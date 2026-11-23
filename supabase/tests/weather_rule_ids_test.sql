@@ -55,11 +55,11 @@ select t_wri.check(:'saved'::jsonb -> 1 = jsonb_build_object('applies_to', 'Seal
   'one sent by name gets the id of the item of that name, the active one');
 select t_wri.check(:'saved'::jsonb -> 2 = '{"applies_to": "Hand patching", "max_rain_pct": 30}' and :'saved'::jsonb -> 3 = '{"max_wind_mph": 20}',
   'a name that isn''t on the price list, and a rule for every job, stay as they are');
-select t_wri.check((select settings -> 'weather_rules' = :'saved'::jsonb from public.companies where id = :'co'), 'and that''s what''s saved');
+select t_wri.check((select public.company_settings(id) -> 'weather_rules' = :'saved'::jsonb from public.companies where id = :'co'), 'and that''s what''s saved');
 
 update public.services set name = 'Sealcoating' where id = :'seal';
-select public.set_weather_rules(:'co', settings -> 'weather_rules') from public.companies where id = :'co';
-select t_wri.check((select settings -> 'weather_rules' -> 1 = jsonb_build_object('applies_to', 'Sealcoating', 'service_id', :'seal', 'requires_dry_hours', 24)
+select public.set_weather_rules(:'co', public.company_settings(id) -> 'weather_rules') from public.companies where id = :'co';
+select t_wri.check((select public.company_settings(id) -> 'weather_rules' -> 1 = jsonb_build_object('applies_to', 'Sealcoating', 'service_id', :'seal', 'requires_dry_hours', 24)
   from public.companies where id = :'co'), 'renaming the item keeps its rule, which takes the new name when saved again');
 
 select t_wri.check(public.set_weather_rules(:'co', format('[{"service_id": %s, "applies_to": "crack fill", "max_rain_pct": 50},

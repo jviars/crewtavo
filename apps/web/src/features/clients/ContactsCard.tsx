@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine, RowPerson } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { fieldError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
@@ -16,6 +18,7 @@ import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { formatPhoneTyping } from "@/lib/validate";
+import styles from "./clients.module.css";
 import { TextsSwitch, useTextStops } from "./TextsSwitch";
 
 interface Contact {
@@ -55,7 +58,7 @@ export function ContactsCard({ clientId, canEdit, canSetTexts = false }: { clien
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Contact | "new" | null>(null);
   const contacts = useClientContacts(clientId);
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
   const remove = useMutation({
     // Undo's toast says how it went (removeLater below).
     meta: { inline: true },
@@ -83,38 +86,37 @@ export function ContactsCard({ clientId, canEdit, canSetTexts = false }: { clien
   return (
     <>
       {rows.length > 0 && (
-        <div className="card">
-          <div className="card-head">
-            <strong>Other contacts</strong>
-            {canEdit && <Button size="sm" variant="ghost" icon="plus" onClick={() => setEditing("new")}>Add contact</Button>}
-          </div>
-          <div ref={listRef}>
+        <Section title="Other contacts" count={rows.length} action={canEdit && <button type="button" onClick={() => setEditing("new")}>Add contact</button>}>
+          <ul ref={listRef} className="rel" role="list" aria-label="Other contacts">
             {rows.map((c) => (
-              <div key={c.id} className="card-row" style={{ alignItems: "flex-start" }}>
-                <span className="grow" style={{ display: "grid", gap: 2 }}>
-                  <span className="row" style={{ gap: 6 }}>
-                    <strong>{c.name}</strong>
-                    {c.role && <span className="chip">{c.role}</span>}
-                    {c.is_primary && <span className="chip chip-green">Primary</span>}
+              <li key={c.id} className="rel-row" style={{ alignItems: "flex-start" }}>
+                <span className="rel-lead"><RowPerson name={c.name} /></span>
+                <div className="rel-body">
+                  <span className="rel-head">
+                    <span className="rel-title">{c.name}</span>
+                    {(c.role || c.is_primary) && <span className="rel-detail"> · {[c.role, c.is_primary && "Primary"].filter(Boolean).join(" · ")}</span>}
                   </span>
-                  {c.email && <a href={`mailto:${c.email}`} className="small">{c.email}</a>}
-                  {c.phone && <a href={`tel:${c.phone}`} className="small">{c.phone}</a>}
+                  <MetaLine className={`rel-sub ${styles.reach}`} parts={[c.email && <a href={`mailto:${c.email}`}>{c.email}</a>, c.phone && <a href={`tel:${c.phone}`}>{c.phone}</a>]} />
                   {c.phone && canSetTexts && <span className="small"><TextsSwitch clientId={clientId} contactId={c.id} name={c.name} phone={c.phone} stop={stopFor(c.phone)} label="Can be texted" /></span>}
-                </span>
+                </div>
                 {canEdit && (
-                  <Menu
-                    triggerClassName="btn btn-sm btn-ghost btn-icon"
-                    label={`Actions for ${c.name}`}
-                    items={[
-                      { label: "Edit contact", icon: "edit", onSelect: () => setEditing(c) },
-                      { label: "Remove contact", icon: "trash", danger: true, onSelect: () => removeLater(c) },
-                    ]}
-                  />
+                  <span className="rel-actions">
+                    <Menu
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      label={`Actions for ${c.name}`}
+                      title={c.name}
+                      items={[
+                        { label: "Edit contact", icon: "edit", onSelect: () => setEditing(c) },
+                        { separator: true },
+                        { label: "Remove contact", icon: "trash", danger: true, onSelect: () => removeLater(c) },
+                      ]}
+                    />
+                  </span>
                 )}
-              </div>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </Section>
       )}
       {editing && <ContactDialog clientId={clientId} contact={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
     </>

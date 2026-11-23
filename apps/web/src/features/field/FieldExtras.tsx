@@ -46,23 +46,30 @@ export function useVisitExtraScope(visitId: string, enabled = true) {
   });
 }
 
+/** Work lines as the crew sees them: what, how many, and the office's note; never a price. */
+export function WorkLines({ lines }: { lines: ReadonlyArray<{ id: string; name: string; description?: string | null; quantity: number | string; unit: string; waiting?: boolean }> }) {
+  return (
+    <ul className="work-lines">
+      {lines.map((l) => (
+        <li key={l.id}>
+          <span className="work-line-name">{l.name}</span>
+          {Number(l.quantity) !== 1 || l.unit !== "ea" ? <span className="work-line-qty tabular">{qty(Number(l.quantity))} {l.unit}</span> : null}
+          {l.waiting && <span className="work-line-note">{t("Sends when you have signal")}</span>}
+          {l.description && <span className="work-line-note pre-wrap">{l.description}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** "Extra work on this visit", or nothing when there's none. */
 export function VisitExtraScope({ visitId, title = t("Extra work on this visit") }: { visitId: string; title?: string }) {
   const extras = useVisitExtraScope(visitId);
   if (!extras.data?.length) return null;
   return (
-    <div className="stack-sm">
-      <strong>{title}</strong>
-      <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-        {extras.data.map((l) => (
-          <li key={l.id}>
-            <strong>{l.name}</strong>
-            {Number(l.quantity) !== 1 || l.unit !== "ea" ? <span className="tabular"> · {qty(Number(l.quantity))} {l.unit}</span> : null}
-            {l.waiting && <span className="muted small"> · {t("sends when you have signal")}</span>}
-            {l.description && <span className="muted pre-wrap" style={{ display: "block" }}>{l.description}</span>}
-          </li>
-        ))}
-      </ul>
+    <div className="work-extra">
+      <h3 className="work-extra-title">{title}</h3>
+      <WorkLines lines={extras.data} />
     </div>
   );
 }

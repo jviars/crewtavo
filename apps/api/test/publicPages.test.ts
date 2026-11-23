@@ -2,7 +2,8 @@
  * The business's privacy policy link (companies.settings.privacy_url) on the pages its clients and
  * the public use: the booking form, the referral page, the unsubscribe page and a website form's
  * own pages each get it when it's set, as a plain web address, and nothing when it isn't. And the
- * referral page tells the friend when the person recommending gets a credit.
+ * referral page tells the friend when the person recommending gets a credit. Those three pages also
+ * get the business's brand color and logo, so they wear its look rather than Crewtavo's.
  * PostgREST is a stand-in answering over fetch.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -65,6 +66,41 @@ describe("a referral page", () => {
   });
 });
 
+describe("the business's own look", () => {
+  /** The company with a brand color and a logo saved in its branding, or `branding` as given. */
+  const branded = (branding: unknown) => {
+    world();
+    const stub = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/companies")) return Response.json([{ id: CO, slug: "acme", name: "Acme Lawn", phone: "555-0100", website: null, timezone: "America/New_York", settings: { branding } }]);
+      return stub(input, init);
+    });
+  };
+
+  it("goes to the booking form, the referral page and the unsubscribe page: its brand color and logo", async () => {
+    branded({ color: "#1d6b66", logo: `${CO}/logo/00000000-0000-4000-8000-00000000106f.png` });
+    const refer = tokenOf(await clientLink(env, env.APP_URL!, { c: CO, t: "refer", id: ANA }));
+    const unsub = tokenOf(await clientLink(env, env.APP_URL!, { c: CO, t: "unsub", id: ANA }));
+    for (const page of [(await get("/public/forms/acme/quote")).company, (await get(`/public/refer/${refer}`)).company, await get(`/public/unsubscribe/${unsub}`)]) {
+      expect(page.color).toBe("#1d6b66");
+      expect(page.logo).toMatch(/^\/api\/public\/logo\//);
+    }
+  });
+
+  it("is null without one, or with something saved that isn't a hex color, so the page falls back", async () => {
+    for (const branding of [undefined, {}, { color: "teal" }, { color: "#12345" }, { color: 42 }]) {
+      branded(branding);
+      const refer = tokenOf(await clientLink(env, env.APP_URL!, { c: CO, t: "refer", id: ANA }));
+      const unsub = tokenOf(await clientLink(env, env.APP_URL!, { c: CO, t: "unsub", id: ANA }));
+      const form = (await get("/public/forms/acme/quote")).company;
+      expect([form.color, form.logo], JSON.stringify(branding)).toEqual([null, null]);
+      expect((await get(`/public/refer/${refer}`)).company.color, JSON.stringify(branding)).toBeNull();
+      expect((await get(`/public/unsubscribe/${unsub}`)).color, JSON.stringify(branding)).toBeNull();
+    }
+  });
+});
+
 describe("the business's privacy policy link", () => {
   it("goes to the booking form, the referral page and the unsubscribe page when it's set", async () => {
     world(POLICY);
@@ -72,7 +108,7 @@ describe("the business's privacy policy link", () => {
     const refer = await clientLink(env, env.APP_URL!, { c: CO, t: "refer", id: ANA });
     expect((await get(`/public/refer/${tokenOf(refer)}`)).company.privacy_url).toBe(POLICY);
     const unsub = await clientLink(env, env.APP_URL!, { c: CO, t: "unsub", id: ANA });
-    expect(await get(`/public/unsubscribe/${tokenOf(unsub)}`)).toEqual({ company: "Acme Lawn", unsubscribed: false, privacy_url: POLICY });
+    expect(await get(`/public/unsubscribe/${tokenOf(unsub)}`)).toEqual({ company: "Acme Lawn", logo: null, color: null, unsubscribed: false, privacy_url: POLICY });
   });
 
   it("isn't there for a business that set none, or saved something that isn't a web address", async () => {

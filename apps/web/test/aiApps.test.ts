@@ -37,7 +37,8 @@ describe("the Claude and ChatGPT apps", () => {
   it("have no connector link on their pages: that's in Settings alone", () => {
     const page = source("features/apps/AppDetailPage.tsx");
     expect(page).not.toMatch(/ConnectorCard|mcp_url|mcpUrl|CONNECTOR_STEPS|Connector link copied/);
-    expect(page).toContain('To use Crewtavo from inside {app.name}, add the connector in <Link to="/settings?tab=assistants" style={{ textDecoration: "underline" }}>Settings → AI assistants</Link>.');
+    expect(page).toContain("<div>Using Crewtavo from inside {app.name}</div>");
+    expect(page).toContain('Add the connector in <Link to="/settings?tab=assistants" style={{ textDecoration: "underline" }}>Settings → AI assistants</Link>.');
     const settings = source("features/settings/AssistantSettings.tsx");
     expect(settings).toContain("Connector link copied");
     expect(settings).toContain("CONNECTOR_STEPS.chatgpt");

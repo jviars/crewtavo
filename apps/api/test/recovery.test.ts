@@ -2,6 +2,7 @@ import { canMakeResetLink, ROLES } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
+import { NO_APP_URL } from "../src/lib/http";
 import { MIN_RECOVERY_CODE, newSpareKeys, normalizeSpareKey, RECOVERY_WINDOW_MS, recoverySetting, spareKeyHash } from "../src/lib/recovery";
 
 const base: Env = {
@@ -146,6 +147,34 @@ describe("POST /api/auth/recover", () => {
     calls = supabase({ spareKeyWorks: true });
     expect((await recover({ ...base, RESEND_API_KEY: "re_1", EMAIL_FROM: "a@b.co" }, { email: "pat@example.com", code: "7K4M-PQ2X-9DRF" })).status).toBe(400);
     expect(calls.some((c) => c.call.includes("spare_key_use"))).toBe(false);
+  });
+
+  it("still takes them when the company's only mailbox wasn't connected by an owner, since it won't carry the owner's link", async () => {
+    const tryKey = async (connectedBy: string) => {
+      const calls = supabase({ spareKeyWorks: true, mailbox: true });
+      const inner = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        // Pat owns the company; whoever connected the mailbox is an owner there only if it's Pat.
+        if (url.includes("/rest/v1/memberships") && url.includes("role=eq.owner")) return Response.json(url.includes(`user_id=eq.${PAT}`) ? [{ user_id: PAT }] : []);
+        if (url.includes("/rest/v1/memberships")) return Response.json([{ company_id: "c1", role: "owner" }]);
+        if (url.includes("/rest/v1/integrations") && url.includes("select=connected_by")) return Response.json([{ connected_by: connectedBy }]);
+        return inner(input, init);
+      });
+      const res = await recover(base, { email: "pat@example.com", code: "7K4M-PQ2X-9DRF" });
+      return { status: res.status, used: calls.some((c) => c.call.includes("spare_key_use")) };
+    };
+    expect(await tryKey("33333333-3333-4333-8333-333333333333")).toEqual({ status: 200, used: true });
+    // Pat connected it: "Forgot password" reaches Pat, so spare keys wait.
+    expect(await tryKey(PAT)).toEqual({ status: 400, used: false });
+  });
+
+  it("uses up no key or code where it couldn't make the link, without the instance's own address", async () => {
+    const calls = supabase({ spareKeyWorks: true });
+    const res = await recover({ ...withCode, APP_URL: undefined }, { email: "pat@example.com", code: "mowing season starts in april" });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe(NO_APP_URL);
+    expect(calls.some((c) => c.call.includes("spare_key_use") || c.call.includes("app_secrets") || c.call.includes("generate_link"))).toBe(false);
   });
 
   it("the server's code (the last resort) is claimed before the link is made, and works once", async () => {

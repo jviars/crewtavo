@@ -4,51 +4,33 @@
  * dependencies), and a PDF from the server is just a file the phone shows and prints, on the whole
  * sheet with no browser header or footer.
  *
- * Its pictures come from the business's own storage, never from an address in the request: the
- * letterhead, logo and package pictures by their /api/public paths, a signature or initials as the
- * PNG it was drawn as. Any other picture is left off.
+ * It's made for someone the server knows: the page asks for a print ticket first (printTicket), as a
+ * signed-in member of the business or with a Client Hub link, and the ticket says whose document it
+ * is. Its pictures come from that business's own storage, never from an address in the request:
+ * the letterhead, logo and package pictures by their /api/public paths, a signature or initials as
+ * the PNG it was drawn as. Any other picture is left off.
+ *
+ * A document is limited in size (PDF_LIMITS), and its PDF is made on a thread of its own
+ * (pdf/worker.ts), a couple at once, each stopped when it takes too long: making one never holds up
+ * the rest of the server.
  */
-import { createElement } from "react";
-import { Font, renderToBuffer } from "@react-pdf/renderer";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { DocumentCompany, DocumentData } from "../../../web/src/features/documents/types";
 import type { TemplateSettings } from "@crewtavo/core/documents";
 import type { Env } from "../env";
+import { signToken, verifyToken } from "../lib/crypto";
 import { assetDir } from "../lib/reviewCard";
 import { storedFile } from "../lib/storedFile";
 import { adminClient, type Db } from "../lib/supabase";
-import { DocumentPdf, documentPictures, type PdfPicture } from "../pdf/DocumentPdf";
+import { documentPictures, type PdfPicture } from "../pdf/DocumentPdf";
+import { renderDocument, type RenderJob } from "../pdf/render";
+import { gate, onThread } from "../pdf/threads";
 import { LETTERHEAD_MAX_BYTES } from "./letterhead";
-import { isPng, LOGO_MAX_BYTES } from "./logo";
+import { isDrawnPng, isPng, LOGO_MAX_BYTES, pngSize } from "./logo";
 import { PACKAGE_PICTURE_MAX_BYTES } from "./packagePictures";
 import { isJpeg } from "./photos";
-
-/**
- * Figtree, then for the letters it doesn't have, its Latin Extended part (Ł, ő, ș) and then Noto
- * Sans for Vietnamese (ễ, ơ, đ): each letter is printed in the first that has it.
- */
-const FONTS = ["Figtree", "Figtree Ext", "Noto Sans"];
-let registered = false;
-
-/** The fonts, from next to the server (assets/fonts, as the review card's are). Words aren't hyphenated. */
-function registerFonts() {
-  if (registered) return;
-  const dir = assetDir().fonts;
-  const family = (family: string, file: string, styles: string[]) =>
-    Font.register({
-      family,
-      fonts: styles.map((style) => {
-        const [weight, italic] = style.split("-");
-        return { src: `${dir}${file}-${style}.woff`, fontWeight: Number(weight), fontStyle: italic === "italic" ? "italic" : "normal" };
-      }),
-    });
-  const figtree = ["400-normal", "400-italic", "500-normal", "600-normal", "700-normal", "700-italic"];
-  family("Figtree", "figtree-latin", figtree);
-  family("Figtree Ext", "figtree-latin-ext", figtree);
-  family("Noto Sans", "noto-sans-vietnamese", ["400-normal", "400-italic", "700-normal", "700-italic"]);
-  Font.registerHyphenationCallback((word) => [word]);
-  registered = true;
-}
 
 /** The most a drawn signature or initials may be, as text (a data URL) and as a picture. */
 const DRAWN_MAX_CHARS = 1_500_000;
@@ -83,13 +65,17 @@ const STORED: Array<{ path: RegExp; folder: string; ext: "png" | "jpg"; max: num
   { path: new RegExp(`^/api/public/service/(${UUID})/(${UUID})\\.jpg$`, "i"), folder: "services", ext: "jpg", max: PACKAGE_PICTURE_MAX_BYTES },
 ];
 
-/** One of the document's pictures, from storage or as drawn; null for any other, or one that isn't a picture. */
-export async function pictureFor(admin: Db, url: string): Promise<PdfPicture | null> {
+/**
+ * One of the document's pictures, from `company`'s storage or as drawn; null for any other (another
+ * business's included), or one that isn't a picture.
+ */
+export async function pictureFor(admin: Db, url: string, company: string): Promise<PdfPicture | null> {
   let bytes: Uint8Array | null = null;
   let format: "png" | "jpg" = "png";
   const drawn = /^data:image\/png;base64,([a-z0-9+/=]+)$/i.exec(url);
   if (drawn) {
-    if (url.length > DRAWN_MAX_CHARS) return null;
+    // No bigger, by its header, than a signature pad makes one (logo.ts isDrawnPng).
+    if (url.length > DRAWN_MAX_CHARS || !isDrawnPng(url)) return null;
     bytes = Buffer.from(drawn[1]!, "base64");
   } else {
     // Only the path counts (the page may have it as a full address): nothing is fetched from another server.
@@ -100,7 +86,7 @@ export async function pictureFor(admin: Db, url: string): Promise<PdfPicture | n
       return null;
     }
     const stored = STORED.map((s) => ({ s, m: s.path.exec(path) })).find((x) => x.m);
-    if (!stored) return null;
+    if (!stored || stored.m![1]!.toLowerCase() !== company.toLowerCase()) return null;
     format = stored.s.ext;
     bytes = await storedFile(admin, `${stored.m![1]!.toLowerCase()}/${stored.s.folder}/${stored.m![2]!.toLowerCase()}.${stored.s.ext}`, stored.s.max);
   }
@@ -196,12 +182,152 @@ export function knownTimeZone(zone: string | undefined): string | undefined {
   }
 }
 
-/** The PDF of a document on the business's template, with its pictures from storage. */
-export async function documentPdf(env: Env, input: { template: TemplateSettings; company: DocumentCompany; data: DocumentData; currency: string; timeZone?: string }): Promise<Buffer> {
-  registerFonts();
-  const admin = adminClient(env);
-  const urls = documentPictures(input.template, input.company, input.data);
-  const loaded = await Promise.all(urls.map((url) => pictureFor(admin, url)));
-  const pictures = new Map(urls.map((url, i) => [url, loaded[i] ?? null]));
-  return renderToBuffer(createElement(DocumentPdf, { ...input, timeZone: knownTimeZone(input.timeZone), pictures, font: FONTS }) as Parameters<typeof renderToBuffer>[0]);
+/** How long a print ticket lasts: a page asks for one just before it sends the document. */
+const TICKET_SECONDS = 5 * 60;
+
+/**
+ * Who may have a PDF made, signed by the server (lib/crypto signToken) for a few minutes: a member
+ * of the business, for any of its documents, as the office prints them; or a Client Hub link, for
+ * its own quote or invoice only (`doc`, by kind and number).
+ */
+export interface PrintTicket {
+  k: "document-pdf";
+  /** The business: its pictures are the only ones the PDF may have. */
+  c: string;
+  doc?: { kind: "estimate" | "invoice"; number: number | null };
+  exp: number;
+}
+
+const COMPANY_ID = new RegExp(`^${UUID}$`, "i");
+
+/** A print ticket for the business `company`, for `doc` only when it says which. */
+export function printTicket(env: Env, company: string, doc?: PrintTicket["doc"]): Promise<string> {
+  return signToken(env, { k: "document-pdf", c: company, ...(doc && { doc }), exp: Math.floor(Date.now() / 1000) + TICKET_SECONDS });
+}
+
+/** The print ticket a form sent, when it's one this server made and it hasn't run out. */
+export async function readPrintTicket(env: Env, ticket: unknown): Promise<PrintTicket | null> {
+  if (typeof ticket !== "string" || ticket.length > 2000) return null;
+  const read = await verifyToken<PrintTicket>(env, ticket).catch(() => null);
+  return read?.k === "document-pdf" && typeof read.c === "string" && COMPANY_ID.test(read.c) ? read : null;
+}
+
+/** Whether a ticket covers a document: any of the business's, or the one quote or invoice it's for. */
+export const ticketCovers = (ticket: PrintTicket, data: { kind: string; number: number | null }) =>
+  !ticket.doc || (ticket.doc.kind === data.kind && ticket.doc.number === (data.number ?? null));
+
+/**
+ * The most a document sent to print may hold: far more than any real one (a contract of a hundred
+ * pages, an invoice of hundreds of lines, a dozen initials), few enough that its PDF is quick to make.
+ */
+export const PDF_LIMITS = {
+  /** Values in the document as sent: each string, number, list and object. */
+  values: 100_000,
+  /** Characters of words, all told (drawn pictures aside). */
+  characters: 600_000,
+  /** A contract's pieces, all its sections' together: paragraphs, headings, items, rows and their cells. */
+  pieces: 6_000,
+  /** Drawn signatures and initials, each different one. */
+  drawn: 40,
+  /** Their pixels, all told: each takes several bytes to draw. */
+  drawnPixels: 16_000_000,
+} as const;
+
+const DRAWN_PREFIX = "data:image/png;base64,";
+
+/** A drawn signature's or initials' picture, where a document has one (signatures, initialed): not words. */
+const isDrawing = (key: string, value: unknown) => key === "image" && typeof value === "string" && value.startsWith(DRAWN_PREFIX);
+
+/**
+ * Whether a document as sent (read from JSON, not checked yet) holds more values or words than any
+ * may (PDF_LIMITS), counted before anything else is done with it. Drawn pictures are counted below.
+ */
+export function tooMuchToRead(json: unknown): boolean {
+  let values = 0;
+  let characters = 0;
+  const left: unknown[] = [json];
+  while (left.length) {
+    const value = left.pop();
+    values++;
+    if (typeof value === "string") {
+      characters += value.length;
+      if (characters > PDF_LIMITS.characters) return true;
+    } else if (value && typeof value === "object") {
+      const inside = Array.isArray(value) ? value : Object.entries(value).flatMap(([key, item]) => (isDrawing(key, item) ? [null] : [item]));
+      if (values + left.length + inside.length > PDF_LIMITS.values) return true;
+      for (const item of inside) left.push(item);
+    }
+  }
+  return false;
+}
+
+/** Whether a document has more contract than any may, or drawn signatures and initials too many or too big to draw (PDF_LIMITS). */
+export function tooMuchToDraw(data: DocumentData): boolean {
+  const sections = data.contract?.sections ?? [];
+  let pieces = 0;
+  for (const section of sections) for (const block of section.blocks ?? []) pieces += 1 + (block.kind === "row" ? block.cells.length : 0);
+  if (pieces > PDF_LIMITS.pieces) return true;
+  const drawn = new Set(
+    [data.signatures?.customer?.image, data.signatures?.company?.image, ...sections.map((s) => s.initialed?.image)].filter((url): url is string => typeof url === "string" && url.startsWith("data:")),
+  );
+  if (drawn.size > PDF_LIMITS.drawn) return true;
+  let pixels = 0;
+  for (const url of drawn) {
+    // One that isn't a drawn PNG is left off (pictureFor). Its size is in its header, the first 44 characters.
+    if (!isDrawnPng(url)) continue;
+    const [width, height] = pngSize(Buffer.from(url.slice(DRAWN_PREFIX.length, DRAWN_PREFIX.length + 44), "base64"));
+    pixels += width * height;
+  }
+  return pixels > PDF_LIMITS.drawnPixels;
+}
+
+/**
+ * Making PDFs: two at once, eight more waiting their turn (past that, Busy), each on its thread for
+ * 20 seconds at most and with a cap on the memory it holds.
+ */
+const THREADS = { size: 2, waiting: 8, timeoutMs: 20_000, memoryMb: 320 };
+const turn = gate(THREADS.size, THREADS.waiting);
+
+let worker: URL | null | undefined;
+
+/**
+ * The thread's script, next to the bundled server (dist/server/pdf-worker.mjs, scripts/build-server.mjs).
+ * Without one (running from the source, as the tests do), the PDF is made on this thread, still
+ * within the limits on how many at once.
+ */
+function pdfWorker(): URL | null {
+  if (worker === undefined) {
+    const file = new URL("./pdf-worker.mjs", import.meta.url);
+    worker = existsSync(fileURLToPath(file)) ? file : null;
+  }
+  return worker;
+}
+
+/** For tests: the thread's script to use (a build of pdf/worker.ts), or null to make PDFs on this thread. */
+export function setPdfWorker(file: URL | null) {
+  worker = file;
+}
+
+/**
+ * The PDF of a document on the business's template, with its pictures from the business's storage
+ * (`companyId`, the print ticket's). Throws Busy when too many are being made, and TookTooLong when
+ * this one runs out of time (pdf/threads.ts).
+ */
+export async function documentPdf(env: Env, input: { companyId: string; template: TemplateSettings; company: DocumentCompany; data: DocumentData; currency: string; timeZone?: string }): Promise<Buffer> {
+  const done = await turn();
+  try {
+    const admin = adminClient(env);
+    const urls = documentPictures(input.template, input.company, input.data);
+    const loaded = await Promise.all(urls.map((url) => pictureFor(admin, url, input.companyId)));
+    const { template, company, data, currency } = input;
+    const job: RenderJob = { template, company, data, currency, timeZone: knownTimeZone(input.timeZone), pictures: urls.map((url, i): [string, PdfPicture | null] => [url, loaded[i] ?? null]) };
+    const fonts = assetDir().fonts;
+    const file = pdfWorker();
+    if (!file) return Buffer.from(await renderDocument(job, fonts));
+    const reply = await onThread<{ pdf?: Uint8Array; error?: string }>(file, job, { fonts }, THREADS);
+    if (!reply.pdf) throw new Error(reply.error ?? "The PDF's thread answered without one.");
+    return Buffer.from(reply.pdf.buffer, reply.pdf.byteOffset, reply.pdf.byteLength);
+  } finally {
+    done();
+  }
 }

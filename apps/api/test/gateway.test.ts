@@ -11,9 +11,10 @@ import type { AddressInfo } from "node:net";
 import type { HttpBindings } from "@hono/node-server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { EMAIL_CHANGE_STALE, gateway, NO_S3, PASSWORD_LINK_STALE, safeFile, storesFile, unsizedUpload } from "../src/lib/gateway";
+import { EMAIL_CHANGE_STALE, gateway, MAX_AUTH_BODY, MAX_REST_BODY, NO_S3, PASSWORD_LINK_STALE, safeFile, storesFile, unsizedUpload } from "../src/lib/gateway";
 import { NO_AUTH_MAIL, sealAuthToken } from "../src/lib/signInGuard";
-import { forgetStorageUsage, type StorageSnapshot } from "../src/lib/storageLimits";
+import { BIGGER_THAN_SAID, LINK_RUN_OUT, UPLOADS_PAUSED, type PublicUploads, type UploadRecord } from "../src/lib/publicUploads";
+import { COUNTED_EVERY, forgetStorageUsage, ONE_REQUEST, type StorageSnapshot } from "../src/lib/storageLimits";
 import { STORAGE_PAUSED } from "../src/services/storageBucket";
 
 // Whether a storage move has uploads turned away right now (services/storageBucket.ts).
@@ -24,6 +25,17 @@ vi.mock("../src/services/storageBucket", async (importOriginal) => ({
 }));
 afterEach(() => {
   pause.on = false;
+});
+
+// The rate limits' counts (lib/limit.ts): every key asked about, and the kinds that are used up.
+const limits = vi.hoisted(() => ({ keys: [] as string[], full: [] as string[] }));
+vi.mock("../src/lib/limit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/lib/limit")>()),
+  allow: async (_env: unknown, key: string) => (limits.keys.push(key), !limits.full.some((kind) => key.startsWith(kind))),
+}));
+afterEach(() => {
+  limits.keys.length = 0;
+  limits.full.length = 0;
 });
 
 const env: Env = { SUPABASE_URL: "http://127.0.0.1:8080", SUPABASE_SECRET_KEY: "sb_secret_test" };
@@ -280,6 +292,26 @@ describe("storage limits at the gateway", () => {
 
   let numbers: StorageSnapshot;
   let reads = 0;
+  /** The records of the upload links the server made (public.upload_links), by stored name. */
+  let records: Map<string, UploadRecord>;
+  /** What was counted against the day's worth of strangers' uploads, whether there's room, and how much is left of the day. */
+  let spent: Array<{ company: string; visitor: string; bytes: number }>;
+  let room = true;
+  let left = Infinity;
+  let recordsDown = false;
+  const uploads: PublicUploads = {
+    find: async (path) => {
+      if (recordsDown) throw new Error("the database is busy");
+      return records.get(path) ?? null;
+    },
+    spend: async (company, visitor, bytes) => {
+      spent.push({ company, visitor, bytes });
+      left -= bytes;
+      return room && left >= 0;
+    },
+  };
+  /** What was counted, without the asks (0) before an upload starts. */
+  const counted = () => spent.filter((s) => s.bytes > 0);
   const limited = (jwtSecret = SECRET) =>
     gateway(env, { auth: base, rest: base, storage: base }, {
       jwtSecret,
@@ -288,13 +320,24 @@ describe("storage limits at the gateway", () => {
         // The database has what the stand-in kept.
         return { ...numbers, companyUsed: numbers.companyUsed + storedBytes };
       },
+      uploads,
     });
+  /** A link the server made for `name`, on record for a file of `bytes`. */
+  const made = (name: string, bytes = 4096, expiresAt = Date.now() + 3_600_000) => {
+    records.set(name, { company: CO, maxBytes: bytes, expiresAt });
+    return link(name);
+  };
   beforeEach(() => {
     forgetStorageUsage();
     reads = 0;
     storedBytes = 0;
     reached.length = 0;
     numbers = { companyUsed: 45e9, companyLimit: 45e9, userUsed: 0, userLimit: null, owner: false, member: true };
+    records = new Map();
+    spent = [];
+    room = true;
+    left = Infinity;
+    recordsDown = false;
   });
 
   /** A resumable upload being made (tus-js-client's first request): its size and where it goes, no file yet. */
@@ -364,14 +407,135 @@ describe("storage limits at the gateway", () => {
     expect(reads).toBe(0);
   });
 
-  it("never checks the server, a booking form or an upload link the server made", async () => {
+  it("never holds the server, or an upload link the server made, to the storage limits", async () => {
     expect((await upload(`/storage/v1/object/files/${CO}/plans/a.pdf`, 4096, service)).status).toBe(200);
-    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${link(`${CO}/plans/b.pdf`)}`, 4096, anon, "PUT")).status).toBe(200);
-    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/subs/s1/c.pdf?token=${link(`${CO}/subs/s1/c.pdf`)}`, 4096, null, "PUT")).status).toBe(200);
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${made(`${CO}/plans/b.pdf`)}`, 4096, anon, "PUT")).status).toBe(200);
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/subs/s1/c.pdf?token=${made(`${CO}/subs/s1/c.pdf`)}`, 4096, null, "PUT")).status).toBe(200);
     // Storage goes by the link there, not by who's signed in.
-    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/e.pdf?token=${link(`${CO}/plans/e.pdf`)}`, 4096, ana, "PUT")).status).toBe(200);
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/e.pdf?token=${made(`${CO}/plans/e.pdf`)}`, 4096, ana, "PUT")).status).toBe(200);
     expect((await create(`${CO}/plans/d.pdf`, 4096, { Authorization: `Bearer ${service}` })).status).toBe(200);
     expect(reads).toBe(0);
+  });
+
+  it("holds an upload through a link the server made to the size its visitor gave, and counts it against the day", async () => {
+    const token = made(`${CO}/plans/b.pdf`, 4096);
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${token}`, 4096, null, "PUT")).status).toBe(200);
+    // Asked first (counting nothing), then counted as it arrived.
+    expect(spent).toEqual([{ company: CO, visitor: "127.0.0.1", bytes: 0 }, { company: CO, visitor: "127.0.0.1", bytes: 4096 }]);
+    // A form's envelope is a little more than its file.
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${token}`, 4096 + 1000, null, "PUT")).status).toBe(200);
+    // Far more than its visitor said: refused before Storage sees a byte, and not counted.
+    reached.length = 0;
+    spent = [];
+    const big = await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${token}`, 100_000, null, "PUT");
+    expect(big.status).toBe(413);
+    expect((await big.json()).message).toBe(BIGGER_THAN_SAID);
+    expect(reached).toEqual([]);
+    expect(spent).toEqual([]);
+  });
+
+  it("wants the size of an upload through a link the server made, however it's sent", async () => {
+    const token = made(`${CO}/plans/b.pdf`);
+    const form = new FormData();
+    form.append("", new Blob([new Uint8Array(2048)], { type: "application/pdf" }), "plan.pdf");
+    const body = new Request("http://x", { method: "PUT", body: form });
+    const res = await limited().request(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${token}`, {
+      method: "PUT",
+      headers: { "Content-Type": body.headers.get("content-type")! },
+      body: body.body,
+      duplex: "half",
+    } as RequestInit, from);
+    expect(res.status).toBe(411);
+    expect(reached).toEqual([]);
+  });
+
+  it("takes nothing through a link the server made that isn't on record, or has run out", async () => {
+    const unknown = await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/x.pdf?token=${link(`${CO}/plans/x.pdf`)}`, 4096, null, "PUT");
+    expect(unknown.status).toBe(403);
+    expect((await unknown.json()).message).toBe(LINK_RUN_OUT);
+    const old = made(`${CO}/plans/y.pdf`, 4096, Date.now() - 1000);
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/y.pdf?token=${old}`, 4096, null, "PUT")).status).toBe(403);
+    expect(reached).toEqual([]);
+  });
+
+  it("takes no resumable upload through a link the server made: one could be made and never sent", async () => {
+    const token = made(`${CO}/plans/r.pdf`, 4096);
+    for (const headers of [{}, { "Upload-Length": "", "Upload-Defer-Length": "1" }] as Array<Record<string, string>>) {
+      const res = await create(`${CO}/plans/r.pdf`, 4096, { Authorization: "", "x-signature": token, ...headers }, "/storage/v1/upload/resumable/sign");
+      expect(res.status).toBe(400);
+      expect((await res.json()).message).toBe(ONE_REQUEST);
+    }
+    expect(reached).toEqual([]);
+    expect(spent).toEqual([]);
+  });
+
+  /** A body that sends `bytes` in pieces of `piece`, then (with `drop`) stops there as a dropped connection does. */
+  const pieces = (bytes: number, piece: number, drop = false) => {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (sent >= bytes) return drop ? c.error(new Error("the connection dropped")) : c.close();
+        const n = Math.min(piece, bytes - sent);
+        sent += n;
+        c.enqueue(new Uint8Array(n));
+      },
+    });
+  };
+  const putThrough = (name: string, token: string, said: number, body: ReadableStream<Uint8Array>) =>
+    limited().request(`/storage/v1/object/upload/sign/files/${name}?token=${token}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream", "Content-Length": String(said) },
+      body,
+      duplex: "half",
+    } as RequestInit, from);
+
+  it("counts nothing for a size said and never sent, however often it's said", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const name = `${CO}/plans/big.pdf`;
+    const token = made(name, 200_000_000);
+    for (let i = 0; i < 3; i++) await putThrough(name, token, 200_000_000, pieces(1000, 1000, true));
+    expect(counted()).toEqual([]);
+    expect(storedBytes).toBe(0);
+  });
+
+  it("counts a big file as it arrives, and all of it once it's in", async () => {
+    const MB = 1024 * 1024;
+    const name = `${CO}/plans/plan-set.pdf`;
+    const res = await putThrough(name, made(name, 40 * MB), 40 * MB, pieces(40 * MB, MB));
+    expect(res.status).toBe(200);
+    expect(counted().map((s) => s.bytes)).toEqual([COUNTED_EVERY, COUNTED_EVERY, 40 * MB - 2 * COUNTED_EVERY]);
+    expect(storedBytes).toBe(40 * MB);
+  });
+
+  it("cuts an upload off where the day runs out, and never sends Storage the end of a file it had no room for", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const MB = 1024 * 1024;
+    left = 20 * MB;
+    const name = `${CO}/plans/plan-set.pdf`;
+    const res = await putThrough(name, made(name, 40 * MB), 40 * MB, pieces(40 * MB, MB));
+    expect(res.status).toBe(429);
+    expect((await res.json()).message).toBe(UPLOADS_PAUSED);
+    expect(storedBytes).toBe(0);
+    // A small file whose last piece goes over: counted before it goes on, so it isn't stored either.
+    left = 1000;
+    const small = `${CO}/plans/small.pdf`;
+    const smallRes = await putThrough(small, made(small, 4096), 4096, pieces(4096, 4096));
+    expect(smallRes.status).toBe(429);
+    expect(storedBytes).toBe(0);
+  });
+
+  it("turns uploads through links the server made away once the day's worth has come in", async () => {
+    room = false;
+    const res = await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${made(`${CO}/plans/b.pdf`)}`, 4096, null, "PUT");
+    expect(res.status).toBe(429);
+    expect((await res.json()).message).toBe(UPLOADS_PAUSED);
+    expect(reached).toEqual([]);
+  });
+
+  it("lets an upload through a link the server made go ahead when its record can't be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    recordsDown = true;
+    expect((await upload(`/storage/v1/object/upload/sign/files/${CO}/plans/b.pdf?token=${link(`${CO}/plans/b.pdf`)}`, 4096, null, "PUT")).status).toBe(200);
   });
 
   it("checks an upload link a team member made, whoever uses it", async () => {
@@ -684,5 +848,71 @@ describe("sign-in links through the gateway", () => {
     expect((await auth("/user", { method: "GET", token: key("authenticated") })).status).toBe(200);
     expect((await auth("/logout", { body: {} })).status).toBe(200);
     expect(reached).toEqual(["POST /token?grant_type=refresh_token", "GET /user", "POST /logout"]);
+  });
+});
+
+describe("what the Data API and Auth take", () => {
+  const SECRET = "super-secret-jwt-token-with-at-least-32-characters-long";
+  const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const key = (role: string) => {
+    const unsigned = `${part({ alg: "HS256", typ: "JWT" })}.${part({ role, iss: "supabase", exp: Math.floor(Date.now() / 1000) + 3600 })}`;
+    return `${unsigned}.${createHmac("sha256", SECRET).update(unsigned).digest("base64url")}`;
+  };
+  const guarded = () => gateway(env, { auth: base, rest: base, storage: base }, { jwtSecret: SECRET });
+  const send = (path: string, init: { length?: number; body?: BodyInit; token?: string } = {}) =>
+    guarded().request(
+      path,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(init.length === undefined ? {} : { "Content-Length": String(init.length) }), ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}) },
+        body: init.body ?? "{}",
+        duplex: "half",
+      } as RequestInit,
+      from,
+    );
+  beforeEach(() => {
+    reached.length = 0;
+  });
+
+  it("turns away a body far bigger than the app ever sends, before the service sees it", async () => {
+    const rest = await send("/rest/v1/clients", { length: MAX_REST_BODY + 1 });
+    expect(rest.status).toBe(413);
+    expect((await rest.json()).message).toBe("That's too much to send at once. Send it in smaller parts.");
+    const auth = await send("/auth/v1/token?grant_type=refresh_token", { length: MAX_AUTH_BODY + 1 });
+    expect(auth.status).toBe(413);
+    expect((await auth.json()).error_code).toBe("request_too_large");
+    expect(reached).toEqual([]);
+  });
+
+  it("counts one that doesn't say its size as it arrives", async () => {
+    expect((await send("/rest/v1/clients", { body: stream(MAX_REST_BODY + 1) as unknown as BodyInit })).status).toBe(413);
+    expect((await send("/auth/v1/oauth/clients/register", { body: stream(MAX_AUTH_BODY + 1) as unknown as BodyInit })).status).toBe(413);
+    // Within the limit it goes through whole.
+    const ok = await send("/rest/v1/clients", { body: stream(1024 * 1024) as unknown as BodyInit });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).bytes).toBe(1024 * 1024);
+  });
+
+  it("takes what the app does send, and anything from this server itself", async () => {
+    const batch = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ display_name: `Client ${i}`, notes: "x".repeat(5000) })));
+    expect((await send("/rest/v1/clients", { body: batch, length: Buffer.byteLength(batch) })).status).toBe(200);
+    expect((await send("/rest/v1/rpc/import_jobber", { length: MAX_REST_BODY + 1, token: key("service_role") })).status).toBe(200);
+    expect(reached).toEqual(["POST /clients", "POST /rpc/import_jobber"]);
+  });
+
+  it("lets each visitor sign only so many apps up with Auth's OAuth server an hour, by any spelling of its address", async () => {
+    const register = (path = "/auth/v1/oauth/clients/register", token?: string) => send(path, { body: JSON.stringify({ client_name: "Claude", redirect_uris: ["https://claude.ai/api/mcp/auth_callback"] }), token });
+    expect((await register()).status).toBe(200);
+    expect(limits.keys).toEqual([expect.stringMatching(/^oauth-register:ip:/)]);
+    limits.full.push("oauth-register:");
+    for (const path of ["/auth/v1/oauth/clients/register", "/auth/v1/oauth/clients/register/", "/auth/v1/OAuth/Clients/Register", "/auth/v1//oauth/clients/%72egister"]) {
+      const res = await register(path);
+      expect(res.status, path).toBe(429);
+      expect((await res.json()).msg).toBe("Too many apps signed up from here. Try again in an hour.");
+    }
+    // Nothing else of Auth's is counted, and the server itself isn't held to it.
+    expect((await send("/auth/v1/token?grant_type=refresh_token", { body: JSON.stringify({ refresh_token: "r" }) })).status).toBe(200);
+    expect((await register("/auth/v1/oauth/clients/register", key("service_role"))).status).toBe(200);
+    expect(reached).toEqual(["POST /oauth/clients/register", "POST /token?grant_type=refresh_token", "POST /oauth/clients/register"]);
   });
 });

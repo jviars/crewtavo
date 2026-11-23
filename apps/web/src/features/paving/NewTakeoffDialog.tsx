@@ -24,6 +24,7 @@ import { ClientPicker, PropertySelect, type PickedClient } from "../clients/Clie
 import { PropertyDialog } from "../clients/PropertyDialog";
 import { addOptions } from "../quotes/options";
 import { PackagePicker } from "../roofing/PackageCards";
+import styles from "./paving.module.css";
 import { canEditPackages, canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "../roofing/packages";
 
 const WORDS = {
@@ -154,9 +155,9 @@ export function NewTakeoffDialog({ open, onClose, trade = "paving" }: { open: bo
           </Field>
           {client && (
             <Field label="Property">
-              <div className="stack-sm">
+              <div className={styles.property}>
                 <PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} />
-                <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setAddingAddress(true)}>Add an address</button>
+                <button type="button" className={styles.addLink} onClick={() => setAddingAddress(true)}><Icon name="plus" size={14} />Add an address</button>
               </div>
             </Field>
           )}

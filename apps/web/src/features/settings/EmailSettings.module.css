@@ -1,35 +1,72 @@
-.providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr)); gap: 8px; }
+/* Settings → Email: where email goes out from, or the choice of how, then that choice's steps and fields. */
+
+/* What it's connected to: the provider's mark, the address, a quiet line, and its status. */
+.status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.statusText { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.address { font-size: var(--fs-15); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.statusMeta { font-size: var(--fs-12); color: var(--text-3); }
+.gap { margin-top: 14px; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+.disconnect { color: var(--danger); }
+.disconnect:hover { color: var(--danger); }
+
+/* The choices: Resend on its own row, then the mailboxes. Tiles a person picks, flat until picked. */
+.choose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.providers { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr)); gap: 8px; }
 .provider {
-  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px;
-  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--ink);
-  font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 9px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--ink);
+  font: inherit; font-size: var(--fs-13); font-weight: 600; text-align: left; cursor: pointer;
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast), background var(--dur-fast);
 }
-.provider:hover { border-color: var(--border-strong, var(--text-3)); }
-.provider[aria-pressed="true"] { border-color: var(--green); box-shadow: var(--ring); background: var(--green-tint); }
-.provider small { display: block; font-weight: 400; color: var(--text-2); font-size: var(--fs-12); }
+.provider:hover { border-color: var(--border-strong); background: var(--fill); }
+.provider[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: transparent; }
+.provider:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.provider small { display: block; margin-top: 1px; font-size: var(--fs-12); font-weight: 400; line-height: 1.4; color: var(--text-3); }
 .providerName { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.providerName :global(.chip) { height: auto; padding: 0; background: none; font-size: var(--fs-12); font-weight: 600; }
 /* The recommended choice sits on its own row above the mailboxes, with room for its reason. */
 .provider[data-featured] { min-height: 64px; padding: 12px 14px; }
 .provider[data-featured] .mark { width: 36px; height: 36px; }
-.provider[data-featured] small { font-size: var(--fs-13); margin-top: 2px; }
-.or { margin-top: 6px; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); }
+.or { margin-top: 6px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
 .mark {
-  display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-control);
+  display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 8px;
   background: var(--fill-2); color: var(--text-2);
 }
 /* Real logos sit on a white tile in both themes, like the app icons (.app-icon). */
-.logo { background: #fff; border: 1px solid rgba(0, 0, 0, 0.08); }
+.logo { background: #fff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
 .logo img { width: 60%; height: 60%; object-fit: contain; display: block; }
 .logo[data-wide] img { width: 84%; height: 84%; } /* wordmark-shaped logos (Zoho) */
-.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: var(--fs-14); }
-/* Numbered setup guide (Resend): each step with its own button to the right page. */
-.guide { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--fill); }
-.guide > li { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; font-size: var(--fs-14); }
-.guide > li + li { border-top: 1px solid var(--border); }
+
+/* That choice's steps and fields. */
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.simple { display: grid; gap: 10px; }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+/* Numbered setup guide (Resend): each step on a hairline, with its own button to the right page. */
+.guide { margin: -14px 0 0; padding: 0; list-style: none; display: grid; }
+.guide > li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
 .stepNumber {
-  display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: var(--radius-pill);
-  background: var(--green-tint); color: var(--green-dark); font-size: var(--fs-13); font-weight: 700;
+  display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-pill);
+  background: var(--fill-2); color: var(--text-2); font-size: var(--fs-12); font-weight: 600; font-variant-numeric: tabular-nums;
 }
-.status { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.address { font-size: var(--fs-16); font-weight: 700; word-break: break-all; }
+.stepText { display: grid; gap: 2px; min-width: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
+.stepText strong { font-weight: 600; color: var(--ink); }
+.stepText :global(.btn) { justify-self: start; margin-top: 6px; }
+.more { display: inline-flex; align-items: center; gap: 4px; justify-self: start; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.more:hover { color: var(--ink); }
+
+@media (max-width: 900px) {
+  .address { font-size: var(--fs-16); }
+  /* The status under the address, so a long address keeps the row's width. */
+  .status { align-items: flex-start; row-gap: 6px; }
+  .status > :global(.pill) { flex-basis: 100%; padding-left: 44px; }
+  .statusMeta, .stepText, .steps { font-size: var(--fs-14); }
+  .provider { min-height: 56px; font-size: var(--fs-15); background: var(--m-card); border-color: transparent; }
+  .provider[aria-pressed="true"] { background: var(--m-card); }
+  /* In the card, the recommended one's mark lines up with the mailboxes' marks under it. */
+  .provider[data-featured] { padding: 12px; }
+  .guide { margin: 0; }
+  .guide > li:last-child { border-bottom: 0; }
+  .actions :global(.btn) { min-height: 44px; }
+  .more { min-height: 44px; }
+}

@@ -10,15 +10,16 @@ import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./AnalyticsPanel.module.css";
+import { CodeBlock, CodeRow, kit, Step, Steps } from "./PanelKit";
+import { Select } from "@/components/ui/Select";
 
 /** What Check found on the website (routes/analytics.ts). */
 export interface WebsiteCheck {
@@ -113,7 +114,7 @@ const BUILDERS: Builder[] = [
     steps: [
       <>GoDaddy's website builder has no place for code on every page, so add it to each page you want counted, starting with your home page.</>,
       <>In the editor, add a section near the bottom of the page, search for <strong>HTML</strong> and add it. Set its height to 1 so it doesn't show.</>,
-      <>Paste the line for GoDaddy below into <strong>Custom Code</strong>. On each other page, change <code className={styles.inline}>data-page="/"</code> to that page's address, like <code className={styles.inline}>"/services"</code>.</>,
+      <>Paste the line for GoDaddy below into <strong>Custom Code</strong>. On each other page, change <code className={kit.code}>data-page="/"</code> to that page's address, like <code className={kit.code}>"/services"</code>.</>,
       <>Publish.</>,
     ],
     note: <>GoDaddy runs custom code in a box of its own, so Crewtavo can't see where these visitors came from. Pages and visitors still count.</>,
@@ -145,32 +146,29 @@ function DeveloperSteps({ line }: { line: string }) {
   const component = `import Script from "next/script";\n\n// In app/layout.tsx (or pages/_app.tsx), inside <body>:\n<Script src="${src}"${site ? ` data-site="${site}"` : ""} strategy="afterInteractive" />`;
   const pick = (value: Framework, label: string) => <button type="button" aria-pressed={framework === value} onClick={() => setFramework(value)}>{label}</button>;
   return (
-    <div className="stack-sm">
-      <div className="segmented" role="group" aria-label="Built with" style={{ justifySelf: "start" }}>
+    <div className={styles.dev}>
+      <div className="segmented" role="group" aria-label="Built with">
         {pick("astro", "Astro")}
         {pick("next", "Next.js")}
         {pick("other", "Other")}
       </div>
       {framework === "astro" ? (
-        <ol className="app-steps" aria-label="Steps for Astro">
-          <li>Paste the line into the <code className={styles.inline}>{"<head>"}</code> of the layout every page uses, like <code className={styles.inline}>src/layouts/Layout.astro</code>. Astro leaves it as it is.</li>
-          <li>With view transitions (<code className={styles.inline}>{"<ClientRouter />"}</code>), each page people move to still counts.</li>
-        </ol>
+        <Steps label="Steps for Astro">
+          <Step>Paste the line into the <code className={kit.code}>{"<head>"}</code> of the layout every page uses, like <code className={kit.code}>src/layouts/Layout.astro</code>. Astro leaves it as it is.</Step>
+          <Step>With view transitions (<code className={kit.code}>{"<ClientRouter />"}</code>), each page people move to still counts.</Step>
+        </Steps>
       ) : framework === "next" ? (
-        <ol className="app-steps" aria-label="Steps for Next.js">
-          <li>
-            <div className="stack-sm">
-              <span>Add it with Next.js's Script component in the root layout, so it loads once and counts every page people move to:</span>
-              <pre className={styles.code}>{component}</pre>
-              <Button size="sm" icon="copy" style={{ justifySelf: "start" }} onClick={() => copyText(component, "Copied")}>Copy</Button>
-            </div>
-          </li>
-        </ol>
+        <Steps label="Steps for Next.js">
+          <Step>
+            <span>Add it with Next.js's Script component in the root layout, so it loads once and counts every page people move to:</span>
+            <CodeBlock code={component} what="Next.js Script component" />
+          </Step>
+        </Steps>
       ) : (
-        <ol className="app-steps" aria-label="Steps for other sites">
-          <li>Paste the line into the <code className={styles.inline}>{"<head>"}</code> of the template every page uses (Hugo, Eleventy, Jekyll, plain HTML), or of the app's <code className={styles.inline}>index.html</code> (React, Vue, Svelte).</li>
-          <li>Apps that change pages without reloading count each page too.</li>
-        </ol>
+        <Steps label="Steps for other sites">
+          <Step>Paste the line into the <code className={kit.code}>{"<head>"}</code> of the template every page uses (Hugo, Eleventy, Jekyll, plain HTML), or of the app's <code className={kit.code}>index.html</code> (React, Vue, Svelte).</Step>
+          <Step>Apps that change pages without reloading count each page too.</Step>
+        </Steps>
       )}
     </div>
   );
@@ -199,14 +197,8 @@ export function AnalyticsPanel() {
     },
   });
 
-  if (setup.error) return <div className="card"><ErrorState error={setup.error} onRetry={() => setup.refetch()} /></div>;
-  if (!setup.data) {
-    return (
-      <section className="card card-pad stack-sm" aria-busy="true" aria-label="Loading">
-        <Skeleton width={260} height={20} /><Skeleton height={38} /><Skeleton width="70%" height={14} />
-      </section>
-    );
-  }
+  if (setup.error) return <ErrorState error={setup.error} onRetry={() => setup.refetch()} />;
+  if (!setup.data) return <div aria-busy="true" aria-label="Loading"><SectionSkeleton rows={3} /></div>;
   const data = setup.data;
   const builder = BUILDERS.find((b) => b.id === builderId) ?? BUILDERS[0]!;
   const line = builder.id === "godaddy" ? pageLine(data.snippet) : data.snippet;
@@ -220,33 +212,25 @@ export function AnalyticsPanel() {
 
   return (
     <>
-      <section className="card card-pad stack-sm" aria-labelledby="analytics-status" style={{ gap: 10 }}>
-        <div className="row-between wrap" style={{ gap: 8 }}>
-          <h2 id="analytics-status" className="section-title" style={{ fontSize: 16 }}>{working ? "Counting your website's visits" : "Waiting for your website"}</h2>
-          <StatusPill label={working ? "Installed" : "Not on your website yet"} tone={working ? "good" : "muted"} />
+      <Section
+        title={working ? "Counting your website's visits" : "Waiting for your website"}
+        className={kit.panel}
+        action={working && <Link to="/marketing?tab=website"><Icon name="marketing" size={14} />See visits in Marketing</Link>}
+      >
+        <div className={styles.status} role="status">
+          <StatusPill label={working ? "Installed" : "Not on your website yet"} tone={working ? "good" : "pending"} />
+          <span className={kit.note}>
+            {visited
+              ? <>Last visit {visited}{data.counting ? <> to <strong>{data.counting}</strong></> : null}. Each visit shows in Marketing within a minute.</>
+              : <>Once the line below is on your website, visits show up in Marketing within a minute of someone opening it.</>}
+          </span>
         </div>
-        <span className="muted" role="status">
-          {visited
-            ? <>Last visit {visited}{data.counting ? <> to <strong>{data.counting}</strong></> : null}. Each visit shows in Marketing within a minute.</>
-            : <>Once the line below is on your website, visits show up in Marketing within a minute of someone opening it.</>}
-        </span>
-        {working && (
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Link className="btn" to="/marketing?tab=website"><Icon name="marketing" size={16} />See visits in Marketing</Link>
-          </div>
-        )}
-      </section>
+      </Section>
 
-      <section id="app-setup" className="card card-pad stack" aria-labelledby="analytics-line" style={{ gap: 14 }}>
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <h2 id="analytics-line" className="section-title" style={{ fontSize: 16 }}>Put this line on your website</h2>
-          <span className="muted small">It goes on every page, in the part of the page called the head. It loads from your own Crewtavo, uses no cookies and keeps nothing that tells who a visitor is.</span>
-        </div>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <code className="code-pill grow" aria-label={builder.id === "godaddy" ? "The line for GoDaddy" : "The line to paste"}>{line}</code>
-          <Button icon="copy" onClick={() => copyText(line, "Line copied")}>Copy</Button>
-        </div>
-        <Field label="Your website is on">
+      <Section id="app-setup" title="Put this line on your website" className={kit.panel}>
+        <p className={kit.text}>It goes on every page, in the part of the page called the head. It loads from your own Crewtavo, uses no cookies and keeps nothing that tells who a visitor is.</p>
+        <CodeRow value={line} name={builder.id === "godaddy" ? "The line for GoDaddy" : "The line to paste"} done="Line copied" />
+        <Field label="Your website is on" className={styles.builder}>
           <Select className="select" value={builder.id} onChange={(e) => setBuilderId(e.target.value)}>
             {BUILDERS.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
           </Select>
@@ -254,41 +238,41 @@ export function AnalyticsPanel() {
         {builder.id === "developer" ? (
           <DeveloperSteps line={data.snippet} />
         ) : builder.steps ? (
-          <ol className="app-steps" aria-label={`Steps for ${builder.label}`}>{builder.steps.map((step, i) => <li key={`${builder.id}-${i}`}>{step}</li>)}</ol>
+          <Steps label={`Steps for ${builder.label}`}>{builder.steps.map((step, i) => <Step key={`${builder.id}-${i}`}>{step}</Step>)}</Steps>
         ) : null}
-        {builder.note && <p className="muted small" style={{ margin: 0 }}>{builder.note}</p>}
-      </section>
+        {builder.note && <p className={kit.note}>{builder.note}</p>}
+      </Section>
 
-      <section className="card card-pad stack-sm" aria-labelledby="analytics-check" style={{ gap: 10 }}>
-        <h2 id="analytics-check" className="section-title" style={{ fontSize: 16 }}>Check your website</h2>
-        <span className="muted small">After you publish, Crewtavo opens your home page and looks for the line. Once it finds it, only that website's pages count, so a copy of your site somewhere else doesn't add to your numbers.</span>
-        <form className="row wrap" style={{ gap: 8 }} onSubmit={submit}>
-          <input className="input grow" style={{ minWidth: 0, flexBasis: 220 }} type="text" inputMode="url" autoComplete="url" spellCheck={false} placeholder="greenlawn.com" aria-label="Your website's address" value={site} onChange={(e) => { setSite(e.target.value); check.reset(); }} />
+      <Section title="Check your website" className={kit.panel}>
+        <p className={kit.note}>After you publish, Crewtavo opens your home page and looks for the line. Once it finds it, only that website's pages count, so a copy of your site somewhere else doesn't add to your numbers.</p>
+        <form className={styles.check} onSubmit={submit}>
+          <input className="input" type="text" inputMode="url" autoComplete="url" spellCheck={false} placeholder="greenlawn.com" aria-label="Your website's address" value={site} onChange={(e) => { setSite(e.target.value); check.reset(); }} />
           <Button type="submit" variant={working ? "secondary" : "primary"} icon="refresh" loading={check.isPending}>Check</Button>
         </form>
-        {check.error && <span className="field-error">{(check.error as Error).message}</span>}
+        {check.error && <span className="field-error" role="alert">{(check.error as Error).message}</span>}
         {result && !check.isPending && <CheckResult check={result} />}
-      </section>
+      </Section>
     </>
   );
 }
 
 function CheckResult({ check }: { check: WebsiteCheck }) {
   const host = new URL(check.url).hostname.replace(/^www\./, "");
+  // Found: a quiet status, as at the top. Only a line that's missing, which someone must fix, gets a callout.
   if (check.found) {
     return (
-      <div className="callout callout-good" role="status">
-        <Icon name="check" size={20} />
-        <div className="grow">Installed on {host}<span className="muted small" style={{ display: "block", fontWeight: 400 }}>Checked {timeAgo(check.at)}</span></div>
+      <div className={styles.status} role="status">
+        <StatusPill label={`Installed on ${host}`} tone="good" />
+        <span className={kit.note}>Checked {timeAgo(check.at)}</span>
       </div>
     );
   }
   return (
     <div className="callout callout-warning" role="status">
-      <Icon name="alert" size={20} />
+      <Icon name="alert" size={16} />
       <div className="grow">
-        {check.problem ?? <>The line isn't on {host} yet. Paste it, publish your website, and check again.</>}
-        <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Checked {timeAgo(check.at)}</span>
+        <div>{check.problem ?? <>The line isn't on {host} yet. Paste it, publish your website, and check again.</>}</div>
+        Checked {timeAgo(check.at)}
       </div>
     </div>
   );

@@ -1,0 +1,30 @@
+/*
+ * Roofing's list page (RoofingPage) and its tabs (RoofingTabs, also on Packages and Catalog). The
+ * list itself is the shared inbox list; these are the few things that are Roofing's own.
+ */
+
+/* Projects · Packages · Catalog: underline tabs, then on a phone one full-width segmented control (Mobile-Apps, Roofing). */
+.tabs { margin-top: -6px; }
+@media (max-width: 900px) {
+  .tabs:global(.underline-tabs) { gap: 2px; margin-top: -10px; padding: 3px; border: 0; border-radius: 11px; background: var(--seg-track); }
+  .tabs:global(.underline-tabs) a { flex: 1 1 0; justify-content: center; height: 38px; border-radius: 8px; font-size: var(--fs-14); color: var(--text-3); }
+  .tabs:global(.underline-tabs) a[aria-current="page"] { background: var(--raised); color: var(--ink); box-shadow: var(--seg-shadow); }
+  .tabs:global(.underline-tabs) a[aria-current="page"]::after { display: none; }
+  /* The sliding highlight (lib/indicator.ts) is the raised chip here, not the underline. */
+  .tabs:global(.underline-tabs)[data-indicator]::before { top: 0; bottom: auto; height: var(--ind-h); transform: translate(var(--ind-x), var(--ind-y)); border-radius: 8px; background: var(--raised); box-shadow: var(--seg-shadow); }
+  .tabs:global(.underline-tabs)[data-indicator] > a[aria-current="page"] { background: transparent; box-shadow: none; }
+  .tabs:global(.underline-tabs) a:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; box-shadow: none; }
+  /* Each tab is a thumb's 44px to tap: the track's padding is part of it. */
+  .tabs:global(.underline-tabs) a::before { content: ""; position: absolute; inset: -3px -1px; }
+}
+
+/* The range a row was sent: "$18,300" over "– $21,050". */
+.to { font-variant-numeric: tabular-nums; }
+
+/* No packages yet: the callout's first line is its heading. */
+.calloutTitle { margin: 0; font-size: inherit; font-weight: 600; letter-spacing: normal; line-height: inherit; }
+
+/* A row's quiet line on a phone: the roof and its package, not how long ago (Mobile-Apps, Roofing). */
+@media (max-width: 900px) {
+  .age, :global(.meta-dot):has(+ .age) { display: none !important; }
+}

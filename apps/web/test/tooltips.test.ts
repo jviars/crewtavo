@@ -1,67 +1,6 @@
-/**
- * Menus show what's there to choose and nothing left over (components/ui/menuEntries.ts), and the
- * tooltip layer lifts a title and puts back exactly what it found (components/ui/titles.ts).
- */
+/** The tooltip layer lifts a title and puts back exactly what it found (components/ui/titles.ts). */
 import { describe, expect, it } from "vitest";
-import { hasActions, shownEntries, type MenuEntry, type ShownEntry } from "@/components/ui/menuEntries";
 import { liftTitle, restoreTitle, tipAdds, titleText, type TitleHost } from "@/components/ui/titles";
-
-const act = (label: string, more: Partial<Extract<MenuEntry, { onSelect: () => void }>> = {}): MenuEntry => ({ label, onSelect: () => undefined, ...more });
-/** What a menu draws, as short words: "a:Open", "-", "group:Heading[...]", "sub:More[...]", "tick:Dark". */
-const read = (shown: ShownEntry[]): string[] =>
-  shown.map((s) =>
-    s.kind === "separator" ? "-"
-      : s.kind === "group" ? `group:${s.heading}[${read(s.items).join(",")}]`
-        : s.kind === "submenu" ? `sub:${s.entry.label}[${read(s.items).join(",")}]`
-          : s.kind === "tick" ? `tick:${s.entry.label}`
-            : `a:${s.entry.label}`,
-  );
-
-describe("shownEntries", () => {
-  it("leaves out hidden rows and the lines they leave at either end or doubled", () => {
-    const items: MenuEntry[] = [
-      { separator: true },
-      act("Edit"),
-      act("Copy", { hidden: true }),
-      { separator: true },
-      act("Archive", { hidden: true }),
-      { separator: true },
-      act("Delete", { danger: true }),
-      { separator: true },
-      act("Restore", { hidden: true }),
-    ];
-    expect(read(shownEntries(items))).toEqual(["a:Edit", "-", "a:Delete"]);
-  });
-
-  it("keeps a heading with the rows under it, and drops one with none", () => {
-    const items: MenuEntry[] = [
-      { heading: "Account" },
-      act("Profile"),
-      { separator: true },
-      { heading: "Needs a key" },
-      act("Refund", { hidden: true }),
-      { separator: true },
-      act("Sign out"),
-    ];
-    expect(read(shownEntries(items))).toEqual(["group:Account[a:Profile]", "-", "a:Sign out"]);
-  });
-
-  it("drops a submenu with nothing to choose in it, and tidies the inside of the rest", () => {
-    const items: MenuEntry[] = [
-      { label: "Move to", items: [{ heading: "Folders" }, act("Plans", { hidden: true })] },
-      { label: "Appearance", items: [{ separator: true }, { label: "Light", checked: true, onCheckedChange: () => undefined }, { label: "Dark", checked: false, onCheckedChange: () => undefined }, { separator: true }] },
-      { label: "Hidden", hidden: true, items: [act("Never")] },
-    ];
-    expect(read(shownEntries(items))).toEqual(["sub:Appearance[tick:Light,tick:Dark]"]);
-  });
-
-  it("says whether there's anything to choose", () => {
-    expect(hasActions(shownEntries([]))).toBe(false);
-    expect(hasActions(shownEntries([{ heading: "Nothing" }, { separator: true }, act("Gone", { hidden: true })]))).toBe(false);
-    expect(hasActions(shownEntries([act("Open", { disabled: true, title: "Turned off" })]))).toBe(true);
-    expect(hasActions(shownEntries([{ label: "Crew", checked: false, onCheckedChange: () => undefined }]))).toBe(true);
-  });
-});
 
 /** Just enough of an element: its attributes and its words. */
 function element(attrs: Record<string, string>, text = ""): TitleHost & { attrs: Map<string, string> } {

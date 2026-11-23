@@ -5,17 +5,19 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { RESET_LINKS_BODY, RESET_LINKS_LABEL, resetLinksPath } from "../src/features/clients/resetLinks";
+import { RESET_LINKS_BODY, RESET_LINKS_LABEL, RESET_LINKS_NOTE, resetLinksPath } from "../src/features/clients/resetLinks";
 
 const page = readFileSync(fileURLToPath(new URL("../src/features/clients/ClientPage.tsx", import.meta.url)), "utf8");
 
 describe("resetting a client's links from their page", () => {
-  it("is in the client's menu for the office only, under Copy Client Hub link", () => {
+  it("is in the client's menu for the office only, with the risky ones before Delete, saying what it breaks", () => {
     expect(RESET_LINKS_LABEL).toBe("Reset this client's links");
-    const copy = page.indexOf('label: "Copy Client Hub link"');
-    const reset = page.indexOf("{ label: RESET_LINKS_LABEL, icon: \"refresh\", onSelect: resetClientLinks, hidden: !isOffice }");
-    expect(copy).toBeGreaterThan(-1);
-    expect(reset).toBeGreaterThan(copy);
+    expect(RESET_LINKS_NOTE).toBe("Links already sent stop working");
+    const merge = page.indexOf('label: "Merge into another client"');
+    const reset = page.indexOf("{ label: RESET_LINKS_LABEL, description: RESET_LINKS_NOTE, icon: \"refresh\", onSelect: resetClientLinks, hidden: !isOffice }");
+    expect(merge).toBeGreaterThan(-1);
+    expect(reset).toBeGreaterThan(merge);
+    expect(page.indexOf('label: "Delete client"')).toBeGreaterThan(reset);
     expect(page).toContain('const isOffice = hasRole(session, "admin", "office");');
   });
 

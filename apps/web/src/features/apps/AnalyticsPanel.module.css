@@ -1,2 +1,22 @@
-.code { margin: 0; padding: 12px 14px; border-radius: var(--radius-control); background: var(--fill); border: 1px solid var(--border); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.inline { font-size: var(--fs-13); padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill); overflow-wrap: anywhere; }
+/* Website Analytics' sections (AnalyticsPanel.tsx); the shared parts are PanelKit's. */
+
+/* Whether visits are counting: the status's dot and words, then the last visit. */
+.status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.status > :global(.pill) { flex: none; }
+
+/* Which builder: a short select, not the section's width. */
+.builder :global(.select) { max-width: 280px; }
+
+/* Built by a developer: which framework, then its steps. */
+.dev { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; justify-items: start; }
+.dev > ol { justify-self: stretch; }
+
+/* The website's address and Check, on one row. */
+.check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.check > :global(.input) { flex: 1 1 220px; min-width: 0; max-width: 360px; }
+
+@media (max-width: 900px) {
+  .builder :global(.select) { max-width: none; }
+  .check > :global(.input) { max-width: none; flex-basis: 100%; }
+  .check > :global(.btn) { flex: 1; }
+}

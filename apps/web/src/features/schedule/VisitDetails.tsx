@@ -5,11 +5,13 @@
  */
 import { marketingOn } from "@crewtavo/core/marketing";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine } from "@/components/ui/InboxList";
 import { MapsLink } from "@/components/ui/MapsLink";
+import { Menu } from "@/components/ui/Menu";
 import { Note } from "@/components/ui/Note";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
@@ -27,6 +29,7 @@ const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(i
 
 export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; onClose: () => void; onEdit?: () => void }) {
   const session = useSession();
+  const navigate = useNavigate();
   const tz = session.company.timezone;
   const office = hasRole(session, "admin", "office", "estimator");
   const showcases = hasRole(session, "admin", "office") && can(session, "marketing") && marketingOn(session.company.settings);
@@ -71,20 +74,28 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
   const names = (people.data ?? []).map((p) => p.full_name).filter(Boolean);
 
   return (
-    <Dialog open onClose={onClose} title={v?.title ?? t("Visit")} description={v?.job ? <>Job #{v.job.number}{client ? ` · ${client.display_name}` : ""}</> : client?.display_name}>
+    <Dialog open onClose={onClose} title={v?.title ?? t("Visit")} description={v?.job ? <>{t("Job #{number}", { number: v.job.number })}{client ? ` · ${client.display_name}` : ""}</> : client?.display_name} className="visit-sheet">
       <div className="dialog-body">
         {visit.error && <ErrorState error={visit.error} onRetry={() => visit.refetch()} />}
-        {visit.isPending && <><Skeleton width="60%" /><Skeleton width="80%" /><Skeleton width="40%" /></>}
+        {visit.isPending && (
+          <div className="visit-facts" aria-hidden="true">
+            {[60, 80, 45].flatMap((w) => [<Skeleton key={`i${w}`} width={16} height={16} radius={8} />, <Skeleton key={`t${w}`} width={`${w}%`} />])}
+          </div>
+        )}
         {v && (
           <>
-            <div className="row wrap" style={{ gap: 6 }}>
-              <EntityStatus kind="visit" status={v.status} />
-              {v.kind !== "job" && <span className="chip">{visitKindText(v.kind)}</span>}
-              {v.route_order && v.status === "scheduled" && <span className="chip"><Icon name="navigation" size={12} />{t("Stop {number}", { number: v.route_order })}</span>}
-              {v.time_fixed && v.starts_at && <span className="chip chip-blue"><Icon name="lock" size={12} />{t("Fixed time")}</span>}
-              {v.series_total && v.series_total > 1 && <span className="chip chip-blue">{t("Day {day} of {days}", { day: v.series_day, days: v.series_total })}</span>}
-              {asked && <span className="chip chip-blue"><Icon name="calendar" size={12} />{t("Change requested")}</span>}
-            </div>
+            {/* Its status as a dot and words, then what else is true of it, quietly; a client's request in amber, since someone has to answer it. */}
+            <MetaLine
+              className="visit-status"
+              parts={[
+                <EntityStatus key="status" kind="visit" status={v.status} />,
+                v.kind !== "job" && visitKindText(v.kind),
+                v.route_order && v.status === "scheduled" && <span key="stop"><Icon name="navigation" size={13} />{t("Stop {number}", { number: v.route_order })}</span>,
+                v.time_fixed && v.starts_at && <span key="fixed"><Icon name="lock" size={13} />{t("Fixed time")}</span>,
+                v.series_total && v.series_total > 1 && t("Day {day} of {days}", { day: v.series_day, days: v.series_total }),
+                asked && <span key="asked" className="visit-flag"><Icon name="refresh" size={13} />{t("Change requested")}</span>,
+              ]}
+            />
 
             <div className="visit-facts">
               <Icon name="clock" size={16} />
@@ -97,16 +108,16 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                 <>
                   <Icon name="pin" size={16} />
                   <div>
-                    {v.property.label && <strong style={{ display: "block" }}>{v.property.label}</strong>}
+                    {v.property.label && <strong className="visit-label">{v.property.label}</strong>}
                     <MapsLink className="address-link" place={v.property}>{addressLine(v.property)}</MapsLink>
                     {(codes?.gate_code || codes?.lockbox_code) && (
-                      <span className="row wrap small" style={{ gap: 12, marginTop: 4 }}>
-                        {codes.gate_code && <span><Icon name="lock" size={12} /> {t("Gate")} <strong>{codes.gate_code}</strong></span>}
-                        {codes.lockbox_code && <span><Icon name="lock" size={12} /> {t("Lockbox")} <strong>{codes.lockbox_code}</strong></span>}
+                      <span className="visit-codes">
+                        {codes.gate_code && <span><Icon name="lock" size={12} />{t("Gate")} <strong>{codes.gate_code}</strong></span>}
+                        {codes.lockbox_code && <span><Icon name="lock" size={12} />{t("Lockbox")} <strong>{codes.lockbox_code}</strong></span>}
                       </span>
                     )}
-                    {codes?.instructions && <span className="muted small pre-wrap" style={{ display: "block", marginTop: 4 }}>{codes.instructions}</span>}
-                    {v.property.notes && <span className="muted small pre-wrap" style={{ display: "block", marginTop: 4 }}>{v.property.notes}</span>}
+                    {codes?.instructions && <span className="visit-sub pre-wrap">{codes.instructions}</span>}
+                    {v.property.notes && <span className="visit-sub pre-wrap">{v.property.notes}</span>}
                   </div>
                 </>
               )}
@@ -123,7 +134,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                   <div>
                     {office ? <Link to={`/clients/${client.id}`}>{client.display_name}</Link> : client.display_name}
                     {client.phone && <> · <a href={`tel:${client.phone}`}>{client.phone}</a></>}
-                    {office && client.email && <span className="muted small" style={{ display: "block" }}>{client.email}</span>}
+                    {office && client.email && <span className="visit-sub">{client.email}</span>}
                   </div>
                 </>
               )}
@@ -132,8 +143,8 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
                 <>
                   <Icon name="users" size={16} />
                   <div>
-                    {v.crew && <span className="row" style={{ gap: 6, display: "inline-flex" }}><i style={{ width: 8, height: 8, borderRadius: "50%", background: v.crew.color ?? "var(--text-4)" }} />{v.crew.name}</span>}
-                    {names.length > 0 && <span className="muted" style={{ display: "block" }}>{names.join(", ")}</span>}
+                    {v.crew && <span className="visit-crew"><i style={{ background: v.crew.color ?? "var(--text-4)" }} aria-hidden="true" />{v.crew.name}</span>}
+                    {names.length > 0 && <span className="visit-sub">{names.join(", ")}</span>}
                   </div>
                 </>
               )}
@@ -148,7 +159,7 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
               {v.hold_reason && (
                 <>
                   <Icon name="cloud" size={16} />
-                  <div style={{ color: "var(--warning)", fontWeight: 600 }}>{t("Weather: {reason}", { reason: v.hold_reason })}</div>
+                  <div className="visit-warn">{t("Weather: {reason}", { reason: v.hold_reason })}</div>
                 </>
               )}
 
@@ -175,17 +186,25 @@ export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; on
               )}
             </div>
 
+            {/* Ways to reach it on the left as quiet buttons (tiles on a phone), Edit the one green button. */}
             <div className="visit-actions">
-              {onEdit && <Button variant="primary" icon="edit" onClick={onEdit}>{t("Edit")}</Button>}
               {place && <MapsLink className="btn" place={place}><Icon name="navigation" size={16} />{t("Directions")}</MapsLink>}
               {client?.phone && <a className="btn" href={`tel:${client.phone}`}><Icon name="phone" size={16} />{t("Call")}</a>}
               {client?.phone && <a className="btn" href={`sms:${client.phone}`}><Icon name="messages" size={16} />{t("Text")}</a>}
               {office && v.job && <Link className="btn" to={`/jobs/${v.job.id}`} onClick={onClose}><Icon name="job" size={16} />{t("Open job")}</Link>}
+              {!office && <Link className="btn" to={`/field/visits/${v.id}`} onClick={onClose}><Icon name="clipboard" size={16} />{t("Open visit")}</Link>}
               {/* A finished visit's before and after photos, on a page to share (Marketing → Showcases). */}
               {showcases && v.job && v.status === "completed" && (
-                <Link className="btn" to={`/marketing?tab=showcases&job=${v.job.id}&visit=${v.id}`} onClick={onClose}><Icon name="image" size={16} />{t("Make a showcase")}</Link>
+                <Menu
+                  label={t("More actions")}
+                  title={v.title}
+                  triggerClassName="btn btn-icon visit-more"
+                  // A tile with its word on a phone, like the ways to reach it beside it; just the dots on a computer.
+                  trigger={<><Icon name="more" size={18} /><span className="visit-more-text" aria-hidden="true">{t("More")}</span></>}
+                  items={[{ label: t("Make a showcase"), icon: "image", onSelect: () => { onClose(); navigate(`/marketing?tab=showcases&job=${v.job!.id}&visit=${v.id}`); } }]}
+                />
               )}
-              {!office && <Link className="btn" to={`/field/visits/${v.id}`} onClick={onClose}><Icon name="clipboard" size={16} />{t("Open visit")}</Link>}
+              {onEdit && <Button variant="primary" icon="edit" onClick={onEdit}>{t("Edit")}</Button>}
             </div>
           </>
         )}

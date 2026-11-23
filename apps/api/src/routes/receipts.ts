@@ -39,7 +39,7 @@ const OFF = "Reading receipts is off. An owner or admin can turn it on in Settin
 const USED_UP = "That's all the receipts that can be read this hour. Fill this one in by hand, or add it again later.";
 
 async function companySettings(c: Ctx) {
-  const { data, error } = await c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle();
+  const { data, error } = await adminClient(c.env).from("companies").select("settings").eq("id", c.var.companyId).maybeSingle();
   if (error) throw dbError(error);
   return (data?.settings ?? {}) as Record<string, unknown>;
 }

@@ -229,26 +229,20 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
     body = (
       <>
         <div className={styles.estimateHead}>
-          <div>
-            <h3>The estimate</h3>
-            <p className={styles.lead}>{lead}</p>
-          </div>
-          {options.length > 0 ? (
-            <span className={styles.packageTag}><strong>{options.length} options</strong></span>
-          ) : (
-            (pkgName || editable) && (
-              <span className={styles.packageTag}>
-                {pkgName ? <span><strong>{pkgName}</strong> package</span> : <span>No package</span>}
-                {editable && (
-                  <>
-                    <span aria-hidden="true">·</span>
-                    <button type="button" className={styles.linkBtn} disabled={editor.busy || add.isPending} onClick={() => setChanging(true)}>
-                      {pkgName ? "Change" : "Pick one"}
-                    </button>
-                  </>
-                )}
-              </span>
-            )
+          <p className={styles.lead}>{lead}</p>
+          {/* With options, the step's heading already says how many, and the options bar names them. */}
+          {!options.length && (pkgName || editable) && (
+            <span className={styles.packageTag}>
+              {pkgName ? <span><strong>{pkgName}</strong> package</span> : <span>No package</span>}
+              {editable && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <button type="button" className={styles.linkBtn} disabled={editor.busy || add.isPending} onClick={() => setChanging(true)}>
+                    {pkgName ? "Change" : "Pick one"}
+                  </button>
+                </>
+              )}
+            </span>
           )}
         </div>
         {(editable || options.length > 0) && (
@@ -310,7 +304,7 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
             </div>
           </details>
         )}
-        <QuoteSections quote={quote} optionSectionIds={tab ? tab.option.section_ids : null} approval={quote.approval} onChanged={refresh} />
+        <QuoteSections quote={quote} optionSectionIds={tab ? tab.option.section_ids : null} approval={quote.approval} onChanged={refresh} level={3} />
       </>
     );
   }
@@ -318,6 +312,11 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
   return (
     <div className={styles.estimate}>
       <div className={styles.estimateGrid}>
+        {/* First, so a phone shows the range at the top of the step; beside the list on a desktop. */}
+        <aside className={styles.aside} aria-label="The range and your numbers">
+          <RangeCard quote={quote} salesperson={salesperson} canSell={canSell} busy={editor.busy || add.isPending || filling} onSend={onSend} />
+          <EstimateNumbers quote={quote} clientName={quote.client?.display_name} optionId={viewed} optionLabel={view?.label ?? null} />
+        </aside>
         <div className={styles.main}>
           {body}
           {!signed && (
@@ -332,10 +331,6 @@ export function EstimateStep({ quote, takeoff, packageName, salesperson, canSell
             </div>
           )}
         </div>
-        <aside className={styles.aside} aria-label="The range and your numbers">
-          <RangeCard quote={quote} salesperson={salesperson} canSell={canSell} busy={editor.busy || add.isPending || filling} onSend={onSend} />
-          <EstimateNumbers quote={quote} clientName={quote.client?.display_name} optionId={viewed} optionLabel={view?.label ?? null} />
-        </aside>
       </div>
       {changing && (
         <ChangePackage
@@ -414,13 +409,14 @@ function PickPackage({ quote, packages, error, pending, onPrice, byHand }: {
       <div className={styles.pick}>
         {canSetUpRoofing(session) ? (
           <div className="callout callout-info">
-            <Icon name="package" size={20} />
-            <span className="grow stack-sm" style={{ gap: 8, fontWeight: 400 }}>
-              <span>Packages price a roof in one tap: Architectural shingle, Designer shingle and Standing-seam metal, from your price list.</span>
-              <Button size="sm" variant="primary" icon="package" style={{ justifySelf: "start" }} loading={setup.isPending} onClick={() => setup.mutate()}>
-                Set up the standard packages
-              </Button>
-            </span>
+            <Icon name="package" size={16} />
+            <div className="grow">
+              <div>No roof packages yet</div>
+              Packages price a roof in one tap: Architectural shingle, Designer shingle and Standing-seam metal, from your price list.
+            </div>
+            <Button size="sm" variant="primary" icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>
+              Set up the standard packages
+            </Button>
           </div>
         ) : (
           <p className={styles.note}>No roof packages yet, so add this roof's lines from your price list. The office can set packages up in Roofing → Packages.</p>
@@ -432,16 +428,16 @@ function PickPackage({ quote, packages, error, pending, onPrice, byHand }: {
   return (
     <div className={styles.pick}>
       <div>
-        <h3 style={{ margin: 0, fontSize: 16 }}>What kind of roof?</h3>
+        <h3 className={styles.subhead}>What kind of roof?</h3>
         <p className={styles.lead}>Pick one, or offer two or three side by side. Their lines go on from the measurements, and you can change any of them after.</p>
       </div>
       <PackagePicker packages={list} value={chosen.map((p) => p.id)} onChange={setPicked} flagExamples />
       <FormError error={error} />
       <div className={styles.pickActions}>
-        <Button variant="primary" size="lg" icon="dollar" loading={pending} disabled={!chosen.length} onClick={() => onPrice(chosen.map((p) => p.id))}>
+        <Button variant="primary" icon="dollar" loading={pending} disabled={!chosen.length} onClick={() => onPrice(chosen.map((p) => p.id))}>
           {priceLabel(chosen, (name) => `Price it as ${name}`)}
         </Button>
-        <Link to="/roofing/packages" className="small strong">Edit packages</Link>
+        <Link to="/roofing/packages" className={styles.linkBtn}>Edit packages</Link>
         {!manual && (
           <button type="button" className={styles.linkBtn} onClick={() => setManual(true)}>
             Add lines by hand
@@ -481,7 +477,7 @@ function ChangePackage({ packages, current, hasLines, pending, error, onClose, o
         {hasLines && <p className={styles.note}>The lines on the estimate now are replaced. Notes and photos stay.</p>}
         <FormError error={error} />
         <div className="form-actions">
-          <Link to="/roofing/packages" className="small strong" style={{ marginRight: "auto" }}>Edit packages</Link>
+          <Link to="/roofing/packages" className={styles.linkBtn} style={{ marginRight: "auto" }}>Edit packages</Link>
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" icon="package" loading={pending} disabled={!chosen.length}>
             {priceLabel(chosen, () => "Use this package")}

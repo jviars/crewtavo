@@ -9,11 +9,12 @@
  */
 import { entryHours, localDate, paymentProblem, workLines, zonedTimeToUtc } from "@crewtavo/core";
 import { z } from "zod";
-import { BATCH_JOBS, invoiceJobs, loggedWork as jobWork, remindInvoices, sendInvoice, sendSchema, TOO_MANY_JOBS } from "../services/sales";
+import { assistantSendSchema, BATCH_JOBS, invoiceJobs, loggedWork as jobWork, remindInvoices, sendInvoice, TOO_MANY_JOBS } from "../services/sales";
 import { customFieldsArg, customFieldsPatch } from "./customFields";
 import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
 
-const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId: ctx.companyId, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, "") });
+/** The sending the quote and invoice screens do, as an assistant: only to addresses on file (services/sales.ts). */
+const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId: ctx.companyId, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, ""), assistant: true });
 
 /** A job's logged work waiting to be billed (services/sales.ts loggedWork), as the person's client reads it. */
 const loggedWork = (ctx: ToolContext, jobId: string) => jobWork(ctx.db, ctx.companyId, jobId);
@@ -186,10 +187,15 @@ export const invoiceTools = {
     run: (ctx, a) => invoiceJobs(salesScope(ctx), a.job_ids, a.send),
   }),
   send_invoice: tool({
-    description: "Send an invoice to the client by email (default) or text, with their link to view and pay it; or just make the link (channel link). It goes to the client and their contacts ticked for emails or texts, unless recipients names the addresses or numbers to send it to instead (10 at most). A draft becomes sent.",
-    input: z.object({ invoice_id: z.uuid(), ...sendSchema.shape, ...companyArg }),
+    description:
+      "Send an invoice to the client by email (default) or text, in Crewtavo's usual words, with their link to view and pay it. It goes to the client and their contacts ticked for emails or texts, or to the ones recipients names from the client's own email or phone and their contacts' (get_client, 10 at most). An assistant never sends one to any other address, or to one an assistant put on file (the person sends those from Crewtavo), never with words of its own, and doesn't get the link. A draft becomes sent.",
+    input: z.object({ invoice_id: z.uuid(), ...assistantSendSchema.shape, ...companyArg }).strict(),
     area: "invoices",
-    run: async (ctx, { invoice_id, company_id: _, ...body }) => sendInvoice(salesScope(ctx), invoice_id, body),
+    run: async (ctx, { invoice_id, company_id: _, ...body }) => {
+      // The link opens Crewtavo without anyone signing in, so it isn't handed back (lib/noAssistants.ts).
+      const { link: _link, ...sent } = await sendInvoice(salesScope(ctx), invoice_id, body);
+      return sent;
+    },
   }),
   send_reminders: tool({
     description: "Email a friendly payment reminder for these unpaid invoices (up to 100). Invoices with a bank payment on its way are skipped.",

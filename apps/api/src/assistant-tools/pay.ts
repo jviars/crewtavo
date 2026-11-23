@@ -43,7 +43,7 @@ export const payTools = {
   }),
   mark_paid: tool({
     description:
-      "Record that people were paid for a pay period (everyone with approved hours or piece pay, or these user_ids): how (direct_deposit, check, cash, payroll_service, other), a reference (check number, payroll run), the date, and amounts if they differ from their hours and piece pay together. Their time and piece pay in it are then locked. Only what's still owed is recorded: hours already paid with another period are left out, and someone already marked paid for the period isn't marked again. Everyone's time has to be approved first. Confirm with the person before marking.",
+      "Record that people were paid for a pay period (everyone with approved hours or piece pay, or these user_ids): how (direct_deposit, check, cash, payroll_service, other), a reference (check number, payroll run), the date, and amounts if they differ from their hours and piece pay together. Their time and piece pay in it are then locked. Only what's still owed is recorded: hours already paid with another period are left out, and someone already marked paid for the period isn't marked again. Everyone's time has to be approved first. Only an owner marks their own pay: anyone else's own is left out. Confirm with the person before marking.",
     input: z.object({
       from: date,
       to: date,
@@ -59,7 +59,7 @@ export const payTools = {
     run: (ctx, a) => markPaid(scope(ctx), a),
   }),
   unmark_paid: tool({
-    description: "Take back a paid mark for a pay period (everyone, or these user_ids), so their time in it can be changed again and their piece pay is owed again. Where a later period overlaps it, that one's mark has to be taken back first.",
+    description: "Take back a paid mark for a pay period (everyone, or these user_ids), so their time in it can be changed again and their piece pay is owed again. Where a later period overlaps it, that one's mark has to be taken back first. Only an owner takes back their own.",
     input: z.object({ from: date, to: date, user_ids: z.array(z.uuid()).min(1).max(500).optional(), ...companyArg }),
     area: "pay",
     run: (ctx, a) => unmarkPaid(scope(ctx), a),

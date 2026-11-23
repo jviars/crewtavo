@@ -19,7 +19,7 @@ import { PAVING_ITEMS } from "@crewtavo/core/paving";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, useJustDone } from "@/components/ui/Button";
+import { Button, cx, useJustDone } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -32,6 +32,7 @@ import { destinationText, lineDestination, packageServices, type LinePlace } fro
 import { useRoofPackages } from "../roofing/packages";
 import { formulaValue, pavesAsphalt, sectionsOf, serviceKind, STEPS, takeoffVariables, usesDepth, viewedLines } from "./data";
 import { EstimateLines, ProjectFlow, SERVICE_FIELDS, type EstimateProps, type FlowTrade, type Service, type TakeoffProps } from "./ProjectFlow";
+import styles from "./paving.module.css";
 import { useWorksheets, WorksheetsCard } from "./WorksheetsCard";
 
 const PAVING: FlowTrade = {
@@ -65,37 +66,33 @@ export function PavingProjectPage() {
   return <ProjectFlow trade={PAVING} takeoffView={(props) => <TakeoffSummary {...props} />} estimateView={(props) => <Estimate {...props} />} />;
 }
 
-function TakeoffSummary({ takeoff, picture, editLink }: TakeoffProps) {
+function TakeoffSummary({ takeoff, picture }: TakeoffProps) {
   const sections = sectionsOf(takeoff);
   const items = PAVING_ITEMS.filter((item) => sections.some((s) => s.item === item.id));
   return (
-    <div className="paving-takeoff">
+    <div className={styles.takeoff}>
       {picture ? (
-        <a href={picture} target="_blank" rel="noreferrer" className="paving-takeoff-picture"><img src={picture} alt={`Takeoff sheet for ${takeoff.title}`} /></a>
+        <a href={picture} target="_blank" rel="noreferrer" className={styles.takeoffPicture}><img src={picture} alt={`Takeoff sheet for ${takeoff.title}`} /></a>
       ) : (
-        <div className="paving-takeoff-picture paving-takeoff-empty muted small">No picture saved yet. Save the takeoff on the map to make the sheet.</div>
+        <div className={cx(styles.takeoffPicture, styles.takeoffEmpty)}>No picture saved yet. Save the takeoff on the map to make the sheet.</div>
       )}
-      <div className="stack-sm">
-        {items.length ? (
-          <div className="paving-quantities">
-            {items.map((item) => (
-              <div key={item.id}>
-                <ItemSwatch item={item} />
-                <span className="grow">{item.name}</span>
-                <strong className="num">{formatItemTotal(sections, item)}</strong>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <span className="muted small">{formatNumber(takeoff.total_area_sqft)} sq ft measured, with no paving items marked. Mark the shapes as asphalt, striping and so on to price each on its own line.</span>
-        )}
-        {editLink && <Link className="btn" style={{ justifySelf: "start" }} to={editLink}><Icon name="edit" size={16} /> Edit the takeoff</Link>}
-      </div>
+      {items.length ? (
+        <dl className={styles.quantities} aria-label="Measured">
+          {items.map((item) => (
+            <div key={item.id}>
+              <dt><ItemSwatch item={item} />{item.name}</dt>
+              <dd>{formatItemTotal(sections, item)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="paving-step-note">{formatNumber(takeoff.total_area_sqft)} sq ft measured, with no paving items marked. Mark the shapes as asphalt, striping and so on to price each on its own line.</p>
+      )}
     </div>
   );
 }
 
-function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
+function Estimate({ quote, takeoff, editable, onChanged, current }: EstimateProps) {
   const { company } = useSession();
   const queryClient = useQueryClient();
   const panelId = useId();
@@ -195,75 +192,80 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
   };
 
   return (
-    <div className="stack" style={{ gap: 16 }}>
+    <div className="paving-step-body">
       {(editable || quote.options.length > 0) && quote.lines.length > 0 && (
         <QuoteOptions quote={quote} options={quote.options} lines={quote.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={optionsChanged} panelId={panelId} />
       )}
       {editable && (
-        <div className="stack-sm" style={{ gap: 10 }}>
-          <div className="row wrap" style={{ gap: 12 }}>
-            <div className="stack-sm" style={{ gap: 4 }}>
-              <span className="small strong" id="asphalt-work">What's the asphalt getting?</span>
-              <div className="segmented" role="group" aria-labelledby="asphalt-work">
-                {ASPHALT_WORK.map((w) => <button key={w.id} type="button" aria-pressed={work === w.id} onClick={() => setWork(w.id)}>{w.label}</button>)}
-              </div>
+        <div className={styles.work}>
+          <div className={styles.workField}>
+            <span className={styles.fieldLabel} id={`${panelId}-work`}>What's the asphalt getting?</span>
+            <div className="segmented" role="group" aria-labelledby={`${panelId}-work`}>
+              {ASPHALT_WORK.map((w) => <button key={w.id} type="button" aria-pressed={work === w.id} onClick={() => setWork(w.id)}>{w.label}</button>)}
             </div>
-            {needsDepth && (
-              <label className="stack-sm" style={{ gap: 4 }}>
-                <span className="small strong">Depth (in)</span>
-                <input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} style={{ width: 90 }} />
-              </label>
-            )}
           </div>
+          {needsDepth && (
+            <label className={styles.workField}>
+              <span className={styles.fieldLabel}>Depth (in)</span>
+              <input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} style={{ width: 90 }} />
+            </label>
+          )}
         </div>
       )}
 
       {/* The paving first: priced on the calculator. */}
       {priced ? (
-        <WorksheetsCard quoteId={quote.id} editable={editable} />
+        <WorksheetsCard quoteId={quote.id} editable={editable} level={3} flush />
       ) : (
         editable &&
         work === "pave" && (
-          <div className="card card-pad paving-calc-lead">
-            <span className="paving-step-icon"><Icon name="calculator" size={20} /></span>
-            <span className="grow stack-sm" style={{ gap: 2 }}>
-              <strong>Price the paving on the calculator</strong>
-              <span className="muted small">
-                The takeoff's {formatNumber(vars.asphalt_sqft ?? 0)} sq ft of asphalt fills in. Its tons, crew days, trucking and profit work out there, and the job goes on this estimate as one line.
-              </span>
+          <div className={styles.calcLead}>
+            <span className="rel-icon" aria-hidden="true"><Icon name="calculator" size={15} /></span>
+            <span className={styles.calcLeadText}>
+              <span className={styles.calcLeadTitle}>Price the paving on the calculator</span>
+              The takeoff's {formatNumber(vars.asphalt_sqft ?? 0)} sq ft of asphalt fills in. Its tons, crew days, trucking and profit work out there, and the job goes on this estimate as one line.
             </span>
-            <Link className="btn btn-primary" to={calculatorLink}><Icon name="calculator" size={16} />Use the calculator</Link>
+            {/* The way forward while nothing's priced; once something is, the proposal's Send is the green one. */}
+            <Link className={cx("btn", current ? "btn-primary" : "btn-sm")} to={calculatorLink}><Icon name="calculator" size={current ? 16 : 14} />Use the calculator</Link>
           </div>
         )
       )}
       {twice.length > 0 && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={16} />
           <span className="grow">The asphalt is priced twice: on the calculator, and by {twice.join(" and ")} from your price list. Untick {twice.length === 1 ? "it" : "them"} below unless that's on purpose.</span>
         </div>
       )}
 
       {editable && (
-        <div className="stack-sm" style={{ gap: 10 }}>
-          <span className="small strong">{work === "pave" ? "Extras from your price list" : "Services from your price list"}</span>
-          {work === "pave" && <span className="muted small" style={{ marginTop: -6 }}>Sealcoat, striping, crack seal, patching and the rest. The asphalt itself is priced on the calculator.</span>}
+        <div className={styles.extras}>
+          <div className={styles.subhead}>
+            <h3 className={styles.subheadTitle}>{work === "pave" ? "Extras from your price list" : "Services from your price list"}</h3>
+            {notYet.length > 1 && (
+              <button type="button" className={styles.subheadAction} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>
+                {add.isPending ? <span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" /> : <Icon name="plus" size={14} />}
+                Add all {notYet.length}
+              </button>
+            )}
+          </div>
+          {work === "pave" && <p className="paving-step-note">Sealcoat, striping, crack seal, patching and the rest. The asphalt itself is priced on the calculator.</p>}
           {tab && (
-            <div className="row wrap" style={{ gap: "6px 10px" }}>
-              <span className="muted small">For {label}. What you tick goes</span>
-              <div className="segmented" role="group" aria-label="What you tick goes" style={{ flexWrap: "wrap", maxWidth: "100%" }}>
+            <div className={styles.place}>
+              <span id={`${panelId}-place`}>For {label}. What you tick goes</span>
+              <div className="segmented" role="group" aria-labelledby={`${panelId}-place`}>
                 <button type="button" aria-pressed={place === "only"} onClick={() => setPlace("only")}>Only on {label}</button>
                 <button type="button" aria-pressed={place === "every"} onClick={() => setPlace("every")}>On every option</button>
               </div>
             </div>
           )}
           {loadingServices ? (
-            <span className="muted small">Loading your price list…</span>
+            <p className="paving-step-note" role="status">Loading your price list…</p>
           ) : !rows.length ? (
             <EmptyState inline title={work === "pave" ? "No extras from your price list for this takeoff" : "None of your services price from this takeoff"}>
               Add the standard paving services on the <Link to="/paving">Paving</Link> page, or give your own a formula in <Link to="/settings?tab=prices">Settings → Price list</Link>.
             </EmptyState>
           ) : (
-            <div className="paving-services">
+            <ul className={styles.services} role="list">
               {rows.map(({ service, qty }) => {
                 const on = onEstimate.has(service.id);
                 const byPrice = service.formula_target === "unit_price";
@@ -272,31 +274,34 @@ function Estimate({ quote, takeoff, editable, onChanged }: EstimateProps) {
                 const where = !tab ? null : on ? (shared.has(service.id) ? destinationText(null, label) : null) : goesTo && place === "every" ? destinationText(goesTo, label) : null;
                 const what = !tab ? "the estimate" : on ? (shared.has(service.id) ? "every option" : label) : goesTo ? label : "every option";
                 return (
-                  <label key={service.id} className="paving-service" data-on={on || undefined}>
-                    <input type="checkbox" checked={on} disabled={busy} onChange={(e) => (e.target.checked ? add.mutate([service]) : remove.mutate(service))} aria-label={`${on ? "Take" : "Put"} ${service.name} ${on ? "off" : "on"} ${what}`} />
-                    <span className="grow">
-                      <strong>{service.name}</strong>
-                      <span className="muted small">
-                        {qty === null ? "Needs a value the takeoff doesn't have" : byPrice ? `Price works out to ${formatMoney(qty)}` : `${formatNumber(qty, qty < 100 ? 2 : 0)} ${service.unit} × ${formatMoneyCents(service.unit_price)}`}
-                        {where ? ` · ${where}` : ""}
-                        {on && covered.has(service.id) ? " · The calculator prices the asphalt now" : ""}
+                  <li key={service.id}>
+                    <label className={styles.service} data-on={on || undefined}>
+                      <input type="checkbox" checked={on} disabled={busy} onChange={(e) => (e.target.checked ? add.mutate([service]) : remove.mutate(service))} aria-label={`${on ? "Take" : "Put"} ${service.name} ${on ? "off" : "on"} ${what}`} />
+                      <span className={styles.serviceText}>
+                        <span className={styles.serviceName}>{service.name}</span>
+                        <span className={styles.serviceSub}>
+                          {qty === null ? "Needs a value the takeoff doesn't have" : byPrice ? `Price works out to ${formatMoney(qty)}` : `${formatNumber(qty, qty < 100 ? 2 : 0)} ${service.unit} × ${formatMoneyCents(service.unit_price)}`}
+                          {where ? ` · ${where}` : ""}
+                          {on && covered.has(service.id) ? " · The calculator prices the asphalt now" : ""}
+                        </span>
                       </span>
-                    </span>
-                    <strong className="num">{qty === null ? "—" : formatMoney(byPrice ? qty : qty * service.unit_price)}</strong>
-                  </label>
+                      {qty !== null && <span className={styles.serviceAmount}>{formatMoney(byPrice ? qty : qty * service.unit_price)}</span>}
+                    </label>
+                  </li>
                 );
               })}
+            </ul>
+          )}
+          {((work !== "pave" && !priced) || quote.lines.some((l) => l.formula)) && (
+            <div className="paving-step-foot">
+              {work !== "pave" && !priced && <Link className="btn btn-sm" to={calculatorLink}><Icon name="calculator" size={14} />Use the calculator</Link>}
+              {quote.lines.some((l) => l.formula) && (
+                <Button size="sm" icon="refresh" loading={reprice.isPending} done={repriced} doneLabel="Updated" disabled={busy} onClick={() => reprice.mutate()} title="Work the quantities out again from the takeoff">
+                  Update quantities
+                </Button>
+              )}
             </div>
           )}
-          <div className="row wrap" style={{ gap: 8 }}>
-            {work !== "pave" && !priced && <Link className="btn" to={calculatorLink}><Icon name="calculator" size={16} />Use the calculator</Link>}
-            {notYet.length > 1 &&<Button icon="plus" loading={add.isPending} disabled={busy} onClick={() => add.mutate(notYet.filter((r) => r.qty !== null).map((r) => r.service))}>Add all {notYet.length}</Button>}
-            {quote.lines.some((l) => l.formula) && (
-              <Button icon="refresh" loading={reprice.isPending} done={repriced} doneLabel="Updated" disabled={busy} onClick={() => reprice.mutate()} title="Work the quantities out again from the takeoff">
-                Update quantities
-              </Button>
-            )}
-          </div>
         </div>
       )}
 

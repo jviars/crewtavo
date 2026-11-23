@@ -65,7 +65,7 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const [rows, calendars, company] = await Promise.all([
     c.var.db.from("integrations").select("provider, status, account_label, external_account_id, connected_at, last_sync_at, last_error, settings").eq("company_id", c.var.companyId),
     c.var.db.from("calendar_sources").select("app, last_error").eq("company_id", c.var.companyId),
-    c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle(),
+    adminClient(c.env).from("companies").select("settings").eq("id", c.var.companyId).maybeSingle(),
   ]);
   // Apps the company can sign in to with its own app at the provider: which keys it saved, if any.
   const keyed = CATALOG.filter((entry) => entry.appKeys).map((entry) => entry.id as Provider);
@@ -458,7 +458,7 @@ apps.get("/apps/google_business/locations", requireUser, requireCompany(ADMINS, 
   const { data: row } = await admin.from("integrations").select("status").match({ company_id: c.var.companyId, provider: "google_business" }).maybeSingle();
   if (!row || row.status === "disconnected") throw new HttpError(409, "Sign in with Google first.");
   const access = await checkAccess(c.env, admin, c.var.companyId);
-  const company = must(await c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
   const { data: sync } = await admin.from("review_syncs").select("location_id").eq("company_id", c.var.companyId).maybeSingle();
   if (!access.problem && sync?.location_id && marketingOn(company.settings as Record<string, unknown> | null)) runInBackground(c, syncCompany(c.env, admin, c.var.companyId));
   return c.json({ accounts: access.accounts ?? [], problem: access.problem ?? null });
@@ -482,7 +482,7 @@ apps.put("/apps/google_business/location", requireUser, requireCompany(ADMINS, "
   }
   if (!location) throw new HttpError(404, "That location isn't in this Google account anymore.");
   const removed = await chooseLocation(admin, c.var.companyId, body.account, location);
-  const company = must(await c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
   const syncing = location.verified && marketingOn(company.settings as Record<string, unknown> | null);
   if (syncing) runInBackground(c, syncCompany(c.env, admin, c.var.companyId));
   return c.json({ removed, syncing, location, review_url: reviewLinkOffer(company.settings, { new_review_uri: location.new_review_uri }) });

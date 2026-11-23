@@ -168,7 +168,7 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
               {config.features.devMail && <span className="muted small">Development mode: it's in the local Mailpit inbox.</span>}
             </div>
           ) : (
-            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
+            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{done.reason} Copy the link and send it yourself.</div></div>
           )}
           <div className="field">
             <span>{capital(who)}'s link</span>
@@ -193,13 +193,13 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
           {check.error && <p className="muted small" style={{ margin: 0 }}>Couldn't check what the packages left off. It can still go out.</p>}
           {leavesRange && (
             <div className="callout callout-info">
-              <Icon name="info" size={20} />
+              <Icon name="info" size={16} />
               <div className="grow">From now on, {who}'s link shows this exact price instead of the range.</div>
             </div>
           )}
           {unavailable && (
             <div className="callout callout-info">
-              <Icon name="info" size={20} />
+              <Icon name="info" size={16} />
               <div className="grow">{channel === "email" ? "Email" : "Texting"} isn't turned on yet. Use “Copy link” and send it yourself.</div>
             </div>
           )}
@@ -251,8 +251,8 @@ function LeftOffList({ check, showing, onChange }: { check: SendCheck; showing: 
     <>
       {check.items.length > 0 && (
         <section className={styles.leftOff} aria-labelledby="left-off-title">
-          <div>
-            <strong id="left-off-title">Left off this estimate</strong>
+          <div className={styles.leftOffHead}>
+            <h3 id="left-off-title" className={styles.subhead}>Left off this estimate</h3>
             <p className={styles.note}>Office only unless you show it. To price one instead, mark the roof's edges on the map.</p>
           </div>
           {check.items.map((item) => {
@@ -274,7 +274,7 @@ function LeftOffList({ check, showing, onChange }: { check: SendCheck; showing: 
       )}
       {check.low_slope.length > 0 && (
         <div className="callout callout-warning" role="note">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             {tooLow.length > 0 && <>Too low for shingles: {named(tooLow)}. Price {tooLow.length === 1 ? "it" : "them"} as another system, like modified bitumen or TPO. </>}
             {low.length > 0 && <>Low slope: {named(low)}. Shingles there need low-slope underlayment.</>}

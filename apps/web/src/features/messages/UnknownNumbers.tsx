@@ -12,11 +12,13 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { InboxGroup } from "@/components/ui/InboxList";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
+import { ConversationRow } from "./ConversationRow";
 import { byNumber, numberWords, type UnknownNumber } from "./unknownTexts";
 
 /** Who sees unknown numbers: whoever starts conversations with clients (the database holds to the same). */
@@ -40,19 +42,22 @@ export function useUnknownNumbers() {
 export function UnknownRows({ numbers, selected, onOpen }: { numbers: readonly UnknownNumber[]; selected: string | null; onOpen: (phoneKey: string) => void }) {
   if (!numbers.length) return null;
   return (
-    <>
-      <div className="card-row muted small strong" style={{ paddingBlock: 6 }}>Unknown numbers</div>
+    <InboxGroup label="Unknown numbers" count={numbers.length} tone="warning" icon="phone">
       {numbers.map((n) => (
-        <button key={n.phone_key} type="button" className="card-row inbox-row" aria-current={selected === n.phone_key} onClick={() => onOpen(n.phone_key)}>
-          <span className="avatar" style={{ background: "var(--warning)" }} aria-hidden="true">?</span>
-          <span className="grow" style={{ minWidth: 0 }}>
-            <span className="row-between"><strong className="ellipsis">{numberWords(n.from_phone)}</strong><span className="muted small nowrap">{timeAgo(n.created_at)}</span></span>
-            <span className="muted small ellipsis" style={{ display: "block" }}><Icon name="messages" size={12} /> {n.body}</span>
-          </span>
-          <span className="unread-dot" title="Not attached to a client yet" style={{ marginTop: 6 }} />
-        </button>
+        <ConversationRow
+          key={n.phone_key}
+          name={numberWords(n.from_phone)}
+          face="?"
+          current={selected === n.phone_key}
+          unread="Not attached to a client yet"
+          at={n.created_at}
+          onOpen={() => onOpen(n.phone_key)}
+        >
+          <Icon name="messages" size={13} />
+          <span>{n.body}</span>
+        </ConversationRow>
       ))}
-    </>
+    </InboxGroup>
   );
 }
 
@@ -78,16 +83,16 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
   });
   if (texts.isPending) {
     return (
-      <Loading label="Loading texts" className="card thread">
+      <Loading label="Loading texts" className="thread">
         <div className="thread-head"><Skeleton width={160} height={16} /></div>
         <div className="thread-body">{[0, 1].map((i) => <Skeleton key={i} height={48} width="60%" radius={12} />)}</div>
       </Loading>
     );
   }
-  if (texts.error) return <div className="card"><ErrorState error={texts.error} onRetry={() => texts.refetch()} /></div>;
+  if (texts.error) return <div className="thread-empty"><ErrorState error={texts.error} onRetry={() => texts.refetch()} /></div>;
   const rows = texts.data;
   if (!rows.length) {
-    return <div className="card" style={{ height: "100%", display: "grid", placeItems: "center" }}><EmptyState icon="messages" title="No texts from this number">They may have been added to a client or deleted.</EmptyState></div>;
+    return <div className="thread-empty"><EmptyState icon="messages" title="No texts from this number">They may have been added to a client or deleted.</EmptyState></div>;
   }
   const from = rows[rows.length - 1]!.from_phone;
   const askDelete = async () => {
@@ -95,15 +100,15 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
   };
   let lastDay = "";
   return (
-    <div className="card thread">
+    <div className="thread">
       <div className="thread-head">
-        <button type="button" className="icon-btn mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="arrowLeft" size={20} /></button>
+        <button type="button" className="thread-back mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="chevronLeft" size={20} /></button>
         <span className="who">
-          <span className="strong ellipsis">{numberWords(from)}</span>
-          <span className="muted small ellipsis">Not one of your clients' numbers</span>
+          <span className="who-name">{numberWords(from)}</span>
+          <span className="who-sub">Not one of your clients' numbers</span>
         </span>
-        <Button size="sm" variant="primary" icon="plus" onClick={() => setAttaching(true)}>Add to a client</Button>
-        {hasRole(session, "admin", "office") && <Button size="sm" variant="ghost" icon="trash" aria-label="Delete these texts" loading={remove.isPending} onClick={askDelete} />}
+        <Button size="sm" variant="primary" icon="plus" className="thread-head-add" onClick={() => setAttaching(true)}>Add to a client</Button>
+        {hasRole(session, "admin", "office") && <Button size="sm" variant="ghost" icon="trash" aria-label="Delete these texts" title="Delete these texts" loading={remove.isPending} onClick={askDelete} />}
       </div>
       <div className="thread-body">
         {rows.map((m) => {
@@ -121,7 +126,11 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
           );
         })}
       </div>
-      <div className="composer"><span className="muted small">Add this number to a client to reply and keep the conversation with their other messages.</span></div>
+      <div className="composer">
+        <span className="composer-note">Add this number to a client to reply and keep the conversation with their other messages.</span>
+        {/* On a phone the header has no room for it: it's the bar at the bottom instead. */}
+        <Button variant="primary" icon="plus" className="thread-add" onClick={() => setAttaching(true)}>Add to a client</Button>
+      </div>
       {attaching && (
         <AttachDialog
           from={from}

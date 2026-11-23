@@ -15,13 +15,17 @@ import { featureOn } from "@/components/shell/nav";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
-import { NumberInput } from "@/components/ui/NumberInput";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Menu } from "@/components/ui/Menu";
+import { RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import { SettingsActions } from "./SettingsKit";
+import { loadSettings } from "@/lib/companySettings";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 interface Service { id: string; name: string; category: string | null; active: boolean }
 
@@ -34,8 +38,7 @@ export function WeatherSettings() {
   const rules = useQuery({
     queryKey: key,
     queryFn: async () => {
-      const row = unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single());
-      const list = (row.settings as { weather_rules?: unknown } | null)?.weather_rules;
+      const list = (await loadSettings(company.id)).weather_rules;
       // Settings are JSON anyone with the key could have edited: anything that isn't a rule is skipped, as the weather task does.
       return Array.isArray(list) ? (list.filter((r) => r && typeof r === "object") as WeatherRule[]) : [];
     },
@@ -62,35 +65,50 @@ export function WeatherSettings() {
       commit: () => save.mutateAsync(queryClient.getQueryData<WeatherRule[]>(key) ?? []),
     });
 
-  if (rules.isPending) return <Loading label="Loading your weather rules"><CardSkeleton lines={4} /></Loading>;
-  if (rules.error) return <div className="card"><ErrorState error={rules.error} onRetry={() => rules.refetch()} /></div>;
+  if (rules.isPending) return <Loading label="Loading your weather rules"><SectionSkeleton rows={4} /></Loading>;
+  if (rules.error) return <ErrorState error={rules.error} onRetry={() => rules.refetch()} />;
   const list = rules.data;
   // Each rule's item called what it's called now: a rule follows its item when it's renamed.
   const named = namedWeatherRules(list, new Map((services.data ?? []).map((s) => [s.id, s.name])));
 
   return (
-    <div className="stack" style={{ maxWidth: 760 }}>
-      <div className="card card-pad stack-sm">
-        <h2 className="section-title">Weather rules</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          The work that needs good weather, and how good. Visits in the next few days for jobs with that work get a weather warning on the schedule, on Home and on the crew's visit. Nothing is moved by itself.
-        </p>
-      </div>
+    <>
+      <SettingsActions><Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a rule</Button></SettingsActions>
+      <Section level={3} title="Rules" count={list.length || undefined}>
+        {list.length ? (
+          <ul className="rel" role="list">
+            {list.map((rule, i) => {
+              const summary = weatherRuleSummary(named[i]!);
+              // "Sealcoat: at least 50°F, 24 dry hours after": the work as the row's title, its limits quietly under it.
+              const cut = summary.lastIndexOf(": ");
+              const limits = summary.slice(cut + 2);
+              return (
+                <RelatedRow
+                  key={`${i}-${JSON.stringify(rule)}`}
+                  onClick={() => setEditing(i)}
+                  title={summary.slice(0, cut)}
+                  sub={limits.charAt(0).toUpperCase() + limits.slice(1)}
+                  actions={
+                    <Menu
+                      label={`More for ${summary}`}
+                      title={summary.slice(0, cut)}
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      items={[
+                        { label: "Edit rule", icon: "edit", kbd: "E", onSelect: () => setEditing(i) },
+                        { separator: true },
+                        { label: "Delete rule", icon: "trash", danger: true, onSelect: () => remove(rule, i) },
+                      ]}
+                    />
+                  }
+                />
+              );
+            })}
+          </ul>
+        ) : (
+          <EmptyState inline title="No weather rules yet" action={<Button onClick={() => setEditing("new")}>Add a rule</Button>} />
+        )}
+      </Section>
       <ForecastSource />
-      <div className="row-between">
-        <span className="muted small">{list.length === 1 ? "1 rule" : `${list.length} rules`}</span>
-        <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a rule</Button>
-      </div>
-      <div className="card">
-        {list.map((rule, i) => (
-          <div key={`${i}-${JSON.stringify(rule)}`} className="card-row">
-            <span className="grow">{weatherRuleSummary(named[i]!)}</span>
-            <Button size="sm" variant="ghost" icon="edit" aria-label={`Edit ${weatherRuleSummary(named[i]!)}`} onClick={() => setEditing(i)} />
-            <Button size="sm" variant="ghost" icon="trash" aria-label={`Delete ${weatherRuleSummary(named[i]!)}`} onClick={() => remove(rule, i)} />
-          </div>
-        ))}
-        {!list.length && <EmptyState inline title="No weather rules yet" />}
-      </div>
       {editing !== null && (
         <RuleDialog
           rule={editing === "new" ? null : named[editing]!}
@@ -103,7 +121,7 @@ export function WeatherSettings() {
           }}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -207,10 +225,10 @@ function ForecastSource() {
     queryKey: key,
     queryFn: async () => {
       const [row, app] = await Promise.all([
-        supabase().from("companies").select("settings").eq("id", company.id).single(),
+        loadSettings(company.id),
         supabase().from("integrations").select("status").eq("company_id", company.id).eq("provider", "open_meteo").maybeSingle(),
       ]);
-      return { source: weatherSourceOf(unwrap(row).settings), paid: app.data?.status === "connected" };
+      return { source: weatherSourceOf(row), paid: app.data?.status === "connected" };
     },
   });
   const pick = useMutation({
@@ -224,24 +242,23 @@ function ForecastSource() {
   const current = pick.isPending ? pick.variables : chosen.data?.source;
   const paid = Boolean(chosen.data?.paid);
   return (
-    <div className="card">
-      <div className="card-head"><h2>Forecast source</h2></div>
-      <div role="radiogroup" aria-label="Forecast source">
+    <Section level={3} title="Forecast source">
+      <div className="set-rows" role="radiogroup" aria-label="Forecast source">
         {SOURCES.filter(({ source }) => source !== "open_meteo_commercial" || paid || current === source).map(({ source, about }) => (
-          <label key={source} className="card-row" style={{ alignItems: "flex-start", cursor: "pointer" }}>
-            <input type="radio" name="weather-source" style={{ marginTop: 3 }} checked={current === source} disabled={chosen.isPending || pick.isPending} onChange={() => pick.mutate(source)} />
-            <span className="grow">
-              <strong>{WEATHER_SOURCE_LABELS[source]}</strong>
-              <span className="muted small" style={{ display: "block" }}>{about}</span>
+          <label key={source} className="set-row set-choice">
+            <input type="radio" name="weather-source" checked={current === source} disabled={chosen.isPending || pick.isPending} onChange={() => pick.mutate(source)} />
+            <span className="set-row-text">
+              <span className="set-row-label">{WEATHER_SOURCE_LABELS[source]}</span>
+              <span className="set-row-hint">{about}</span>
             </span>
           </label>
         ))}
       </div>
       <FormError error={pick.error ?? chosen.error} />
-      <p className="muted small" style={{ margin: 0, padding: "10px 20px 14px" }}>
+      <p className="set-note">
         Used for the weather warnings on visits and for Snow. Official winter storm alerts on the Snow page always come from the National Weather Service.
         {chosen.data && !paid && <> A business that wants Open-Meteo's forecasts needs its paid service, which becomes a choice here once you add the <Link to="/apps/open_meteo">Open-Meteo (commercial) app</Link>.</>}
       </p>
-    </div>
+    </Section>
   );
 }

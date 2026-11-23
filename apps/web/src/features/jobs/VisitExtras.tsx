@@ -23,6 +23,7 @@ import { formatDate, formatDateTime, formatMoneyCents } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { priceListColumns } from "../quotes/LineItems";
+import styles from "./jobs.module.css";
 
 const qty = (n: number | string) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(Number(n));
 
@@ -90,8 +91,9 @@ interface PriceListItem { id: string; name: string; description: string | null; 
  * The extra work on one visit, with adding and removing for those who may. It loads what it needs
  * from the visit's id, so the schedule's visit dialog and the job page use it alike. Nothing shows
  * for a visit that isn't a repeating job's. No form of its own: it sits inside the visit dialog's.
+ * `titled={false}` leaves out its heading, in a dialog whose title already says it.
  */
-export function VisitExtrasEditor({ visitId, jobId, onChanged }: { visitId: string; jobId: string; onChanged?: () => void }) {
+export function VisitExtrasEditor({ visitId, jobId, onChanged, titled = true }: { visitId: string; jobId: string; onChanged?: () => void; titled?: boolean }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const sees = useSeesExtras();
@@ -173,32 +175,36 @@ export function VisitExtrasEditor({ visitId, jobId, onChanged }: { visitId: stri
     submit();
   };
   return (
-    <section className="stack-sm" aria-label="Extra work on this visit">
-      <div className="row-between wrap" style={{ gap: 8 }}>
-        <strong>Extra work on this visit</strong>
-        <span className="muted small">{extraBillingHint(about.data.job)}</span>
-      </div>
+    <section className={styles.extras} aria-label="Extra work on this visit">
+      {titled && (
+        <div className={styles.extrasHead}>
+          <span className={styles.extrasTitle}>Extra work on this visit</span>
+          <span className={styles.extrasHint}>{extraBillingHint(about.data.job)}</span>
+        </div>
+      )}
       {extras.isPending && <Skeleton height={36} radius={8} />}
       {mine.length > 0 && (
-        <div className="card" style={{ boxShadow: "none" }}>
+        <ul className="rel" role="list" aria-label="Extra work">
           {mine.map((e) => {
             const state = extraState(e, about.data.visit);
             return (
-              <div key={e.id} className="card-row" style={{ padding: "10px 14px" }}>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{e.name}</strong>
-                  <span className="muted small" style={{ display: "block" }}>
-                    {qty(e.quantity)} {e.unit} at {formatMoneyCents(Number(e.unit_price))}{e.taxable ? "" : " · not taxed"} · {extraStateText(state, e.invoice?.number)}{e.added_in_field_at ? " · added by the crew" : ""}
-                  </span>
-                </span>
-                <span className="tabular">{formatMoneyCents(lineTotal(e.quantity, e.unit_price))}</span>
+              <li key={e.id} className="rel-row">
+                <div className="rel-body">
+                  <span className="rel-head"><span className="rel-title">{e.name}</span></span>
+                  <div className="rel-sub">
+                    {qty(e.quantity)} {e.unit} at {formatMoneyCents(Number(e.unit_price))}{e.taxable ? "" : " · not taxed"} · {extraStateText(state, e.invoice?.number).toLowerCase()}{e.added_in_field_at ? " · added by the crew" : ""}
+                  </div>
+                </div>
+                <span className="rel-end"><b>{formatMoneyCents(lineTotal(e.quantity, e.unit_price))}</b></span>
                 {edits && !e.invoice_id && (
-                  <Button size="sm" variant="ghost" icon="trash" aria-label={`Remove ${e.name}`} title="Remove" loading={remove.isPending && remove.variables === e.id} onClick={() => remove.mutate(e.id)} />
+                  <span className="rel-actions">
+                    <Button size="sm" variant="ghost" icon="trash" aria-label={`Remove ${e.name}`} title="Remove" loading={remove.isPending && remove.variables === e.id} onClick={() => remove.mutate(e.id)} />
+                  </span>
                 )}
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
       {edits && open && (
         <div className="stack-sm">
@@ -222,7 +228,7 @@ export function VisitExtrasEditor({ visitId, jobId, onChanged }: { visitId: stri
           <FormError error={problem ?? add.error} />
         </div>
       )}
-      {edits && !open && about.data.visit.invoice_id && <span className="muted small">This visit is on an invoice, so more work goes on the invoice itself.</span>}
+      {edits && !open && about.data.visit.invoice_id && <span className={styles.extrasHint}>This visit is on an invoice, so more work goes on the invoice itself.</span>}
     </section>
   );
 }
@@ -232,7 +238,7 @@ export function ExtraWorkDialog({ visit, jobId, onClose }: { visit: { id: string
   return (
     <Dialog open onClose={onClose} title="Extra work on this visit" description={`${visit.title}${visit.scheduled_on ? ` · ${formatDate(visit.scheduled_on)}` : ""}. It's billed once, with this visit, and doesn't change the job's price.`} size="lg">
       <div className="dialog-body stack">
-        <VisitExtrasEditor visitId={visit.id} jobId={jobId} />
+        <VisitExtrasEditor visitId={visit.id} jobId={jobId} titled={false} />
         <div className="form-actions">
           <Button variant="primary" onClick={onClose}>Done</Button>
         </div>
@@ -247,8 +253,9 @@ export function VisitExtraLines({ extras, visit }: { extras: readonly ExtraRow[]
   return (
     <>
       {extras.map((e) => (
-        <span key={e.id} className="small" style={{ display: "block" }}>
-          <Icon name="plus" size={12} /> {extraText(e)} <span className="muted">· {extraStateText(extraState(e, visit), e.invoice?.number).toLowerCase()}{e.added_in_field_at ? " · added by the crew" : ""}</span>
+        <span key={e.id} className={styles.extraLine}>
+          <Icon name="plus" size={12} />
+          <span>{extraText(e)} <span className={styles.extraState}>· {extraStateText(extraState(e, visit), e.invoice?.number).toLowerCase()}{e.added_in_field_at ? " · added by the crew" : ""}</span></span>
         </span>
       ))}
     </>
@@ -293,13 +300,13 @@ export function ExtrasToReview({ jobId, extras, visits }: { jobId: string; extra
     <>
       {notBilled.length > 0 && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <div className="grow stack-sm">
-            <strong>Extra work that wasn't billed</strong>
+            <div>Extra work that wasn't billed</div>
             {notBilled.map((e) => {
               const was = e.visit_id ? byId.get(e.visit_id)?.scheduled_on ?? null : e.visit_was_on;
               return (
-                <div key={e.id} className="row wrap small" style={{ gap: 8 }}>
+                <div key={e.id} className="row wrap" style={{ gap: 8 }}>
                   <span className="grow">{extraText(e)} · its visit{was ? ` on ${formatDate(was)}` : ""} was {e.visit_id ? "cancelled" : "removed"}</span>
                   {edits && targets.length > 0 && (
                     <Select className="select input-sm" style={{ width: "auto" }} value="" aria-label={`Put ${e.name} on another visit`} onChange={(ev) => ev.target.value && move.mutate({ id: e.id, visitId: ev.target.value })}>
@@ -316,18 +323,18 @@ export function ExtrasToReview({ jobId, extras, visits }: { jobId: string; extra
       )}
       {fromField.length > 0 && (
         <div className="callout callout-info">
-          <Icon name="truck" size={20} />
-          <div className="grow stack-sm">
-            <strong>Extra work added in the field</strong>
+          <Icon name="truck" size={16} />
+          <div className="grow">
+            <div>Extra work added in the field</div>
             {fromField.map((e) => {
               const on = e.visit_id ? byId.get(e.visit_id)?.scheduled_on : null;
               return (
-                <span key={e.id} className="small">
-                  {extraText(e)}{on ? ` · visit on ${formatDate(on)}` : ""} · {who(e.added_in_field_by)}, {formatDateTime(e.added_in_field_at!, company.timezone)}
-                </span>
+                <div key={e.id}>
+                  {extraText(e)}{on ? ` · visit on ${formatDate(on)}` : ""} <span className="muted">· {who(e.added_in_field_by)}, {formatDateTime(e.added_in_field_at!, company.timezone)}</span>
+                </div>
               );
             })}
-            <span className="muted small">Look it over before the visit is invoiced. It's billed once, with that visit.</span>
+            <div className="muted">Look it over before the visit is invoiced. It's billed once, with that visit.</div>
           </div>
         </div>
       )}

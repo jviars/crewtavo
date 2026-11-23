@@ -53,6 +53,8 @@ interface World {
   arrived?: Record<string, string>;
   /** The email provider answers with an error. */
   emailDown?: boolean;
+  /** The business has taken its day's worth of strangers' files (lib/publicUploads.ts). */
+  dayUsed?: boolean;
 }
 
 const apex = { id: SUB, company_id: CO, name: "Apex Roofing LLC", contact_name: "Al Apex", email: "al@apex.test", phone: "+15405550101", active: true };
@@ -88,6 +90,8 @@ function serve(world: World = {}) {
     switch (call.path) {
       case "rpc/rate_limit_hit":
         return !world.full?.test(call.body.p_key);
+      case "rpc/rate_limit_spend":
+        return !world.dayUsed;
       case "memberships":
         return world.member ? [world.member] : [{ role: "office", role_id: null }];
       case "company_roles":
@@ -134,7 +138,7 @@ describe("a sub's paperwork page", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
-      company: { name: "Uniform Roofing", logo: `/api/public/logo/${CO}/00000000-0000-4000-8000-0000000000c1.png` },
+      company: { name: "Uniform Roofing", logo: `/api/public/logo/${CO}/00000000-0000-4000-8000-0000000000c1.png`, color: null },
       sub: { name: "Apex Roofing LLC" },
       needed: [
         { requirement: "w9", label: "W-9", state: "missing", expires_on: null },
@@ -283,6 +287,31 @@ describe("sending paperwork by link", () => {
     expect((await page(token, "/files", { files_token: `${sent.files_token}x` })).status).toBe(400);
     const pageToken = await tokenFor({ t: "sub", id: SUB });
     expect((await page(token, "/files", { files_token: pageToken })).status).toBe(400);
+  });
+
+  it("keeps the upload link on record with the size given for the file, and keeps nothing bigger", async () => {
+    const token = await tokenFor({ t: "sub", id: SUB });
+    const db = serve();
+    const sent = (await (await page(token, "/uploads", { kind: "w9", file: { ...pdf, size: 100_000 } })).json()) as { path: string; files_token: string };
+    expect(db.calls.find((c) => c.method === "POST" && c.path === "upload_links")?.body).toEqual([
+      { path: sent.path, company_id: CO, kind: "paperwork", max_bytes: 100_000, expires_at: expect.any(String) },
+    ]);
+    // Only asks whether the business has room today: the bytes count where they arrive.
+    expect(db.calls.filter((c) => c.path === "rpc/rate_limit_spend").map((c) => (c.body as { p_key: string; p_amount: number })).map((b) => [b.p_key, b.p_amount])).toEqual([[`upload-bytes:company:${CO}`, 0]]);
+    // It arrived far bigger than the file picked (Storage reached without the gateway): removed, not recorded.
+    const done = serve({ arrived: { [sent.path]: "application/pdf" } });
+    const res = await page(token, "/files", { files_token: sent.files_token, expires_on: "2030-01-01" });
+    expect(res.status).toBe(413);
+    expect(done.calls.some((c) => c.path === "sub_documents")).toBe(false);
+    expect(done.calls.find((c) => c.method === "DELETE" && c.url.pathname === "/storage/v1/object/files")?.body).toEqual({ prefixes: [sent.path] });
+  });
+
+  it("hands out no upload link once the business has taken its day's worth of files", async () => {
+    const db = serve({ dayUsed: true });
+    const res = await page(await tokenFor({ t: "sub", id: SUB }), "/uploads", { kind: "liability", file: pdf });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "This business has taken in a lot of files today, so it can't take more until tomorrow. Email them instead." });
+    expect(db.calls.some((c) => c.url.pathname.startsWith("/storage/") || c.path === "upload_links")).toBe(false);
   });
 
   it("limits uploads and records by visitor and by link", async () => {

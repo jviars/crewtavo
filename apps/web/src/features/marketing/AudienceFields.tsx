@@ -11,6 +11,7 @@ import { TagInput } from "@/components/ui/TagInput";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useClientTags } from "../clients/ClientForm";
+import styles from "./Marketing.module.css";
 
 export const STATUS_OPTIONS = [["active", "Active clients"], ["lead", "Leads"], ["archived", "Archived"]] as const;
 export const VISIT_OPTIONS = [["90", "3 months"], ["180", "6 months"], ["365", "12 months"], ["730", "2 years"]] as const;
@@ -43,7 +44,7 @@ export function AudienceFields({ audience, onChange, choices, statusHint = "None
     <>
       <div className="field">
         <span>Client status</span>
-        <div className="row wrap" style={{ gap: 6 }}>
+        <div className={styles.chips} role="group" aria-label="Client status">
           {STATUS_OPTIONS.map(([value, text]) => {
             const on = audience.statuses?.includes(value) ?? false;
             return <button key={value} type="button" className="tab" aria-pressed={on} onClick={() => set({ statuses: on ? (audience.statuses ?? []).filter((x) => x !== value) : [...(audience.statuses ?? []), value] })}>{text}</button>;

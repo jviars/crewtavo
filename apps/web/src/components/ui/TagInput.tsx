@@ -53,7 +53,7 @@ export function TagInput({ value, onChange, suggestions = [], options, placehold
     }
   };
   return (
-    <div className="input" style={{ position: "relative", height: "auto", minHeight: "var(--control)", display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 8px", alignItems: "center" }} onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement)?.focus()}>
+    <div className="input tag-input" onClick={(e) => (e.currentTarget.querySelector("input") as HTMLInputElement)?.focus()}>
       {value.map((tag) => (
         <span key={tag} className="tag">
           {tag}
@@ -82,7 +82,7 @@ export function TagInput({ value, onChange, suggestions = [], options, placehold
         aria-controls={showList ? listId : undefined}
         aria-activedescendant={showList && index >= 0 ? `${listId}-${index}` : undefined}
         autoComplete="off"
-        style={{ flex: "1 0 100px", border: 0, outline: "none", minWidth: 80, height: 24, background: "transparent" }}
+        className="tag-input-field"
       />
       {showList && (
         <div className="tag-suggest" id={listId} role="listbox" aria-label={placeholder}>

@@ -1,0 +1,100 @@
+/*
+ * Automations in direction B (no board of its own: App-Marketing.dc.html's automated rows are the
+ * nearest, with Productboard-style When / If / Then steps for a rule). Rules are rows grouped by what
+ * starts them, each with its switch, its name and what it does in a sentence, how often it ran, and a
+ * menu; a run is a row with what it did and its status; a rule's page is its steps down a quiet rail.
+ */
+
+/* ---- A rule: switch, name and sentence (the row opens it), its menu ---- */
+.rule { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 14px; align-items: start; padding: 12px 4px; border-bottom: 1px solid var(--row-divider); transition: background var(--dur-fast); }
+.rule:hover { background: var(--fill); }
+.rule:has(.link:focus-visible) { outline: 2px solid var(--green); outline-offset: -2px; border-radius: 6px; }
+.switch { position: relative; z-index: 1; display: flex; padding-top: 1px; }
+.body { display: grid; gap: 2px; min-width: 0; }
+.link { --focus-ring: transparent; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); text-decoration: none; }
+.link:hover { color: var(--ink); text-decoration: none; }
+.link::after { content: ""; position: absolute; inset: 0; }
+.rule[data-off] .link { color: var(--text-2); }
+.what { margin: 0; color: var(--text-2); font-size: var(--fs-13); }
+.rule[data-off] .what { color: var(--text-3); }
+.meta { margin-top: 2px; font-size: var(--fs-12); color: var(--quiet); }
+.end { position: relative; z-index: 1; display: flex; align-items: center; }
+.end :global(.btn-icon) { border-color: transparent; color: var(--text-3); }
+.end :global(.btn-icon):hover { background: var(--fill-2); color: var(--ink); }
+
+/* ---- A run: what rule, when, what each action did; its status and Retry or Cancel ---- */
+.run { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; padding: 11px 4px; border-bottom: 1px solid var(--row-divider); }
+.runName { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); font-size: var(--fs-13); }
+a.runName:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.runWhen { margin-top: 1px; font-size: var(--fs-12); color: var(--text-3); }
+.runWhen a { font-weight: 600; }
+.results { margin: 5px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.results li { display: flex; gap: 6px; font-size: var(--fs-12); color: var(--text-2); }
+.results li > span:first-child { flex: none; width: 12px; text-align: center; font-weight: 700; }
+.results li[data-tone="good"] > span:first-child { color: var(--green-dark); }
+.results li[data-tone="danger"] { color: var(--danger); }
+.results li[data-tone="muted"] { color: var(--text-3); }
+.runError { margin: 4px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+.runEnd { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; white-space: nowrap; }
+/* Retry or Cancel: quiet words under the status, so a run stays as tall as what it says. */
+.runEnd :global(.btn) { height: 22px; padding: 0 2px; border: 0; background: none; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.runEnd :global(.btn):hover:not(:disabled) { background: none; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.filters { margin-bottom: 4px; }
+
+/* ---- A rule's page ---- */
+.summary { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--seg-track); font-size: var(--fs-14); font-weight: 500; color: var(--ink); line-height: 1.45; }
+.summary > svg { flex: none; margin-top: 2px; color: var(--quiet); }
+.note { margin: 0; font-size: var(--fs-12); color: var(--text-3); line-height: 1.5; }
+.note[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.nameFields { max-width: 880px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 16px; }
+.test { display: grid; gap: 10px; }
+.testRecord { font-size: var(--fs-13); color: var(--text-2); }
+.verdict { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-13); font-weight: 600; }
+.verdict svg { flex: none; margin-top: 2px; }
+.verdict[data-tone="good"] { color: var(--green-dark); }
+.verdict[data-tone="warning"] { color: var(--warning); }
+.sample { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--seg-track); }
+.sampleHead { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.sampleHead svg { color: var(--quiet); }
+.sampleTitle { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.sampleBody { margin: 0; font-size: var(--fs-13); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); font-weight: 500; color: var(--text-2); cursor: pointer; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 900px) {
+  /* Rules and Activity as chips that scroll, the chosen one solid, as Marketing's and Finance's sections are. */
+  .tabs.tabs { gap: 8px; margin-inline: calc(-1 * max(16px, env(safe-area-inset-left))); padding: 5px max(16px, env(safe-area-inset-left)); border-bottom: 0; }
+  .tabs.tabs > button { flex: none; height: 34px; padding: 0 14px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); font-size: var(--fs-14); }
+  .tabs.tabs > button::before { content: ""; position: absolute; inset: -5px 0; }
+  .tabs.tabs > button[aria-selected="true"] { background: var(--solid); color: var(--on-solid); }
+  .tabs.tabs > button[aria-selected="true"] :global(.badge) { color: inherit; opacity: 0.7; }
+  .tabs.tabs > button::after, .tabs.tabs[data-indicator]::before { content: none; }
+  /* Edge to edge as the phone's lists are (the list is the page's own), the hairline from the words. */
+  .rule { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "body switch end"; column-gap: 8px; padding: 12px max(8px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); border-bottom: 0; }
+  .rule::before { content: ""; position: absolute; left: max(16px, env(safe-area-inset-left)); right: 0; bottom: 0; height: 1px; background: var(--row-divider); }
+  .rule:last-child::before { content: none; }
+  .rule:hover { background: none; }
+  .rule:active { background: var(--fill-2); }
+  .switch { grid-area: switch; padding-top: 2px; }
+  .body { grid-area: body; }
+  .end { grid-area: end; margin-top: -8px; }
+  .end :global(.btn-icon) { width: 40px; height: 40px; }
+  .link { font-size: var(--fs-16); white-space: normal; }
+  .what { font-size: var(--fs-14); }
+  .meta { font-size: var(--fs-13); }
+  .run { padding: 12px 0; }
+  .runName { font-size: var(--fs-15); white-space: normal; }
+  .runWhen, .results li, .runError { font-size: var(--fs-13); }
+  /* A 44px target that draws no taller than its words. */
+  .runEnd :global(.btn) { height: 44px; margin: -12px -6px -12px 0; padding: 0 6px; font-size: var(--fs-14); }
+  .nameFields { grid-template-columns: minmax(0, 1fr); }
+  /* On the grouped page's grey ground, the summary and the test's samples are white, as its cards are. */
+  :global(.content:has(.m-grouped)) :is(.summary, .sample) { background: var(--m-card); }
+  :global(.content:has(.m-grouped)) .chips > :global(.tab:not([aria-pressed="true"])) { background: var(--m-card); }
+  /* Except in an action, which is a white card itself. */
+  :global(.content:has(.m-grouped) .rule-action) .chips > :global(.tab:not([aria-pressed="true"])) { background: var(--fill-2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rule { transition: none; }
+}

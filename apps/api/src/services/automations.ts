@@ -52,7 +52,7 @@ import { clientRecipients, type Recipient } from "@crewtavo/core/recipients";
 import { countsOn } from "@crewtavo/core/money";
 import type { Env } from "../env";
 import { companyAddress, companyFooter, firstName, isEmail, renderEmail } from "../lib/email";
-import { clientLink } from "../lib/links";
+import { clientLink, KEPT_LINK } from "../lib/links";
 import { peopleOnVisits } from "./visitPeople";
 import { sendEmail, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
@@ -437,7 +437,8 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
  * Adds the signed client link ({{link}}): a quote's or invoice's Client Hub page, or for a client the
  * Hub's home; for a visit that home too, where the client sees their visits and can ask to move one.
  * It's the client's own (own: 1), for the emails and texts that go to their own email and
- * phone. Everything else a rule writes, where the team reads it, has the office's copy (officeVars).
+ * phone. A contact's copy has the office's (officeVars), and everything a rule writes where the team
+ * reads it has none (keptVars).
  */
 async function withLink(env: Env, ctx: RunContext, baseUrl: string | null): Promise<RunContext> {
   if (!baseUrl) return ctx;
@@ -569,10 +570,10 @@ export async function withAutopayLink(env: Env, ctx: RunContext, trigger: string
 }
 
 /**
- * The values for the office's own notices, the notes and tasks a rule adds, and the copy of a
- * client's email or text kept on their timeline: the client links in them are the office's copies
- * (via "office", as Copy Client Hub link makes them), so none can be used to confirm a card for the
- * client or add a tip to their saved card. Everything else is as the client's emails have it.
+ * The values for a client's email or text that goes to one of their contacts: the client links in it
+ * are the office's copies (via "office", as Copy Client Hub link makes them), so none can be used to
+ * confirm a card for the client or add a tip to their saved card. Everything else is as the client's
+ * emails have it.
  */
 export async function officeVars(env: Env, ctx: RunContext, baseUrl: string | null): Promise<TemplateVars> {
   if (!baseUrl) return ctx.vars;
@@ -587,6 +588,20 @@ export async function officeVars(env: Env, ctx: RunContext, baseUrl: string | nu
   if (group.link && ctx.client) {
     vars.autopay = { ...group, link: `${await clientLink(env, baseUrl, { c: ctx.company.id, t: "client", id: ctx.client.id, via: "office" })}?view=autopay` };
   }
+  return vars;
+}
+
+/**
+ * The values for what the team reads: the office's notices, the notes and tasks a rule adds, the copy
+ * of a client's email or text kept on their timeline, and the rule screen's preview. A client link
+ * there is no link (lib/links KEPT_LINK): crews read a visit's notes and messages, an AI assistant
+ * connected as someone reads what they do, and a link opens the client's page as the client.
+ */
+export function keptVars(ctx: RunContext): TemplateVars {
+  const vars: TemplateVars = { ...ctx.vars };
+  if (vars.link) vars.link = KEPT_LINK;
+  const group = autopayVars(vars);
+  if (group.link) vars.autopay = { ...group, link: KEPT_LINK };
   return vars;
 }
 
@@ -721,7 +736,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
             : "Only the office with the Subcontractors area hears about subs' offers, and nobody this rule notifies has it.",
         );
       }
-      const office = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      const office = { ...ctx, vars: keptVars(ctx) };
       const title = render(action.title, office) || ruleName;
       // A new request whose client picked a time online says so, whatever the rule's own words are:
       // "Booked online for Tue, Jan 14, 10:00 to 11:00 AM." or "Asked for ... It waits for your OK."
@@ -743,11 +758,12 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       if (ctx.campaign && client.marketing_opt_out) return new Skip(`${client.display_name} unsubscribed from marketing`);
       const people = await peopleFor(admin, ctx, client, "email");
       if (!people.length) throw new Error(`${client.display_name} has no email address.`);
-      // The client's own address gets their own links; a contact's, and the timeline's copy, the
-      // office's copies (officeVars), which can't agree to autopay or tip on the client's card.
-      const kept = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      // The client's own address gets their own links; a contact's the office's copies (officeVars),
+      // which can't agree to autopay or tip on the client's card; and the timeline's copy none (keptVars).
+      const forContacts = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      const kept = { ...ctx, vars: keptVars(ctx) };
       const delivery = await sendToEach(people, (person) => {
-        const from = person.contact_id ? kept : ctx;
+        const from = person.contact_id ? forContacts : ctx;
         const email = renderEmail({ companyName: ctx.company.name, logo: baseUrl ? logoImage(baseUrl, ctx.company.id, ctx.company.settings) : null, text: render(action.body, from), footer: companyFooter(ctx.company) });
         return sendEmail(env, { to: person.to, subject: render(action.subject, from), text: email.text, html: email.html, replyTo: ctx.company.email ?? undefined, fromName: ctx.company.name }, ctx.company.id);
       }, "The email wasn't sent.");
@@ -784,12 +800,14 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
         // Their phone texted STOP, and there's nobody else to text.
         return new Skip(textsOffReason(client.display_name).replace(/\.$/, ""));
       }
-      // As with emails: their own links to the client's own phone, the office's copies to a contact's.
-      const kept = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      // As with emails: their own links to the client's own phone, the office's copies to a
+      // contact's, and none in the timeline's copy.
+      const forContacts = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      const kept = { ...ctx, vars: keptVars(ctx) };
       const delivery = await sendToEach(people, async (person) => {
         // The first text a number gets says how to stop them, and a promotional one always does (services/stopLine.ts).
         const result = await textWithStopLine(
-          admin, ctx.company.id, person.to, render(action.body, person.contact_id ? kept : ctx),
+          admin, ctx.company.id, person.to, render(action.body, person.contact_id ? forContacts : ctx),
           (body) => sendSms(env, { to: person.to, body }, ctx.company.id),
           { promotional: Boolean(ctx.campaign?.marketing) },
         );
@@ -820,8 +838,8 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       if (!client) throw new Error("There's no client on this record.");
       // Crews who see the client read its notes: nothing about autopay goes there (the database refuses the rule too).
       if (isAutopayTrigger(ctx.trigger)) throw new Error("A rule about autopay can't add a client note (crews can read them).");
-      // The team reads notes, so a link in one is the office's copy (officeVars), as the preview shows it.
-      const kept = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+      // The team reads notes, so a link in one is no link (keptVars), as the preview shows it.
+      const kept = { ...ctx, vars: keptVars(ctx) };
       const { error } = await admin.from("messages").insert({
         company_id: ctx.company.id, client_id: client.id, channel: "note", direction: "internal", body: render(action.body, kept),
         related_type: ctx.subject, related_id: ctx.id, sent_by: null,
@@ -833,8 +851,8 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       const today = localDate(new Date(), ctx.company.timezone || "UTC");
       const due = addDays(today, Math.max(0, Math.min(365, Math.round(Number(action.days_from_now) || 0))));
       // A task is on the schedule, where the crew sees it: never a sub's price or reason in it, and
-      // a link in it is the office's copy (officeVars), as the preview shows it.
-      const office = await officeVars(env, ctx, baseUrl);
+      // a link in it is no link (keptVars), as the preview shows it.
+      const office = keptVars(ctx);
       const title = renderTemplate(action.title ?? "", ctx.trigger ? taskVars(ctx.trigger, office) : office).trim();
       const { error } = await admin.from("visits").insert({
         company_id: ctx.company.id, kind: "task", title: (title || ruleName).slice(0, 200), scheduled_on: due, status: "scheduled",

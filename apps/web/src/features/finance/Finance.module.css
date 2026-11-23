@@ -1,0 +1,336 @@
+/*
+ * Finance and Metrics (Page-Finance.dc.html, Page-Metrics.dc.html, Mobile-Business.dc.html): flat
+ * figures on hairlines, quiet charts with only a baseline and a few gridlines, breakdowns as rows.
+ * No tinted panels and no cards on a desktop; on a phone (max-width 900px) the page is the kit's
+ * grouped ground (.m-grouped) and each part an inset card under a small grey heading.
+ */
+
+/* ---------- The page: its header, the range, the sections' tabs ---------- */
+
+/* The date range: a small button with a hairline (the mockup's btn-line), the current range in words. */
+.rangeBtn { gap: 6px; padding: 0 10px 0 12px; border-color: var(--border); color: var(--ink); font-weight: 600; }
+.rangeBtn:hover { border-color: var(--border-strong); background: var(--fill); color: var(--ink); }
+.rangeBtn svg { color: var(--quiet); }
+:global(.page-header) .rangeBtn, :global(.page-actions) .rangeBtn { border-color: var(--border); color: var(--ink); }
+
+/* A custom range's two dates, under the title's line. */
+.custom { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-3); }
+.custom :global(.input) { width: 156px; height: var(--control-sm); }
+/* The range's menu with a custom range's dates before it, where a screen puts the picker on its own (Marketing → Website). */
+.picker { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.picker > .custom { flex-basis: auto; }
+
+/* The tab panel: sections 28px apart, as the boards space them. */
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; min-width: 0; }
+.body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; min-width: 0; }
+
+/* Parts side by side: three for the overview's breakdowns, two for charts and tables. */
+.cols3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; align-items: start; }
+.cols2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px; align-items: start; }
+@media (max-width: 1100px) { .cols2 { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+
+/* A quiet line under a section's heading: what it counts, how. */
+.sub { margin: 0; font-size: var(--fs-12); color: var(--text-3); }
+.sub + * { margin-top: 10px; }
+
+/* A section's own figure when it isn't plain words (a total with its change): large, under the heading. */
+.value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.value :global(.chip) { height: auto; padding: 0; background: none; font-size: var(--fs-13); font-weight: 600; letter-spacing: 0; }
+
+/* An explanation of a figure, on hover and to a screen reader: a small quiet (i) after the heading. */
+.info { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -2px; color: var(--quiet); cursor: help; }
+.info:hover { color: var(--ink); }
+
+/* ---------- Overview: the figure and its chart, what's owed beside it ---------- */
+
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 36px; align-items: start; }
+@media (max-width: 1100px) { .hero { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+.heroMain { min-width: 0; }
+.heroMain > :global(.segmented) { margin-bottom: 12px; }
+.big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.big :global(.chip), .change :global(.chip) { height: auto; padding: 0; background: none; font-size: var(--fs-14); font-weight: 600; letter-spacing: 0; }
+.prev { margin: 2px 0 0; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.heroChart { margin-top: 10px; }
+
+/* Beside it: what's owed, what's late and what's on the way, each a figure on a hairline. */
+.side { display: grid; min-width: 0; }
+.bals { display: grid; }
+.bal { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 12px 0; border-bottom: 1px solid var(--divider); }
+.bal:first-child { padding-top: 0; }
+.balLabel { font-size: var(--fs-12); color: var(--text-3); }
+.balLink { grid-column: 2; grid-row: 1; font-size: var(--fs-12); font-weight: 600; color: var(--green); text-decoration: none; }
+.balLink:hover { color: var(--green-dark); text-decoration: none; }
+/* The whole figure opens its list; the link's own focus ring goes round the figure. */
+.balLink::after { content: ""; position: absolute; inset: 0; }
+.bal:has(.balLink:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
+.balLink:focus-visible { outline: none; }
+.balValue { grid-column: 1 / -1; margin-top: 2px; font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.balValue[data-tone="danger"] { color: var(--danger); }
+.balHint { grid-column: 1 / -1; font-size: var(--fs-12); color: var(--text-3); }
+.chev { display: none; }
+
+/* The year's revenue goal: the figure against the goal, a bar with a tick where an even pace would be. */
+.goal { margin-top: 16px; min-width: 0; }
+.goalHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.goalTitle { font-size: var(--fs-12); font-weight: 400; letter-spacing: normal; color: var(--text-3); }
+.goalHead button { padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-12); font-weight: 600; color: var(--green); cursor: pointer; }
+.goalHead button:hover { color: var(--green-dark); }
+.goalFigure { margin-top: 4px; font-size: var(--fs-13); font-weight: 600; font-variant-numeric: tabular-nums; }
+.goalFigure span { font-weight: 400; color: var(--quiet); }
+.track { position: relative; height: 8px; margin-top: 10px; border-radius: var(--radius-pill); background: var(--fill-3); }
+.trackFill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--green-solid); transform-origin: left; animation: grow var(--dur-enter) var(--ease-enter) both; }
+.trackPace { position: absolute; top: -4px; width: 2px; height: 16px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
+.goalState { margin: 8px 0 0; font-size: var(--fs-12); font-weight: 600; }
+.goalState[data-tone="warning"] { color: var(--warning); }
+.goalState[data-tone="good"] { color: var(--green-dark); }
+.goalNote { margin: 2px 0 0; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.goalEmpty { margin: 6px 0 0; font-size: var(--fs-13); color: var(--text-3); }
+.goalEmpty button { display: block; margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--green); cursor: pointer; }
+
+/* A tablet: the chart takes the width, and what's owed goes side by side under it on one hairline, the goal under that. */
+@media (min-width: 901px) and (max-width: 1100px) {
+  .bals { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); column-gap: 28px; padding-bottom: 12px; border-bottom: 1px solid var(--divider); }
+  .bal, .bal:first-child { padding: 0; border-bottom: 0; }
+}
+
+/* ---------- Rows: a label, a quiet note and a figure on a hairline ---------- */
+
+.lines { display: grid; }
+.line { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.lineLabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.lineLabel a { color: inherit; text-decoration: none; }
+.lineLabel a:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.lineNote { flex: none; font-size: var(--fs-12); color: var(--quiet); font-variant-numeric: tabular-nums; }
+.lineValue { flex: none; font-weight: 600; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lineValue[data-tone="warning"] { color: var(--warning); }
+.lineValue[data-tone="danger"] { color: var(--danger); }
+/* Nothing in it: the whole row quiet. */
+.line[data-none] :is(.lineLabel, .lineValue) { color: var(--quiet); }
+.line[data-none] .lineValue { font-weight: 500; }
+
+/* ---------- A total in parts: one thin bar, then a row per part (Payments by method) ---------- */
+
+.split { display: grid; gap: 10px; }
+.splitBar { display: flex; height: 8px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); transform-origin: left; animation: grow var(--dur-enter) var(--ease-enter) both; }
+.splitBar > span { display: block; height: 100%; min-width: 3px; }
+.legend { display: grid; gap: 6px; }
+.legendRow { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-12); }
+.swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.legendLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.legendNote { color: var(--quiet); white-space: nowrap; }
+.legendValue { margin-left: auto; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- A ranked bar list (Why quotes were lost, Where the time went) ---------- */
+
+.bars { display: grid; padding-top: 22px; }
+.bar { display: grid; grid-template-columns: minmax(0, 150px) minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 34px; font-size: var(--fs-13); }
+.barLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.bar[data-quiet] .barLabel { color: var(--quiet); }
+.barTrack { display: block; min-width: 0; }
+.barFill { display: block; height: 8px; min-width: 4px; border-radius: var(--radius-pill); background: var(--invoice); transform-origin: left; animation: grow var(--dur-enter) var(--ease-enter) both; }
+.bar[data-quiet] .barFill { opacity: 0.5; }
+.barValue { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.barValue span { font-weight: 400; color: var(--quiet); }
+
+/* ---------- Charts: a line, a soft fill under it, the dates under the baseline ---------- */
+
+.trend { position: relative; min-width: 0; }
+.axis { position: relative; height: 16px; margin-top: 6px; font-size: var(--fs-11); color: var(--quiet); font-variant-numeric: tabular-nums; }
+.axis span { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
+.axis span:first-child { transform: none; }
+.axis span:last-child:not(:first-child) { transform: translateX(-100%); }
+.trend :global(.chart-empty) { inset: 0; }
+
+/* ---------- Payments: the amount, how, what for, who and when, on one hairline row ---------- */
+
+.pays { display: grid; }
+.pay { position: relative; display: grid; grid-template-columns: 104px 124px minmax(0, 1fr) minmax(0, 200px) 88px; align-items: center; gap: 12px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+.pay:has(.payLink):hover { background: var(--fill); box-shadow: -8px 0 0 var(--fill), 8px 0 0 var(--fill); }
+.payAmount { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.payAmount[data-refund] { color: var(--text-3); }
+.payTip { display: block; font-size: var(--fs-11); font-weight: 400; color: var(--quiet); }
+.payMethod { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--fs-12); color: var(--text-2); white-space: nowrap; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--quiet); }
+.payWhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.payLink { color: inherit; text-decoration: none; }
+.payLink:hover { color: inherit; text-decoration: none; }
+/* The invoice is the row's link, stretched over it; the client's own link sits above it. */
+.payLink::after { content: ""; position: absolute; inset: 0; }
+.payLink:focus-visible { outline: none; }
+.pay:has(.payLink:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
+.payClient { position: relative; z-index: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payClient a { color: var(--ink); text-decoration: none; }
+.payClient a:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.payWhen { color: var(--quiet); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Under a day's heading (Payments): inset as the heading is, so the amounts line up with the day. */
+:global(.il) .pay { padding-left: 4px; padding-right: 4px; }
+
+/* ---------- Report tables: quiet column heads, hairline rows, sorting and Download under them ---------- */
+
+.rt { min-width: 0; overflow-x: auto; }
+.rt table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
+.rt th { height: 32px; padding: 0 10px; border-bottom: 1px solid var(--divider); font-size: var(--fs-12); font-weight: 500; color: var(--quiet); text-align: left; white-space: nowrap; }
+.rt td { height: 40px; padding: 6px 10px; border-bottom: 1px solid var(--row-divider); color: var(--ink); vertical-align: middle; }
+.rt :is(th, td):first-child { padding-left: 0; }
+.rt :is(th, td):last-child { padding-right: 0; }
+.rt .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sort { display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.sort:hover, .rt th[aria-sort] .sort { color: var(--ink); }
+.num .sort { flex-direction: row-reverse; }
+.sort svg { width: 12px; height: 12px; }
+.rt td :global(.cell-link) { color: var(--ink); font-weight: 500; text-decoration: none; }
+.rt td :global(.cell-link):hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.who { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.rt td > .who { display: flex; }
+.tone[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.tone[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.tone[data-tone="good"] { color: var(--green-dark); font-weight: 600; }
+.quiet { color: var(--quiet); }
+
+.foot { display: flex; align-items: center; gap: 16px; margin-top: 10px; font-size: var(--fs-12); color: var(--quiet); }
+.footBtn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; }
+.footBtn:hover { color: var(--ink); }
+.footBtn svg { width: 14px; height: 14px; color: var(--quiet); }
+.footEnd { display: flex; align-items: center; gap: 16px; margin-left: auto; }
+.phoneOnly { display: none; }
+.deskOnly { display: contents; }
+
+/* ---------- Small things ---------- */
+
+.late { font-size: var(--fs-12); font-weight: 600; white-space: nowrap; }
+.late[data-tone="warning"] { color: var(--warning); }
+.late[data-tone="danger"] { color: var(--danger); }
+.spark { width: 96px; }
+.endMoney { min-width: 72px; text-align: right; }
+
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+/* With Reduce Motion, bars fade in at their length instead of growing to it. */
+@media (prefers-reduced-motion: reduce) {
+  .trackFill, .splitBar, .barFill { animation-name: fade; }
+}
+
+/* ---------- A phone (Mobile-Business.dc.html, Finance and Metrics) ---------- */
+
+@media (max-width: 900px) {
+  /* The range: a pill in the title's row, its words kept (not a round icon button). */
+  :global(.page-header) > :global(.page-actions) > :global(.btn).rangeBtn:has(svg) { width: auto; gap: 6px; padding: 0 12px 0 14px; font-size: var(--fs-14); font-weight: 600; }
+  :global(.page-header) > :global(.page-actions) > :global(.btn).rangeBtn:has(svg) svg { width: 16px; height: 16px; color: var(--quiet); }
+  .custom :global(.input) { flex: 1 1 130px; width: auto; height: 44px; }
+  /* On its own (Marketing → Website): the words and the button share a line, the two dates full width under them. */
+  .picker { display: contents; }
+  .picker > .custom { order: 2; flex-basis: 100%; }
+
+  /* The sections as chips that scroll, the chosen one solid (the kit's m-chips). */
+  .tabs { gap: 8px; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding: 0 max(16px, env(safe-area-inset-right)) 2px max(16px, env(safe-area-inset-left)); border-bottom: 0; }
+  .tabs[data-indicator]::before { content: none; }
+  .tabs > button { flex: none; height: 34px; padding: 0 14px; border-radius: var(--radius-pill); background: var(--m-card); color: var(--text-2); font-size: var(--fs-14); }
+  .tabs > button::after, .tabs[data-indicator] > button[aria-selected="true"]::after { content: ""; position: absolute; inset: -5px 0; height: auto; border-radius: 0; background: none; animation: none; }
+  .tabs > button[aria-selected="true"] { background: var(--solid); color: var(--on-solid); }
+
+  .panel, .body { gap: 22px; }
+  .cols3, .cols2 { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+
+  /* The figure and its chart in an inset card. */
+  .hero { gap: 18px; }
+  .heroMain { padding: 14px 16px; border-radius: 14px; background: var(--m-card); }
+  .heroMain > :global(.segmented) { display: flex; width: 100%; background: var(--m-group); }
+  .heroMain > :global(.segmented) > button { flex: 1 1 0; min-width: 0; padding: 0 8px; }
+  .big { font-size: var(--fs-32); }
+  .heroChart :global(.chart) { height: 130px !important; }
+
+  /* What's owed: rows in one card, each opening its list; the quiet line under each figure left out. */
+  .side { gap: 18px; }
+  .bals { padding: 0 16px; border-radius: 14px; background: var(--m-card); }
+  .bal { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+  .bal:first-child { padding-top: 10px; }
+  .bal:last-child { border-bottom: 0; }
+  .balLabel { flex: 1; min-width: 0; font-size: var(--fs-15); }
+  .balValue { margin: 0; font-size: var(--fs-15); font-weight: 500; letter-spacing: normal; }
+  .balHint { display: none; }
+  .balLink { order: 3; font-size: 0; }
+  .chev { display: block; order: 4; flex: none; margin-left: -6px; color: var(--quiet); }
+  .bal:active:has(.balLink) { box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); background: var(--fill-2); }
+
+  /* The goal: a small grey heading over its card. */
+  .goal { margin-top: 0; }
+  .goalHead { padding: 0 4px 8px; }
+  .goalTitle { font-size: var(--fs-13); font-weight: 600; }
+  .goalHead button { font-size: var(--fs-13); }
+  .goalBody { padding: 14px 16px; border-radius: 14px; background: var(--m-card); }
+  .goalFigure { margin-top: 0; font-size: var(--fs-15); }
+  .goalEmpty { margin: 0; font-size: var(--fs-15); }
+  /* Edit goal and Set a revenue goal reach 44px to a thumb without moving the words. */
+  .goalHead button, .goalEmpty button { position: relative; }
+  .goalHead button::after, .goalEmpty button::after { content: ""; position: absolute; inset: -13px -8px; }
+
+  /* Rows as the kit's list rows: 48px, 15px words. */
+  .line { position: relative; min-height: 48px; padding: 10px 0; font-size: var(--fs-15); }
+  /* A row that opens another screen (Quotes won) is one target, as a list row is. */
+  .lineLabel a::after { content: ""; position: absolute; inset: 0; }
+  .line:has(a):active { box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); background: var(--fill-2); }
+  .lineNote { font-size: var(--fs-13); }
+  .lineValue { font-weight: 500; }
+  .legend { gap: 0; }
+  .legendRow { min-height: 40px; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-15); }
+  .legendRow:last-child { border-bottom: 0; }
+  .legendValue { font-weight: 500; }
+  .swatch { width: 10px; height: 10px; border-radius: 3px; }
+  .bars { padding-top: 0; }
+  .bar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "label value" "track value"; row-gap: 6px; min-height: 52px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-15); }
+  .barLabel { grid-area: label; }
+  .barTrack { grid-area: track; }
+  .barValue { grid-area: value; font-weight: 500; }
+
+  /* A payment: who and how much, then how, what for and when. */
+  .pay { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "client client amount" "method what when"; gap: 2px 8px; min-height: 60px; padding: 10px 0; font-size: var(--fs-15); }
+  .pay:has(.payLink):hover { background: none; box-shadow: none; }
+  .pay:has(.payLink):active { background: var(--fill-2); box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); }
+  .payAmount { grid-area: amount; text-align: right; font-weight: 500; }
+  .payTip { display: inline; margin-left: 4px; font-size: var(--fs-12); }
+  .payMethod { grid-area: method; gap: 6px; font-size: var(--fs-13); color: var(--text-3); }
+  .payMethod::after { content: "·"; margin-left: 2px; color: var(--quiet); }
+  .payClient { grid-area: client; font-weight: 500; }
+  .payWhat { grid-area: what; font-size: var(--fs-13); }
+  .payWhen { grid-area: when; font-size: var(--fs-13); }
+  .pay[data-no-client] { grid-template-areas: "what what amount" "method . when"; }
+  .pay[data-no-client] .payWhat { color: var(--ink); font-size: var(--fs-15); font-weight: 500; }
+
+  /* A report table as rows: the first column, the last on the right, the others in a quiet line under them. */
+  .rt { overflow: visible; }
+  .rt thead { display: none; }
+  .rt table, .rt tbody { display: block; }
+  .rt tr { position: relative; display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; padding: 11px 0; border-bottom: 1px solid var(--row-divider); }
+  .rt tbody tr:last-child { border-bottom: 0; }
+  .rt td { display: block; height: auto; padding: 0; border: 0; }
+  .rt td:first-child { flex: 1 1 0; order: 0; min-width: 0; margin-right: 12px; font-size: var(--fs-15); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rt td:last-child { flex: none; order: 1; font-size: var(--fs-15); font-weight: 500; }
+  .rt td.mid { flex: none; order: 2; max-width: 100%; overflow: hidden; font-size: var(--fs-13); color: var(--text-3); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+  .rt td.mid::before { content: attr(data-label) "\00a0"; }
+  /* The figure on the right says what it is ("Booked 0%"): a bare "0" or "0%" means nothing without its column. */
+  .rt td.end::before { content: attr(data-label) "\00a0"; font-size: var(--fs-13); font-weight: 400; color: var(--text-3); }
+  .rt td.end:empty::before { content: none; }
+  /* The dot goes after a part, so a quiet line that wraps ends in "·" and its next line starts with a word. */
+  .rt td.mid:has(~ td.mid:not(:empty))::after { content: "\00a0·\00a0"; }
+  .rt td.mid:empty { display: none; }
+  /* The quiet line starts its own row: an empty full-width break between the two lines. */
+  .rt tr::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+  .rt td.mid :global(.pill) { font-size: var(--fs-13); }
+  /* A row whose first column opens a record (a client, a job) is one 44px+ target, as a list row is. */
+  .rt td:first-child :global(.cell-link)::after { content: ""; position: absolute; inset: 0; }
+  .rt td:first-child :global(.cell-link):focus-visible { outline: none; }
+  .rt tr:has(td:first-child :global(.cell-link):focus-visible) { outline: 2px solid var(--green); outline-offset: -2px; border-radius: var(--radius-sm); }
+  .rt tr:has(td:first-child :global(.cell-link)):active { background: var(--fill-2); }
+  .who, .rt td > .who { display: inline-flex; gap: 10px; }
+  .phoneOnly { display: inline-flex; }
+  .deskOnly { display: none; }
+  /* A day's payments in an inset card: the card draws the edge, so its rows are padded and its last has no line. */
+  :global(.il-inset) .pay { padding-left: 16px; padding-right: 16px; }
+  :global(.il-inset) .pay:last-child { border-bottom: 0; }
+  :global(.il-inset) .pay:has(.payLink):active { box-shadow: none; }
+  .foot { margin-top: 0; border-top: 1px solid var(--row-divider); }
+  .foot:first-child { border-top: 0; }
+  .footBtn { height: 44px; font-size: var(--fs-14); color: var(--green); }
+  .footBtn svg { color: var(--green); }
+  .spark { display: none; }
+}

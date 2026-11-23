@@ -10,26 +10,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { featureOn } from "@/components/shell/nav";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { formatDateTime, todayIn } from "@/lib/format";
+import { addDaysIso, formatDateTime, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { AudienceFields, labelOf, useAudienceChoices, VISIT_OPTIONS, type Choice } from "./AudienceFields";
-import { CampaignRecipients, CampaignResults, CampaignStats } from "./CampaignResults";
+import { CampaignRecipients, CampaignStats } from "./CampaignResults";
 import { companyAddressLine, EmailPreview, MessageField, SubjectField, TestEmailDialog } from "./EmailEditor";
 import { MarketingPage } from "./MarketingPage";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
+import styles from "./Marketing.module.css";
+import { NameInput } from "./NameInput";
 import { SenderAddressNote } from "./SenderAddress";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
 
@@ -48,9 +52,9 @@ const TOKENS = [
   { token: "link", label: "Client Hub link" },
 ];
 const TEMPLATES = [
-  { label: "Seasonal reminder", subject: "Time to book your {{season}} service", body: "Hi {{client.first_name}},\n\nThe season is almost here and our schedule fills up quickly. Book online, reply to this email or call us to get on the calendar.\n\n{{link}}\n\nThanks,\n{{company.name}}\n{{company.phone}}" },
-  { label: "We miss you", subject: "It's been a while, {{client.first_name}}", body: "Hi {{client.first_name}},\n\nIt's been a while since we last worked together, and we'd love to help again. If anything around the property needs attention, you can ask for a visit online, or just reply and we'll put together a quote.\n\n{{link}}\n\nThanks,\n{{company.name}}" },
-  { label: "Thank you", subject: "Thank you from {{company.name}}", body: "Hi {{client.first_name}},\n\nThank you for trusting us with your property this year. If you know anyone who could use our help, we'd be grateful for the introduction.\n\nThanks again,\n{{company.name}}" },
+  { label: "Seasonal reminder", icon: "calendar" as const, subject: "Time to book your {{season}} service", body: "Hi {{client.first_name}},\n\nThe season is almost here and our schedule fills up quickly. Book online, reply to this email or call us to get on the calendar.\n\n{{link}}\n\nThanks,\n{{company.name}}\n{{company.phone}}" },
+  { label: "We miss you", icon: "history" as const, subject: "It's been a while, {{client.first_name}}", body: "Hi {{client.first_name}},\n\nIt's been a while since we last worked together, and we'd love to help again. If anything around the property needs attention, you can ask for a visit online, or just reply and we'll put together a quote.\n\n{{link}}\n\nThanks,\n{{company.name}}" },
+  { label: "Thank you", icon: "thumbsUp" as const, subject: "Thank you from {{company.name}}", body: "Hi {{client.first_name}},\n\nThank you for trusting us with your property this year. If you know anyone who could use our help, we'd be grateful for the introduction.\n\nThanks again,\n{{company.name}}" },
 ];
 
 /** Who a sent campaign went to, in words: the audience it was sent with, its cities and services as the business writes them. */
@@ -227,50 +231,85 @@ function CampaignPageScreen() {
     editable && recipients.data && !count && "No one matches this audience.",
   ].filter(Boolean) as string[];
 
+  const stopOrUnschedule = async () =>
+    (await confirm({ title: c.status === "scheduled" ? "Unschedule this campaign?" : "Stop sending?", body: c.status === "sending" ? "Emails already sent can't be recalled." : "It goes back to being a draft.", confirmLabel: c.status === "scheduled" ? "Unschedule" : "Stop", danger: c.status === "sending" })) && cancel.mutate();
+
   return (
     <>
-      <BackLink to="/marketing">Marketing</BackLink>
-      <PageHeader
-        title={editable ? <h1 className="page-title"><input className="title-input" value={draft.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} aria-label="Campaign name" /></h1> : c.name}
+      <DetailHeader
+        crumb={{ to: "/marketing", label: "Marketing" }}
+        title={editable ? <h1 className="page-title"><NameInput value={draft.name} onChange={(name) => set({ name })} label="Campaign name" /></h1> : c.name}
         documentTitle={c.name}
+        status={<EntityStatus kind="campaign" status={c.status} />}
+        meta={[
+          editable && <SaveStatus status={saving.status} />,
+          c.status === "scheduled" && c.scheduled_at && `Sends ${formatDateTime(c.scheduled_at)}`,
+          c.status !== "draft" && `${c.sent_count} of ${c.recipients_count} sent${c.failed_count ? ` · ${c.failed_count} failed` : ""}`,
+        ]}
         actions={
           <>
             {editable && <Button icon="mail" onClick={() => setDialog("test")} disabled={!session.config.features.email || !hasAddress || problems.slice(0, 2).length > 0}>Send test</Button>}
             {editable && <Button variant="primary" icon="send" onClick={() => setDialog("send")} disabled={problems.length > 0 || !session.config.features.email || !hasAddress}>Send</Button>}
-            {(c.status === "scheduled" || c.status === "sending") && <Button variant="danger" icon="x" loading={cancel.isPending} onClick={async () => (await confirm({ title: c.status === "scheduled" ? "Unschedule this campaign?" : "Stop sending?", body: c.status === "sending" ? "Emails already sent can't be recalled." : "It goes back to being a draft.", confirmLabel: c.status === "scheduled" ? "Unschedule" : "Stop", danger: c.status === "sending" })) && cancel.mutate()}>{c.status === "scheduled" ? "Unschedule" : "Stop sending"}</Button>}
-            <Menu
-              items={[
-                { label: "Duplicate", icon: "copy", onSelect: () => duplicate.mutate() },
-                { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: async () => (await confirm({ title: "Delete this campaign?", confirmLabel: "Delete", danger: true })) && remove.mutate() },
-              ]}
-            />
+            {(c.status === "scheduled" || c.status === "sending") && <Button variant="danger" icon="x" loading={cancel.isPending} onClick={stopOrUnschedule}>{c.status === "scheduled" ? "Unschedule" : "Stop sending"}</Button>}
           </>
         }
+        moreTitle={c.name}
+        more={[
+          { label: "Duplicate", icon: "copy", kbd: "D", onSelect: () => duplicate.mutate() },
+          { separator: true, hidden: c.status === "sending" },
+          { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: async () => (await confirm({ title: "Delete this campaign?", confirmLabel: "Delete", danger: true })) && remove.mutate() },
+        ]}
       />
-      <div className="page-meta">
-        <EntityStatus kind="campaign" status={c.status} />
-        {editable && <SaveStatus status={saving.status} />}
-        {c.status === "scheduled" && c.scheduled_at && <span className="muted">Sends {formatDateTime(c.scheduled_at)}</span>}
-        {c.status !== "draft" && <span className="muted">{c.sent_count} of {c.recipients_count} sent{c.failed_count ? ` · ${c.failed_count} failed` : ""}</span>}
-      </div>
-      {!session.config.features.email && editable && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email isn't connected yet, so this can't be sent.<ConnectEmailHint /></div></div>}
+      {!session.config.features.email && editable && <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Email isn't connected yet, so this can't be sent.<ConnectEmailHint /></div></div>}
       {editable && <SenderAddressNote what="this can't be sent or tested" />}
       {c.status === "sending" && <div className="progress"><span style={{ width: `${c.recipients_count ? (c.sent_count / c.recipients_count) * 100 : 0}%` }} /></div>}
       {/* Across the page, so the five numbers sit in one row. */}
       {!editable && <CampaignStats campaignId={c.id} live={c.status === "sending"} />}
 
-      <div className="two-col">
-        <div className="wide stack">
-          {editable ? (
-            <div className="card card-pad stack">
-              <div className="row-between wrap">
-                <strong>Email</strong>
-                <div className="row">
-                  <Menu label="Start from a template" triggerClassName="btn btn-sm btn-ghost" trigger={<><Icon name="file" size={14} />Templates</>} items={TEMPLATES.map((t) => ({ label: t.label, onSelect: async () => { if (draft.body.trim().length > 20 && !(await confirm({ title: "Replace your email?", body: "The template replaces the subject and message.", confirmLabel: "Replace" }))) return; set({ subject: t.subject.replace("{{season}}", "spring"), body: t.body }); } }))} />
-                  {session.config.features.ai && <Button size="sm" variant="ghost" icon="sparkle" onClick={() => setDialog("ai")}>Write with AI</Button>}
-                  <UsingChatGptPlan />
+      <DetailColumns
+        grouped
+        side={
+          <>
+            <Section title="Audience" count={editable ? (recipients.isFetching ? "…" : count.toLocaleString("en-US")) : undefined} flush={editable}>
+              {editable ? (
+                <div className="stack">
+                  <AudienceFields audience={draft.audience} onChange={(audience) => set({ audience })} choices={choices.data} />
+                  <div className="stack-sm">
+                    <p className={styles.count}><b>{count.toLocaleString("en-US")}</b> {count === 1 ? "client" : "clients"} will get this.</p>
+                    {Boolean(recipients.data?.length) && (
+                      <ul className={styles.sample} aria-label="Who gets it">
+                        {recipients.data!.slice(0, 5).map((r) => <li key={r.client_id}><span>{r.display_name}</span><span>{r.email}</span></li>)}
+                      </ul>
+                    )}
+                    {count > 5 && <p className={styles.fine}>and {count - 5} more</p>}
+                  </div>
                 </div>
+              ) : (
+                <p className={styles.audienceLine}>{audienceSummary(shown.audience, choices.data)}</p>
+              )}
+            </Section>
+            {editable && problems.length > 0 && (
+              <div className="callout callout-warning" role="note">
+                <Icon name="alert" size={16} />
+                <ul className={`grow ${styles.problems}`}>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
               </div>
+            )}
+          </>
+        }
+      >
+        {editable ? (
+          <Section
+            title="Email"
+            flush
+            action={
+              <>
+                <UsingChatGptPlan />
+                <Menu label="Start from a template" title="Templates" triggerClassName="btn btn-sm btn-ghost" trigger={<><Icon name="file" size={14} />Templates</>} items={TEMPLATES.map((t) => ({ label: t.label, icon: t.icon, onSelect: async () => { if (draft.body.trim().length > 20 && !(await confirm({ title: "Replace your email?", body: "The template replaces the subject and message.", confirmLabel: "Replace" }))) return; set({ subject: t.subject.replace("{{season}}", "spring"), body: t.body }); } }))} />
+                {session.config.features.ai && <Button size="sm" variant="ghost" icon="sparkle" onClick={() => setDialog("ai")}>Write with AI</Button>}
+              </>
+            }
+          >
+            <div className={cx("stack", styles.editor)}>
               <SubjectField value={draft.subject} onChange={(subject) => set({ subject })} placeholder="Spring cleanup spots are filling up" />
               <MessageField
                 value={draft.body}
@@ -278,35 +317,18 @@ function CampaignPageScreen() {
                 tokens={TOKENS}
                 hint={`${hasAddress ? "Your address and an unsubscribe link are added at the bottom." : "An unsubscribe link is added at the bottom. Your address goes there too, once it's filled in."} Client Hub link is each client's own, where they can ask for work.`}
               />
-              {!hasTrackableLink(draft.body) && <p className="small" style={{ margin: 0, color: "var(--warning)", fontWeight: 600 }}>Add a link so clicks and bookings can be counted.</p>}
+              {!hasTrackableLink(draft.body) && <p className={styles.autoNote} data-tone="warning">Add a link so clicks and bookings can be counted.</p>}
               <FormError error={save.error} />
             </div>
-          ) : (
-            <CampaignRecipients campaignId={c.id} live={c.status === "sending"} />
-          )}
+          </Section>
+        ) : (
+          <CampaignRecipients campaignId={c.id} live={c.status === "sending"} />
+        )}
 
-          <EmailPreview companyName={session.company.name} address={companyAddressLine(session.company.address)} subject={shown.subject} body={shown.body} vars={vars} unsubscribe linkLabel={HUB_HOME_BUTTON} />
-        </div>
-
-        <aside className="narrow stack">
-          <div className="card card-pad stack">
-            <div className="row-between"><strong>Audience</strong>{editable && (recipients.isFetching ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <span className="badge badge-green">{count}</span>)}</div>
-            {editable ? (
-              <>
-                <AudienceFields audience={draft.audience} onChange={(audience) => set({ audience })} choices={choices.data} />
-                <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
-                  <span className="text-sm"><strong>{count}</strong> {count === 1 ? "client" : "clients"} will get this.</span>
-                  {recipients.data?.slice(0, 5).map((r) => <span key={r.client_id} className="small ellipsis">{r.display_name} · <span className="muted">{r.email}</span></span>)}
-                  {count > 5 && <span className="muted small">and {count - 5} more</span>}
-                </div>
-              </>
-            ) : (
-              <p className="text-sm" style={{ margin: 0 }}>{audienceSummary(shown.audience, choices.data)}</p>
-            )}
-          </div>
-          {editable && problems.length > 0 && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{problems.map((p) => <div key={p} style={{ fontWeight: 600 }}>{p}</div>)}</div></div>}
-        </aside>
-      </div>
+        <Section title="Preview" flush>
+          <EmailPreview companyName={session.company.name} address={companyAddressLine(session.company.address)} subject={shown.subject} body={shown.body} vars={vars} unsubscribe linkLabel={HUB_HOME_BUTTON} heading={false} />
+        </Section>
+      </DetailColumns>
 
       {dialog === "send" && (
         <SendCampaignDialog
@@ -331,13 +353,16 @@ function CampaignPageScreen() {
 function AutomatedCampaignView({ id, name }: { id: string; name: string }) {
   return (
     <>
-      <BackLink to="/marketing">Marketing</BackLink>
-      <PageHeader title={name} />
-      <div className="page-meta">
-        <EntityStatus kind="campaign" status="automated" />
-        <span className="muted">Sends by itself. <Link to="/marketing?tab=campaigns">Edit on Marketing → Campaigns</Link></span>
-      </div>
-      <CampaignResults campaignId={id} />
+      <DetailHeader
+        crumb={{ to: "/marketing", label: "Marketing" }}
+        title={name}
+        status={<EntityStatus kind="campaign" status="automated" />}
+        meta={<span>Sends by itself. <Link to="/marketing?tab=campaigns">Edit on Marketing → Campaigns</Link></span>}
+      />
+      <CampaignStats campaignId={id} />
+      <DetailColumns grouped>
+        <CampaignRecipients campaignId={id} />
+      </DetailColumns>
     </>
   );
 }
@@ -345,7 +370,11 @@ function AutomatedCampaignView({ id, name }: { id: string; name: string }) {
 function SendCampaignDialog({ id, count, onClose, onDone }: { id: string; count: number; onClose: () => void; onDone: () => void }) {
   const session = useSession();
   const [when, setWhen] = useState<"now" | "later">("now");
-  const [date, setDate] = useState(todayIn(session.company.timezone));
+  // 9 AM today, or tomorrow once that's gone, so picking Schedule doesn't open on "Pick a time in the future".
+  const [date, setDate] = useState(() => {
+    const today = todayIn(session.company.timezone);
+    return new Date(`${today}T09:00:00`).getTime() > Date.now() + 60_000 ? today : addDaysIso(today, 1);
+  });
   const [time, setTime] = useState("09:00");
   const at = new Date(`${date}T${time}:00`);
   const past = when === "later" && at.getTime() < Date.now() + 60_000;
@@ -360,7 +389,7 @@ function SendCampaignDialog({ id, count, onClose, onDone }: { id: string; count:
   return (
     <Dialog open onClose={onClose} title="Send campaign" description={`To ${count} ${count === 1 ? "client" : "clients"}.`} size="sm">
       <form onSubmit={(e) => { e.preventDefault(); if (!past) send.mutate(); }}>
-        <div className="segmented" role="group" aria-label="When">
+        <div className={cx("segmented", styles.segStart)} role="group" aria-label="When">
           <button type="button" aria-pressed={when === "now"} onClick={() => setWhen("now")}>Send now</button>
           <button type="button" aria-pressed={when === "later"} onClick={() => setWhen("later")}>Schedule</button>
         </div>
@@ -396,7 +425,7 @@ function AiDialog({ onClose, onDraft }: { onClose: () => void; onDraft: (d: { su
     <Dialog open onClose={onClose} title="Write with AI">
       <form onSubmit={(e) => { e.preventDefault(); draft.mutate(); }}>
         <Field label="What's this email for?"><textarea className="textarea" value={goal} onChange={(e) => setGoal(e.target.value)} maxLength={600} required minLength={5} placeholder="Remind past sealcoating clients to book before June, 10% off if they book this month" /></Field>
-        <div className="segmented" role="group" aria-label="Tone">
+        <div className={cx("segmented", styles.segStart)} role="group" aria-label="Tone">
           {(["friendly", "professional", "urgent"] as const).map((t) => <button key={t} type="button" aria-pressed={tone === t} onClick={() => setTone(t)}>{t[0].toUpperCase() + t.slice(1)}</button>)}
         </div>
         <FormError error={draft.error} />

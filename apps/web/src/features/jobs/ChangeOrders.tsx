@@ -1,7 +1,8 @@
 /** Change orders on a job: extra work priced as a quote, approved by the client, added to the job. */
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
+import { RelatedRow, Section } from "@/components/ui/Section";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
@@ -30,23 +31,21 @@ export function ChangeOrders({ jobId, onStart, starting }: { jobId: string; onSt
     queryKey: ["job", jobId, "change-orders"],
     queryFn: async () => unwrap(await supabase().from("quotes").select("id, number, title, status, total").eq("change_order_for", jobId).order("created_at")),
   });
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
   if (!orders.data?.length) return null;
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">Change orders</h2>
-        <Button size="sm" icon="plus" loading={starting} onClick={onStart}>New change order</Button>
-      </div>
-      <div className="card" ref={listRef}>
+    <Section title="Change orders" count={orders.data.length} action={<Button icon="plus" loading={starting} onClick={onStart}>New change order</Button>}>
+      <ul className="rel" role="list" aria-label="Change orders" ref={listRef}>
         {orders.data.map((o) => (
-          <Link key={o.id} to={`/quotes/${o.id}`} className="card-row">
-            <strong className="grow">#{o.number} · {o.title.replace(/^Change order: /, "")}</strong>
-            <span className="tabular">{formatMoney(o.total)}</span>
-            <EntityStatus kind="quote" status={o.status === "converted" ? "approved" : o.status} />
-          </Link>
+          <RelatedRow
+            key={o.id}
+            to={`/quotes/${o.id}`}
+            lead={`#${o.number}`}
+            title={o.title.replace(/^Change order: /, "")}
+            end={<><EntityStatus kind="quote" status={o.status === "converted" ? "approved" : o.status} /><b>{formatMoney(o.total)}</b></>}
+          />
         ))}
-      </div>
-    </section>
+      </ul>
+    </Section>
   );
 }

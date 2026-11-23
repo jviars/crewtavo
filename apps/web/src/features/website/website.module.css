@@ -6,13 +6,19 @@
   border-top: 1px solid var(--divider); background: var(--page);
 }
 .bar { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 6px 10px 6px 16px; border-bottom: 1px solid var(--divider); color: var(--text-2); }
-.name { color: var(--ink); font-size: var(--fs-14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.cms { font-size: var(--fs-13); color: var(--text-3); white-space: nowrap; }
+/* The site's mark: a quiet globe, no tile behind it. */
+.icon { display: flex; flex: none; color: var(--quiet); }
+.name { color: var(--ink); font-size: var(--fs-14); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cms { font-size: var(--fs-13); color: var(--quiet); white-space: nowrap; }
+.cms::before { content: "·"; margin-right: 8px; color: var(--quiet); }
 .frameArea { position: relative; flex: 1; min-height: 0; }
 .frame { display: block; width: 100%; height: 100%; border: 0; background: var(--page); }
 .loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 
 @media (max-width: 900px) {
+  .bar { min-height: 52px; padding: 4px 8px 4px 16px; }
+  /* Reload and Open at a thumb's size. */
+  .bar :global(.btn) { height: 44px; min-width: 44px; }
   .page { height: calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
 }
 @media (max-width: 600px) {

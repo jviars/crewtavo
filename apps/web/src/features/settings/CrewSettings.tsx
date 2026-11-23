@@ -3,13 +3,15 @@ import { useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Menu } from "@/components/ui/Menu";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { roleName, useCompanyRoles } from "./roles";
+import styles from "./settings.module.css";
 import type { Member } from "./TeamSettings";
 
 const PALETTE = ["#3b7d23", "#3474d4", "#c9852a", "#d2445c", "#8b5cf6", "#0e7490", "#57534e", "#b45309"];
@@ -76,43 +78,55 @@ export function CrewSettings() {
     });
 
   const added = useJustDone(add);
-  const cards = useListAnimation<HTMLDivElement>();
+  const cards = useListAnimation<HTMLUListElement>();
+  const crews = data.data?.crews ?? [];
   return (
-    <div className="stack">
-      <form className="toolbar" onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) add.mutate(); }}>
-        <input className="input" placeholder="New crew name, e.g. Mowing crew 2" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} aria-label="New crew name" />
-        <Button type="submit" icon="plus" loading={add.isPending} done={added} doneLabel="Added" disabled={!name.trim() && !added}>Add crew</Button>
-        <SaveStatus status={saving.status} />
-      </form>
-      <p className="muted small" style={{ margin: 0 }}>The people on a crew are on its visits: they see them on My day, get them in their calendar and hear when one changes. Pick people on a visit to send only them.</p>
-      {data.isPending ? <Loading><div className="grid-cards">{[0, 1].map((i) => <CardSkeleton key={i} lines={4} />)}</div></Loading> : data.error ? <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div> : !data.data?.crews.length ? (
-        <div className="card"><EmptyState inline title="No crews yet" /></div>
-      ) : (
-        <div className="grid-cards" ref={cards}>
-          {data.data.crews.map((c) => (
-            <div key={c.id} className="card card-pad stack-sm" style={{ borderTop: `4px solid ${c.color ?? "var(--border)"}`, opacity: c.active ? 1 : 0.6 }}>
-              <div className="row">
-                <input className="input input-sm grow" defaultValue={c.name} maxLength={60} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== c.name && void saving.track(update.mutateAsync({ id: c.id, patch: { name: e.target.value.trim() } }))} aria-label="Crew name" style={{ fontWeight: 700 }} />
-                <input type="color" value={c.color ?? "#3b7d23"} onChange={(e) => void saving.track(update.mutateAsync({ id: c.id, patch: { color: e.target.value } }))} aria-label={`${c.name} color`} style={{ width: 32, height: 32, border: 0, padding: 0, background: "none" }} />
-                <Menu
-                  triggerClassName="btn btn-sm btn-ghost btn-icon"
-                  items={[
-                    { label: c.active ? "Hide from the schedule" : "Show on the schedule", icon: c.active ? "archive" : "undo", onSelect: () => void saving.track(update.mutateAsync({ id: c.id, patch: { active: !c.active } })) },
-                    { label: "Delete crew", icon: "trash", danger: true, onSelect: () => deleteCrew(c) },
-                  ]}
-                />
-              </div>
-              {!data.data.team.length && <span className="muted small">Invite your team in the Team tab to add them to crews.</span>}
-              {data.data.team.map((m) => (
-                <label key={m.user_id} className="checkbox" style={{ fontSize: 13 }}>
-                  <input type="checkbox" checked={c.crew_members.some((cm) => cm.user_id === m.user_id)} onChange={(e) => void saving.track(toggleMember.mutateAsync({ crewId: c.id, userId: m.user_id, on: e.target.checked }))} />
-                  <span>{m.profile?.full_name || "Team member"} <span className="muted">· {roleName(m, roles.data)}</span></span>
-                </label>
-              ))}
-            </div>
-          ))}
-        </div>
+    <Section level={3} title="Crews" count={data.data ? crews.length : undefined} action={<SaveStatus status={saving.status} />}>
+      {data.isPending ? <SectionSkeleton rows={3} /> : data.error ? <ErrorState compact error={data.error} onRetry={() => data.refetch()} /> : (
+        <>
+          {!crews.length && <EmptyState inline title="No crews yet" />}
+          <ul className={styles.crews} role="list" ref={cards}>
+            {crews.map((c) => {
+              const on = data.data.team.filter((m) => c.crew_members.some((cm) => cm.user_id === m.user_id)).length;
+              return (
+                <li key={c.id} className={styles.crew} data-hidden={c.active ? undefined : true}>
+                  <div className={styles.crewHead}>
+                    <input type="color" className={`set-swatch ${styles.crewColor}`} value={c.color ?? "#3b7d23"} onChange={(e) => void saving.track(update.mutateAsync({ id: c.id, patch: { color: e.target.value } }))} aria-label={`${c.name} color`} style={{ background: c.color ?? "#3b7d23" }} />
+                    <input className={styles.crewName} defaultValue={c.name} maxLength={60} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== c.name && void saving.track(update.mutateAsync({ id: c.id, patch: { name: e.target.value.trim() } }))} aria-label="Crew name" />
+                    <span className={styles.crewCount}>{c.active ? `${on} ${on === 1 ? "person" : "people"}` : "Hidden from the schedule"}</span>
+                    <Menu
+                      label={`More for ${c.name}`}
+                      title={c.name}
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      items={[
+                        { label: c.active ? "Hide from the schedule" : "Show on the schedule", icon: c.active ? "archive" : "undo", onSelect: () => void saving.track(update.mutateAsync({ id: c.id, patch: { active: !c.active } })) },
+                        { separator: true },
+                        { label: "Delete crew", icon: "trash", danger: true, onSelect: () => deleteCrew(c) },
+                      ]}
+                    />
+                  </div>
+                  {data.data.team.length ? (
+                    <div className={styles.crewPeople} role="group" aria-label={`People on ${c.name}`}>
+                      {data.data.team.map((m) => (
+                        <label key={m.user_id} className="checkbox">
+                          <input type="checkbox" checked={c.crew_members.some((cm) => cm.user_id === m.user_id)} onChange={(e) => void saving.track(toggleMember.mutateAsync({ crewId: c.id, userId: m.user_id, on: e.target.checked }))} />
+                          <span>{m.profile?.full_name || "Team member"} <span className="muted">· {roleName(m, roles.data)}</span></span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="set-note">Invite your team under People to add them to crews.</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <form className={styles.addRow} onSubmit={(e: FormEvent) => { e.preventDefault(); if (name.trim()) add.mutate(); }}>
+            <input className="input" placeholder="New crew name, e.g. Mowing crew 2" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} aria-label="New crew name" />
+            <Button type="submit" icon="plus" loading={add.isPending} done={added} doneLabel="Added" disabled={!name.trim() && !added}>Add crew</Button>
+          </form>
+        </>
       )}
-    </div>
+    </Section>
   );
 }

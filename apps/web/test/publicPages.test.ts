@@ -12,7 +12,7 @@ const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import
 
 describe("a referral page", () => {
   it("shows the friend that the person recommending gets a credit, under the recommendation", () => {
-    expect(source("../src/features/public/ReferralPage.tsx")).toContain("{view.data.disclosure && <p style={{ margin: 0 }}>{view.data.disclosure}</p>}");
+    expect(source("../src/features/public/ReferralPage.tsx")).toContain("{view.data.disclosure && <p className={k.msg}>{view.data.disclosure}</p>}");
   });
 });
 

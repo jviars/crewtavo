@@ -19,10 +19,14 @@ import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
+import { ListFoot } from "@/components/ui/InboxList";
+import { BackLink } from "@/components/ui/PageHeader";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { DetailSkeleton, Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { DetailSkeleton, SectionSkeleton, Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { EmptyState, ErrorState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
@@ -33,6 +37,8 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { AudienceFields, useAudienceChoices } from "./AudienceFields";
 import { audienceSummary } from "./CampaignPage";
 import { MessageField } from "./EmailEditor";
+import styles from "./Marketing.module.css";
+import { NameInput } from "./NameInput";
 import { MarketingPage } from "./MarketingPage";
 import { PostcardAudienceDialog } from "./PostcardAudience";
 import { ASK_ADMIN_WORDS, blockStyle, deletableFrom, draftAsSaved, duplicateQuestion, needsAdmin, pickablePhotos, proofLink, proofQuestion, waitForSave } from "./postcardForm";
@@ -254,48 +260,45 @@ function PostcardScreen() {
     if (ok && mode) send.mutate({ count, mode, draft: draftAsSaved(draft) });
   };
 
+  const askToStop = async () => (await confirm({ title: "Stop mailing?", body: "Cards Lob has already made are still mailed. Lob can cancel them for a short while from your Lob dashboard.", confirmLabel: "Stop", danger: true })) && stop.mutate();
+  const askToDelete = async () => {
+    // Lob may still fetch the front's picture, which deleting the campaign takes down.
+    const wait = deletableFrom(c);
+    if (wait) return void (await confirm({ title: "This campaign can't be deleted yet", body: `Lob fetches the picture on the front from Crewtavo while it draws the cards, and deleting the campaign takes the picture down. It can be deleted from ${formatDate(wait.toISOString())}, ${POSTCARD_KEEP_DAYS} days after its last card.`, confirmLabel: "OK" }));
+    if (await confirm({ title: "Delete this postcard campaign?", body: c.status === "draft" ? undefined : "Its list of who was mailed goes too. Cards already mailed aren't affected.", confirmLabel: "Delete", danger: true })) remove.mutate();
+  };
+
   return (
     <>
-      <BackLink to="/marketing?tab=campaigns">Marketing</BackLink>
-      <PageHeader
-        title={editable ? <h1 className="page-title"><input className="title-input" value={draft.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} aria-label="Campaign name" /></h1> : c.name}
+      <DetailHeader
+        crumb={{ to: "/marketing?tab=campaigns", label: "Marketing" }}
+        title={editable ? <h1 className="page-title"><NameInput value={draft.name} onChange={(name) => set({ name })} label="Campaign name" /></h1> : c.name}
         documentTitle={c.name}
+        status={<EntityStatus kind="campaign" status={c.status} />}
+        meta={[
+          `Postcard · ${POSTCARD_SIZE_INFO[shown.size].label}`,
+          editable && <SaveStatus status={saving.status} />,
+          c.status !== "draft" && `${c.made_count.toLocaleString("en-US")} of ${c.recipients_count.toLocaleString("en-US")} ${c.mode === "live" ? "mailed" : "made in test mode"}${c.failed_count ? ` · ${c.failed_count} failed` : ""}`,
+        ]}
         actions={
           <>
             {editable && !askAdmin && <Button icon="mail" loading={proof.isPending} disabled={cardProblems.length > 0 || unsaved.blocked || !mode} onClick={askForProof}>{mode === "test" ? "Make one test card first" : "Mail one to us first"}</Button>}
             {editable && !askAdmin && <Button variant="primary" icon="send" loading={send.isPending} disabled={problems.length > 0 || summary.isFetching || !count || unsaved.blocked} onClick={askToSend}>{mode === "test" ? "Make test cards" : "Send"}</Button>}
-            {c.status === "sending" && <Button variant="danger" icon="x" loading={stop.isPending} onClick={async () => (await confirm({ title: "Stop mailing?", body: "Cards Lob has already made are still mailed. Lob can cancel them for a short while from your Lob dashboard.", confirmLabel: "Stop", danger: true })) && stop.mutate()}>Stop</Button>}
-            <Menu
-              items={[
-                { label: c.status === "draft" ? "Duplicate" : "Duplicate (mails everyone again)", icon: "copy", onSelect: askToDuplicate },
-                {
-                  label: "Delete",
-                  icon: "trash",
-                  danger: true,
-                  hidden: c.status === "sending",
-                  onSelect: async () => {
-                    // Lob may still fetch the front's picture, which deleting the campaign takes down.
-                    const wait = deletableFrom(c);
-                    if (wait) return void (await confirm({ title: "This campaign can't be deleted yet", body: `Lob fetches the picture on the front from Crewtavo while it draws the cards, and deleting the campaign takes the picture down. It can be deleted from ${formatDate(wait.toISOString())}, ${POSTCARD_KEEP_DAYS} days after its last card.`, confirmLabel: "OK" }));
-                    if (await confirm({ title: "Delete this postcard campaign?", body: c.status === "draft" ? undefined : "Its list of who was mailed goes too. Cards already mailed aren't affected.", confirmLabel: "Delete", danger: true })) remove.mutate();
-                  },
-                },
-              ]}
-            />
+            {c.status === "sending" && <Button variant="danger" icon="x" loading={stop.isPending} onClick={askToStop}>Stop</Button>}
           </>
         }
+        moreTitle={c.name}
+        more={[
+          { label: c.status === "draft" ? "Duplicate" : "Duplicate (mails everyone again)", icon: "copy", kbd: "D", onSelect: askToDuplicate },
+          { separator: true, hidden: c.status === "sending" },
+          { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: askToDelete },
+        ]}
       />
-      <div className="page-meta">
-        <EntityStatus kind="campaign" status={c.status} />
-        <span className="chip"><Icon name="mail" size={12} />Postcard · {POSTCARD_SIZE_INFO[shown.size].label}</span>
-        {editable && <SaveStatus status={saving.status} />}
-        {c.status !== "draft" && <span className="muted">{c.made_count.toLocaleString("en-US")} of {c.recipients_count.toLocaleString("en-US")} {c.mode === "live" ? "mailed" : "made in test mode"}{c.failed_count ? ` · ${c.failed_count} failed` : ""}</span>}
-      </div>
-      {c.stopped_reason && c.stopped_reason !== "Stopped" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{c.stopped_reason}</div></div>}
-      {editable && askAdmin && <div className="callout callout-info" role="note"><Icon name="lock" size={20} /><div className="grow"><strong>Ask an owner or admin to send it</strong><span style={{ display: "block", fontWeight: 400 }}>{ASK_ADMIN_WORDS}</span></div></div>}
-      {setup.error ? <div className="card"><ErrorState compact error={setup.error} onRetry={() => setup.refetch()} /></div> : s && !s.lob && editable ? (
+      {c.stopped_reason && c.stopped_reason !== "Stopped" && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{c.stopped_reason}</div></div>}
+      {editable && askAdmin && <div className="callout callout-info" role="note"><Icon name="lock" size={16} /><div className="grow"><div>Ask an owner or admin to send it</div>{ASK_ADMIN_WORDS}</div></div>}
+      {setup.error ? <ErrorState compact error={setup.error} onRetry={() => setup.refetch()} /> : s && !s.lob && editable ? (
         <div className="callout callout-info">
-          <Icon name="info" size={20} />
+          <Icon name="info" size={16} />
           <div className="grow">Postcards are printed and mailed by Lob, through your own Lob account. {s.can_connect ? <Link to="/apps/lob">Connect Lob in Apps</Link> : "Ask an owner or admin to connect Lob in Apps."}</div>
         </div>
       ) : (
@@ -304,11 +307,45 @@ function PostcardScreen() {
       {c.status === "sending" && <div className="progress"><span style={{ width: `${c.recipients_count ? ((c.made_count + c.failed_count) / c.recipients_count) * 100 : 0}%` }} /></div>}
       {c.status !== "draft" && <PostcardStats id={c.id} mode={c.mode as "test" | "live"} live={c.status === "sending"} />}
 
-      <div className="two-col">
-        <div className="wide stack">
-          {editable ? (
-            <div className="card card-pad stack">
-              <strong>The card</strong>
+      <DetailColumns
+        grouped
+        side={
+          <>
+            <Section title="Audience" count={editable ? (summary.isFetching ? "…" : count.toLocaleString("en-US")) : undefined} flush={editable}>
+              {editable ? (
+                <div className="stack">
+                  <AudienceFields audience={draft.audience} onChange={(a) => set({ audience: a })} choices={choices.data} statusHint="None selected means every status. Archived clients never get a card." />
+                  <div className="stack-sm">
+                    <p className={styles.count}><b>{count.toLocaleString("en-US")}</b> {count === 1 ? "client" : "clients"} will get a card.</p>
+                    {summary.data && leftOutLine(summary.data.left_out) && <p className={styles.fine}>{leftOutLine(summary.data.left_out)}.</p>}
+                    {Boolean(summary.data?.sample.length) && (
+                      <ul className={styles.sample} aria-label="Who gets a card">
+                        {summary.data!.sample.map((r) => <li key={r.client_id}><span>{r.name}</span><span>{[r.city, r.region].filter(Boolean).join(", ")}</span></li>)}
+                      </ul>
+                    )}
+                    {count > 5 && <p className={styles.fine}>and {(count - 5).toLocaleString("en-US")} more</p>}
+                    {summary.data && <div><Button size="sm" icon="users" onClick={() => setListing(true)}>See everyone and their addresses</Button></div>}
+                    <p className={styles.fine}>Each card goes to the client's billing address, or their first property's when that one can't be mailed to. {ONE_PER_ADDRESS} {PRICE_WORDS}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className={styles.audienceLine}>{audienceSummary(shown.audience, choices.data)}</p>
+              )}
+            </Section>
+            {editable && problems.length > 0 && (
+              <div className="callout callout-warning" role="note">
+                <Icon name="alert" size={16} />
+                <ul className={`grow ${styles.problems}`}>{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+              </div>
+            )}
+            <FormError error={send.error} />
+            <FormError error={proof.error} />
+          </>
+        }
+      >
+        {editable ? (
+          <Section title="The card" flush>
+            <div className="stack">
               <div className="field">
                 <span>Size</span>
                 <div className="segmented" role="group" aria-label="Size">
@@ -317,7 +354,7 @@ function PostcardScreen() {
               </div>
               <div className="field">
                 <span>Front</span>
-                <div className="row wrap" style={{ gap: 8 }}>
+                <div className={styles.frontPick}>
                   <Button icon="image" onClick={() => setPicking(true)}>Pick a job photo</Button>
                   <UploadFront campaignId={c.id} onUploaded={(path) => set({ front_path: path, front_attachment_id: null })} />
                 </div>
@@ -328,45 +365,21 @@ function PostcardScreen() {
                   </label>
                 )}
                 <span className="hint">The picture fills the front, past the edges, so keep what matters away from them.</span>
-                {soft && <div className="callout callout-warning" role="note" style={{ marginTop: 8 }}><Icon name="alert" size={20} /><div className="grow">{soft}</div></div>}
+                {soft && <div className="callout callout-warning" role="note" style={{ marginTop: 8 }}><Icon name="alert" size={16} /><div className="grow">{soft}</div></div>}
               </div>
               <MessageField value={draft.message} onChange={(m) => set({ message: m })} tokens={[...POSTCARD_TOKENS]} hint={`The back of the card. About ${POSTCARD_SIZE_INFO[draft.size].maxMessage.toLocaleString("en-US")} characters fit, fewer with many short lines. Lob prints your return address beside the client's. Booking link is your booking form's address.`} />
-              <span className={`small${fit.fits ? " muted" : ""}`} style={fit.fits ? undefined : { color: "var(--danger)", fontWeight: 600 }}>
+              <p className={fit.fits ? styles.fine : styles.autoNote} data-tone={fit.fits ? undefined : "danger"}>
                 {message.length.toLocaleString("en-US")} characters, {fit.fits ? "which fits" : `about ${fit.over} ${fit.over === 1 ? "line" : "lines"} too long for this size`}. Every client's card is checked with their own name when you send.
-              </span>
+              </p>
               <FormError error={save.error} />
             </div>
-          ) : (
-            <PostcardRecipients id={c.id} mode={c.mode as "test" | "live"} live={c.status === "sending"} />
-          )}
-          <PostcardPreview size={shown.size} frontUrl={front.data?.url ?? null} back={backHtml({ size: shown.size, message })} />
-          <PostcardProofs campaignId={c.id} />
-        </div>
-
-        <aside className="narrow stack">
-          <div className="card card-pad stack">
-            <div className="row-between"><strong>Audience</strong>{editable && (summary.isFetching ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <span className="badge badge-green">{count}</span>)}</div>
-            {editable ? (
-              <>
-                <AudienceFields audience={draft.audience} onChange={(a) => set({ audience: a })} choices={choices.data} statusHint="None selected means every status. Archived clients never get a card." />
-                <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
-                  <span className="text-sm"><strong>{count.toLocaleString("en-US")}</strong> {count === 1 ? "client" : "clients"} will get a card.</span>
-                  {summary.data && leftOutLine(summary.data.left_out) && <span className="muted small">{leftOutLine(summary.data.left_out)}.</span>}
-                  {summary.data?.sample.map((r) => <span key={r.client_id} className="small ellipsis">{r.name} · <span className="muted">{[r.city, r.region].filter(Boolean).join(", ")}</span></span>)}
-                  {count > 5 && <span className="muted small">and {(count - 5).toLocaleString("en-US")} more</span>}
-                  {summary.data && <div><Button size="sm" icon="users" onClick={() => setListing(true)}>See everyone and their addresses</Button></div>}
-                  <span className="muted small">Each card goes to the client's billing address, or their first property's when that one can't be mailed to. {ONE_PER_ADDRESS} {PRICE_WORDS}</span>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm" style={{ margin: 0 }}>{audienceSummary(shown.audience, choices.data)}</p>
-            )}
-          </div>
-          {editable && problems.length > 0 && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{problems.map((p) => <div key={p} style={{ fontWeight: 600 }}>{p}</div>)}</div></div>}
-          <FormError error={send.error} />
-          <FormError error={proof.error} />
-        </aside>
-      </div>
+          </Section>
+        ) : (
+          <PostcardRecipients id={c.id} mode={c.mode as "test" | "live"} live={c.status === "sending"} />
+        )}
+        <PostcardPreview size={shown.size} frontUrl={front.data?.url ?? null} back={backHtml({ size: shown.size, message })} />
+        <PostcardProofs campaignId={c.id} />
+      </DetailColumns>
       {picking && <FrontPhotoPicker onClose={() => setPicking(false)} onPick={(photo) => { set({ front_attachment_id: photo, front_path: null, front_marked: true }); setPicking(false); }} />}
       {listing && <PostcardAudienceDialog name={draft.name} audience={draft.audience} onClose={() => setListing(false)} />}
     </>
@@ -479,16 +492,16 @@ function FrontPhotoPicker({ onClose, onPick }: { onClose: () => void; onPick: (i
 export function PostcardPreview({ size, frontUrl, back }: { size: PostcardSize; frontUrl: string | null; back: string }) {
   const { width, height } = POSTCARD_SIZE_INFO[size];
   const side = (label: string, html: string | null, zone: boolean) => (
-    <figure className="stack-sm" style={{ margin: 0 }}>
-      <figcaption className="muted small">{label}</figcaption>
-      <div style={{ width: `${width}in`, height: `${height}in`, position: "relative", overflow: "hidden", borderRadius: 4, boxShadow: "0 1px 4px rgba(0,0,0,.18)", background: "#fff", flex: "none" }}>
+    <figure className={styles.side}>
+      <figcaption>{label}</figcaption>
+      <div className={styles.card} style={{ width: `${width}in`, height: `${height}in` }}>
         {html ? (
           <iframe title={label} srcDoc={html} sandbox="" style={{ position: "absolute", left: `-${BLEED_IN}in`, top: `-${BLEED_IN}in`, width: `${width + 2 * BLEED_IN}in`, height: `${height + 2 * BLEED_IN}in`, border: 0, pointerEvents: "none" }} />
         ) : (
-          <div className="muted small" style={{ display: "grid", placeItems: "center", height: "100%" }}>Pick a picture for the front</div>
+          <div className={styles.cardEmpty}>Pick a picture for the front</div>
         )}
         {zone && (
-          <div className="muted small" style={{ position: "absolute", ...blockStyle(size), border: "1px dashed var(--border)", display: "grid", placeItems: "center", textAlign: "center", padding: 8, background: "rgba(255,255,255,.6)", boxSizing: "border-box" }}>
+          <div className={styles.zone} style={blockStyle(size)}>
             Lob prints your return address, the client's address, the barcode and postage here
           </div>
         )}
@@ -496,13 +509,12 @@ export function PostcardPreview({ size, frontUrl, back }: { size: PostcardSize; 
     </figure>
   );
   return (
-    <section className="card card-pad stack" aria-label="Preview">
-      <div className="row-between wrap"><strong>Preview</strong><span className="muted small">Real size, {POSTCARD_SIZE_INFO[size].label}</span></div>
-      <div className="stack" style={{ overflowX: "auto", paddingBottom: 4 }}>
+    <Section title="Preview" count={`Real size, ${POSTCARD_SIZE_INFO[size].label}`} flush>
+      <div className={styles.sides}>
         {side("Front", frontUrl ? frontHtml(size, frontUrl) : null, false)}
         {side("Back", back, true)}
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -525,22 +537,27 @@ function PostcardStats({ id, mode, live }: { id: string; mode: "test" | "live"; 
   });
   const r = results.data;
   if (results.isPending) return <StatsSkeleton count={4} />;
-  if (results.error) return <div className="card"><ErrorState compact error={results.error} onRetry={() => results.refetch()} /></div>;
+  if (results.error) return <ErrorState compact error={results.error} onRetry={() => results.refetch()} />;
   return (
-    <div className="stack-sm">
-      <div className="stat-row">
-        <div className="card stat"><div className="label">{mode === "live" ? "Mailed" : "Made in test mode"}</div><div className="value">{(r?.made ?? 0).toLocaleString("en-US")}</div><div className="hint">{mode === "live" ? "Accepted by Lob to print and mail" : "Not printed or mailed"}</div></div>
-        <div className="card stat"><div className="label">Failed</div><div className="value">{(r?.failed ?? 0).toLocaleString("en-US")}</div><div className="hint">Lob refused them or couldn't print them</div></div>
-        <div className="card stat"><div className="label">Skipped</div><div className="value">{(r?.skipped ?? 0).toLocaleString("en-US")}</div><div className="hint">Stopped, opted out or archived</div></div>
-        <div className="card stat">
-          <div className="label">Revenue</div>
-          <div className="value">{r?.revenue == null ? "—" : formatMoneyCents(r.revenue)}</div>
-          <div className="hint">{mode === "test" ? "Test cards weren't mailed" : r?.revenue == null ? "Needs the Invoices area" : `${(r.clients_paid ?? 0).toLocaleString("en-US")} ${r.clients_paid === 1 ? "client" : "clients"} paid, before tax`}</div>
-        </div>
+    <>
+      <StatStrip label="What it made">
+        <Stat label={mode === "live" ? "Mailed" : "Made in test mode"} value={(r?.made ?? 0).toLocaleString("en-US")} note={mode === "live" ? "Accepted by Lob to print and mail" : "Not printed or mailed"} />
+        <Stat label="Failed" value={(r?.failed ?? 0).toLocaleString("en-US")} tone={r?.failed ? "danger" : undefined} note="Lob refused them or couldn't print them" />
+        <Stat label="Skipped" value={(r?.skipped ?? 0).toLocaleString("en-US")} note="Stopped, opted out or archived" />
+        {/* Someone without the Invoices area has no revenue to see. */}
+        {r?.revenue != null && (
+          <Stat
+            label="Revenue"
+            value={formatMoneyCents(r.revenue)}
+            note={mode === "test" ? "Test cards weren't mailed" : `${(r?.clients_paid ?? 0).toLocaleString("en-US")} ${r?.clients_paid === 1 ? "client" : "clients"} paid, before tax`}
+          />
+        )}
+      </StatStrip>
+      <div className="stack-sm">
+        <p className={styles.fine}>Lob draws each card after it accepts it. For {POSTCARD_KEEP_DAYS} days after the last card, Crewtavo asks Lob every hour whether any failed, and marks those failed below with Lob's reason.</p>
+        {mode === "live" && <p className={styles.fine}>Revenue is paid invoices from clients this was mailed to, made after their card and within 90 days of it, before tax. A postcard has no link to follow, so it counts work they'd have booked anyway too.</p>}
       </div>
-      <p className="muted small" style={{ margin: 0 }}>Lob draws each card after it accepts it. For {POSTCARD_KEEP_DAYS} days after the last card, Crewtavo asks Lob every hour whether any failed, and marks those failed below with Lob's reason.</p>
-      {mode === "live" && <p className="muted small" style={{ margin: 0 }}>Revenue is paid invoices from clients this was mailed to, made after their card and within 90 days of it, before tax. A postcard has no link to follow, so it counts work they'd have booked anyway too.</p>}
-    </div>
+    </>
   );
 }
 
@@ -579,31 +596,29 @@ function PostcardRecipients({ id, mode, live }: { id: string; mode: "test" | "li
       : r.status === "skipped" ? `Skipped: ${r.error ?? "not mailed"}`
       : "Waiting";
   return (
-    <section className="card" aria-labelledby="postcard-recipients">
-      <div className="card-pad row-between wrap" style={{ paddingBottom: 8 }}>
-        <h2 id="postcard-recipients" className="section-title" style={{ fontSize: 16 }}>Who it went to</h2>
-        <div className="segmented" role="group" aria-label="Show">
-          <button type="button" aria-pressed={!failedOnly} onClick={() => setFailedOnly(false)}>Everyone</button>
-          <button type="button" aria-pressed={failedOnly} onClick={() => setFailedOnly(true)}>Failed</button>
-        </div>
+    <Section title="Who it went to" flush>
+      <div className={styles.filters}>
+        <FilterTabs label="Show" value={failedOnly ? "failed" : "all"} onChange={(v) => setFailedOnly(v === "failed")} options={[{ value: "all", label: "Everyone" }, { value: "failed", label: "Failed" }]} />
       </div>
-      {list.isPending ? <div className="card-pad"><Skeleton height={120} /></div> : list.error ? <ErrorState compact error={list.error} onRetry={() => list.refetch()} /> : !rows.length ? (
-        <EmptyState icon="mail" title={failedOnly ? "None failed" : "No one yet"} />
+      {list.isPending ? <SectionSkeleton rows={3} /> : list.error ? <ErrorState compact error={list.error} onRetry={() => list.refetch()} /> : !rows.length ? (
+        <EmptyState inline title={failedOnly ? "None failed" : "No one yet"} />
       ) : (
         <>
-          {rows.map((r) => (
-            <div key={r.id} className="card-row">
-              <div className="grow" style={{ minWidth: 0 }}>
-                <strong className="ellipsis" style={{ display: "block" }}>{r.name}</strong>
-                <span className="muted small" style={{ display: "block", overflowWrap: "anywhere" }}>{r.address?.line1 ? addressLine({ line1: r.address.line1, line2: r.address.line2, city: r.address.city ?? "", region: r.address.region ?? "", postal_code: r.address.postal_code ?? "" }) : ""}{r.lob_id ? ` · ${r.lob_id}` : ""}</span>
-                {proofLink(r) && <a className="small" href={proofLink(r)!} target="_blank" rel="noreferrer">See the card as Lob drew it <Icon name="external" size={12} /></a>}
-              </div>
-              <span className="small" style={r.status === "failed" ? { color: "var(--danger)", fontWeight: 600 } : undefined}>{words(r)}</span>
-            </div>
-          ))}
-          {list.hasNextPage && <div className="card-pad"><Button loading={list.isFetchingNextPage} onClick={() => list.fetchNextPage()}>Show more</Button></div>}
+          <ul className="rel" aria-label="Who it went to">
+            {rows.map((r) => (
+              <li key={r.id} className={styles.recipient}>
+                <div className={styles.recipientBody}>
+                  <span className={styles.recipientName}>{r.name}</span>
+                  <div className={styles.recipientMeta}>{r.address?.line1 ? addressLine({ line1: r.address.line1, line2: r.address.line2, city: r.address.city ?? "", region: r.address.region ?? "", postal_code: r.address.postal_code ?? "" }) : ""}{r.lob_id ? ` · ${r.lob_id}` : ""}</div>
+                  {proofLink(r) && <a className={styles.recipientMeta} href={proofLink(r)!} target="_blank" rel="noreferrer">See the card as Lob drew it <Icon name="external" size={12} /></a>}
+                </div>
+                <span className={styles.recipientEnd} data-tone={r.status === "failed" ? "danger" : undefined}>{words(r)}</span>
+              </li>
+            ))}
+          </ul>
+          {list.hasNextPage && <ListFoot more={{ onClick: () => void list.fetchNextPage(), loading: list.isFetchingNextPage, label: "Show more" }}>{rows.length.toLocaleString("en-US")} shown</ListFoot>}
         </>
       )}
-    </section>
+    </Section>
   );
 }

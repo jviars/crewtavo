@@ -32,6 +32,8 @@ export interface SigningScope {
   companyId: string;
   userId: string;
   baseUrl: string;
+  /** As SalesScope's: the office copies leave out the client's money for someone who doesn't see invoices. */
+  noMoney?: boolean;
 }
 
 /**
@@ -122,7 +124,8 @@ async function loadQuote(s: SigningScope, id: string) {
 type Quote = Awaited<ReturnType<typeof loadQuote>>;
 
 async function loadCompany(s: SigningScope) {
-  return must(await s.db.from("companies").select("name, email, phone, timezone, address, settings, trade_preset").eq("id", s.companyId).maybeSingle(), "Company not found.");
+  // With the server's key: the browser's role doesn't read the settings (lib/companySettings.ts).
+  return must(await adminClient(s.env).from("companies").select("name, email, phone, timezone, address, settings, trade_preset").eq("id", s.companyId).maybeSingle(), "Company not found.");
 }
 
 type Company = Awaited<ReturnType<typeof loadCompany>>;
@@ -214,7 +217,7 @@ export async function signQuote(s: SigningScope, id: string, body: SignBody) {
   if (body.save_signature && body.company_signature) await keepSignature(s, body.company_signature);
 
   // The person signed in gets the office's copy of the link; only a copy that goes out to the client's own email is theirs.
-  const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: "quote", id }, COPY_DAYS);
+  const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: "quote", id, ...(s.noMoney && { nm: 1 as const }) }, COPY_DAYS);
   if (!body.email_copy) return { status: "approved" as const, emailed: false, link: links.office };
   const copy = await deliverCopy(s, quote, company, links, { channel: "email", to: body.to });
   return { status: "approved" as const, emailed: copy.sent, ...(copy.sent ? {} : { email_reason: copy.reason }), link: links.office };
@@ -254,7 +257,7 @@ export async function sendSignedCopy(s: SigningScope, id: string, body: CopyBody
   const quote = await loadQuote(s, id);
   if (!SIGNED.includes(quote.status)) throw new HttpError(409, "This estimate isn't signed yet.");
   const company = await loadCompany(s);
-  const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: "quote", id }, COPY_DAYS);
+  const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: "quote", id, ...(s.noMoney && { nm: 1 as const }) }, COPY_DAYS);
   const result = await deliverCopy(s, quote, company, links, body);
   return { sent: result.sent, ...(result.sent ? {} : { reason: result.reason }), link: links.office };
 }
@@ -263,10 +266,10 @@ export async function sendSignedCopy(s: SigningScope, id: string, body: CopyBody
  * The signed copy itself. Problems a person can fix (no email on file, email not set up) come back
  * as a reason instead of an error, so the estimate stays signed and the screen can say what to do.
  * An email or text to the client's own email or phone on file carries their own link (`links.own`;
- * lib/links sentToClient); one typed to any other address, and the copy kept on their timeline,
- * carry the office's (`links.office`).
+ * lib/links sentToClient); one typed to any other address carries the office's (`links.office`), and
+ * the copy kept on their timeline none (`links.kept`, lib/links KEPT_LINK).
  */
-async function deliverCopy(s: SigningScope, quote: Quote, company: Company, links: { own: string; office: string }, body: CopyBody): Promise<{ sent: boolean; reason?: string }> {
+async function deliverCopy(s: SigningScope, quote: Quote, company: Company, links: { own: string; office: string; kept: string }, body: CopyBody): Promise<{ sent: boolean; reason?: string }> {
   const client = quote.client as { display_name: string; email: string | null; phone: string | null } | null;
   const who = client?.display_name || "this client";
   const intro = `Here's your signed estimate from ${company.name}. You can view, print or save it any time:`;
@@ -310,7 +313,8 @@ async function deliverCopy(s: SigningScope, quote: Quote, company: Company, link
       client_id: quote.client_id,
       channel: body.channel,
       subject: body.channel === "email" ? subject : `Signed estimate #${quote.number}`,
-      body: body.channel === "email" ? email(links.office) : sms(links.office),
+      // A quote's timeline is read by estimators too: its copy leaves the money out of the Client Hub home (lib/links clientLinks).
+      body: body.channel === "email" ? email(links.kept) : sms(links.kept),
       related_type: "quote",
       related_id: quote.id,
       external_id: result.id ?? null,

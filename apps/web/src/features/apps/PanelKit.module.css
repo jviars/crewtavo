@@ -1,0 +1,277 @@
+/*
+ * The parts of an app's panels (PanelKit.tsx), flat and quiet like the rest of the app: a Section's
+ * body as an even column, notes in quiet words, numbered steps in small grey circles, values to copy
+ * on hairline rows in a mono face, a block of code on the faintest fill, folds that open in place,
+ * switches on hairlines, and lists of things (calendars, assistants) as hairline rows.
+ * 13px words and 12px notes on a desktop; 15px and 13px, with 44px targets, on a phone.
+ */
+
+/* A Section's body as one column with even gaps between its parts. */
+.panel > :global(.sec-body) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+/* Rows first in a section sit right on its hairline, as facts and related rows do. */
+.panel > :global(.sec-body) > :is(.rows, .switchLine, .codeRow):first-child { margin-top: -12px; }
+.panel > :global(.sec-body) > :is(.note, .text):first-child { margin-top: -2px; }
+
+/* What a part is for, in running words (as the app page's own text), and quieter notes beside it. */
+.text { margin: 0; max-width: 72ch; font-size: var(--fs-14); line-height: 1.55; color: var(--text-2); }
+.note { margin: 0; max-width: 72ch; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
+:is(.text, .note) :is(strong, b) { font-weight: 600; color: var(--ink); }
+:is(.text, .note) a { font-weight: 600; }
+.small { font-size: var(--fs-12); }
+/* Inside Settings, a quiet note is the size of Settings' own (.set-note). */
+:global(.settings-body) .note { font-size: var(--fs-12); }
+.strong { font-weight: 600; color: var(--ink); }
+
+/* A sub-heading inside a section's body: the thing in ink. */
+.label { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+
+/* Buttons that go together, left to right. */
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.actions:empty { display: none; }
+
+/* Code in a sentence: the field names and the attributes a website needs. */
+.code { padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; overflow-wrap: anywhere; }
+
+/* ---- Steps: a number in a small grey circle, the words beside it ---- */
+.steps { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: step; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
+.steps > li { position: relative; min-height: 24px; padding: 2px 0 0 36px; counter-increment: step; }
+.steps > li::before { content: counter(step); position: absolute; top: 0; left: 0; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--radius-pill); background: var(--fill-2); font-size: var(--fs-12); font-weight: 700; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.steps strong, .steps b { font-weight: 600; color: var(--ink); }
+/* A link in a step sits in running words: underlined, so it isn't told apart by colour alone. */
+.steps a:not(:global(.btn)) { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.steps a:not(:global(.btn)):hover { text-decoration-color: currentColor; }
+/* A step with more than words: they stack with a small gap. */
+.step { min-width: 0; }
+/* Its words flow as a sentence (bold and code inside them too); what comes after them goes under, 8px apart. */
+.step > :is(div, p, ul, ol, pre, form, label, select, :global(.btn), button) { max-width: 100%; margin-top: 8px; }
+.step > :first-child { margin-top: 0; }
+.step > .codeRow + .codeRow { margin-top: 0; }
+.step > :is(:global(.btn), button) { display: flex; width: fit-content; }
+.step > select { display: block; }
+/* A short list inside a step (the APIs to turn on, the permissions to add). */
+.bullets { display: grid; gap: 2px; margin: 0; padding-left: 18px; }
+
+/* ---- A value to copy, on a hairline row: its name, the value in a mono face, Copy ---- */
+.codeRow { display: grid; grid-template-columns: minmax(96px, 148px) minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; min-height: 40px; padding: 6px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.codeRow:first-child, :not(.codeRow) + .codeRow { border-top: 1px solid var(--row-divider); }
+/* Straight under a section's heading, its hairline is the row's top line. */
+.panel > :global(.sec-body) > .codeRow:first-child { border-top: 0; }
+.codeRow.bare { grid-template-columns: minmax(0, 1fr) auto; }
+.codeLabel { color: var(--text-3); line-height: 1.35; }
+.codeValue { min-width: 0; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-12); line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+.copy { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-control); background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); font-weight: 600; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+.copy:hover { background: var(--fill-2); color: var(--ink); }
+.copy svg { color: var(--quiet); }
+.copy:hover svg { color: currentColor; }
+.copy:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+
+/* ---- A block of code to paste: the faintest fill, Copy in its corner ---- */
+.codeBlock { position: relative; min-width: 0; }
+.codeBlock > pre { margin: 0; padding: 12px 84px 12px 14px; max-height: 280px; overflow: auto; border-radius: var(--radius-control); background: var(--fill-2); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-12); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.codeBlock > .copy { position: absolute; top: 6px; right: 6px; background: var(--fill-2); }
+.codeBlock > .copy:hover { background: var(--fill-3); }
+
+/* ---- A fold: optional parts, shut until asked for ---- */
+.fold { min-width: 0; }
+.fold > summary { display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; min-height: 32px; list-style: none; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); cursor: pointer; border-radius: var(--radius-sm); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: ""; flex: none; width: 6px; height: 6px; margin: 0 4px 0 2px; border-right: 1.5px solid var(--quiet); border-bottom: 1.5px solid var(--quiet); transform: rotate(-45deg); transition: transform var(--dur-fast); }
+.fold[open] > summary::before { transform: rotate(45deg) translate(-1px, -1px); }
+.fold > summary:hover, .fold[open] > summary { color: var(--ink); }
+.fold > summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.foldNote { font-weight: 500; color: var(--quiet); }
+.foldBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 8px 0 4px 20px; }
+@media (prefers-reduced-motion: reduce) { .fold > summary::before { transition: none; } }
+
+/* ---- Switches on hairline rows: the switch, its words, a quiet line under them ---- */
+.switchLine { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
+.switchLine > :global(.switch) { margin-top: 1px; }
+.switchText { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.switchLabel { font-size: var(--fs-13); font-weight: 500; line-height: 1.45; color: var(--ink); cursor: pointer; }
+.switchLine:has(> :global(.switch:disabled)) .switchLabel { color: var(--text-3); cursor: default; }
+.hint { font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.hint strong { font-weight: 600; color: var(--text-2); }
+.switchText > :not(.switchLabel, .hint) { margin-top: 6px; }
+
+/* ---- A list of things on hairline rows ---- */
+.rows { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; list-style: none; }
+.row { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; min-height: 52px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.rowLead { display: flex; flex: none; align-items: center; gap: 12px; }
+/* A row of two lines or more: what leads it stays by the name (as in the inbox), however far the words wrap. */
+.row:has(> .rowText > :is(.rowSub, .rowProblem)) > .rowLead { align-self: flex-start; min-height: 1.45em; }
+.rowText { flex: 1 1 10rem; display: grid; gap: 1px; min-width: 0; }
+.rowTitle { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; color: var(--ink); }
+.rowTitle > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A name already in a row's weight stays there when it's marked strong (OpenAI's "Using ChatGPT plan"). */
+.rowTitle :is(strong, b) { font-weight: inherit; }
+.rowSub { font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); overflow-wrap: anywhere; }
+.rowProblem { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-12); font-weight: 600; line-height: 1.45; color: var(--danger); }
+.rowProblem > svg { flex: none; margin-top: 1px; }
+.rowEnd { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
+/* A row's buttons, and the one beside a status line, are quiet words that fill on hover. */
+:is(.rowEnd, .statusLine) :global(.btn) { height: 28px; padding: 0 8px; border-color: transparent; background: none; color: var(--text-2); font-size: var(--fs-12); }
+.rowEnd :global(.btn-icon) { width: 28px; padding: 0; color: var(--text-3); }
+:is(.rowEnd, .statusLine) :global(.btn):not(:global(.btn-primary)):hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.rowEnd :global(.btn-primary) { border-color: var(--green-solid); background: var(--green-solid); color: #fff; }
+.rowEnd :global(.btn-primary):hover { background: var(--green-solid-hover); color: #fff; }
+.rowTime { font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Turned off: quieter words that still read (4.5:1), and a faded color or icon. */
+.row[data-off] .rowTitle { font-weight: 500; color: var(--text-3); }
+.row[data-off] .rowSub { color: var(--quiet); }
+.row[data-off] .rowLead :global(.cal-swatch) { opacity: 0.45; }
+/* After words that introduce it, or a callout above it, a list starts on its own hairline. */
+/* (Settings' own quiet note, .set-note, and a list of steps introduce a list too: Settings → Calendars, a calendar app's steps.) */
+:is(.note, .text, .steps, :global(.set-note)) + .rows, .panel > :global(.sec-body) > :global(.callout) + :is(.rows, :global(.facts)) { border-top: 1px solid var(--row-divider); }
+/* A log (what assistants did): shorter rows. */
+.compact > .row { min-height: 40px; padding: 8px 0; }
+.quiet { font-weight: 400; color: var(--quiet); }
+/* Settings first in a section sit on its hairline. */
+:global(.sec-body) > .flushTop:first-child { margin-top: -12px; }
+/* An empty list after the words that introduce it (EmptyState inline): one quiet line, close under them. */
+:is(.note, .text) + :global(.empty-inline) { padding-top: 0; }
+
+/* Pasting an address back: the field takes the room, its button beside it. */
+.pasteRow { display: flex; align-items: center; gap: 8px; width: 100%; }
+.pasteRow > :global(.input) { flex: 1; min-width: 0; }
+
+/* A box to tick on a hairline row (My Meta app is Live). */
+.tick { cursor: pointer; }
+.tick > input { flex: none; margin: 0; }
+.tick:has(> input:disabled) { cursor: default; }
+
+/* A quiet status and its one button, on one line. */
+.statusLine { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-width: 0; }
+.statusLine > :global(.btn) { flex: none; }
+
+/* Inside a callout: its lines and buttons stacked with a small gap. */
+.calloutBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; justify-items: start; }
+.calloutBody > * { max-width: 100%; }
+.calloutBody > :not(:first-child) { font-weight: 400; }
+.calloutBody > .actions { margin-top: 4px; }
+.calloutWide { justify-self: stretch; width: 100%; }
+.calloutBody :global(.checkbox) { font-size: var(--fs-13); font-weight: 500; }
+.ellipsis { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A value in a sentence with its Copy beside it ("Project number: 1234 Copy"). */
+.inlineCopy { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+
+/* An assistant's logo in a list: a small white tile, as on the Apps page. */
+.logo { display: grid; place-items: center; width: 28px; height: 28px; overflow: hidden; border-radius: 7px; background: #fff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); color: #1f2421; font-size: var(--fs-12); font-weight: 700; }
+.logo img { width: 62%; height: 62%; object-fit: contain; }
+
+/* A thing's picture (a Facebook Page) or a round quiet icon where it has none. */
+.thumb { width: 36px; height: 36px; flex: none; border-radius: 8px; object-fit: cover; background: var(--fill-2); }
+.roundIcon.good { background: var(--green-tint); color: var(--green-dark); }
+.roundIcon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-3); }
+
+/* A choice of a few (a location, a Page, how much an assistant may change): radio rows on hairlines. */
+.choices { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; margin: 0; padding: 0; border: 0; }
+.choices > legend { margin-bottom: 6px; padding: 0; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.choices > legend.label { margin-bottom: 10px; font-size: var(--fs-13); color: var(--ink); }
+.choice { display: flex; align-items: flex-start; gap: 12px; min-height: 48px; padding: 11px 0; border-bottom: 1px solid var(--row-divider); cursor: pointer; font-size: var(--fs-13); }
+.choices > legend + .choice, .choices > .choice:first-child { border-top: 1px solid var(--row-divider); }
+.choice > input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--green-solid); }
+.choice > :is(.thumb, .roundIcon) { margin-top: -6px; margin-bottom: -6px; }
+.choice:has(> input:checked) .rowTitle { color: var(--ink); }
+.choice:has(> input:disabled) { cursor: not-allowed; }
+.choice:has(> input:disabled) .rowText { opacity: 0.6; }
+.choice:has(> input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
+.choice .rowTitle { font-weight: 600; }
+
+/* What an assistant may change, in groups: a small quiet heading over each group's boxes. */
+.areas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.areas > legend { margin-bottom: 10px; padding: 0; }
+.areas > :is(.note, legend) { grid-column: 1 / -1; }
+.areaGroup { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.areaGroup :global(.checkbox) { font-size: var(--fs-13); }
+.areaGroup :global(.checkbox)[data-off] { color: var(--text-3); cursor: not-allowed; }
+.groupLabel { font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+
+/* A save under a form: the button, and a quiet word on what's waiting. */
+.save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.saveNote { font-size: var(--fs-12); color: var(--quiet); }
+
+/* A form in a panel: its parts in one column, fields two across, switches on hairlines under a hairline. */
+.form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; margin: 0; }
+/* A section inside a panel's column (the team's assistants under the company's switches) keeps a section's distance above it. */
+.form > :global(.sec):not(:first-child) { margin-top: 10px; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+.fields > .full { grid-column: 1 / -1; }
+.lines { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--row-divider); }
+/* In a dialog its footer's line closes them. */
+:global(.dialog) .lines > .switchLine:last-child { border-bottom: 0; }
+/* Remove, beside Cancel and Save: red words, no box. */
+.dangerText:global(.btn) { color: var(--danger); }
+.dangerText:global(.btn):hover { background: var(--danger-tint); color: var(--danger); }
+
+/* Dropping a file: a dashed hairline with quiet words, the ask in ink. */
+.drop:global(.dropzone) { gap: 4px; padding: 20px 16px; border: 1px dashed var(--border-strong); border-radius: 10px; background: transparent; color: var(--text-3); font-size: var(--fs-12); }
+.drop:global(.dropzone) > strong { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.drop:global(.dropzone):is(:hover, [data-over]) { border-color: var(--green); background: var(--green-tint); color: var(--text-2); }
+
+/* What each file in an upload came to: a green tick, or what went wrong in red. */
+.result { min-height: 40px; align-items: flex-start; }
+.result > svg { flex: none; margin-top: 2px; color: var(--green-dark); }
+.result:not([data-ok]) { color: var(--danger); }
+.result:not([data-ok]) > svg { color: var(--danger); }
+.result strong { font-weight: 600; }
+
+@media (max-width: 900px) {
+  .text { font-size: var(--fs-15); }
+  .note { font-size: var(--fs-14); }
+  :global(.settings-body) .note { font-size: var(--fs-13); }
+  /* Small buttons in callouts and under a step: the shared 44px phone height, with room either side. */
+  :is(.actions, .step) > :global(.btn-sm) { padding: 0 14px; font-size: var(--fs-14); }
+  /* A box to tick in a callout or a form (I switched my app to Live, development keys): its row is the 44px target. */
+  :is(.calloutBody, .form) > :global(.checkbox) { min-height: 44px; align-items: center; }
+  /* A dialog's footer with Remove: on a phone its buttons share the row, with no gap held open between them. */
+  :global(.form-actions):has(> .dangerText) > :global(.spacer) { display: none; }
+  .steps { gap: 16px; font-size: var(--fs-15); }
+  .steps > li { min-height: 26px; padding-left: 38px; }
+  .steps > li::before { width: 26px; height: 26px; font-size: var(--fs-13); }
+  .codeRow { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 0; row-gap: 2px; }
+  .codeRow .codeLabel { grid-column: 1 / -1; font-size: var(--fs-12); }
+  .codeValue { font-size: var(--fs-13); }
+  .copy { height: 44px; min-width: 44px; padding: 0 10px; font-size: var(--fs-13); }
+  .codeBlock > .copy { top: 0; right: 0; }
+  .fold > summary { min-height: 44px; font-size: var(--fs-14); }
+  .foldBody { padding-left: 0; }
+  /* The switch on the right, by the label's first line however long the words under it run. */
+  .switchLine { flex-direction: row-reverse; align-items: flex-start; min-height: 48px; padding: 11px 0; }
+  .switchLine:not(:has(.hint)) { align-items: center; }
+  .switchLabel { font-size: var(--fs-15); }
+  .hint { font-size: var(--fs-13); }
+  .row { min-height: 60px; font-size: var(--fs-15); }
+  .rowSub, .rowProblem { font-size: var(--fs-13); }
+  :is(.rowEnd, .statusLine) :global(.btn) { height: 44px; padding: 0 10px; font-size: var(--fs-14); }
+  .rowEnd :global(.btn-icon) { width: 44px; }
+  .choice { min-height: 52px; font-size: var(--fs-15); }
+  .label { font-size: var(--fs-15); }
+  .fields { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .areas { grid-template-columns: minmax(0, 1fr); }
+  .areaGroup { gap: 0; }
+  .areaGroup :global(.checkbox) { min-height: 44px; align-items: center; font-size: var(--fs-15); }
+  .compact > .row { min-height: 48px; }
+  .drop:global(.dropzone) { padding: 24px 16px; font-size: var(--fs-13); }
+  .drop:global(.dropzone) > strong { font-size: var(--fs-15); }
+  /* On a grouped page each section is an inset card: its parts keep the panel's gaps (doubled classes outrank the kit's margins). */
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) > :not(.never, dialog) { margin-block: 0; }
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) { padding-block: 14px; }
+  /* Facts, related rows or an inbox list at a card's edge draw their own rows: no padding between them and the edge. */
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body):has(> :is(:global(.facts), :global(.rel), :global(.il)):first-child) { padding-top: 0; }
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body):has(> :is(:global(.facts), :global(.rel), :global(.il)):last-child) { padding-bottom: 0; }
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) > :is(.rows, .switchLine, .codeRow):first-child { margin-top: -14px; }
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) > :is(.rows, .switchLine, .codeRow):last-child { margin-bottom: -14px; }
+  :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) > .rows:last-child > :last-child, :global(.m-grouped) .panel.panel:not(:global(.sec-flush)) > :global(.sec-body) > :is(.switchLine, .codeRow):last-child { border-bottom: 0; }
+  /* A long name wraps on a phone rather than losing its end. */
+  .rowTitle > span:first-child { white-space: normal; overflow-wrap: break-word; }
+  /*
+   * Two worded buttons (Access and Disconnect, Change Page and Check again) don't fit beside the name:
+   * they go on their own line under the words, starting where the words start, not pushed to the edge.
+   */
+  .row:has(> .rowLead):has(> .rowEnd > :global(.btn):not(:global(.btn-icon)) ~ :global(.btn):not(:global(.btn-icon))) {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 0;
+  }
+  .row:has(> .rowLead):has(> .rowEnd > :global(.btn):not(:global(.btn-icon)) ~ :global(.btn):not(:global(.btn-icon))) > .rowEnd {
+    grid-column: 2; justify-content: flex-start; gap: 4px; margin: 0 0 -8px -10px;
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * Metrics: how the business is running beyond the money (quotes and lead sources, visits and
+ * Metrics (Page-Metrics.dc.html): how the business is running beyond the money (quotes and lead sources, visits and
  * requests, the team's hours, and clients won and lapsed) over one date range. Money lives on
  * Finance. Owners and office staff with "Finance and metrics".
  */
@@ -8,6 +8,7 @@ import { marketingOn } from "@crewtavo/core/marketing";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
+import { RowPerson } from "@/components/ui/InboxList";
 import { NoAccess } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { supabase } from "@/lib/api";
@@ -16,9 +17,10 @@ import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { CATEGORY_LABELS } from "../field/fieldData";
 import { leadSource } from "../marketing/website";
-import { HBars, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart } from "../finance/Charts";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
+import { HBars, ReportCard, ReportTable, reportStyles as styles, TrendChart } from "../finance/Charts";
 import { bucketize, bucketsFor, hoursBetween, type Range } from "../finance/range";
-import { hrs, memberName, pct, plural, RangeHeader, sum, TabBody, timeRates, useRangeParams, useTeam } from "../finance/shared";
+import { hrs, memberName, pct, plural, RangeHeader, sum, TabBody, TabPanel, timeRates, useRangeParams, useTeam } from "../finance/shared";
 
 const TABS = [
   { key: "sales", label: "Sales" },
@@ -37,12 +39,12 @@ export function MetricsPage() {
   return (
     <>
       <RangeHeader title="Metrics" state={state} tabs={TABS} tab={tab} />
-      <div key={tab} className="stack" style={{ gap: 28, animation: "page-in var(--dur-slow) var(--ease-out)" }} role="tabpanel">
+      <TabPanel tab={tab}>
         {tab === "sales" && <Sales range={range} />}
         {tab === "work" && <Work range={range} />}
         {tab === "team" && <Team range={range} />}
         {tab === "clients" && <Clients range={range} />}
-      </div>
+      </TabPanel>
     </>
   );
 }
@@ -103,54 +105,61 @@ function Sales({ range }: { range: Range }) {
         for (const q of lost) reasons.set(q.lost_reason?.trim() || "No reason given", (reasons.get(q.lost_reason?.trim() || "No reason given") ?? 0) + 1);
         return (
           <>
-            <KpiStrip label="Sales this period">
-              <Kpi label="Quotes sent" value={formatNumber(d.quotes.length)} hint={formatMoney(sum(d.quotes, (q) => Number(q.total)))} />
-              <Kpi label="Won" value={formatNumber(won.length)} hint={formatMoney(sum(won, (q) => Number(q.total)))} />
-              <Kpi label="Conversion" value={pct(won.length, d.quotes.length)} hint={`${lost.length} ${statusText("quote", "lost").toLowerCase()} · ${open.length} ${statusText("quote", "sent").toLowerCase()}`} />
-              <Kpi label="Average quote" value={d.quotes.length ? formatMoney(sum(d.quotes, (q) => Number(q.total)) / d.quotes.length) : "—"} />
-              <Kpi label="Days to approval" value={avgDays === null ? "—" : formatNumber(avgDays, 1)} />
-              <Kpi label={statusText("quote", "sent")} value={formatMoney(sum(open, (q) => Number(q.total)))} hint={<Link to="/pipeline">Open pipeline</Link>} />
-            </KpiStrip>
-            <div className="report-grid">
-              <ReportCard title="Quoted value" value={formatMoney(sum(d.quotes, (q) => Number(q.total)))} footer={plural(d.quotes.length, "quote") + " sent"}>
-                <TrendChart buckets={buckets} values={bucketize(d.quotes, buckets, (q) => q.sent_at, (q) => Number(q.total), company.timezone)} format={formatMoney} label="Quote value sent over time" color="var(--quote)" height={200} />
+            <StatStrip label="Sales this period">
+              <Stat label="Quotes sent" value={formatNumber(d.quotes.length)} note={formatMoney(sum(d.quotes, (q) => Number(q.total)))} />
+              <Stat label="Won" value={formatNumber(won.length)} note={formatMoney(sum(won, (q) => Number(q.total)))} />
+              <Stat label="Conversion" value={d.quotes.length ? pct(won.length, d.quotes.length) : "0%"} note={`${lost.length} ${statusText("quote", "lost").toLowerCase()} · ${open.length} waiting`} />
+              <Stat label="Average quote" value={formatMoney(d.quotes.length ? sum(d.quotes, (q) => Number(q.total)) / d.quotes.length : 0)} />
+              <Stat label="Days to approval" value={avgDays === null ? "None yet" : formatNumber(avgDays, 1)} note={avgDays === null ? "No quotes approved" : "average"} />
+              <Stat label={statusText("quote", "sent")} value={formatNumber(open.length)} note={<>{formatMoney(sum(open, (q) => Number(q.total)))} · <Link to="/pipeline">Open pipeline</Link></>} />
+            </StatStrip>
+            <div className={styles.cols2}>
+              <ReportCard title="Quoted value" count={plural(d.quotes.length, "quote") + " sent"}>
+                <TrendChart buckets={buckets} values={bucketize(d.quotes, buckets, (q) => q.sent_at, (q) => Number(q.total), company.timezone)} format={formatMoney} label="Quote value sent over time" height={150} />
               </ReportCard>
-              <ReportCard title="Why quotes were lost" subtitle={plural(lost.length, "lost quote")}>
-                <HBars rows={[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value, color: "var(--danger)" }))} format={(n) => formatNumber(n)} empty="No lost quotes in this period" />
+              <ReportCard title="Why quotes were lost" count={lost.length || undefined}>
+                <HBars
+                  rows={[...reasons].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value, quiet: label === "No reason given" }))}
+                  format={(n) => formatNumber(n)}
+                  color="var(--quote)"
+                  empty="No lost quotes in this period"
+                />
               </ReportCard>
             </div>
-            <ReportCard title="By salesperson">
-              <ReportTable
-                rows={[...people.values()]}
-                rowKey={(r) => r.id}
-                filename={`sales-by-person-${range.from}-to-${range.to}`}
-                initialSort={{ key: "value", desc: true }}
-                empty="No quotes sent in this period"
-                columns={[
-                  { key: "name", label: "Salesperson", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
-                  { key: "sent", label: "Sent", num: true, value: (r) => r.sent },
-                  { key: "won", label: "Won", num: true, value: (r) => r.won },
-                  { key: "rate", label: "Conversion", num: true, value: (r) => (r.sent ? Math.round((r.won / r.sent) * 100) : 0), render: (r) => pct(r.won, r.sent) },
-                  { key: "value", label: "Won value", num: true, value: (r) => r.value, render: (r) => formatMoney(r.value) },
-                ]}
-              />
-            </ReportCard>
-            <ReportCard title="Lead sources">
-              <ReportTable
-                rows={[...sources.values()]}
-                rowKey={(r) => r.source}
-                filename={`lead-sources-${range.from}-to-${range.to}`}
-                initialSort={{ key: "value", desc: true }}
-                empty="No new clients or quotes in this period"
-                columns={[
-                  { key: "source", label: "Source", value: (r) => r.source, render: (r) => <strong>{r.source}</strong> },
-                  { key: "clients", label: "New clients", num: true, value: (r) => r.clients },
-                  { key: "quotes", label: "Quotes sent", num: true, value: (r) => r.quotes },
-                  { key: "won", label: "Won", num: true, value: (r) => r.won },
-                  { key: "value", label: "Won value", num: true, value: (r) => r.value, render: (r) => formatMoney(r.value) },
-                ]}
-              />
-            </ReportCard>
+            <div className={styles.cols2}>
+              <ReportCard title="By salesperson">
+                <ReportTable
+                  rows={[...people.values()]}
+                  rowKey={(r) => r.id}
+                  filename={`sales-by-person-${range.from}-to-${range.to}`}
+                  initialSort={{ key: "value", desc: true }}
+                  empty="No quotes sent in this period"
+                  columns={[
+                    { key: "name", label: "Salesperson", value: (r) => r.name, render: (r) => <span className={styles.who}><RowPerson name={r.id === "none" ? null : r.name} empty="Unassigned" />{r.name}</span> },
+                    { key: "sent", label: "Sent", num: true, value: (r) => r.sent },
+                    { key: "won", label: "Won", num: true, value: (r) => r.won },
+                    { key: "rate", label: "Conversion", num: true, value: (r) => (r.sent ? Math.round((r.won / r.sent) * 100) : 0), render: (r) => pct(r.won, r.sent) },
+                    { key: "value", label: "Won value", num: true, value: (r) => r.value, render: (r) => formatMoney(r.value) },
+                  ]}
+                />
+              </ReportCard>
+              <ReportCard title="Lead sources">
+                <ReportTable
+                  rows={[...sources.values()]}
+                  rowKey={(r) => r.source}
+                  filename={`lead-sources-${range.from}-to-${range.to}`}
+                  initialSort={{ key: "value", desc: true }}
+                  empty="No new clients or quotes in this period"
+                  columns={[
+                    { key: "source", label: "Source", value: (r) => r.source },
+                    { key: "clients", label: "New clients", num: true, value: (r) => r.clients },
+                    { key: "quotes", label: "Sent", num: true, value: (r) => r.quotes },
+                    { key: "won", label: "Won", num: true, value: (r) => r.won },
+                    { key: "value", label: "Won value", num: true, value: (r) => r.value, render: (r) => formatMoney(r.value) },
+                  ]}
+                />
+              </ReportCard>
+            </div>
           </>
         );
       }}
@@ -186,17 +195,17 @@ function Work({ range }: { range: Range }) {
         const perDay = d.visits.length / range.days;
         return (
           <>
-            <KpiStrip label="Work this period">
-              <Kpi label="Visits completed" value={formatNumber(d.visits.length)} hint={perDay >= 1 ? `${formatNumber(perDay, 1)} per day` : `${formatNumber(perDay * 7, 1)} per week`} />
-              <Kpi label="Requests received" value={formatNumber(d.requests.length)} hint={`${pct(converted, d.requests.length)} quoted or booked`} />
-              <Kpi label="Jobs completed" value={formatNumber(d.jobs)} hint={can(session, "invoices") ? <Link to="/finance?tab=profit">Profit by job</Link> : undefined} />
-            </KpiStrip>
-            <div className="report-grid">
-              <ReportCard title="Visits completed" value={formatNumber(d.visits.length)}>
-                <TrendChart buckets={buckets} values={bucketize(d.visits, buckets, (v) => v.completed_at, () => 1, company.timezone)} format={(n) => formatNumber(n)} label="Visits completed over time" color="var(--job)" height={200} />
+            <StatStrip label="Work this period">
+              <Stat label="Visits completed" value={formatNumber(d.visits.length)} note={perDay >= 1 ? `${formatNumber(perDay, 1)} per day` : `${formatNumber(perDay * 7, 1)} per week`} />
+              <Stat label="Requests received" value={formatNumber(d.requests.length)} note={d.requests.length ? `${pct(converted, d.requests.length)} quoted or booked` : "None quoted or booked"} />
+              <Stat label="Jobs completed" value={formatNumber(d.jobs)} note={can(session, "invoices") ? <Link to="/finance?tab=profit">Profit by job</Link> : undefined} />
+            </StatStrip>
+            <div className={styles.cols2}>
+              <ReportCard title="Visits completed" count={plural(d.visits.length, "visit")}>
+                <TrendChart buckets={buckets} values={bucketize(d.visits, buckets, (v) => v.completed_at, () => 1, company.timezone)} format={(n) => plural(n, "visit")} label="Visits completed over time" height={150} />
               </ReportCard>
-              <ReportCard title="Requests received" value={formatNumber(d.requests.length)} footer={`${formatNumber(converted)} quoted or booked`}>
-                <TrendChart buckets={buckets} values={bucketize(d.requests, buckets, (r) => r.created_at, () => 1, company.timezone)} format={(n) => formatNumber(n)} label="Requests received over time" color="var(--req)" height={200} />
+              <ReportCard title="Requests received" count={`${formatNumber(converted)} of ${formatNumber(d.requests.length)} quoted or booked`}>
+                <TrendChart buckets={buckets} values={bucketize(d.requests, buckets, (r) => r.created_at, () => 1, company.timezone)} format={(n) => plural(n, "request")} label="Requests received over time" height={150} />
               </ReportCard>
             </div>
           </>
@@ -252,21 +261,21 @@ function Team({ range }: { range: Range }) {
         for (const e of entries) categories.set(e.category, (categories.get(e.category) ?? 0) + hoursBetween(e.started_at, e.ended_at));
         return (
           <>
-            <KpiStrip label="Team this period">
-              <Kpi label="Paid hours" value={hrs(total)} hint={plural(people.size, "person", "people")} />
-              <Kpi label="On visits" value={pct(onVisits, total)} hint={hrs(onVisits)} />
-              {can(session, "job_costs") && <Kpi label="Labor cost" value={formatMoney(sum([...people.values()], (p) => p.cost))} />}
-              <Kpi label="Awaiting approval" value={hrs(pending)} hint={pending ? <Link to="/timesheets">Review timesheets</Link> : "All caught up"} />
-            </KpiStrip>
-            <div className="report-grid">
-              <ReportCard title="Hours worked" value={hrs(total)}>
-                <TrendChart buckets={buckets} values={bucketize(entries, buckets, (e) => e.started_at, (e) => e.paid, company.timezone)} format={(n) => hrs(n)} label="Hours worked over time" color="var(--ink)" height={200} />
+            <StatStrip label="Team this period">
+              <Stat label="Paid hours" value={hrs(total)} note={plural(people.size, "person", "people")} />
+              <Stat label="On visits" value={total ? pct(onVisits, total) : "0%"} note={hrs(onVisits)} />
+              {can(session, "job_costs") && <Stat label="Labor cost" value={formatMoney(sum([...people.values()], (p) => p.cost))} />}
+              <Stat label="Awaiting approval" value={hrs(pending)} note={pending ? <Link to="/timesheets">Review timesheets</Link> : "All caught up"} />
+            </StatStrip>
+            <div className={styles.cols2}>
+              <ReportCard title="Hours worked" count={hrs(total)}>
+                <TrendChart buckets={buckets} values={bucketize(entries, buckets, (e) => e.started_at, (e) => e.paid, company.timezone)} format={(n) => hrs(n)} label="Hours worked over time" height={150} />
               </ReportCard>
-              <ReportCard title="Where the time went">
+              <ReportCard title="Where the time went" count={categories.size ? plural(categories.size, "kind") : undefined}>
                 <HBars rows={[...categories].sort((a, b) => b[1] - a[1]).map(([c, value]) => ({ key: c, label: CATEGORY_LABELS[c as keyof typeof CATEGORY_LABELS] ?? c, value }))} format={hrs} empty="No time tracked in this period" />
               </ReportCard>
             </div>
-            <ReportCard title="By team member">
+            <ReportCard title="By team member" count={people.size ? plural(people.size, "person", "people") : undefined}>
               <ReportTable
                 rows={[...people.values()]}
                 rowKey={(r) => r.id}
@@ -274,12 +283,12 @@ function Team({ range }: { range: Range }) {
                 initialSort={{ key: "total", desc: true }}
                 empty="No time tracked in this period"
                 columns={[
-                  { key: "name", label: "Name", value: (r) => r.name, render: (r) => <span className="row" style={{ gap: 6 }}><strong>{r.name}</strong>{r.running && <StatusPill label="Clocked in" tone="good" />}</span> },
+                  { key: "name", label: "Name", value: (r) => r.name, render: (r) => <span className={styles.who}><RowPerson name={r.name} />{r.name}{r.running && <StatusPill label="Clocked in" tone="good" />}</span> },
                   { key: "total", label: "Total", num: true, value: (r) => Math.round(r.total * 100) / 100, render: (r) => hrs(r.total) },
                   { key: "visit", label: "On visits", num: true, value: (r) => Math.round(r.visit * 100) / 100, render: (r) => hrs(r.visit) },
                   { key: "drive", label: "Driving", num: true, value: (r) => Math.round(r.drive * 100) / 100, render: (r) => hrs(r.drive) },
                   { key: "other", label: "Other", num: true, value: (r) => Math.round(r.other * 100) / 100, render: (r) => hrs(r.other) },
-                  { key: "approved", label: "Approved", num: true, value: (r) => (r.total ? Math.round((r.approved / r.total) * 100) : 0), render: (r) => pct(r.approved, r.total) },
+                  { key: "approved", label: "Approved", num: true, value: (r) => (r.total ? Math.round((r.approved / r.total) * 100) : 0), render: (r) => (r.total ? pct(r.approved, r.total) : "0%") },
                   { key: "cost", label: "Labor cost", num: true, value: (r) => Math.round(r.cost * 100) / 100, render: (r) => formatMoney(r.cost) },
                 ]}
               />
@@ -335,30 +344,31 @@ function Clients({ range }: { range: Range }) {
         for (const c of d.created) sources.set(leadSource(c.lead_source, c.requests), (sources.get(leadSource(c.lead_source, c.requests)) ?? 0) + 1);
         return (
           <>
-            <KpiStrip label="Clients">
-              <Kpi label="New clients" value={formatNumber(d.created.length)} hint={`${formatNumber((d.created.length / range.days) * 30, 1)} per month`} />
-              <Kpi label="Active clients" value={formatNumber(d.active)} />
-              <Kpi label="Leads" value={formatNumber(d.leads)} hint={<Link to="/clients?status=lead">View leads</Link>} />
-              <Kpi label="No work in 12+ months" value={formatNumber(d.lapsed.length)} />
+            <StatStrip label="Clients">
+              <Stat label="New clients" value={formatNumber(d.created.length)} note={`${formatNumber((d.created.length / range.days) * 30, 1)} per month`} />
+              <Stat label="Active clients" value={formatNumber(d.active)} />
+              <Stat label="Leads" value={formatNumber(d.leads)} note={<Link to="/clients?status=lead">View leads</Link>} />
+              <Stat label="No work in 12+ months" value={formatNumber(d.lapsed.length)} note="Past clients to win back" />
               {d.referred && (
-                <Kpi
+                <Stat
                   label="Referrals"
                   value={formatNumber(d.referred.leads)}
-                  hint={<>{[`${formatNumber(d.referred.won)} won`, d.referred.revenue === null ? null : formatMoney(d.referred.revenue)].filter(Boolean).join(" · ")} · <Link to="/marketing?tab=referrals">View referrals</Link></>}
+                  note={<>{[`${formatNumber(d.referred.won)} won`, d.referred.revenue === null ? null : formatMoney(d.referred.revenue)].filter(Boolean).join(" · ")} · <Link to="/marketing?tab=referrals">View referrals</Link></>}
                 />
               )}
-            </KpiStrip>
-            <div className="report-grid">
-              <ReportCard title="New clients" value={formatNumber(d.created.length)}>
-                <TrendChart buckets={buckets} values={bucketize(d.created, buckets, (c) => c.created_at, () => 1, company.timezone)} format={(n) => formatNumber(n)} label="New clients over time" color="var(--req)" height={200} />
+            </StatStrip>
+            <div className={styles.cols2}>
+              <ReportCard title="New clients" count={plural(d.created.length, "client")}>
+                <TrendChart buckets={buckets} values={bucketize(d.created, buckets, (c) => c.created_at, () => 1, company.timezone)} format={(n) => plural(n, "client")} label="New clients over time" height={150} />
               </ReportCard>
-              <ReportCard title="How they found you">
+              <ReportCard title="How they found you" count={sources.size ? plural(sources.size, "source") : undefined}>
                 <HBars rows={[...sources].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ key: label, label, value }))} format={(n) => formatNumber(n)} empty="No new clients in this period" />
               </ReportCard>
             </div>
             <ReportCard
               title="No work in 12+ months"
-              action={d.lapsed.length > 0 && marketingOn(company.settings) && <Link to="/marketing" className="btn btn-ghost btn-sm"><Icon name="marketing" size={14} />Start a campaign</Link>}
+              count={d.lapsed.length || undefined}
+              action={d.lapsed.length > 0 && marketingOn(company.settings) && <Link to="/marketing"><Icon name="marketing" size={14} />Start a campaign</Link>}
             >
               <ReportTable
                 rows={d.lapsed}
@@ -368,7 +378,7 @@ function Clients({ range }: { range: Range }) {
                 empty="No clients to win back"
                 columns={[
                   { key: "name", label: "Client", value: (r) => r.name, render: (r) => <Link className="cell-link" to={`/clients/${r.id}`}>{r.name}</Link> },
-                  { key: "email", label: "Email", value: (r) => r.email ?? "", render: (r) => r.email ? <span className="row" style={{ gap: 6 }}>{r.email}{r.optOut && <StatusPill label="Unsubscribed" />}</span> : <span className="muted">—</span> },
+                  { key: "email", label: "Email", value: (r) => r.email ?? "", render: (r) => (r.email ? <span className={styles.who}>{r.email}{r.optOut && <StatusPill label="Unsubscribed" tone="muted" />}</span> : null) },
                   { key: "last", label: "Last activity", value: (r) => r.last.slice(0, 10), render: (r) => formatDate(r.last) },
                 ]}
               />

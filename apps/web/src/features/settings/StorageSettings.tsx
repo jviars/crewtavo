@@ -23,10 +23,10 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
+import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, SkeletonText } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton, SkeletonText } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { useSession } from "@/lib/session";
 import { useCompanyRoles } from "./roles";
@@ -35,7 +35,10 @@ import {
   setsAllowances, setStorageLimit, shareOf, usd, useFileSettings, useStorageReport,
   type AllowanceTarget, type StoragePerson, type StorageReport,
 } from "./storage";
+import p from "./Prefs.module.css";
+import { SaveBar, SwitchRow } from "./SettingsKit";
 import styles from "./StorageSettings.module.css";
+import { Select } from "@/components/ui/Select";
 
 const count = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 /** What the company's limit turns away once storage is full (STORAGE_FIELD_FOLDERS never are). */
@@ -45,12 +48,12 @@ const percent = (share: number) => `${Math.floor(share * 100)}%`;
 export function StorageSettings() {
   const session = useSession();
   const report = useStorageReport();
-  if (report.isPending) return <CardSkeleton lines={5} />;
-  if (!report.data) return <div className="card"><ErrorState error={report.error} onRetry={() => report.refetch()} /></div>;
+  if (report.isPending) return <Loading label="Loading storage"><div className="settings-body"><SectionSkeleton rows={2} /><SectionSkeleton rows={4} /></div></Loading>;
+  if (!report.data) return <ErrorState error={report.error} onRetry={() => report.refetch()} />;
   const o = report.data;
   const owner = setsAllowances(session);
   return (
-    <div className={`stack ${styles.page}`}>
+    <>
       <Usage o={o} />
       {session.config.platform === "railway" && <BucketNote o={o} />}
       <LimitCard key={`${o.limit_mode}:${o.limit_bytes ?? ""}:${o.limit_dollars ?? ""}`} o={o} />
@@ -59,7 +62,7 @@ export function StorageSettings() {
       {owner && <Roles o={o} />}
       {o.by_area && o.by_area.length > 0 && <Areas areas={o.by_area} />}
       <HowItWorks />
-    </div>
+    </>
   );
 }
 
@@ -78,17 +81,11 @@ function Usage({ o }: { o: StorageReport }) {
   const over = o.limit_bytes !== null && o.used_bytes > o.limit_bytes;
   const described = `${companyLine(o)}${trash ? `, ${formatBytes(trash)} of it in the Trash` : ""}`;
   return (
-    <section className="card card-pad stack" aria-labelledby="storage-usage">
-      <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-        <div className="stack-sm" style={{ gap: 2 }}>
-          <h2 id="storage-usage" className={styles.title}>Storage</h2>
-          <span className="muted small">Every photo and file in Crewtavo, the Trash included.</span>
-        </div>
-        {o.railway?.backend && <span className={`chip ${o.railway.backend === "bucket" ? "chip-blue" : ""}`}>{o.railway.backend === "bucket" ? "Bucket" : "Volume"}</span>}
-      </div>
-      <div className="stack-sm" style={{ gap: 2 }}>
-        <span className="hero-number">{formatBytes(o.used_bytes)}</span>
-        <span className="muted small">
+    <Section level={3} title="Space used" action={o.railway?.backend ? <span className={styles.where}>{o.railway.backend === "bucket" ? "In a Railway bucket" : "On a Railway volume"}</span> : undefined}>
+      <p className="set-note">Every photo and file in Crewtavo, the Trash included.</p>
+      <div className={styles.figure}>
+        <span className={styles.big}>{formatBytes(o.used_bytes)}</span>
+        <span className={styles.of}>
           {o.limit_bytes ? `of the ${formatBytes(o.limit_bytes)} limit` : "No limit"}
           {share !== null ? ` (${percent(share)})` : ""} · {count(o.files, "file")}
         </span>
@@ -103,19 +100,19 @@ function Usage({ o }: { o: StorageReport }) {
         <span><i className={styles.keyTrash} />In the Trash {formatBytes(trash)}</span>
       </div>
       {level !== "ok" && share !== null && <FullNote level={level} share={share} trash={trash} />}
-      {o.railway?.pricePerGbMonth != null && <span className="small">{costLine(o, o.railway.pricePerGbMonth)}</span>}
-    </section>
+      {o.railway?.pricePerGbMonth != null && <p className={`set-note ${styles.gap}`}>{costLine(o, o.railway.pricePerGbMonth)}</p>}
+    </Section>
   );
 }
 
 function FullNote({ level, share, trash }: { level: "warning" | "danger" | "full"; share: number; trash: number }) {
   const title = level === "full" ? "Storage is full" : `Storage is ${percent(share)} full`;
   return (
-    <div className={`callout ${level === "warning" ? "callout-warning" : "callout-danger"}`} role={level === "full" ? "alert" : undefined}>
-      <Icon name="alert" size={18} />
+    <div className={`callout ${level === "warning" ? "callout-warning" : "callout-danger"} ${styles.gap}`} role={level === "full" ? "alert" : undefined}>
+      <Icon name="alert" size={16} />
       <div className="grow">
         <div>{title}</div>
-        <div style={{ fontWeight: 400 }}>
+        <div>
           {level === "full" ? `${REFUSED[0].toUpperCase()}${REFUSED.slice(1)} are turned away until there's room. ` : `Once it's full, ${REFUSED} are turned away. `}
           Visit photos, quote photos, receipts and sub paperwork still go through, so crews can finish their jobs. Raise the limit below
           {trash > 0 ? <>, or <Link to="/drive/trash">empty the Trash</Link> to free {formatBytes(trash)}</> : null}.
@@ -247,34 +244,31 @@ function LimitCard({ o }: { o: StorageReport }) {
   const offerDollars = inDollars || o.limit_mode === "dollars";
 
   return (
-    <section className="card card-pad stack" aria-labelledby="storage-limit">
-      <div className="stack-sm" style={{ gap: 2 }}>
-        <h2 id="storage-limit" className={styles.title}>Limit</h2>
-        <span className="muted small">Owners and admins get a bell and an email when files reach 80% and 95% of it.</span>
-      </div>
-      <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (changed) save.mutate(mode); }}>
-        <fieldset className={styles.choices}>
+    <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (changed) save.mutate(mode); }}>
+      <Section level={3} title="Limit">
+        <p className="set-note">Owners and admins get a bell and an email when files reach 80% and 95% of it.</p>
+        <fieldset className={`${p.choices} ${styles.gap}`}>
           <legend className="sr-only">Storage limit</legend>
-          <label className={styles.choice}>
+          <label className={p.choice}>
             <input type="radio" name="storage-limit" checked={mode === "default"} onChange={() => pick("default")} />
-            <span className={styles.choiceBody}>
-              <strong>Default{o.default_bytes ? ` (${formatBytes(o.default_bytes)}${inDollars && price ? `, ${monthly(o.default_bytes, price)}` : ""})` : ""}</strong>
-              <span className="muted small">{defaultNote(o)}</span>
+            <span className={p.rowText}>
+              Default{o.default_bytes ? ` (${formatBytes(o.default_bytes)}${inDollars && price ? `, ${monthly(o.default_bytes, price)}` : ""})` : ""}
+              <span className={p.hint}>{defaultNote(o)}</span>
             </span>
           </label>
           {offerDollars && (
-            <label className={styles.choice}>
+            <label className={p.choice}>
               <input type="radio" name="storage-limit" checked={mode === "dollars"} onChange={() => pick("dollars")} />
-              <span className={styles.choiceBody}>
-                <strong>A monthly amount</strong>
+              <span className={p.rowText}>
+                A monthly amount
                 {inDollars ? (
                   <>
-                    <span className="muted small">Files can cost up to this much a month on Railway.</span>
+                    <span className={p.hint}>Files can cost up to this much a month on Railway.</span>
                     <DollarInput value={amount} invalid={mode === "dollars" && Boolean(typed && "problem" in typed)} onFocus={() => mode !== "dollars" && pick("dollars")} onChange={(v) => { setAmount(v); save.reset(); }} />
                   </>
                 ) : (
                   // Set while this Crewtavo ran on Railway: it holds at the size it came to there.
-                  <span className="muted small">
+                  <span className={p.hint}>
                     Set as {usd(o.limit_dollars ?? 0)} a month while Crewtavo ran on Railway{o.limit_bytes ? `, which holds files to ${formatBytes(o.limit_bytes)} here` : ""}. Choose Custom to set a size instead.
                   </span>
                 )}
@@ -282,22 +276,22 @@ function LimitCard({ o }: { o: StorageReport }) {
             </label>
           )}
           {offerSize && (
-            <label className={styles.choice}>
+            <label className={p.choice}>
               <input type="radio" name="storage-limit" checked={mode === "custom"} onChange={() => pick("custom")} />
-              <span className={styles.choiceBody}>
-                <strong>{inDollars ? "A size" : "Custom"}</strong>
-                <span className="muted small">
+              <span className={p.rowText}>
+                {inDollars ? "A size" : "Custom"}
+                <span className={p.hint}>
                   {inDollars ? `Set before limits were in dollars${price && o.limit_bytes ? `: ${monthly(o.limit_bytes, price)} ${whereNow(o)}` : ""}. A monthly amount stays the same if files move between the volume and a bucket.` : "A size of your own."}
                 </span>
                 <GbInput value={size} label="Custom storage limit in GB" invalid={mode === "custom" && Boolean(parsed && "problem" in parsed)} onFocus={() => mode !== "custom" && pick("custom")} onChange={(v) => { setSize(v); save.reset(); }} />
               </span>
             </label>
           )}
-          <label className={styles.choice}>
+          <label className={p.choice}>
             <input type="radio" name="storage-limit" checked={mode === "none"} onChange={() => pick("none")} />
-            <span className={styles.choiceBody}>
-              <strong>No limit</strong>
-              <span className="muted small">
+            <span className={p.rowText}>
+              No limit
+              <span className={p.hint}>
                 {/* Self-hosters see nothing about Railway. */}
                 Uploads are never turned away for space. {session.config.platform === "railway" ? `Keep an eye on Railway's bill${volume ? " and how full the volume is" : ""}.` : "Keep an eye on how much room your server has."}
               </span>
@@ -305,41 +299,42 @@ function LimitCard({ o }: { o: StorageReport }) {
           </label>
         </fieldset>
         {mode === "custom" && volume && bytes && bytes > volume ? (
-          <div className="callout callout-warning">
-            <Icon name="alert" size={18} />
+          <div className={`callout callout-warning ${styles.gap}`}>
+            <Icon name="alert" size={16} />
             <div className="grow">
               <div>That's more than the volume holds</div>
-              <div style={{ fontWeight: 400 }}>Your volume is {formatBytes(volume)}, and files stop when it's full whatever the limit. Grow the volume in Railway first.</div>
+              <div>Your volume is {formatBytes(volume)}, and files stop when it's full whatever the limit. Grow the volume in Railway first.</div>
             </div>
           </div>
         ) : null}
         {fromDollars && price ? (
           fromDollars.capped ? (
-            <div className="callout callout-warning">
-              <Icon name="alert" size={18} />
+            <div className={`callout callout-warning ${styles.gap}`}>
+              <Icon name="alert" size={16} />
               <div className="grow">
                 <div>That's more than the volume holds</div>
-                <div style={{ fontWeight: 400 }}>
+                <div>
                   Uploads stop at {formatBytes(fromDollars.bytes)}, {monthly(fromDollars.bytes, price)}, so the volume never fills. Make the volume bigger in Railway, or{" "}
                   <Link to="/settings?tab=hosting">move files to a bucket</Link>, where {usd(dollars!)} a month holds {formatBytes(storageLimitFromDollars(dollars!, STORAGE_PRICES.bucket))}.
                 </div>
               </div>
             </div>
           ) : (
-            <span className="small">
+            <span className={`set-note ${styles.line}`}>
               That's {formatBytes(fromDollars.bytes)} {whereNow(o)}, at {pricePerGb(price)} per GB a month. If files move between the volume and a bucket, it stays {usd(dollars!)} and the size
               follows.
             </span>
           )
         ) : null}
-        {price !== null && chosen && mode !== "dollars" ? <span className="small">At {formatBytes(chosen)}, storage would cost {monthly(chosen, price)} on Railway once files filled it.</span> : null}
+        {price !== null && chosen && mode !== "dollars" ? <span className={`set-note ${styles.line}`}>At {formatBytes(chosen)}, storage would cost {monthly(chosen, price)} on Railway once files filled it.</span> : null}
         <FormError error={save.error} />
-        <div className="row wrap">
-          <Button type="submit" variant="primary" disabled={!changed} loading={save.isPending}>Save limit</Button>
-          {changed && !save.isPending && <span className="muted small">Not saved yet</span>}
+        <div className={styles.gap}>
+          <SaveBar note={changed && !save.isPending ? "Not saved yet" : null}>
+            <Button type="submit" variant="primary" disabled={!changed} loading={save.isPending}>Save limit</Button>
+          </SaveBar>
         </div>
-      </form>
-    </section>
+      </Section>
+    </form>
   );
 }
 
@@ -356,10 +351,10 @@ function BucketNote({ o }: { o: StorageReport }) {
   if (bucketTipDismissed(session.company.settings)) return null;
   return (
     <div className="callout callout-info">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={16} />
       <div className="grow">
         <div>Photos and files would cost a tenth as much in a Railway bucket</div>
-        <div style={{ fontWeight: 400 }}>
+        <div>
           {pricePerGb(STORAGE_PRICES.bucket)} per GB a month instead of {pricePerGb(STORAGE_PRICES.volume)} on the volume, and a bucket has no size to outgrow. But Railway backs up volumes on its Pro plan, and
           never buckets. <Link to="/settings?tab=hosting">Files storage in Settings → Hosting</Link> moves them with one press, and can move them back.
         </div>
@@ -386,58 +381,49 @@ function FilesCard() {
     mutationFn: (change: Partial<FileSettings>) => saveFileSettings(session.company.id, change),
     onSuccess: () => refreshFileSettings(queryClient, session.company.id, session.refresh),
   });
-  if (settings.isPending) return <CardSkeleton lines={3} />;
-  if (!settings.data) return <div className="card"><ErrorState error={settings.error} onRetry={() => settings.refetch()} /></div>;
+  if (settings.isPending) return <SectionSkeleton rows={3} />;
+  if (!settings.data) return <ErrorState error={settings.error} onRetry={() => settings.refetch()} />;
   const f = settings.data;
   const busy = save.isPending;
   return (
-    <section className="card card-pad stack" aria-labelledby="storage-files">
-      <div className="stack-sm" style={{ gap: 2 }}>
-        <h2 id="storage-files" className={styles.title}>Photos and videos</h2>
-        <span className="muted small">For what's added to Drive and to Plans and files on clients' work.</span>
+    <Section level={3} title="Photos and videos">
+      <p className="set-note">For what's added to Drive and to Plans and files on clients' work.</p>
+      <div className={`set-rows ${styles.gap}`}>
+        <SwitchRow
+          label="Make photos smaller as they're added"
+          hint="Photos from a phone or camera are saved at 2560 pixels on their longest side: still sharp when you zoom in, and usually a fraction of the room. Plan sheets, PDFs and screenshots are never changed. Turn it off to keep every photo exactly as it was taken."
+          checked={f.shrinkPhotos}
+          disabled={busy}
+          onChange={(on) => save.mutate({ shrinkPhotos: on })}
+        />
       </div>
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={f.shrinkPhotos} disabled={busy} onChange={(e) => save.mutate({ shrinkPhotos: e.target.checked })} />
-          Make photos smaller as they're added
-        </label>
-        <span className="muted small">
-          Photos from a phone or camera are saved at 2560 pixels on their longest side: still sharp when you zoom in, and usually a fraction of the room. Plan sheets, PDFs and screenshots are never
-          changed. Turn it off to keep every photo exactly as it was taken.
-        </span>
-      </div>
-      <div className={`stack-sm ${styles.divided}`}>
-        <strong className="small">Videos</strong>
-        <fieldset className={styles.choices}>
-          <legend className="sr-only">Who can add videos</legend>
-          {(
-            [
-              ["everyone", "Everyone on the team", "Crews can add a video of a job to its Plans and files."],
-              ["office", "Only the office", "Owners, admins, office staff and estimators. Crew leads and field crew add photos instead."],
-            ] as Array<[VideoUploaders, string, string]>
-          ).map(([value, label, hint]) => (
-            <label key={value} className={styles.choice}>
-              <input type="radio" name="video-uploaders" checked={f.videos === value} disabled={busy} onChange={() => save.mutate({ videos: value })} />
-              <span className={styles.choiceBody}>
-                <strong>{label}</strong>
-                <span className="muted small">{hint}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        <label className="row wrap small" style={{ gap: 8 }}>
-          <span>Each video can be up to</span>
-          <Select className="input" style={{ width: "auto" }} value={f.videoMaxBytes} disabled={busy} onChange={(e) => save.mutate({ videoMaxBytes: Number(e.target.value) })}>
+      <h4 className={styles.subhead}>Videos</h4>
+      <fieldset className={p.choices}>
+        <legend className="sr-only">Who can add videos</legend>
+        {(
+          [
+            ["everyone", "Everyone on the team", "Crews can add a video of a job to its Plans and files."],
+            ["office", "Only the office", "Owners, admins, office staff and estimators. Crew leads and field crew add photos instead."],
+          ] as Array<[VideoUploaders, string, string]>
+        ).map(([value, label, hint]) => (
+          <label key={value} className={p.choice}>
+            <input type="radio" name="video-uploaders" checked={f.videos === value} disabled={busy} onChange={() => save.mutate({ videos: value })} />
+            <span className={p.rowText}>
+              {label}
+              <span className={p.hint}>{hint}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+      <div className={`set-grid ${styles.gap}`}>
+        <Field label="Each video can be up to" className="set-full" hint="A minute of phone video is often 100 MB or more, and each one is downloaded in full every time someone plays it. Other files can be up to 200 MB. Visit and quote photos are never turned away, so crews can always finish a job.">
+          <Select className="select set-narrow" value={f.videoMaxBytes} disabled={busy} onChange={(e) => save.mutate({ videoMaxBytes: Number(e.target.value) })}>
             {[...new Set([...VIDEO_SIZE_CHOICES, f.videoMaxBytes])].sort((a, b) => a - b).map((n) => <option key={n} value={n}>{formatBytes(n)}</option>)}
           </Select>
-        </label>
-        <span className="muted small">
-          A minute of phone video is often 100 MB or more, and each one is downloaded in full every time someone plays it. Other files can be up to 200 MB. Visit and quote photos are never
-          turned away, so crews can always finish a job.
-        </span>
+        </Field>
       </div>
       <FormError error={save.error} />
-    </section>
+    </Section>
   );
 }
 
@@ -452,62 +438,50 @@ function People({ people, owner }: { people: StoragePerson[]; owner: boolean }) 
   const [setting, setSetting] = useState<StoragePerson | null>(null);
   const rows = [...people].sort(byUse);
   return (
-    <section className="card" aria-labelledby="storage-people">
-      <div className="card-head"><h2 id="storage-people">Who's using it</h2></div>
-      <p className={`muted small ${styles.note}`}>
+    <Section level={3} title="Who's using it" count={rows.length}>
+      <p className="set-note">
         What each person added that's still in use. The Trash doesn't count toward anyone's own limit, so moving old files there frees their room.
         {owner ? " Owners are never limited." : " Owners set each person's limit."}
       </p>
-      <table className={`table table-stack ${styles.people}`}>
-        <caption className="sr-only">Storage by person</caption>
-        <thead>
-          <tr>
-            <th>Person</th>
-            <th className={`num ${styles.usedCol}`}>Using</th>
-            <th className={styles.limitCol}>Limit</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((p) => {
-            const limit = limitText(p);
-            const share = shareOf(p.used_bytes, p.limit_bytes);
-            const canSet = owner && limitable(p);
-            return (
-              <tr key={p.user_id ?? "crewtavo"}>
-                <td>
-                  <strong>{p.name}</strong>
-                  {p.role_name && <div className="muted small">{p.role_name}</div>}
-                </td>
-                <td className="num">
-                  <div className={styles.used}>
-                    <span className="tabular">{formatBytes(p.used_bytes)}<span className={styles.stacked}> in use</span></span>
-                    {share !== null && (
-                      <div className="progress" data-level={fullness(share)} role="img" aria-label={`${percent(share)} of ${p.name}'s limit`}>
-                        <span style={{ width: `${Math.min(100, share * 100)}%` }} />
-                      </div>
-                    )}
-                  </div>
-                </td>
-                <td>
-                  <div className={styles.limit}>
-                    {/* Stacked on a phone, a size says what it is; a dash says nothing. */}
-                    <span className={p.role ? undefined : styles.notStacked}>
-                      {p.limit_bytes && p.role !== "owner" ? <span className={styles.stacked}>Limit: </span> : null}
-                      {limit.size}
-                    </span>
-                    {limit.source && <span className="muted small">{limit.source}</span>}
-                    {canSet && (
-                      <button type="button" className="link-btn small" onClick={() => setSetting(p)} aria-label={`Set a storage limit for ${p.name}`}>
-                        {p.limit_source === "person" ? "Change…" : "Set limit…"}
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <ul className={styles.people} role="list" aria-label="Storage by person">
+        {rows.map((p) => {
+          const limit = limitText(p);
+          const share = shareOf(p.used_bytes, p.limit_bytes);
+          const canSet = owner && limitable(p);
+          return (
+            <li key={p.user_id ?? "crewtavo"} className={styles.person}>
+              <span className={styles.who}>
+                <strong>{p.name}</strong>
+                {p.role_name && <span>{p.role_name}</span>}
+              </span>
+              <span className={styles.used}>
+                <span className="tabular">{formatBytes(p.used_bytes)} in use</span>
+                {share !== null && (
+                  <span className="progress" data-level={fullness(share)} role="img" aria-label={`${percent(share)} of ${p.name}'s limit`}>
+                    <span style={{ width: `${Math.min(100, share * 100)}%` }} />
+                  </span>
+                )}
+              </span>
+              <span className={styles.limit}>
+                {limit.size !== "—" && (
+                  <span>
+                    {p.limit_bytes && p.role !== "owner" ? "Limit: " : null}
+                    {limit.size}
+                  </span>
+                )}
+                {limit.source && <span className={styles.source}>{limit.source}</span>}
+              </span>
+              <span className={styles.set}>
+                {canSet && (
+                  <button type="button" className="link-btn small" onClick={() => setSetting(p)} aria-label={`Set a storage limit for ${p.name}`}>
+                    {p.limit_source === "person" ? "Change…" : "Set limit…"}
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
       {setting && setting.user_id && (
         <AllowanceDialog
           target={{ user: setting.user_id }}
@@ -517,7 +491,7 @@ function People({ people, owner }: { people: StoragePerson[]; owner: boolean }) 
           onClose={() => setSetting(null)}
         />
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -538,29 +512,28 @@ function Roles({ o }: { o: StorageReport }) {
   const { rows, loading } = useRoleChoices(o);
   const [setting, setSetting] = useState<{ key: string; name: string; limit: number | null } | null>(null);
   return (
-    <section className="card" aria-labelledby="storage-roles">
-      <div className="card-head"><h2 id="storage-roles">By role</h2></div>
-      <p className={`muted small ${styles.note}`} style={{ paddingBottom: 12 }}>
-        A limit for everyone with a role who has no limit of their own. A custom role's limit comes before its access level's.
-      </p>
+    <Section level={3} title="By role">
+      <p className="set-note">A limit for everyone with a role who has no limit of their own. A custom role's limit comes before its access level's.</p>
       {loading ? (
-        <div className="card-pad"><SkeletonText lines={3} /></div>
+        <div className={styles.gap}><SkeletonText lines={3} /></div>
       ) : (
-        rows.map((r) => (
-          <div key={r.key} className={`card-row ${styles.roleRow}`}>
-            <span className="stack-sm" style={{ gap: 0 }}>
-              <strong>{r.name}</strong>
-              <span className="muted small">{r.detail}</span>
-            </span>
-            <span className={styles.roleLimit}>
-              <span className="small">{r.limit ? `${formatBytes(r.limit)} each` : "No limit"}</span>
-              <Button size="sm" onClick={() => setSetting(r)} aria-label={`Set a storage limit for ${r.name}`}>{r.limit ? "Change…" : "Set limit…"}</Button>
-            </span>
-          </div>
-        ))
+        <ul className={styles.people} role="list" aria-label="Storage limits by role">
+          {rows.map((r) => (
+            <li key={r.key} className={`${styles.person} ${styles.role}`}>
+              <span className={styles.who}>
+                <strong>{r.name}</strong>
+                <span>{r.detail}</span>
+              </span>
+              <span className={styles.limit}>{r.limit ? `${formatBytes(r.limit)} each` : "No limit"}</span>
+              <span className={styles.set}>
+                <button type="button" className="link-btn small" onClick={() => setSetting(r)} aria-label={`Set a storage limit for ${r.name}`}>{r.limit ? "Change…" : "Set limit…"}</button>
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       {setting && <AllowanceDialog target={{ role: setting.key }} name={setting.name} current={setting.limit} onClose={() => setSetting(null)} />}
-    </section>
+    </Section>
   );
 }
 
@@ -603,28 +576,28 @@ export function AllowanceDialog({ target, name, current, roleLimit = null, onClo
       description={person ? "It counts the files they add that aren't in the Trash." : "For everyone with this role who has no limit of their own."}
     >
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <fieldset className={styles.choices}>
+        <fieldset className={p.choices}>
           <legend className="sr-only">Storage limit</legend>
-          <label className={styles.choice}>
+          <label className={p.choice}>
             <input type="radio" name="allowance" checked={!limited} onChange={() => choose(false)} />
-            <span className={styles.choiceBody}>
-              <strong>{person ? "No limit for this person" : "No limit for this role"}</strong>
-              <span className="muted small">
+            <span className={p.rowText}>
+              {person ? "No limit for this person" : "No limit for this role"}
+              <span className={p.hint}>
                 {person
                   ? roleLimit ? `Their role's limit, ${formatBytes(roleLimit)}, applies.` : "Only the company's limit applies."
                   : "Each person's own limit, or the company's, applies."}
               </span>
             </span>
           </label>
-          <label className={styles.choice}>
+          <label className={p.choice}>
             <input type="radio" name="allowance" checked={limited} onChange={() => choose(true)} />
-            <span className={styles.choiceBody}>
-              <strong>{person ? "Limit" : "Limit for each person"}</strong>
+            <span className={p.rowText}>
+              {person ? "Limit" : "Limit for each person"}
               <GbInput value={size} label={`Storage limit for ${name} in GB`} invalid={limited && "problem" in parsed} onFocus={() => !limited && choose(true)} onChange={(v) => { setSize(v); save.reset(); }} />
             </span>
           </label>
         </fieldset>
-        <p className="muted small" style={{ margin: 0 }}>
+        <p className="set-note">
           Once {person ? "they reach it, files they add" : "someone reaches it, files they add"} to Drive, plans and guides are turned away. Visit photos, quote photos, receipts and sub paperwork always go through.
         </p>
         <FormError error={save.error} />
@@ -646,9 +619,8 @@ function Areas({ areas }: { areas: NonNullable<StorageReport["by_area"]> }) {
   const most = Math.max(...rows.map((a) => a.bytes), 1);
   if (!rows.length) return null;
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="storage-areas">
-      <h2 id="storage-areas" className={styles.title}>By area</h2>
-      <span className="muted small">What each part of Crewtavo holds.</span>
+    <Section level={3} title="By area">
+      <p className="set-note">What each part of Crewtavo holds.</p>
       <ul className={styles.areas}>
         {rows.map((a) => (
           <li key={a.area}>
@@ -658,7 +630,7 @@ function Areas({ areas }: { areas: NonNullable<StorageReport["by_area"]> }) {
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   );
 }
 
@@ -669,8 +641,7 @@ function Areas({ areas }: { areas: NonNullable<StorageReport["by_area"]> }) {
 function HowItWorks() {
   const railway = useSession().config.platform === "railway";
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="storage-how">
-      <h2 id="storage-how" className={styles.title}>How limits work</h2>
+    <Section level={3} title="How limits work">
       <ul className={styles.notes}>
         <li>Every photo and file counts toward the company's limit, including what's in the Trash, until it's deleted for good 30 days after it went there.</li>
         <li>Visit photos, quote photos, receipts and sub paperwork are never refused, so crews can always finish a job. They still count.</li>
@@ -679,7 +650,7 @@ function HowItWorks() {
         <li>Public forms and one-time upload links (booking requests, a sub's paperwork) always go through.</li>
         <li>Videos added to Drive and plan files are held to the rules under Photos and videos, whatever the limit.</li>
       </ul>
-      <span className="muted small">A GB here is a billion bytes{railway ? ", as Railway counts it" : ""}.</span>
-    </section>
+      <p className={`set-note ${styles.gap}`}>A GB here is a billion bytes{railway ? ", as Railway counts it" : ""}.</p>
+    </Section>
   );
 }

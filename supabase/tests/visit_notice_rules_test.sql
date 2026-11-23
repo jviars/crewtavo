@@ -134,13 +134,13 @@ select tvr.check((select settings -> 'visit_notices' ->> 'pending' = 'true' from
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', :'owner_claims', true);
-update public.companies set settings = settings - 'visit_notices' || '{"arrival_window_min": 60}' where id = :'co';
+update public.companies set settings = public.company_settings(id) - 'visit_notices' || '{"arrival_window_min": 60}' where id = :'co';
 commit;
 select tvr.check((select settings -> 'visit_notices' ->> 'pending' = 'true' and settings ->> 'arrival_window_min' = '60' from public.companies where id = :'co'), 'a settings page open since before it saves the rest and leaves the note waiting');
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', :'owner_claims', true);
-update public.companies set settings = jsonb_set(settings, '{visit_notices}', '{"pending": false}') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{visit_notices}', '{"pending": false}') where id = :'co';
 commit;
 select tvr.check((select settings -> 'visit_notices' ->> 'pending' = 'true' from public.companies where id = :'co'), 'and nobody answers it by saving settings');
 

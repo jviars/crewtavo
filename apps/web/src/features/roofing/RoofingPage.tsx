@@ -2,172 +2,164 @@
  * Roofing: a roof estimate from one place, once Roofing is installed. Start from an address
  * and a roof package, then each project walks through measuring the roof, the estimate, the price
  * range the homeowner is sent, the site visit, the schedule and the invoice (RoofingProjectPage).
- * The list shows where each one is, and its package (or how many options it offers, priced from the
- * cheapest until it's signed). A business with no roof packages yet is offered the standard ones
- * (Roofing → Packages has the rest).
+ * The list groups the projects by what needs doing first (flow/projects.ts groupRoofProjects): each
+ * row is the client, the estimate and its street, the roof and its package (or how many options it
+ * offers), and the price: the range the homeowner was sent, the cheapest option until it's signed, or
+ * the total. A business with no roof packages yet is offered the standard ones (Roofing → Packages
+ * has the rest).
  */
-import { inRangeMode } from "@crewtavo/core/estimates";
-import type { TotalsPromo } from "@crewtavo/core/money";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { TableSkeleton } from "@/components/ui/Skeleton";
+import { InboxSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { StatusPill } from "@/components/ui/StatusPill";
-import { supabase, unwrap } from "@/lib/api";
-import { addressLine, formatMoney, formatNumber, timeAgo } from "@/lib/format";
+import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
+import { formatMoney, formatNumber, timeAgo } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
-import { TAKEOFF_FIELDS, type TakeoffRow } from "../paving/data";
 import { NewTakeoffDialog } from "../paving/NewTakeoffDialog";
-import { isRoof, rangeText, roofStage, roofSummary } from "./data";
+import { roofSummary } from "./data";
 import { lowestOption, SIGNED } from "./flow/model";
+import { groupRoofProjects, isOpenProject, matchesProject, projectPrice, stageNote, useRoofingProjects, type ProjectRow } from "./flow/projects";
+import styles from "./flow/projects.module.css";
 import { canSetUpRoofing, packagesKey, setUpRoofing, setupMessage, useRoofPackages } from "./packages";
 import { RoofingTabs } from "./RoofingTabs";
 
-interface ProjectQuote {
-  id: string;
-  number: number | null;
-  title: string;
-  status: string;
-  total: number;
-  tax_rate: number;
-  discount_amount: number;
-  promo: TotalsPromo | null;
-  range_low: number | null;
-  range_high: number | null;
-  range_sent_at: string | null;
-  range_accepted_at: string | null;
-  priced_on_site_at: string | null;
-  exact_sent_at: string | null;
-  client: { display_name: string } | null;
-  property: { line1: string | null; city: string | null; region: string | null; postal_code: string | null } | null;
-  package: { name: string } | null;
-  /** Its options, when it offers two or three. */
-  options: Array<{ id: string }>;
-  /** What each option's price is worked out from. */
-  lines: Array<{ id: string; option_id: string | null; quantity: number; unit_price: number; taxable: boolean; optional: boolean; selected: boolean }>;
-  jobs: Array<{ id: string; status: string }>;
-  /** Couldn't be measured from the air: a salesperson measures it on site. */
-  measure_on_site_at: string | null;
-}
-
-/** A project: its quote, and its newest roof measurement (none yet while it waits to be measured on site). */
-interface ProjectRow {
-  quote: ProjectQuote;
-  takeoff: TakeoffRow | null;
-}
-
-const QUOTE_FIELDS =
-  "id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), range_low, range_high, range_sent_at, range_accepted_at, priced_on_site_at, exact_sent_at, client:clients(display_name), property:properties(line1, city, region, postal_code), package:roof_packages!quotes_roof_package_fkey(name), options:quote_options!quote_options_quote_fkey(id), lines:quote_line_items(id, option_id, quantity, unit_price, taxable, optional, selected), jobs!jobs_company_id_quote_id_fkey(id, status), measure_on_site_at";
+type Which = "open" | "all";
 
 export function RoofingPage() {
   const session = useSession();
-  const { company } = session;
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [showAll, setShowAll] = useState(false);
+  const [which, setWhich] = useState<Which>("open");
+  const [search, setSearch] = useState("");
   const canSell = hasRole(session, "admin", "office", "estimator");
+  const projects = useRoofingProjects();
 
-  const projects = useQuery({
-    queryKey: ["roofing-projects", company.id],
-    queryFn: async () => {
-      const [measured, onSite] = await Promise.all([
-        supabase()
-          .from("measurements")
-          .select(`${TAKEOFF_FIELDS}, quote:quotes(${QUOTE_FIELDS})`)
-          .not("quote_id", "is", null)
-          .order("updated_at", { ascending: false })
-          .limit(200),
-        supabase().from("quotes").select(QUOTE_FIELDS).not("measure_on_site_at", "is", null).order("measure_on_site_at", { ascending: false }).limit(100),
-      ]);
-      // One row per project: its newest measurement, and only measurements of roofs.
-      const seen = new Set<string>();
-      const rows = (unwrap(measured) as unknown as Array<TakeoffRow & { quote: ProjectQuote | null }>)
-        .filter((r) => r.quote && isRoof(r) && !seen.has(r.quote.id) && seen.add(r.quote.id))
-        .map(({ quote, ...takeoff }): ProjectRow => ({ quote: quote!, takeoff }));
-      // Then the roofs waiting to be measured on site, first: nothing's drawn for them yet.
-      const waiting = (unwrap(onSite) as unknown as ProjectQuote[]).filter((q) => !seen.has(q.id)).map((quote): ProjectRow => ({ quote, takeoff: null }));
-      return [...waiting, ...rows];
-    },
-  });
-  const open = (projects.data ?? []).filter((r) => !["lost", "archived"].includes(r.quote.status) && !(r.quote.jobs[0]?.status === "completed"));
-  const rows = showAll ? projects.data ?? [] : open;
+  const all = projects.data ?? [];
+  const open = all.filter((r) => isOpenProject(r.quote));
+  const rows = (which === "all" ? all : open).filter((r) => matchesProject(r.quote, search));
+  const groups = useMemo(() => groupRoofProjects(rows), [rows]);
+  const start = () => setParams({ new: "1" });
+  const dialog = <NewTakeoffDialog trade="roofing" open={params.get("new") === "1"} onClose={() => setParams({}, { replace: true })} />;
+
+  const header = (
+    <>
+      <PageHeader
+        title="Roofing"
+        lede={<span className="hide-mobile">From address to signed: measure the roof on the aerial, price it from a package, send the homeowner a range, and set the exact price on site.</span>}
+        actions={canSell && <Button variant="primary" icon="plus" onClick={start}>New roof estimate</Button>}
+      />
+      <RoofingTabs />
+      <SetupPackages />
+    </>
+  );
+
+  if (projects.isPending) {
+    return (
+      <>
+        {header}
+        <Loading label="Loading roofing projects">
+          <div className="stack-lg">
+            <div className="row-between"><Skeleton width={184} height={36} radius={10} /><Skeleton width={264} height={32} radius={8} className="hide-mobile" /></div>
+            <InboxSkeleton rows={5} groups={2} />
+          </div>
+        </Loading>
+        {dialog}
+      </>
+    );
+  }
 
   return (
     <>
-      <PageHeader title="Roofing" actions={canSell && <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" })}>New roof estimate</Button>} />
-      <p className="page-subtitle">From address to signed: measure the roof on the aerial, price it from a package, send the homeowner a range, and set the exact price on site.</p>
-      <RoofingTabs />
-
-      <SetupPackages />
-
-      <section className="stack-sm" aria-labelledby="roofing-projects" style={{ gap: 12 }}>
-        <div className="row" style={{ gap: 10 }}>
-          <h2 id="roofing-projects" className="section-title grow">Projects</h2>
-          {(projects.data?.length ?? 0) > open.length && (
-            <div className="segmented" role="group" aria-label="Which projects">
-              <button type="button" aria-pressed={!showAll} onClick={() => setShowAll(false)}>Open</button>
-              <button type="button" aria-pressed={showAll} onClick={() => setShowAll(true)}>All</button>
-            </div>
+      {header}
+      {projects.error ? (
+        <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
+      ) : !all.length ? (
+        <EmptyState icon="roofing" title="No roof estimates yet" action={canSell && <Button icon="plus" onClick={start}>Start a roof estimate</Button>}>
+          Pick a client, an address and a roof package, then outline the roof on the aerial. The squares, edges and tear-off price themselves from the package.
+        </EmptyState>
+      ) : (
+        <>
+          <Toolbar
+            filters={
+              <FilterTabs<Which>
+                label="Which projects"
+                value={which}
+                onChange={setWhich}
+                options={[
+                  { value: "open", label: "Open", count: open.length },
+                  { value: "all", label: "All", count: all.length },
+                ]}
+              />
+            }
+            search={<SearchField value={search} onChange={setSearch} placeholder="Search client, street or #" label="Search roofing projects" />}
+          />
+          {!rows.length ? (
+            search.trim() ? (
+              <EmptyState icon="search" title="No projects match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
+            ) : (
+              <EmptyState icon="roofing" title="No open projects" action={<Button onClick={() => setWhich("all")}>Show all {all.length}</Button>}>
+                Every roof estimate here is signed and done, lost or archived.
+              </EmptyState>
+            )
+          ) : (
+            <InboxList
+              label="Roofing projects"
+              foot={<ListFoot>{rows.length === 1 ? "1 project" : `${rows.length} projects`}{which === "open" ? " open" : ""}</ListFoot>}
+            >
+              {groups.map((g) => (
+                <InboxGroup key={g.key} label={g.label} count={g.rows.length} tone={g.tone} icon={g.icon}>
+                  {g.rows.map((r) => <ProjectRowView key={r.quote.id} row={r} />)}
+                </InboxGroup>
+              ))}
+            </InboxList>
           )}
-        </div>
-        {projects.isPending ? (
-          <div className="card"><TableSkeleton rows={4} /></div>
-        ) : projects.error ? (
-          <ErrorState error={projects.error} onRetry={() => projects.refetch()} />
-        ) : !rows.length ? (
-          <div className="card">
-            <EmptyState icon="roofing" title="No roof estimates yet" action={canSell && <Button icon="plus" onClick={() => setParams({ new: "1" })}>Start a roof estimate</Button>}>
-              Pick a client, an address and a roof package, then outline the roof on the aerial. The squares, edges and tear-off price themselves from the package.
-            </EmptyState>
-          </div>
-        ) : (
-          <div className="card">
-            <table className="table table-stack">
-              <thead><tr><th>Project</th><th>Measured</th><th className="num">Price</th><th>Stage</th></tr></thead>
-              <tbody>
-                {rows.map((r) => {
-                  const q = r.quote;
-                  const stage = roofStage(q, Boolean(r.takeoff));
-                  const ranged = inRangeMode(q) && q.range_high !== null;
-                  // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
-                  const from = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
-                  return (
-                    <tr key={q.id} className="row-link" onClick={() => navigate(`/roofing/${q.id}`)}>
-                      <td>
-                        <Link className="cell-link" to={`/roofing/${q.id}`} onClick={(e) => e.stopPropagation()}>{q.title}</Link>
-                        <div className="muted small">{[q.client?.display_name, q.property ? addressLine(q.property) : null].filter(Boolean).join(" · ")}</div>
-                      </td>
-                      <td>
-                        <span className="small">{r.takeoff ? roofSummary(r.takeoff, formatNumber) : "Not from the air"}</span>
-                        <div className="muted small">{[q.options?.length ? `${q.options.length} options` : q.package?.name, timeAgo(r.takeoff?.updated_at ?? q.measure_on_site_at!)].filter(Boolean).join(" · ")}</div>
-                      </td>
-                      <td className="num">
-                        {ranged ? (
-                          <span title="The price range the homeowner was sent">{rangeText(Number(q.range_low), Number(q.range_high), formatMoney)}</span>
-                        ) : from !== null ? (
-                          <span title="Its cheapest option">From {formatMoney(from)}</span>
-                        ) : q.lines.length ? (
-                          formatMoney(q.total)
-                        ) : (
-                          <span className="muted" title="Not priced yet">—</span>
-                        )}
-                      </td>
-                      <td><StatusPill label={stage.label} tone={stage.tone} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <NewTakeoffDialog trade="roofing" open={params.get("new") === "1"} onClose={() => setParams({}, { replace: true })} />
+        </>
+      )}
+      {dialog}
     </>
+  );
+}
+
+/** One project: the client and estimate number, the estimate and its street, the roof and package, and its price. */
+function ProjectRowView({ row }: { row: ProjectRow }) {
+  const q = row.quote;
+  const street = q.property?.line1?.trim();
+  const subject = street && !q.title.toLowerCase().includes(street.toLowerCase()) ? `${q.title}, ${street}` : q.title;
+  // Options not chosen yet: from the cheapest. Once signed, the total is the one chosen.
+  const lowest = q.options?.length && !SIGNED.includes(q.status) ? lowestOption(q) : null;
+  const price = projectPrice(q, lowest);
+  return (
+    <InboxRow
+      to={`/roofing/${q.id}`}
+      title={q.client?.display_name ?? q.title}
+      number={q.number ?? undefined}
+      subject={q.client ? subject : street}
+      square
+      meta={[
+        stageNote(row),
+        // "28.4 squares", "6/12": each its own part, so the dots between them all match.
+        ...(row.takeoff ? roofSummary(row.takeoff, formatNumber).split(" · ") : [q.measure_on_site_at ? "Not from the air" : "Not measured yet"]),
+        q.options?.length ? `${q.options.length} options` : q.package?.name,
+        // How long since it was measured (or flagged), on a desktop: a phone's line keeps to the roof and its package.
+        (row.takeoff?.updated_at ?? q.measure_on_site_at) && <span className={styles.age}>{timeAgo((row.takeoff?.updated_at ?? q.measure_on_site_at)!)}</span>,
+      ]}
+      aside={
+        price?.kind === "range" ? (
+          <>
+            <span className="il-money" title="The price range the homeowner was sent">{formatMoney(price.low)}</span>
+            <span className={`il-sub ${styles.to}`}><span aria-hidden="true">– </span><span className="sr-only">to </span>{formatMoney(price.high)}</span>
+          </>
+        ) : price?.kind === "from" ? (
+          <span className="il-money" title="Its cheapest option">From {formatMoney(price.amount)}</span>
+        ) : price ? (
+          <span className="il-money">{formatMoney(price.amount)}</span>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -190,19 +182,17 @@ function SetupPackages() {
   });
   if (!canSetUp || !packages.data || packages.data.length > 0) return null;
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="roofing-setup" style={{ gap: 10 }}>
-      <div className="row" style={{ gap: 10 }}>
-        <Icon name="package" size={20} />
-        <h2 id="roofing-setup" className="section-title grow" style={{ fontSize: 16 }}>Set up your roof packages</h2>
-      </div>
-      <span className="muted small">
+    <section className="callout callout-info" aria-labelledby="roofing-setup">
+      <Icon name="package" size={16} />
+      <div className="grow">
+        <h2 id="roofing-setup" className={styles.calloutTitle}>Set up your roof packages</h2>
         A package prices a whole roof in one tap: the shingles or metal by the square, the tear-off, edges and pipe boots, and quick adds for the extras.
         Start with Architectural shingle, Designer shingle and Standing-seam metal, made from your price list. You can change them any time.
-      </span>
-      <div className="row wrap" style={{ gap: 10 }}>
-        <Button icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
-        <Link to="/roofing/packages" className="link-btn small">See packages</Link>
       </div>
+      <span className="row" style={{ gap: 12, flex: "none" }}>
+        <Link to="/roofing/packages" className="link-btn small">See packages</Link>
+        <Button size="sm" icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>
+      </span>
     </section>
   );
 }

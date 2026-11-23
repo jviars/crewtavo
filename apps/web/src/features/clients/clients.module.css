@@ -1,0 +1,240 @@
+/* The Clients list, a client's page and Possible duplicates (Page-Clients.dc.html, Page-Client.dc.html, Mobile-Work.dc.html). */
+
+/* ---------- The list ---------- */
+/* By name, each letter heads its clients in ink, as an address book's do (Page-Clients.dc.html). */
+@media (min-width: 901px) {
+  .byLetter :global(.il-head-label) { font-size: var(--fs-13); font-weight: 700; color: var(--ink); }
+}
+/* The company beside the name: quiet and small, and the first to give way. */
+.company { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--quiet); }
+.more { flex: none; color: var(--quiet); }
+/* Tags sit after the address with a little room, no dot between, and keep their whole outline. */
+.list :global(.il-meta) > .tags { display: inline-flex; flex: none; gap: 4px; overflow: visible; }
+.tags > :global(.tag) { height: 18px; padding: 0 5px; font-size: var(--fs-11); }
+.list :global(.il-meta) > :global(.meta-dot):has(+ .tags) { display: none; }
+@media (max-width: 900px) {
+  /* The phone kit's rows are two lines: the name, then where they are (or how to reach them). */
+  .list :global(.il-body):has(.place) :global(.il-subject) { display: none; }
+  .list .company, .list :global(.il-meta) > .tags, .list :global(.il-meta) > :global(.meta-dot):has(+ .tags) { display: none; }
+  .list :global(.il-meta):not(:has(.place)) { display: none; }
+}
+
+/* ---------- A client's page ---------- */
+/* What's on record about them, after the status: quiet words, an icon for a review. */
+.flag { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); white-space: nowrap; }
+.flag svg { width: 13px; height: 13px; flex: none; color: var(--quiet); }
+.star { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); text-decoration: none; white-space: nowrap; }
+.star svg { width: 13px; height: 13px; flex: none; color: var(--req); fill: currentColor; }
+a.star:hover { color: var(--ink); text-decoration: none; }
+
+/* A phone's quick ways to reach them, under the title (Mobile-Work.dc.html, Client). */
+.quick, .hero, .owes { display: none; }
+@media (max-width: 900px) {
+  /* The hero: a 64px green face over the name and its quiet line, centered. */
+  .hero { order: 1; display: grid; place-items: center; flex: none; width: 64px; height: 64px; margin: 2px calc(50% - 32px) -2px; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; font-size: var(--fs-22); font-weight: 700; letter-spacing: 0.01em; }
+  :global(.detail-head):has(> .hero) > :global(.page-title) { text-align: center; }
+  :global(.detail-head):has(> .hero) > :global(.detail-meta) { justify-content: center; text-align: center; }
+  /* The balance as one row in its own inset card, opening their invoices below. */
+  .owes { order: 5; flex-basis: 100%; display: flex; align-items: center; gap: 12px; min-height: 52px; margin-top: 4px; padding: 8px 14px 8px 16px; border: 0; border-radius: 14px; background: var(--m-card); color: var(--ink); font: inherit; font-size: var(--fs-15); text-align: left; cursor: pointer; }
+  .owes:active { background: var(--fill-2); }
+  .owes > svg { flex: none; color: var(--quiet); }
+  .owesFigure { display: grid; justify-items: end; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .owesFigure b { font-weight: 600; }
+  .owesFigure .pastDue { font-size: var(--fs-12); }
+  /* It's up there, so Details doesn't say it again. */
+  .details :global(.fact):has(.balance) { display: none; }
+}
+@media (max-width: 900px) {
+  .quick { order: 4; flex-basis: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+  .quick > :is(a, button) { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: 62px; padding: 0 4px; border: 0; border-radius: 12px; background: var(--m-card); color: var(--green); font: inherit; font-size: var(--fs-12); font-weight: 600; text-decoration: none; }
+  .quick > :is(a, button):active { background: var(--fill-3); }
+  .quick svg { width: 21px; height: 21px; }
+}
+
+/* Properties: a row each, the name and address, a quiet line of codes and notes, Directions and a menu on the right. */
+.prop { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.propMain { display: grid; gap: 3px; min-width: 0; }
+.propHead { min-width: 0; }
+.propName { font-weight: 600; color: var(--ink); }
+.propAddress { color: var(--quiet); }
+.propLine { font-size: var(--fs-12); color: var(--text-3); }
+.propLine :global(.meta-dot) { color: var(--quiet); }
+.propTags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.propNote { font-size: var(--fs-12); color: var(--text-3); white-space: pre-wrap; overflow-wrap: anywhere; }
+.propNote b { font-weight: 600; color: var(--text-2); }
+.propActions { display: flex; align-items: flex-start; gap: 2px; }
+/* Directions as quiet words, filled on hover (Page-Client.dc.html's btn-xs). Its own buttons only: the maps sheet it opens sits inside it. */
+.propActions > :global(.btn) { height: 28px; padding: 0 9px; border-color: transparent; color: var(--text-2); font-size: var(--fs-12); }
+.propActions > :global(.btn:hover) { background: var(--fill-2); color: var(--ink); }
+.propActions > :global(.btn-icon) { width: 28px; padding: 0; border-color: transparent; color: var(--text-3); }
+.offMap { color: var(--warning); font-weight: 600; }
+.dirIcon { display: none; }
+/* Equipment at the property: a quiet line each, opening its details. */
+.equipment { display: grid; justify-items: start; gap: 1px; }
+.asset { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-height: 22px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.asset > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset svg { flex: none; color: var(--quiet); }
+.assetName { color: var(--text-2); font-weight: 600; }
+.assetName[data-retired] { color: var(--quiet); font-weight: 500; }
+.asset:hover .assetName { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.assetLine { color: var(--text-3); }
+/* Equipment as hairline rows (PropertyEquipment): under the job's client facts with a quiet label, or in a visit's section. */
+.equipBlock { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 18px; }
+.equipLabel { margin: 0 0 2px; font-size: var(--fs-12); font-weight: 600; letter-spacing: normal; color: var(--text-3); }
+.equipBlock > :global(.rel) > :global(.rel-row):first-child { border-top: 1px solid var(--row-divider); }
+.equipAdd { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0; border: 0; border-bottom: 1px solid var(--row-divider); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-13); font-weight: 600; text-align: left; cursor: pointer; }
+.equipAdd svg { color: var(--quiet); }
+.equipAdd:hover { color: var(--ink); }
+.equipAdd:hover svg { color: currentColor; }
+.equipLabel + .equipAdd { border-top: 1px solid var(--row-divider); }
+.retired { color: var(--quiet); font-size: var(--fs-12); }
+/* On a visit, Add equipment under the rows: the last row's hairline is its line. */
+:global(.rel) + .fieldAdd { border-top: 0; }
+/* Serviced (on a visit): a box and its word, the label a finger's target. */
+.serviced { min-height: 36px; align-items: center; font-size: var(--fs-13); }
+@media (max-width: 900px) {
+  .equipLabel { font-size: var(--fs-13); }
+  .equipAdd { min-height: 48px; font-size: var(--fs-15); }
+  .serviced { min-height: 44px; font-size: var(--fs-14); }
+  .retired { font-size: var(--fs-13); }
+  /* In a grouped card the list's last row has no line, so Add equipment draws its own. */
+  :global(.m-grouped) :global(.rel) + .fieldAdd { border-top: 1px solid var(--row-divider); }
+}
+@media (max-width: 900px) {
+  .prop { padding: 12px 0; font-size: var(--fs-15); }
+  .propSep { display: none; }
+  .propAddress { display: block; color: var(--text-3); }
+  .propLine, .propNote, .asset { font-size: var(--fs-13); }
+  .asset { min-height: 32px; }
+  /* Directions as a round icon beside the menu, so the address keeps the row's width. */
+  .propActions > :global(.btn) { width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .propActions > :global(.btn-icon) { background: none; color: var(--text-3); }
+  .dirIcon { display: block; }
+  .dirText { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+
+/* The work for them: the underline tabs, then small rows. On a desktop the tabs are the heading. */
+.work :global(.underline-tabs) { margin-top: -12px; }
+.work :global(.rel) { margin-top: 0 !important; }
+@media (min-width: 901px) {
+  .work > :global(.sec-head) { display: none; }
+  .work > :global(.sec-body) { padding-top: 12px; }
+  /* The status and the money (or date) in columns, so they line up down the list. */
+  .work :global(.rel-end) { display: grid; grid-template-columns: 160px minmax(96px, auto); column-gap: 12px; }
+  .work :global(.rel-end) > :nth-child(2) { justify-self: end; }
+}
+@media (max-width: 900px) {
+  /* A phone's rows: the number and title, then the status and money under them. */
+  .work :global(.rel-row) { flex-wrap: wrap; row-gap: 2px; }
+  .work :global(.rel-body) { flex-basis: calc(100% - 48px); }
+  .work :global(.rel-end) { order: 3; flex-basis: 100%; justify-content: space-between; padding-left: 48px; font-size: var(--fs-14); }
+  /* The card's edge ends the list: no hairline under its last row. */
+  .work :global(.rel) > :global(.rel-row):last-child { border-bottom: 0; }
+}
+.date { color: var(--text-3); font-size: var(--fs-12); }
+
+/* Details: links in ink, switches lined up with their labels, the balance (with what's past due in red) and the quiet line under a switch. */
+.details :global(.fact):has(:global(.switch)) { align-items: start; }
+.details :global(.switch-row) { align-items: flex-start; }
+.details :global(.fact-value) a { color: var(--ink); }
+.details :global(.fact-value) a:hover { color: var(--green-dark); }
+.balance { color: var(--ink) !important; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+  .details :global(.fact):has(:global(.switch)) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .details :global(.fact):has(:global(.switch)) :global(.fact-value) { text-align: left; font-weight: 400; }
+}
+.pastDue { color: var(--danger); font-weight: 600; font-size: var(--fs-12); }
+.hint { display: block; margin-top: 2px; font-size: var(--fs-12); color: var(--text-3); }
+.line { display: block; }
+.switchRow { font-weight: 400; }
+.workAnchor { scroll-margin-top: calc(var(--topbar-height) + 16px); }
+.addContact { margin-top: 10px; }
+
+/* Other contacts: a face, the name and their role, and how to reach them. */
+.reach a { color: var(--text-2); }
+.reach a:hover { color: var(--ink); }
+
+/* Autopay: quiet lines and small buttons under the heading. */
+.autopay { display: grid; gap: 6px; font-size: var(--fs-13); }
+.autopay p { margin: 0; font-size: var(--fs-12); color: var(--text-3); }
+.autopay .bad { color: var(--danger); font-weight: 600; }
+.method { display: flex; align-items: center; gap: 6px; color: var(--ink); }
+.method svg { color: var(--quiet); }
+.autopayActions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.charges { margin-top: 8px; }
+.chargesHead { font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+
+/* Notes and messages: a note box with its button beside it, then the entries on hairlines. */
+.compose { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 16px; }
+.compose :global(.textarea) { flex: 1; min-height: var(--control); max-height: 180px; padding-top: 7px; padding-bottom: 7px; resize: none; field-sizing: content; }
+.compose :global(.textarea):is(:focus, :not(:placeholder-shown)) { height: auto; min-height: 72px; resize: vertical; }
+@supports (field-sizing: content) {
+  .compose :global(.textarea):is(:focus, :not(:placeholder-shown)) { min-height: var(--control); }
+}
+.compose :global(.btn) { flex: none; }
+@media (max-width: 900px) {
+  .compose { flex-wrap: wrap; justify-content: flex-end; }
+  .compose :global(.textarea) { flex-basis: 100%; }
+}
+.entry { grid-template-columns: 28px minmax(0, 1fr) auto !important; align-items: start; }
+.who { color: var(--ink); font-weight: 600; }
+.entryText { min-width: 0; }
+.failed { margin-left: 8px; }
+.subjectLine { margin-top: 1px; color: var(--text-2); overflow-wrap: anywhere; }
+.body { margin-top: 1px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.subjectLine + .body { color: var(--text-3); }
+/* Under a subject the words are a preview: two lines until Show all. */
+.subjectLine + .body .clamped { -webkit-line-clamp: 2; line-clamp: 2; }
+.when { display: flex; align-items: center; gap: 2px; font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; }
+.when :global(.btn) { width: 26px; height: 26px; margin: -4px -6px -4px 0; color: var(--quiet); }
+@media (hover: hover) and (pointer: fine) {
+  .entry .when :global(.btn) { opacity: 0; transition: opacity var(--dur-fast); }
+  .entry:is(:hover, :focus-within) .when :global(.btn) { opacity: 1; }
+}
+.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; white-space: normal; }
+.showAll { margin-top: 2px; font-size: var(--fs-12); }
+.missed { color: var(--danger); }
+.older { display: flex; justify-content: flex-start; padding-top: 10px; }
+
+/* A phone's small words that act (Show all, the balance, an email, a piece of equipment, Not duplicates):
+   a 44px tap area around them, the look unchanged. A section's link has its own (components.css). */
+@media (max-width: 900px) {
+  :is(.tap, .asset, .reach a, .details :global(.fact-value) a) { position: relative; }
+  :is(.tap, .asset, .reach a, .details :global(.fact-value) a)::after { content: ""; position: absolute; top: 50%; left: -4px; right: -4px; height: 44px; translate: 0 -50%; }
+  .propActions > :global(.btn) { position: relative; }
+  .propActions > :global(.btn)::after { content: ""; position: absolute; inset: -2px; }
+}
+
+/* ---------- Possible duplicates ---------- */
+.reasonValue { font-weight: 500; color: var(--text-3); }
+:global(.il-head-end) .notDup { color: var(--text-3); }
+:global(.il-head-end) .notDup:hover { color: var(--ink); }
+
+/* ---------- Merge clients: which one stays ---------- */
+.keep { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.keep legend { margin-bottom: 6px; padding: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.keepRow { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px; border: 1px solid var(--divider); border-radius: 10px; cursor: pointer; font-weight: 500; }
+.keepRow:hover { background: var(--fill); }
+.keepRow:has(input:checked) { border-color: var(--green); background: var(--green-tint); }
+.keepRow input { margin: 0; }
+.keepFace { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: var(--fs-11); font-weight: 700; }
+.preview { display: grid; gap: 4px; font-size: var(--fs-13); }
+.preview .quiet { font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---------- The client picker (new quote, request, invoice, merge…): a field that opens a search menu ---------- */
+.picker { min-width: 0; }
+.pickerField { display: flex; align-items: center; gap: 8px; color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.pickerField > svg { flex: none; color: var(--quiet); }
+.pickerField[aria-expanded="true"] { border-color: var(--green); box-shadow: var(--ring); }
+.pickerName { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pickerPlaceholder { color: var(--text-3); }
+/* A client's initials in a small quiet circle, in the field and on each row. */
+.pickerFace { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: var(--fs-11); font-weight: 700; line-height: 1; }
+/* The menu is wider than a plain one: a name and an address on each row. */
+.pickerField + :global(.menu):not([data-sheet]) { width: 340px; max-width: calc(100vw - 16px); }
+.pickerField + :global(.menu) :global(.menu-desc) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) {
+  .pickerField { font-size: var(--fs-15); }
+  .pickerFace { width: 26px; height: 26px; font-size: var(--fs-12); }
+  .pickerField + :global(.menu) .pickerFace { width: 32px; height: 32px; font-size: var(--fs-13); }
+}

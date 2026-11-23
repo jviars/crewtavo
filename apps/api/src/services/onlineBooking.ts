@@ -15,7 +15,7 @@ import { addDays, arrivalWindowMin, localDate, zonedTimeToUtc } from "@crewtavo/
 import type { Env } from "../env";
 import { companyFooter, firstName, renderEmail } from "../lib/email";
 import { buildCalendar } from "../lib/ics";
-import { clientLink } from "../lib/links";
+import { clientLink, KEPT_LINK } from "../lib/links";
 import { asJson, dbError, HttpError, must } from "../lib/http";
 import { emailReady, sendEmail, sendSms, smsReady } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
@@ -217,19 +217,22 @@ export async function confirmBooking(
         // The client's own page, where a booked visit can be moved or cancelled. Only ever sent to
         // the addresses on their record, never shown to whoever filled in the form.
         const hub = baseUrl && booking.booked ? await clientLink(env, baseUrl, { c: co.id, t: "client", id: client.id }) : null;
-        const text = [
-          `Hi ${firstName(client.display_name)},`,
-          line,
-          ...(hub ? [`Need to change it? You can ask to move or cancel it here:\n${hub}`] : []),
-          `Questions? Reply to this email${call}.`,
-          co.name,
-        ].join("\n\n");
+        // The same words with their link to send, and none in the copy kept on their timeline (lib/links KEPT_LINK).
+        const words = (link: string | null) =>
+          [
+            `Hi ${firstName(client.display_name)},`,
+            line,
+            ...(link ? [`Need to change it? You can ask to move or cancel it here:\n${link}`] : []),
+            `Questions? Reply to this email${call}.`,
+            co.name,
+          ].join("\n\n");
+        const text = words(hub);
         const email = renderEmail({ companyName: co.name, logo: baseUrl ? logoImage(baseUrl, co.id, co.settings) : null, text, footer: companyFooter(co) });
         const delivery = await sendToEach(people, (person) => sendEmail(env, { to: person.to, subject, text: email.text, html: email.html, replyTo: co.email ?? undefined, fromName: co.name }, co.id));
         if (delivery.went.length) {
           result.emailed = true;
           await admin.from("messages").insert({
-            company_id: co.id, client_id: client.id, channel: "email", direction: "out", status: "sent", subject, body: text,
+            company_id: co.id, client_id: client.id, channel: "email", direction: "out", status: "sent", subject, body: words(hub && KEPT_LINK),
             ...about, external_id: delivery.id, sent_by: booking.sentBy ?? null, recipients: recipientsColumn(delivery),
           });
         }

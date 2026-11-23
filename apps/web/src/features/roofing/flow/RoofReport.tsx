@@ -12,11 +12,12 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
+import { Icon } from "@/components/ui/Icon";
 import { api, supabase, unwrap } from "@/lib/api";
 import type { TakeoffRow } from "../../paving/data";
 import { useRefreshProject } from "./data";
 import styles from "./flow.module.css";
+import { Select } from "@/components/ui/Select";
 
 const EDGES = [
   ["eave_ft", "Eaves"],
@@ -64,12 +65,18 @@ export function draftReport(draft: ReportDraft): RoofReport {
 
 const numeric = (value: string) => value.replace(/[^0-9.]/g, "");
 
-/** "Enter measurements from a report", or "Change the numbers" on a roof that was. */
-export function RoofReportButton({ quote, takeoff, label, quiet }: { quote: { id: string; property: { id: string } | null }; takeoff?: TakeoffRow | null; label: string; quiet?: boolean }) {
+/**
+ * "Enter measurements from a report", or "Change the numbers" on a roof that was: quiet words (a
+ * step heading's action, with `icon`), or a button beside the way to the map (`button`).
+ */
+export function RoofReportButton({ quote, takeoff, label, button, icon }: { quote: { id: string; property: { id: string } | null }; takeoff?: TakeoffRow | null; label: string; button?: boolean; icon?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className={`${styles.linkBtn} ${quiet ? styles.quiet : ""}`} onClick={() => setOpen(true)}>{label}</button>
+      <button type="button" className={button ? "btn" : icon ? `${styles.linkBtn} ${styles.stepAction}` : styles.linkBtn} onClick={() => setOpen(true)}>
+        {(button || icon) && <Icon name={button ? "clipboard" : "edit"} size={button ? 16 : 14} />}
+        {icon ? <span className={styles.actionWords}>{label}</span> : label}
+      </button>
       {open && <RoofReportDialog quote={quote} takeoff={takeoff ?? null} onClose={() => setOpen(false)} />}
     </>
   );

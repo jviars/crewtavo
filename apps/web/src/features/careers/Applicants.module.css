@@ -2,3 +2,37 @@
 .stars button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-3); cursor: pointer; }
 .stars button:hover { background: var(--fill); color: var(--warning); }
 .stars .on { color: var(--warning); }
+
+/* The list (Page-Applicants.dc.html): an interview's time, blue like a booked assessment. */
+.interview { color: var(--info); font-weight: 500; }
+span.interview svg { color: currentColor; }
+/* A row's words for a computer (the position tag, their email and phone, the résumé) and for a phone
+   (Mobile-Team, Applicants: the position and résumé as the second line, the name alone on the first). */
+.phone.phone { display: none; }
+/* On a phone the age alone says it, in amber; the words stay for a screen reader. */
+@media (max-width: 900px) {
+  .wait { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .desk.desk, .desk + :global(.meta-dot) { display: none; }
+  .phone.phone { display: inline; }
+}
+
+/* One applicant's page. */
+.dot { color: var(--quiet); }
+.status:global(.select) { width: auto; height: 30px; padding-block: 0; font-size: var(--fs-13); }
+.interviewFact { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.interviewFact :global(.link-btn) { font-size: var(--fs-13); }
+.words { margin: 0; font-size: var(--fs-14); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notes { display: grid; gap: 10px; max-width: 880px; }
+.hint { font-size: var(--fs-12); color: var(--text-3); }
+@media (max-width: 900px) {
+  .status:global(.select) { height: var(--control); font-size: var(--fs-15); }
+  .stars { gap: 0; margin-right: -10px; }
+  .stars button { width: 44px; height: 44px; }
+  .hint { padding: 0 4px; font-size: var(--fs-13); }
+  .notes :global(.textarea) { border: 0; border-radius: 14px; background: var(--m-card); }
+}
+
+/* Add applicant: the résumé picked, its name and size with a way to take it back. */
+.picked { display: flex; align-items: center; gap: 8px; min-height: var(--control); font-size: var(--fs-13); }
+.picked > svg { flex: none; color: var(--quiet); }
+.picked > :global(.grow) { min-width: 0; overflow-wrap: anywhere; }

@@ -5,26 +5,31 @@ import { useDeferredValue, useEffect, useId, useState, type FormEvent } from "re
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
-import { RowMenu } from "@/components/ui/ContextMenu";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
-import { archiveWithUndo, SelectAllCell, SelectCell, SelectionBar, useHoldToPick, useSelection } from "@/components/ui/Selection";
-import { ListPageSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { archiveWithUndo, SelectionBar, useSelection } from "@/components/ui/Selection";
+import { InboxPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
+import { FilterMenu, FilterTabs, SearchField, SortMenu, Toolbar } from "@/components/ui/Toolbar";
 import { api, supabase, textFilter, unwrap } from "@/lib/api";
 import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { addDaysIso, dateIn, todayIn } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { NewQuoteDialog } from "../quotes/NewQuoteDialog";
 import { NewClientDialog, useClientTags } from "./ClientForm";
+import styles from "./clients.module.css";
 import { ContactMessagesNotice } from "./ContactMessages";
 import { ImportClientsDialog } from "./ImportClientsDialog";
+import { Select } from "@/components/ui/Select";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -34,6 +39,11 @@ const FILTERS = [
   { key: "no_card", label: "Card not set up" },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+const SORTS = [
+  { value: "name", label: "Name A–Z" },
+  { value: "newest", label: "Newest first" },
+] as const;
+type SortKey = (typeof SORTS)[number]["value"];
 const PAGE = 50;
 /** What POST /clients/autopay/invite takes at once. */
 const INVITE_CHUNK = 200;
@@ -41,22 +51,23 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /**
  * The first `limit` clients of a tab, by name or newest first, and how many it has in all (`total`).
- * `term` narrows them to a name, company, email or phone that has it, and `tag` to one tag.
+ * `term` narrows them to a name, company, email or phone that has it, and `tags` to clients with any
+ * of those tags.
  */
-export async function loadClients({ companyId, filter, term, tag, sort }: { companyId: string; filter: FilterKey; term: string; tag: string; sort: "name" | "newest" }, limit: number) {
+export async function loadClients({ companyId, filter, term, tags, sort }: { companyId: string; filter: FilterKey; term: string; tags: readonly string[]; sort: SortKey }, limit: number) {
   const match = textFilter(term, ["display_name", "company_name", "email", "phone"]);
   const { rows, total } = await firstRows(
     () => {
       let q = supabase()
         .from("clients")
-        .select("id, display_name, company_name, email, phone, status, tags, created_at, properties(line1, city, region), card:autopay_authorizations(id, method:client_payment_methods!inner(status))", { count: "exact" })
+        .select("id, display_name, company_name, email, phone, status, tags, created_at, properties(line1, city, region), card:autopay_authorizations(id, revoked_at, method:client_payment_methods!inner(status))", { count: "exact" })
         .eq("company_id", companyId);
       // Card not set up: active clients with no agreement in force on a card that can be charged (active,
       // or a bank account being checked). An anti-join: a removed card, or one saved but not agreed to, counts.
       if (filter === "no_card") q = q.eq("status", "active").is("card.revoked_at", null).in("card.method.status", ["active", "pending"]).is("card", null);
       else q = filter === "all" ? q.neq("status", "archived") : q.eq("status", filter);
       if (match) q = q.or(match);
-      if (tag) q = q.contains("tags", [tag]);
+      if (tags.length) q = q.overlaps("tags", [...tags]);
       return q;
     },
     limit,
@@ -72,6 +83,62 @@ export const everyClient = (companyId: string) =>
     { order: "display_name", most: Infinity },
   );
 
+type ClientRow = Awaited<ReturnType<typeof loadClients>>["rows"][number];
+type Group = { key: string; label: string; rows: ClientRow[] };
+
+/** The letter a name is filed under: its first letter without accents, or "#" for a number or symbol. */
+export const nameLetter = (name: string) => {
+  const first = name.trim().normalize("NFD").replace(/[̀-ͯ]/g, "").charAt(0).toUpperCase();
+  return /^[A-Z]$/.test(first) ? first : "#";
+};
+
+/**
+ * By name, the clients under their letter (A, B, C…), as an address book files them. Newest first,
+ * under when they were added: this week, this month, earlier (in the company's time zone).
+ */
+export function groupClients(rows: readonly ClientRow[], sort: SortKey, timeZone: string): Group[] {
+  const today = todayIn(timeZone);
+  const weekStart = addDaysIso(today, -new Date(`${today}T12:00:00Z`).getUTCDay());
+  const monthStart = `${today.slice(0, 8)}01`;
+  const groups = new Map<string, Group>();
+  for (const c of rows) {
+    let key: string;
+    let label: string;
+    if (sort === "name") key = label = nameLetter(c.display_name);
+    else {
+      const day = dateIn(c.created_at, timeZone);
+      key = day >= weekStart ? "week" : day >= monthStart ? "month" : "earlier";
+      label = key === "week" ? "Added this week" : key === "month" ? "Earlier this month" : "Earlier";
+    }
+    if (!groups.has(key)) groups.set(key, { key, label, rows: [] });
+    groups.get(key)!.rows.push(c);
+  }
+  return [...groups.values()];
+}
+
+/** A card they agreed to be charged on, that can be: what the Card not set up tab leaves out. */
+const hasCard = (c: ClientRow) => c.card.some((a) => !a.revoked_at && (a.method?.status === "active" || a.method?.status === "pending"));
+
+/** Tags in use on the tab's clients and how many have each, for the tag filter. */
+function useTagCounts(filter: FilterKey) {
+  const { company } = useSession();
+  const scope = filter === "no_card" ? "active" : filter;
+  return useQuery({
+    queryKey: ["client-tags", company.id, "counts", scope],
+    staleTime: 60_000,
+    meta: { silent: true },
+    queryFn: async () => {
+      const rows = await everyRow(() => {
+        const q = supabase().from("clients").select("id, tags").eq("company_id", company.id).not("tags", "eq", "{}");
+        return scope === "all" ? q.neq("status", "archived") : q.eq("status", scope);
+      }, { most: 20_000 });
+      const counts = new Map<string, number>();
+      for (const r of rows) for (const tag of r.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      return counts;
+    },
+  });
+}
+
 export function ClientsPage() {
   const session = useSession();
   const navigate = useNavigate();
@@ -82,24 +149,35 @@ export function ClientsPage() {
   const noCard = money && autopay.enabled && autopay.card_required;
   const filters = FILTERS.filter((f) => f.key !== "no_card" || noCard);
   const [filter, setFilter] = useState<FilterKey>(() => (filters.find((x) => x.key === params.get("status"))?.key as FilterKey | undefined) ?? "all");
-  const [tag, setTag] = useState("");
-  const [sort, setSort] = useState<"name" | "newest">("name");
+  const [picked, setPicked] = useState<string[]>([]);
   const [limit, setLimit] = useState(PAGE);
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [importing, setImporting] = useState(false);
   const [inviting, setInviting] = useState(false);
   const [tagging, setTagging] = useState<"add" | "remove" | null>(null);
+  const [quoting, setQuoting] = useState<{ id: string; display_name: string } | null>(null);
   const queryClient = useQueryClient();
   const term = useDeferredValue(search.trim());
+  const sort: SortKey = params.get("sort") === "newest" ? "newest" : "name";
+  const setParam = (name: string, value: string | null) =>
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      if (value === null) next.delete(name);
+      else next.set(name, value);
+      return next;
+    }, { replace: true });
   const creating = params.get("new") === "1";
-  const setCreating = (on: boolean) => setParams(on ? { new: "1" } : {}, { replace: true });
+  const setCreating = (on: boolean) => setParam("new", on ? "1" : null);
   const canEdit = hasRole(session, "admin", "office", "estimator");
+  const canSell = canEdit && can(session, "sales");
   // Archiving and restoring are the office's, as on a client's page.
   const isOffice = hasRole(session, "admin", "office");
   // Autopay invites are for the people who look after money, once the company has autopay on and can send.
   const invites = money && autopay.enabled && (session.config.features.email || session.config.features.sms);
   const tags = useClientTags();
-  useEffect(() => setLimit(PAGE), [filter, tag, term, sort]);
+  const tagCounts = useTagCounts(filter);
+  const tagKey = picked.join("|");
+  useEffect(() => setLimit(PAGE), [filter, tagKey, term, sort]);
 
   const counts = useQuery({
     queryKey: ["clients", session.company.id, "counts", noCard],
@@ -117,12 +195,20 @@ export function ClientsPage() {
       return { all, lead, active, archived, no_card } as Record<FilterKey, number>;
     },
   });
+  // How many pairs Possible duplicates lists: the same read as that page, so opening it is instant.
+  const duplicates = useQuery({
+    queryKey: ["clients", session.company.id, "duplicates"],
+    enabled: money && canEdit,
+    staleTime: 60_000,
+    meta: { silent: true },
+    queryFn: async () => unwrap(await supabase().rpc("client_duplicates", { p_company: session.company.id })) as unknown as unknown[],
+  });
 
-  const listKey = ["clients", session.company.id, filter, term, tag, sort, limit];
+  const listKey = ["clients", session.company.id, filter, term, tagKey, sort, limit];
   const clients = useQuery({
     queryKey: listKey,
     placeholderData: keepPreviousData,
-    queryFn: () => loadClients({ companyId: session.company.id, filter, term, tag, sort }, limit),
+    queryFn: () => loadClients({ companyId: session.company.id, filter, term, tags: picked, sort }, limit),
   });
 
   const exportCsv = useMutation({
@@ -148,11 +234,10 @@ export function ClientsPage() {
   });
 
   const data = clients.data;
-  const isFiltered = Boolean(term || tag || filter !== "all");
+  const isFiltered = Boolean(term || picked.length || filter !== "all");
   const rows = data?.rows ?? [];
-  const selection = useSelection(rows.map((c) => c.id), `${filter}|${term}|${tag}|${sort}`);
-  const hold = useHoldToPick(selection);
-  const picked = rows.filter((c) => selection.has(c.id));
+  const selection = useSelection(rows.map((c) => c.id), `${filter}|${term}|${tagKey}|${sort}`);
+  const chosen = rows.filter((c) => selection.has(c.id));
   const words = (verb: string) => {
     const names = new Map(rows.map((c) => [c.id, c.display_name]));
     return { verb, one: "client", many: "clients", name: (id: string) => names.get(id) ?? "A client" };
@@ -181,8 +266,17 @@ export function ClientsPage() {
       void refresh();
     },
   });
+  const clearFilters = () => {
+    setSearch("");
+    setPicked([]);
+    setFilter("all");
+  };
 
-  if (clients.isPending && !data) return <ListPageSkeleton columns={5} tabs={4} />;
+  if (clients.isPending && !data) return <InboxPageSkeleton tabs={4} groups={2} />;
+
+  // Tags known to the company, with how many of this tab's clients have each; any picked stay listed.
+  const tagNames = [...new Set([...(tags.data ?? []), ...picked])].sort((a, b) => a.localeCompare(b));
+  const duplicatePairs = duplicates.data?.length ?? 0;
 
   return (
     <>
@@ -193,12 +287,13 @@ export function ClientsPage() {
             <>
               <Menu
                 label={money ? "More actions" : "Import and export"}
+                title="Clients"
                 items={[
                   { label: "Import from a spreadsheet", icon: "upload", onSelect: () => setImporting(true) },
                   { label: exportCsv.isPending ? "Exporting…" : "Download as spreadsheet", icon: "download", onSelect: () => exportCsv.mutate(), disabled: exportCsv.isPending },
                   // Merging moves invoices and payments, so it's for the people who look after money.
                   { separator: true, hidden: !money },
-                  { label: "Possible duplicates", icon: "users", onSelect: () => navigate("/clients/duplicates"), hidden: !money },
+                  { label: "Possible duplicates", icon: "copy", end: duplicatePairs ? String(duplicatePairs) : undefined, onSelect: () => navigate("/clients/duplicates"), hidden: !money },
                   { label: "Send autopay invites", icon: "card", onSelect: () => setInviting(true), hidden: !invites },
                 ]}
               />
@@ -208,57 +303,60 @@ export function ClientsPage() {
         }
       />
       <ContactMessagesNotice />
-      <div className="toolbar">
-        <div className="input-group">
-          <span className="addon"><Icon name="search" size={16} /></span>
-          <input className="input" type="search" placeholder="Search name, company, email or phone" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search clients" />
-        </div>
-        <div className="tabs" role="group" aria-label="Filter clients">
-          {filters.map((f) => (
-            <button key={f.key} type="button" className="tab" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
-              {f.label}
-              {counts.data && <span className="badge">{counts.data[f.key]}</span>}
-            </button>
-          ))}
-        </div>
-        {!!tags.data?.length && (
-          <Select className="select" style={{ width: "auto" }} value={tag} onChange={(e) => setTag(e.target.value)} aria-label="Filter by tag">
-            <option value="">Any tag</option>
-            {tags.data.map((t) => <option key={t} value={t}>{t}</option>)}
-          </Select>
-        )}
-        <Select className="select" style={{ width: "auto", marginLeft: "auto" }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
-          <option value="name">Name A–Z</option>
-          <option value="newest">Newest first</option>
-        </Select>
-      </div>
+      <Toolbar
+        filters={
+          <FilterTabs
+            label="Filter clients"
+            value={filter}
+            onChange={setFilter}
+            // No archived clients is nothing to see: that tab says no number (Page-Clients.dc.html).
+            options={filters.map((f) => ({ value: f.key, label: f.label, count: f.key === "archived" && !counts.data?.archived ? undefined : counts.data?.[f.key] }))}
+          />
+        }
+        search={<SearchField value={search} onChange={setSearch} placeholder="Name, email or phone" label="Search clients" />}
+        tools={
+          <>
+            {tagNames.length > 0 && (
+              <FilterMenu
+                // The one control speaks one language: its button, search and foot all go through t().
+                label={picked.length ? t("Tags") : t("Any tag")}
+                icon="tag"
+                options={tagNames.map((name) => ({ value: name, label: name, count: tagCounts.data ? (tagCounts.data.get(name) ?? 0) : undefined }))}
+                selected={picked}
+                onChange={setPicked}
+                searchPlaceholder={t("Find a tag")}
+                summary={(n) => (n ? t.plural(n, { one: "{count} tag", other: "{count} tags" }) : t("None picked"))}
+              />
+            )}
+            <SortMenu value={sort} onChange={(s) => setParam("sort", s === "newest" ? s : null)} options={[...SORTS]} />
+          </>
+        }
+      />
 
       {clients.error && !data ? (
-        <div className="card"><ErrorState error={clients.error} onRetry={() => clients.refetch()} /></div>
-      ) : clients.isFetching && !data ? (
-        <TableSkeleton columns={5} />
+        <ErrorState error={clients.error} onRetry={() => clients.refetch()} />
       ) : data && data.rows.length === 0 ? (
-        <div className="card">
-          {filter === "no_card" && !term && !tag ? (
-            <EmptyState icon="card" title="Every active client has a card set up" />
-          ) : isFiltered ? (
-            <EmptyState icon="search" title="No clients match" action={<Button onClick={() => { setSearch(""); setTag(""); setFilter("all"); }}>Clear filters</Button>} />
-          ) : (
-            <EmptyState
-              icon="clients"
-              title="No clients yet"
-              // New client in the header is the page's one green button; these are the two ways to start.
-              action={canEdit && (<><Button icon="plus" onClick={() => setCreating(true)}>Add your first client</Button><Button icon="upload" onClick={() => setImporting(true)}>Import from a spreadsheet</Button></>)}
-            />
-          )}
-        </div>
+        filter === "no_card" && !term && !picked.length ? (
+          <EmptyState icon="card" title="Every active client has a card set up" />
+        ) : isFiltered ? (
+          <EmptyState icon="search" title="No clients match" action={<Button onClick={clearFilters}>Clear filters</Button>} />
+        ) : (
+          <EmptyState
+            icon="clients"
+            title="No clients yet"
+            // New client in the header is the page's one green button; these are the two ways to start.
+            action={canEdit && (<><Button icon="plus" onClick={() => setCreating(true)}>Add your first client</Button><Button icon="upload" onClick={() => setImporting(true)}>Import from a spreadsheet</Button></>)}
+          >
+            Everyone you work for, with their properties, work, notes and messages in one place.
+          </EmptyState>
+        )
       ) : (
         data && (
-          <div className={`card${clients.isPlaceholderData ? " is-stale" : ""}`}>
+          <>
             {canEdit && (
-              <SelectionBar selection={selection} noun="clients">
+              <SelectionBar selection={selection} noun="clients" always>
                 <Button size="sm" icon="tag" onClick={() => setTagging("add")}>Add tag</Button>
-                <Button size="sm" icon="tag" disabled={!picked.some((c) => c.tags.length)} onClick={() => setTagging("remove")}>Remove tag</Button>
+                <Button size="sm" icon="tag" disabled={!chosen.some((c) => c.tags.length)} onClick={() => setTagging("remove")}>Remove tag</Button>
                 {isOffice && filter === "archived" && (
                   <Button
                     size="sm"
@@ -275,56 +373,77 @@ export function ClientsPage() {
                 {isOffice && filter !== "archived" && <Button size="sm" icon="archive" onClick={() => void archive()}>Archive</Button>}
               </SelectionBar>
             )}
-            <table className="table table-stack">
-              <thead>
-                <tr>{canEdit && <SelectAllCell selection={selection} label="Select all clients on this page" />}<th>Name</th><th>Contact</th><th>Service address</th><th>Tags</th><th>Status</th></tr>
-              </thead>
-              <RowMenu href={(id) => `/clients/${id}`} selection={selection} {...(canEdit ? hold : {})}>
-                {data.rows.map((c) => (
-                  <tr key={c.id} className="row-link" data-row={c.id} data-selected={selection.has(c.id) || undefined} onClick={() => navigate(`/clients/${c.id}`)}>
-                    {canEdit && <SelectCell selection={selection} id={c.id} label={`Select ${c.display_name}`} />}
-                    <td>
-                      <Link className="cell-link" to={`/clients/${c.id}`} onClick={(e) => e.stopPropagation()}>{c.display_name}</Link>
-                      {c.company_name && c.company_name !== c.display_name && <div className="muted small">{c.company_name}</div>}
-                    </td>
-                    {/* "—" is the one mark for a missing value. A phone alone takes the email's line; on a
-                        phone, where rows stack without column names, a dash says nothing and is left out. */}
-                    <td>
-                      {c.email && <div className="ellipsis" style={{ maxWidth: 240 }}>{c.email}</div>}
-                      {c.phone && <div className={c.email ? "muted small" : undefined}>{c.phone}</div>}
-                      {!c.email && !c.phone && <span className="muted hide-mobile">—</span>}
-                    </td>
-                    <td>
-                      {c.properties[0] ? [c.properties[0].line1, c.properties[0].city].filter(Boolean).join(", ") : <span className="muted hide-mobile">—</span>}
-                      {c.properties.length > 1 && <span className="muted"> +{c.properties.length - 1}</span>}
-                    </td>
-                    <td>
-                      {c.tags.length ? (
-                        <div className="row wrap" style={{ gap: 4 }}>{c.tags.slice(0, 3).map((t) => <span key={t} className="tag">{t}</span>)}{c.tags.length > 3 && <span className="tag">+{c.tags.length - 3}</span>}</div>
-                      ) : (
-                        <span className="muted hide-mobile">—</span>
-                      )}
-                    </td>
-                    <td><EntityStatus kind="client" status={c.status} /></td>
-                  </tr>
-                ))}
-              </RowMenu>
-            </table>
-            <div className="list-foot">
-              <span>Showing {data.rows.length} of {data.total}</span>
-              {data.rows.length < data.total && <Button size="sm" loading={clients.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
-            </div>
-          </div>
+            <InboxList
+              label="Clients"
+              className={sort === "name" ? `il-plain ${styles.list} ${styles.byLetter}` : `il-plain ${styles.list}`}
+              stale={clients.isPlaceholderData}
+              foot={
+                <ListFoot more={data.rows.length < data.total ? { onClick: () => setLimit((l) => l + PAGE), loading: clients.isFetching } : undefined}>
+                  {data.rows.length < data.total ? `Showing ${data.rows.length} of ${data.total}` : plural(data.total, "client")}
+                </ListFoot>
+              }
+            >
+              {groupClients(data.rows, sort, session.company.timezone).map((g) => (
+                <InboxGroup key={g.key} label={g.label} count={g.rows.length}>
+                  {g.rows.map((c) => {
+                    const place = c.properties[0] ? [c.properties[0].line1, c.properties[0].city].filter(Boolean).join(", ") : null;
+                    const reach = [c.email, c.phone].filter(Boolean).join(" · ");
+                    return (
+                      <InboxRow
+                        key={c.id}
+                        to={`/clients/${c.id}`}
+                        title={c.display_name}
+                        badge={c.company_name && c.company_name !== c.display_name ? <span className={styles.company}>{c.company_name}</span> : undefined}
+                        subject={reach || undefined}
+                        meta={[
+                          place && (
+                            <span className={styles.place}>
+                              <Icon name="pin" size={13} />
+                              <span>{place}</span>
+                              {c.properties.length > 1 && <span className={styles.more}>+{c.properties.length - 1}</span>}
+                            </span>
+                          ),
+                          c.tags.length > 0 && (
+                            <span className={styles.tags}>
+                              {c.tags.slice(0, 3).map((tag) => <span key={tag} className="tag">{tag}</span>)}
+                              {c.tags.length > 3 && <span className="tag">+{c.tags.length - 3}</span>}
+                            </span>
+                          ),
+                        ]}
+                        aside={
+                          <>
+                            <EntityStatus kind="client" status={c.status} />
+                            {noCard && filter !== "no_card" && c.status === "active" && !hasCard(c) && <span className="il-sub">No card on file</span>}
+                          </>
+                        }
+                        actions={
+                          <>
+                            {canSell && c.status !== "archived" && <Button size="sm" onClick={() => setQuoting({ id: c.id, display_name: c.display_name })}>New quote</Button>}
+                            {(c.email || c.phone) && <Link className="btn btn-sm btn-icon" to={`/messages?client=${c.id}`} aria-label={`Message ${c.display_name}`} title="Message"><Icon name="messages" size={15} /></Link>}
+                            {c.phone && <a className="btn btn-sm btn-icon" href={`tel:${c.phone}`} aria-label={`Call ${c.display_name}`} title={`Call ${c.phone}`}><Icon name="phone" size={15} /></a>}
+                          </>
+                        }
+                        selection={canEdit ? selection : undefined}
+                        id={c.id}
+                        selectLabel={`Select ${c.display_name}`}
+                      />
+                    );
+                  })}
+                </InboxGroup>
+              ))}
+            </InboxList>
+          </>
         )
       )}
 
       <NewClientDialog open={creating} initialName={search.trim()} onClose={() => setCreating(false)} onCreated={(id) => navigate(`/clients/${id}`)} />
+      {quoting && <NewQuoteDialog open onClose={() => setQuoting(null)} initialClient={quoting} onCreated={(qid) => navigate(`/quotes/${qid}`)} />}
       {importing && <ImportClientsDialog onClose={() => setImporting(false)} />}
       {inviting && <AutopayInvitesDialog onClose={() => setInviting(false)} />}
       {tagging && (
         <TagClientsDialog
           mode={tagging}
-          clients={picked}
+          clients={chosen}
           onClose={() => setTagging(null)}
           onDone={() => {
             setTagging(null);
@@ -337,6 +456,7 @@ export function ClientsPage() {
     </>
   );
 }
+
 
 /**
  * Send autopay invites to many clients at once: every active client not on autopay, or those with

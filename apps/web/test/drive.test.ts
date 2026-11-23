@@ -7,11 +7,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { ROLES, STAFF } from "@crewtavo/core/roles";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MOBILE_TABS, mobileTabs, NAV_GROUPS, navVisible, OTHER_SCREENS, SETTINGS_ITEM } from "../src/components/shell/nav";
 import {
   andList, attachLeaves, attachPatch, companyFilesNote, detachPatch, driveView, editableInDrive, fileMeta, flatTree, folderDescendants, folderNameProblem, folderPath, folderTree,
-  groupClientFiles, iconKind, placeName, placesOf, seesDrive, versionRefused, type DriveFile, type DriveFolder,
+  groupByDay, groupClientFiles, iconKind, placeName, placesOf, seesDrive, versionRefused, type DriveFile, type DriveFolder,
 } from "../src/features/drive/data";
 import { deletedForeverToast } from "../src/features/drive/trash";
 
@@ -229,7 +229,7 @@ describe("where a file is", () => {
   });
 
   it("sums a file up in a line: version, revision, size, kind, when and who", () => {
-    expect(fileMeta(file({ versions: 3, revision: " Rev B ", created_by_name: "Dana Ruiz" }))).toBe("Version 3 · Rev B · 2.4 MB · PDF · updated Oct 19, 2026 · by Dana Ruiz");
+    expect(fileMeta(file({ versions: 3, revision: " Rev B ", created_by_name: "Dana Ruiz" }))).toBe("Version 3 · Rev B · 2.4 MB · PDF · updated Oct 19, 2026 by Dana Ruiz");
     expect(fileMeta(file({ size_bytes: null }))).toBe("PDF · Oct 19, 2026");
   });
 
@@ -290,5 +290,26 @@ describe("Drive's code", () => {
     expect(picker).not.toMatch(/auth\/drive(\.readonly)?"/);
     // The token stays in the tab's memory.
     expect(picker).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+  });
+});
+
+describe("Recent files and the Trash by day", () => {
+  it("groups by the day in the company's time zone, Today then This week then Earlier, leaving out empty groups", () => {
+    vi.useFakeTimers();
+    // Thursday, Nov 19, 2026, 10 AM in New York.
+    vi.setSystemTime(new Date("2026-11-19T15:00:00Z"));
+    try {
+      const at = (created_at: string, id: string) => ({ id, created_at });
+      const files = [at("2026-11-19T14:00:00Z", "today"), at("2026-11-19T03:00:00Z", "late Wednesday in New York"), at("2026-11-15T15:00:00Z", "Sunday"), at("2026-11-14T15:00:00Z", "last Saturday")];
+      const groups = groupByDay(files, "America/New_York");
+      expect(groups.map((g) => [g.label, g.files.map((f) => f.id)])).toEqual([
+        ["Today", ["today"]],
+        ["This week", ["late Wednesday in New York", "Sunday"]],
+        ["Earlier", ["last Saturday"]],
+      ]);
+      expect(groupByDay([at("2026-11-01T15:00:00Z", "old")], "America/New_York").map((g) => g.key)).toEqual(["earlier"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

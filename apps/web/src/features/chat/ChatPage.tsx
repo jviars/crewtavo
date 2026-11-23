@@ -17,10 +17,10 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { Composer, type MentionOption } from "./Composer";
-import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
+import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
-import { ChannelIcon, channelLabel, dayLabel, isNewDay, startsGroup, timeLabel } from "./ui";
+import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { t } from "@/lib/i18n";
 
@@ -71,7 +71,7 @@ export function ChatPage() {
   }, [channel]);
 
   if (!on) return <ChatOff />;
-  if (state.error && !state.data) return <div className="card" style={{ margin: 24 }}><ErrorState error={state.error} onRetry={() => state.refetch()} /></div>;
+  if (state.error && !state.data) return <div className={s.off}><ErrorState error={state.error} onRetry={() => state.refetch()} /></div>;
 
   const toggleMembers = () => {
     setMembersOpen((open) => {
@@ -109,7 +109,7 @@ function ChatOff() {
   const session = useSession();
   const canTurnOn = hasRole(session, "admin") && can(session, "apps");
   return (
-    <div className="card" style={{ margin: "24px auto", maxWidth: 560 }}>
+    <div className={s.off}>
       <EmptyState icon="chat" title={t("Team chat is off")} action={canTurnOn ? <Link className="btn btn-primary" to="/apps/team_chat">{t("Install it from Apps")}</Link> : undefined}>
         {canTurnOn ? t("Channels for the whole team, each crew and the office, with photos and @mentions.") : t("Ask an owner or admin to install Team chat from Apps.")}
       </EmptyState>
@@ -144,11 +144,11 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
   return (
     <aside className={s.side} aria-label={t("Channels")}>
       <div className={s.sideHead}>
-        {/* On a phone the top bar already names the business. */}
+        {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
-        <span className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</span>
+        <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
         {state?.me?.admin && (
-          <Link to="/chat/settings" className="icon-btn" aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={20} /></Link>
+          <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
       </div>
       <nav className={s.sideList} aria-label={t("Channels")}>
@@ -162,25 +162,35 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
           return (
             <div key={g.name}>
               <button type="button" className={s.category} aria-expanded={open} onClick={() => toggle(g.name)}>
-                <Icon name="chevronDown" size={12} bold />
                 <span>{g.name}</span>
+                <Icon name="chevronDown" size={12} bold />
               </button>
-              {g.channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => (
-                <div key={c.id} className={s.channelWrap}>
-                  {c.unread > 0 && c.id !== current && <span className={s.unreadPip} aria-hidden="true" />}
+              {g.channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => {
+                const unread = c.unread > 0 && c.id !== current;
+                const readOnly = !c.can_post && !c.archived && c.kind !== "announcement";
+                return (
                   <NavLink
+                    key={c.id}
                     to={`/chat/${c.id}`}
                     className={s.channel}
-                    data-unread={(c.unread > 0 && c.id !== current) || undefined}
+                    data-unread={unread || undefined}
                     aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}`}
                   >
-                    <ChannelIcon channel={c} />
-                    <span className={s.channelName}>{c.name}</span>
-                    {!c.can_post && !c.archived && c.kind !== "announcement" && <Icon name="eye" size={14} label={t("Read only")} />}
-                    {c.mentions > 0 && c.id !== current && <span className="badge badge-red">{c.mentions}</span>}
+                    <span className={s.hash} aria-hidden="true"><ChannelIcon channel={c} size={14} /></span>
+                    <span className={s.channelText}>
+                      <span className={s.channelName}>{c.name}</span>
+                      {/* On a phone: what the channel is for under its name. */}
+                      <span className={s.channelSub}>{[readOnly || !c.can_post ? t("Read only") : null, c.topic].filter(Boolean).join(" · ")}</span>
+                    </span>
+                    <span className={s.channelEnd}>
+                      {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
+                      {readOnly && <span className="hide-mobile"><Icon name="eye" size={13} label={t("Read only")} /></span>}
+                      {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
+                      {unread && <span className={s.dot} aria-hidden="true" />}
+                    </span>
                   </NavLink>
-                </div>
-              ))}
+                );
+              })}
             </div>
           );
         })}
@@ -202,6 +212,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
   const me = state.me?.user_id ?? session.userId;
   const messages = useMessages(channel.id, around);
   const members = useMembers(channel.id);
+  const live = useLive();
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [focusKey, setFocusKey] = useState("");
   const [personId, setPersonId] = useState<string | null>(null);
@@ -319,15 +330,18 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
   }
   const atStart = !messages.hasNextPage && !messages.isPending;
   const membersCount = members.data?.length;
+  const online = (members.data ?? []).filter((m) => m.online || live.online.has(m.id)).length;
 
   return (
     <>
     <section className={s.conversation} aria-label={channelLabel(channel)}>
       <header className={s.convHead}>
-        <Link to="/chat" className={`icon-btn ${s.back}`} aria-label={t("All channels")}><Icon name="arrowLeft" size={20} /></Link>
+        <Link to="/chat" className={s.back} aria-label={t("All channels")}><Icon name="chevronLeft" size={20} /></Link>
         <div className={s.convTitle}>
-          <ChannelIcon channel={channel} size={20} />
-          <h1>{channel.name}</h1>
+          <h1><span className={s.convHash} aria-hidden="true"><ChannelIcon channel={channel} size={15} /></span><span>{channel.name}</span></h1>
+          {membersCount !== undefined && (
+            <span className={s.convSub}>{[t.plural(membersCount, { one: "{count} member", other: "{count} members" }), online ? t.plural(online, { one: "{count} online", other: "{count} online" }) : null].filter(Boolean).join(" · ")}</span>
+          )}
         </div>
         {channel.can_manage ? (
           <button type="button" className={s.convTopic} onClick={() => setTopicOpen(true)} title={t("Change the topic")}>{channel.topic || t("Add a topic")}</button>
@@ -335,9 +349,11 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
-          <button type="button" className="icon-btn" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}><Icon name="pushpin" size={20} /></button>
-          <button type="button" className={`icon-btn${membersOpen ? ` ${s.toolOn}` : ""}`} aria-label={membersOpen ? t("Hide the member list") : membersCount ? t("Members ({count})", { count: membersCount }) : t("Members")} aria-pressed={membersOpen} title={t("Members")} onClick={onToggleMembers}>
-            <Icon name="users" size={20} />
+          <button type="button" className="btn btn-sm btn-ghost" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}>
+            <Icon name="pushpin" size={15} /><span className={s.toolText}>{t("Pinned")}</span>
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={membersOpen ? t("Hide the member list") : membersCount ? t("Members ({count})", { count: membersCount }) : t("Members")} aria-pressed={membersOpen} title={t("Members")} onClick={onToggleMembers}>
+            <Icon name="users" size={15} />
           </button>
         </div>
       </header>
@@ -345,15 +361,15 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
       <div className={s.scroller} ref={scroller}>
         <div className={s.messages}>
           <div ref={top} />
-          {messages.isFetchingNextPage && <span className="muted small" style={{ alignSelf: "center", margin: 8 }}>{t("Loading older messages…")}</span>}
+          {messages.isFetchingNextPage && <span className={s.older}>{t("Loading older messages…")}</span>}
           {messages.error && <div style={{ padding: 16 }}><ErrorState compact error={messages.error} onRetry={() => messages.refetch()} /></div>}
           {messages.isPending && (
             <Loading label={t("Loading messages")} className="stack" >
-              <div style={{ padding: "16px" }} className="stack">
+              <div style={{ padding: "16px 8px" }} className="stack">
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className="row" style={{ gap: 14, alignItems: "flex-start" }}>
-                    <Skeleton width={40} height={40} radius={20} />
-                    <div className="stack-sm grow"><Skeleton width={180} height={14} /><Skeleton width="70%" height={14} /></div>
+                  <div key={i} className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+                    <Skeleton width={32} height={32} radius={16} />
+                    <div className="stack-sm grow"><Skeleton width={160} height={12} /><Skeleton width="70%" height={13} /></div>
                   </div>
                 ))}
               </div>
@@ -361,7 +377,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           )}
           {atStart && !around && (
             <div className={s.welcome}>
-              <span className={s.welcomeIcon}><ChannelIcon channel={channel} size={30} /></span>
+              <span className={s.welcomeIcon}><ChannelIcon channel={channel} size={20} /></span>
               <h2>{t("Welcome to {channel}", { channel: channelLabel(channel) })}</h2>
               <p>{t("This is the start of {channel}.", { channel: channelLabel(channel) })}{channel.topic ? ` ${channel.topic}` : ""}</p>
             </div>
@@ -412,12 +428,12 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
   return (
     <Dialog open={open} onClose={onClose} title={t("Pinned messages")} description={channel.can_manage ? t("Pin a message from its menu (···) to keep it here.") : undefined}>
       <div className="dialog-body">
-        {pins.isPending && <span className="muted">{t("Loading…")}</span>}
+        {pins.isPending && <span className="muted small">{t("Loading…")}</span>}
         {pins.data?.length === 0 && <EmptyState compact icon="pushpin" title={t("Nothing pinned yet")}>{t("Important messages, like gate codes or a change of plan, can be pinned to the channel.")}</EmptyState>}
         <div className={s.pinList}>
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
-              <span className="small"><strong>{m.author?.name ?? "Crewtavo"}</strong> <span className="muted">{dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span></span>
+              <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
               <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? t("Photo") : t("Job")}</span>
             </button>
           ))}
@@ -454,7 +470,7 @@ function TopicDialog({ open, channel, onClose }: { open: boolean; channel: ChatC
       <form className="dialog-body stack-sm" onSubmit={(e) => { e.preventDefault(); void save(); }}>
         <textarea className="textarea" value={topic} maxLength={300} rows={3} onChange={(e) => setTopic(e.target.value)} aria-label={t("Topic")} placeholder={t("What this channel is for")} />
         {error && <span className="field-error">{error}</span>}
-        <div className="row" style={{ justifyContent: "flex-end" }}>
+        <div className="form-actions">
           <Button variant="ghost" onClick={onClose}>{t("Cancel")}</Button>
           <Button type="submit" variant="primary" loading={saving}>{t("Save")}</Button>
         </div>

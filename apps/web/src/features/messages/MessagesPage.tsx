@@ -8,17 +8,19 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { FilterTabs, SearchField } from "@/components/ui/Toolbar";
+import { InboxGroup, InboxList } from "@/components/ui/InboxList";
+import { InboxSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { initials } from "@/components/ui/Avatar";
 import { ApiError, api, searchTerm, supabase, unwrap } from "@/lib/api";
-import { formatDateTime, timeAgo } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { MessageBody } from "../clients/MessageBody";
 import { messageFrom, messagePeople } from "../clients/messagePeople";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
+import { ConversationRow } from "./ConversationRow";
 import { UnknownRows, UnknownThread, useUnknownNumbers } from "./UnknownNumbers";
 import { matchingNumbers } from "./unknownTexts";
 
@@ -83,36 +85,43 @@ export function MessagesPage() {
     <div className="messages-page stack" data-open={selected || unknown ? "" : undefined} style={{ gap: "inherit" }}>
       <PageHeader title="Messages" actions={hasRole(session, "admin", "office", "estimator") && <Button icon="plus" onClick={() => setComposing(true)}>New message</Button>} />
       {!session.config.features.email && !session.config.features.sms && (
-        <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email and texting aren't turned on yet. You can still add notes.<ConnectEmailHint /></div></div>
+        <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Email and texting aren't turned on yet. You can still add notes.<ConnectEmailHint /></div></div>
       )}
       <div className="inbox" data-open={selected || unknown ? "" : undefined}>
         <section className="inbox-list" aria-label="Conversations">
-          <div className="input-group"><span className="addon"><Icon name="search" size={16} /></span><input className="input" type="search" placeholder="Search conversations" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search conversations" /></div>
-          <div className="tabs" role="group" aria-label="Filter messages">
-            {FILTERS.map((x) => <button key={x.key} type="button" className="tab" aria-pressed={filter === x.key} onClick={() => setFilter(x.key)}>{x.label}</button>)}
-          </div>
-          <div className={`card${messages.isPlaceholderData ? " is-stale" : ""}`} ref={list}>
-            {messages.isPending && <Loading label="Loading conversations">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="card-row"><Skeleton width={36} height={36} circle /><span className="grow stack-sm"><Skeleton width="50%" /><Skeleton width="85%" height={10} /></span></div>)}</Loading>}
+          <SearchField value={search} onChange={setSearch} placeholder="Search conversations" label="Search conversations" />
+          <FilterTabs label="Filter messages" value={filter} onChange={setFilter} options={FILTERS.map((x) => ({ value: x.key, label: x.label }))} />
+          <div className="inbox-scroll" ref={list}>
+            {messages.isPending && <InboxSkeleton rows={6} />}
             {messages.error && <ErrorState compact error={messages.error} onRetry={() => messages.refetch()} />}
-            <UnknownRows numbers={unknownNumbers} selected={unknown} onOpen={(key) => setParams({ unknown: key }, { replace: true })} />
             {messages.data && conversations.length === 0 && unknownNumbers.length === 0 && <EmptyState compact icon="messages" title={term ? "No conversations match" : "No messages yet"} />}
-            {conversations.map((c) => (
-              <button key={c.client!.id} type="button" className="card-row inbox-row" aria-current={selected === c.client!.id} onClick={() => open(c.client!.id)}>
-                <span className="avatar" style={{ background: c.direction === "in" ? "var(--green)" : undefined }}>{initials(c.client!.display_name)}</span>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <span className="row-between"><strong className="ellipsis">{c.client!.display_name}</strong><span className="muted small nowrap">{timeAgo(c.created_at)}</span></span>
-                  <span className="muted small ellipsis" style={{ display: "block" }}>
-                    <Icon name={ICON[c.channel] ?? "messages"} size={12} /> {c.direction === "in" ? "" : c.direction === "internal" ? "Note: " : "You: "}{c.subject ? `${c.subject} · ` : ""}<MessageBody body={c.body} />
-                  </span>
-                </span>
-                {c.direction === "in" && <span className="unread-dot" title="Latest message is from the client" style={{ marginTop: 6 }} />}
-              </button>
-            ))}
+            {(unknownNumbers.length > 0 || conversations.length > 0) && (
+              <InboxList label="Conversations" stale={messages.isPlaceholderData}>
+                <UnknownRows numbers={unknownNumbers} selected={unknown} onOpen={(key) => setParams({ unknown: key }, { replace: true })} />
+                {conversations.length > 0 && (
+                  <InboxGroup label={unknownNumbers.length ? "Clients" : undefined} count={unknownNumbers.length ? conversations.length : undefined}>
+                    {conversations.map((c) => (
+                      <ConversationRow
+                        key={c.client!.id}
+                        name={c.client!.display_name}
+                        current={selected === c.client!.id}
+                        unread={c.direction === "in" ? "Latest message is from the client" : undefined}
+                        at={c.created_at}
+                        onOpen={() => open(c.client!.id)}
+                      >
+                        <Icon name={ICON[c.channel] ?? "messages"} size={13} />
+                        <span>{c.direction === "in" ? "" : c.direction === "internal" ? "Note: " : "You: "}{c.subject ? `${c.subject} · ` : ""}<MessageBody body={c.body} /></span>
+                      </ConversationRow>
+                    ))}
+                  </InboxGroup>
+                )}
+              </InboxList>
+            )}
           </div>
         </section>
-        <section className="inbox-thread" style={{ minHeight: 0 }}>
+        <section className="inbox-thread" aria-label="Conversation">
           {unknown ? <UnknownThread key={unknown} phoneKey={unknown} onBack={() => open(null)} onAttached={(clientId) => open(clientId)} /> : selected ? <Thread key={selected} clientId={selected} onBack={() => open(null)} /> : (
-            <div className="card" style={{ height: "100%", display: "grid", placeItems: "center" }}>
+            <div className="thread-empty">
               <EmptyState icon="messages" title="Pick a conversation" />
             </div>
           )}
@@ -155,23 +164,23 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
   }, [count]);
   if (thread.isPending)
     return (
-      <Loading label="Loading conversation" className="card thread">
+      <Loading label="Loading conversation" className="thread">
         <div className="thread-head"><Skeleton width={160} height={16} /></div>
         <div className="thread-body">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={i === 1 ? 70 : 48} width={i % 2 ? "55%" : "65%"} radius={12} style={{ alignSelf: i % 2 ? "flex-end" : "flex-start" }} />)}</div>
       </Loading>
     );
-  if (thread.error || !thread.data.client) return <div className="card"><ErrorState error={thread.error ?? new ApiError("This client no longer exists. They may have been deleted.", 404)} onRetry={thread.error ? () => thread.refetch() : undefined} /></div>;
+  if (thread.error || !thread.data.client) return <div className="thread-empty"><ErrorState error={thread.error ?? new ApiError("This client no longer exists. They may have been deleted.", 404)} onRetry={thread.error ? () => thread.refetch() : undefined} /></div>;
   const { client, rows } = thread.data;
   let lastDay = "";
   return (
-    <div className="card thread">
+    <div className="thread">
       <div className="thread-head">
-        <button type="button" className="icon-btn mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="arrowLeft" size={20} /></button>
+        <button type="button" className="thread-back mobile-only" aria-label="Back to conversations" onClick={onBack}><Icon name="chevronLeft" size={20} /></button>
         <span className="who">
-          <Link to={`/clients/${client.id}`} className="strong ellipsis" style={{ color: "var(--ink)" }}>{client.display_name}</Link>
-          <span className="muted small ellipsis">{[client.phone, client.email].filter(Boolean).join(" · ") || "No phone or email on file"}</span>
+          <Link to={`/clients/${client.id}`} className="who-name">{client.display_name}</Link>
+          <span className="who-sub">{[client.phone, client.email].filter(Boolean).join(" · ") || "No phone or email on file"}</span>
         </span>
-        {client.phone && <a className="icon-btn" href={`tel:${client.phone}`} aria-label={`Call ${client.display_name}`}><Icon name="phone" size={20} /></a>}
+        {client.phone && <a className="btn btn-sm btn-ghost btn-icon thread-call" href={`tel:${client.phone}`} aria-label={`Call ${client.display_name}`} title={`Call ${client.display_name}`}><Icon name="phone" size={16} /></a>}
       </div>
       <div className="thread-body" ref={body}>
         {rows.length === 0 && <EmptyState compact icon="messages" title="No messages yet" />}
@@ -235,12 +244,12 @@ function Composer({ client, onSent }: { client: { id: string; display_name: stri
   return (
     <form className="composer" onSubmit={(e: FormEvent) => { e.preventDefault(); if (canSend && !send.isPending) send.mutate(); }}>
       <div className="row wrap" style={{ gap: 10 }}>
-        <div className="segmented" role="group" aria-label="Send as">
+        <div className="segmented segmented-sm" role="group" aria-label="Send as">
           <button type="button" aria-pressed={channel === "sms"} onClick={() => { setChannel("sms"); send.reset(); }}><Icon name="messages" size={14} />Text</button>
           <button type="button" aria-pressed={channel === "email"} onClick={() => { setChannel("email"); send.reset(); }}><Icon name="mail" size={14} />Email</button>
           <button type="button" aria-pressed={channel === "note"} onClick={() => { setChannel("note"); send.reset(); }}><Icon name="note" size={14} />Note</button>
         </div>
-        {problem && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{problem}</span>}
+        {problem && <span className="composer-problem">{problem}</span>}
       </div>
       {channel === "email" && <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} placeholder="Subject" aria-label="Subject" />}
       <div className="composer-row">

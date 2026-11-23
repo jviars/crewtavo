@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { progressOf, standingOf } from "../src/features/snow/storm";
+import { answersTone, clearText, progressOf, standingOf, todayGroup, triggersText } from "../src/features/snow/storm";
 
 // Plows at 2 in and again every 2, salts from half an inch.
 const site = { paused: false, located: true, rules: { trigger_in: 2, salt_trigger_in: 0.5, repeat_in: 2 }, told: false };
@@ -45,5 +46,61 @@ describe("Snow → Storm: a storm that's here today", () => {
     expect(progressOf(v("scheduled"), "07:00:00", "06:59").late).toBe(false);
     expect(progressOf(v("scheduled"), "07:00:00", "07:00")).toEqual({ status: "scheduled", late: true, note: "Due by 7 AM" });
     expect(progressOf(v("completed", "scheduled"), "07:00:00", "11:30").note).toBe("Due by 7 AM · 1 of 2 pushes done");
+  });
+});
+
+describe("Snow → Storm: how a row words a customer", () => {
+  it("says its triggers in one line, and that it isn't salted where that's asked", () => {
+    expect(triggersText({ trigger_in: 2, salt_trigger_in: 1, repeat_in: 4 })).toBe("Plow at 2 in, salt at 1 in, again every 4 in");
+    expect(triggersText({ trigger_in: 1.5, salt_trigger_in: null, repeat_in: null })).toBe("Plow at 1.5 in");
+    expect(triggersText({ trigger_in: 2, salt_trigger_in: null, repeat_in: 4 }, true)).toBe("Plow at 2 in, no salting, again every 4 in");
+  });
+  it("puts how soon it's cleared short, with its rank when it isn't the usual", () => {
+    expect(clearText("06:00:00", 1)).toBe("Clear by 6 AM · first");
+    expect(clearText("07:30:00", 2)).toBe("Clear by 7:30 AM");
+    expect(clearText("08:00:00", 3)).toBe("Clear by 8 AM · after the others");
+    expect(clearText(null, 1)).toBe("First priority");
+    expect(clearText(null, 3)).toBe("After the others");
+    expect(clearText(null, 2)).toBeNull();
+  });
+  it("colors the crew line by what the subs asked said: red for a no, amber while waiting, green when all can go", () => {
+    expect(answersTone([])).toBeUndefined();
+    expect(answersTone([true, true])).toBe("good");
+    expect(answersTone([true, null])).toBe("warning");
+    expect(answersTone([null, false])).toBe("danger");
+  });
+});
+
+describe("Snow → Storm: today's storm in piles", () => {
+  const at = (visits: number, more: number, status: string, late = false) => todayGroup({ visits, more, progress: { status, late } });
+  it("puts what's waiting on the office first, the storm that grew with it, then late, under way and done", () => {
+    expect(at(0, 1, "unscheduled")).toBe("schedule");
+    expect(at(1, 1, "in_progress")).toBe("schedule");
+    expect(at(1, 0, "scheduled", true)).toBe("late");
+    expect(at(2, 0, "en_route")).toBe("going");
+    expect(at(1, 0, "completed")).toBe("done");
+  });
+});
+
+describe("Snow on a phone: rows as Mobile-Apps.dc.html draws them", () => {
+  const css = readFileSync(new URL("../src/features/snow/snow.module.css", import.meta.url), "utf8");
+  const phone = css.slice(css.indexOf("@media (max-width: 900px)"));
+  it("swaps the parts said only on a desktop or only on a phone, dot and all", () => {
+    expect(css).toMatch(/@media not all and \(max-width: 900px\) \{\s*:global\(\.il\) \.phoneOnly, [^{]*:has\(\+ \.phoneOnly\)/);
+    expect(phone).toMatch(/:global\(\.il\) \.wideOnly, [^{]*:has\(\+ \.wideOnly\) \{ display: none; \}/);
+  });
+  it("gives who works it two lines rather than an ellipsis, and a tap on it opens the row", () => {
+    expect(phone).toMatch(/:global\(\.il-aside\) > \.crew \{ position: static;[^}]*-webkit-line-clamp: 2;/);
+  });
+});
+
+describe("Snow: a row that opens its popup on this page", () => {
+  it("takes the page's place in the history through the shared row's replace, with no click handler of its own", () => {
+    const page = readFileSync(new URL("../src/features/snow/SnowPage.tsx", import.meta.url), "utf8");
+    const board = readFileSync(new URL("../src/features/snow/StormBoard.tsx", import.meta.url), "utf8");
+    expect(page).not.toContain("onClickCapture");
+    expect(page).toMatch(/to=\{`\/snow\?tab=customers&open=\$\{s\.job_id\}`\}\s+replace\n/);
+    expect(board).toMatch(/to=\{`\/snow\?open=\$\{s\.job_id\}`\}\s+replace\n/);
+    expect(board).toContain("replace={Boolean(site)}");
   });
 });

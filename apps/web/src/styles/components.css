@@ -5,7 +5,7 @@
 .card { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
 .card-pad { padding: 20px; }
 .card-head { display: flex; align-items: center; gap: 8px; padding: 16px 20px; border-bottom: 1px solid var(--divider); }
-.card-head h2, .card-head h3, .card-head strong { flex: 1; min-width: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.card-head h2, .card-head h3, .card-head strong { flex: 1; min-width: 0; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; }
 .card-row { display: flex; gap: 12px; align-items: center; padding: 14px 20px; border-top: 1px solid var(--row-divider); color: inherit; }
 .card > .card-row:first-child { border-top: 0; }
 a.card-row, button.card-row { width: 100%; text-align: left; background: var(--surface); border-left: 0; border-right: 0; border-bottom: 0; transition: background var(--dur-fast); }
@@ -14,45 +14,131 @@ a.card-row:hover, button.card-row:hover { background: var(--fill); color: inheri
 .card > a.card-row:first-child, .card > button.card-row:first-child { border-radius: var(--radius-card) var(--radius-card) 0 0; }
 .card > a.card-row:last-child, .card > button.card-row:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
 .card > a.card-row:only-child, .card > button.card-row:only-child { border-radius: var(--radius-card); }
-/* A choice in a list (a radio in a bordered row): its border turns green once it's picked. A class, since an inline border with a borderColor React clears leaves three sides the text's colour. */
+/*
+ * A choice in a list (a radio in a bordered row): once it's picked, a 2px ink ring (Page-Quote.dc.html's
+ * option tiles), the border and an inset line so nothing moves. A class, since an inline border with a
+ * borderColor React clears leaves three sides the text's colour.
+ */
 .card-row.choice-row { border: 1px solid var(--border); border-radius: var(--radius-control); }
-.card-row.choice-row.picked { border-color: var(--green); }
+.card-row.choice-row.picked { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
 .card-link { transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); color: inherit; }
 .card-link:hover { border-color: var(--button-border); box-shadow: var(--shadow-md); color: inherit; transform: translateY(-1px); }
 .section-title { font-size: var(--fs-20); font-weight: 700; letter-spacing: var(--tracking-tight); }
 .section-head { display: flex; align-items: center; gap: 8px; }
 .section-head .section-title { flex: 1; min-width: 0; }
-.callout { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border-radius: var(--radius-card); background: var(--fill); border: 1px solid var(--border); font-size: var(--fs-14); }
+/*
+ * A callout is a quiet tinted line, not a box (Page-Quote.dc.html, Page-Invoice.dc.html): the words in
+ * ink on a soft tint of what it's about, its icon in that color, the first line in 600. Plain ones sit
+ * on the faintest fill. Its buttons are small and quiet; a link in it is the darker green that reads on a tint.
+ */
+.callout { display: flex; gap: 10px; align-items: flex-start; padding: 11px 14px; border: 0; border-radius: 10px; background: var(--fill-2); color: var(--ink); font-size: var(--fs-13); line-height: 1.45; }
 /* The icon's box is one line of text tall, so a 16 or a 20 sits centered on the first line. */
-.callout > svg { height: 1.45em; }
+.callout > svg { height: 1.45em; flex: none; color: var(--text-3); }
+.callout > .grow, .callout > div { min-width: 0; }
 /* On a tint the app's green is too light to read (4.4:1 on the blue one); the dark green passes. */
 .callout a:not(.btn), .callout .link-btn { color: var(--green-dark); }
 .callout a:not(.btn):hover, .callout .link-btn:hover { color: var(--green-dark); text-decoration: underline; }
-.callout-good { background: var(--green-tint); border-color: transparent; color: var(--green-dark); }
-.callout-warning { background: var(--warning-tint); border-color: transparent; color: var(--warning); }
-.callout-danger { background: var(--danger-tint); border-color: transparent; color: var(--danger); }
-.callout-info { background: var(--info-tint); border-color: transparent; color: var(--info); }
-.callout .grow > :first-child { font-weight: 700; }
+.callout-good { background: var(--green-tint); color: var(--ink); }
+.callout-good > svg { color: var(--green-dark); }
+.callout-warning { background: var(--warning-tint); color: var(--ink); }
+.callout-warning > svg { color: var(--warning); }
+.callout-danger { background: var(--danger-tint); color: var(--ink); }
+.callout-danger > svg { color: var(--danger); }
+.callout-info { background: var(--info-tint); color: var(--ink); }
+.callout-info > svg { color: var(--info); }
+/* Dark: the tone as a faint wash over whatever it sits on, as quiet as light's tints (Radix's step 3 tints are strong filled boxes there). */
+:root.dark .callout-good { background: color-mix(in srgb, var(--green-dark) 10%, transparent); }
+:root.dark .callout-warning { background: color-mix(in srgb, var(--warning) 10%, transparent); }
+:root.dark .callout-danger { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+:root.dark .callout-info { background: color-mix(in srgb, var(--info) 10%, transparent); }
+.callout .grow > :first-child, .callout > div > strong:first-child { font-weight: 600; }
+.callout .btn { height: 28px; padding: 0 10px; border-color: color-mix(in srgb, currentColor 18%, transparent); background: transparent; font-size: var(--fs-12); }
+.callout .btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.callout .btn-primary { border-color: var(--green-solid); background: var(--green-solid); color: #fff; }
+.callout .btn-primary:hover { background: var(--green-solid-hover); }
+@media (max-width: 900px) {
+  .callout { padding: 12px 14px; border-radius: 14px; font-size: var(--fs-14); }
+  .callout .btn { height: 36px; font-size: var(--fs-14); }
+  /* Its button (or row of them) goes under the words, lined up with them past the icon, rather than squeezing the words into a column. */
+  .callout:has(> :is(.btn, .row)) { flex-wrap: wrap; row-gap: 10px; }
+  .callout:has(> :is(.btn, .row)) > :is(.grow, div:not(.row)) { flex: 1 1 calc(100% - 26px); }
+  .callout:has(> svg) > :is(.btn, .row) { margin-left: 26px; }
+  /* On a grouped screen's grey ground a plain one takes the cards' white, or it has no edge. */
+  .content:has(.m-grouped) .callout:not(.callout-good, .callout-warning, .callout-danger, .callout-info) { background: var(--m-card); }
+}
+
+/* ---------- Page header (components/ui/PageHeader.tsx) ---------- */
+/* 24px and bold, tight, with a quiet lede under it; a phone's is a large 28px title on its own row. Over base.css's sizes, which this file follows. */
+.page-title { font-size: var(--fs-24); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.page-lede { flex-basis: 100%; margin: -9px 0 0; color: var(--text-3); font-size: var(--fs-13); font-weight: 400; }
+@media (max-width: 900px) {
+  .page-title { font-size: var(--fs-30); letter-spacing: var(--tracking-display); line-height: 1.15; }
+  .page-lede { margin-top: -8px; font-size: var(--fs-14); }
+  /*
+   * A phone's header (Mobile-Sales.dc.html) doesn't push the list down with a row of buttons: the
+   * title, with the page's other actions on its right as round 40px buttons (one with an icon shows
+   * just the icon, its words still its name for a screen reader), and the one primary floating over
+   * the list above the tab bar (.fab, below). Actions too wide to sit beside the title wrap under it.
+   */
+  .page-header > .page-title { flex: 1 1 160px; }
+  /* A title that's a field (it can't wrap) keeps the whole row; the round buttons go under it on the right. */
+  .page-header > .page-title:has(.title-input) { flex-basis: 100%; }
+  .page-header > .page-actions { flex: 0 1 auto; gap: 8px; margin-left: auto; }
+  .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid) { height: 40px; min-width: 40px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid):hover { background: var(--fill-3); color: var(--ink); }
+  .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid):has(svg) { width: 40px; padding: 0; gap: 0; font-size: 0; }
+  .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid) svg { width: 20px; height: 20px; }
+  /* 40px drawn, a 44px target. */
+  .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid)::after { content: ""; position: absolute; inset: -2px; }
+  .page-header > .page-actions .btn :is(.kbd, kbd) { display: none; }
+  /* The one primary (two would stack in one place, so they stay in the row). */
+  .page-header > .page-actions:not(:has(> .btn-primary ~ .btn-primary)) > .btn-primary { position: fixed; z-index: 15; right: max(16px, env(safe-area-inset-right)); bottom: calc(var(--mobile-nav-height) + 16px + env(safe-area-inset-bottom)); }
+  /* Room under the list for it, so it never sits over the last row. */
+  .content:has(.page-header > .page-actions:not(:has(> .btn-primary ~ .btn-primary)) > .btn-primary) { padding-bottom: calc(var(--mobile-nav-height) + 92px + env(safe-area-inset-bottom)); }
+}
+/*
+ * The phone's floating primary: a 52px green pill over the list, just above the tab bar. A page's
+ * header primary is drawn as one on a phone (above); .fab is the look for anything else that wants it.
+ */
+.fab {
+  position: fixed; z-index: 15; right: max(16px, env(safe-area-inset-right)); bottom: calc(var(--mobile-nav-height) + 16px + env(safe-area-inset-bottom));
+  display: inline-flex; align-items: center; gap: 8px; height: 52px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff;
+  font-size: var(--fs-16); font-weight: 600; box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.18); -webkit-tap-highlight-color: transparent;
+}
+.fab:hover { background: var(--green-solid-hover); color: #fff; }
+.fab svg { width: 20px; height: 20px; }
+@media (max-width: 900px) {
+  .page-header > .page-actions:not(:has(> .btn-primary ~ .btn-primary)) > .btn-primary { height: 52px; padding: 0 20px 0 16px; gap: 8px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-16); box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.18); }
+  .page-header > .page-actions:not(:has(> .btn-primary ~ .btn-primary)) > .btn-primary svg { width: 20px; height: 20px; }
+}
 
 /* ---------- Buttons ---------- */
+/*
+ * Flat. A button is a hairline and its words, filled only under the pointer; the one green primary on
+ * a screen is a flat fill. A page's header actions go further and drop the hairline (below), so the
+ * primary is the only thing there that looks pressable at a glance.
+ */
 .btn {
-  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--control); padding: 0 14px;
-  border-radius: var(--radius-control); font-weight: 600; border: 1px solid var(--button-border); background: var(--surface); color: var(--ink);
-  white-space: nowrap; user-select: none; box-shadow: var(--shadow-xs); -webkit-tap-highlight-color: transparent;
+  position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: var(--control); padding: 0 13px;
+  border-radius: var(--radius-control); font-size: var(--fs-13); font-weight: 600; border: 1px solid var(--border); background: transparent; color: var(--ink);
+  white-space: nowrap; user-select: none; box-shadow: none; -webkit-tap-highlight-color: transparent;
   transition: background var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast) var(--ease-out), color var(--dur-fast);
 }
-.btn:hover { background: var(--fill); border-color: var(--border-strong); color: var(--ink); }
+.btn:hover { background: var(--fill-2); border-color: var(--border); color: var(--ink); }
+@media (max-width: 900px) { .btn { font-size: var(--fs-14); } }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 /* The outline of base.css's :focus-visible, with the soft glow inside it. */
 .btn:focus-visible { box-shadow: var(--ring); }
 /* A file picker inside a label (its input is .sr-only, so it can take focus): the label shows it (and base.css gives it the outline). */
 label.btn:focus-within { box-shadow: var(--ring); }
-.btn-primary { background: var(--green-solid); border-color: var(--green-solid); color: #fff; font-weight: 700; box-shadow: 0 1px 2px rgba(44, 97, 26, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12); }
-.btn-primary:hover { background: var(--green-solid-hover); border-color: var(--green-solid-hover); color: #fff; }
+.btn-primary { background: var(--green-solid); border-color: var(--green-solid); color: #fff; font-weight: 600; }
+.btn-primary:hover:where(:not(:disabled, [aria-disabled="true"])) { background: var(--green-solid-hover); border-color: var(--green-solid-hover); color: #fff; }
+/* A key hint on the primary (New request R) reads on the green. */
+.btn-primary .kbd, .btn-primary kbd { border-color: rgba(255, 255, 255, 0.35); background: transparent; color: rgba(255, 255, 255, 0.85); }
 .btn-danger { color: var(--danger); }
 .btn-danger:hover { background: var(--danger-tint); border-color: color-mix(in srgb, var(--danger) 30%, var(--surface)); color: var(--danger-dark); }
 .btn-danger-solid { background: var(--danger-solid); border-color: var(--danger-solid); color: #fff; }
-.btn-danger-solid:hover { background: var(--danger-solid-hover); border-color: var(--danger-solid-hover); color: #fff; }
+.btn-danger-solid:hover:where(:not(:disabled, [aria-disabled="true"])) { background: var(--danger-solid-hover); border-color: var(--danger-solid-hover); color: #fff; }
 .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; }
 .btn-ghost:hover { background: var(--fill-2); border-color: transparent; }
 /*
@@ -64,8 +150,14 @@ label.btn:focus-within { box-shadow: var(--ring); }
 :where(.section-head) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid)):hover { background: var(--fill-2); border-color: transparent; }
 :where(.section-head) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid, :has(svg))) { color: var(--green); }
 :where(.section-head) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid, :has(svg))):hover { color: var(--green-dark); }
+/*
+ * A page's own actions, in its header: ghosts beside the one primary. A danger action keeps its
+ * outline and an icon-only one (More actions) its hairline, so it still reads as a button on its own.
+ */
+:where(.page-header, .page-actions) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid, .btn-icon)) { border-color: transparent; color: var(--text-2); }
+:where(.page-header, .page-actions) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid, .btn-icon)):hover { background: var(--fill-2); border-color: transparent; color: var(--ink); }
 .btn-dark { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
-.btn-dark:hover { background: var(--solid-hover); border-color: var(--solid-hover); color: var(--on-solid); }
+.btn-dark:hover:where(:not(:disabled, [aria-disabled="true"])) { background: var(--solid-hover); border-color: var(--solid-hover); color: var(--on-solid); }
 .btn-sm { height: var(--control-sm); padding: 0 10px; font-size: var(--fs-13); gap: 6px; }
 .btn-lg { height: var(--control-lg); padding: 0 20px; font-size: var(--fs-16); }
 .btn-block { width: 100%; }
@@ -76,9 +168,17 @@ label.btn:focus-within { box-shadow: var(--ring); }
 .btn-icon { width: var(--control); padding: 0; }
 .btn-icon.btn-sm { width: var(--control-sm); }
 .btn-icon.btn-lg { width: var(--control-lg); }
-/* Disabled reads as off, not as a paler version of itself: one neutral look for every variant. Loading keeps its color. */
-.btn:disabled:not(.is-loading), .btn:disabled:not(.is-loading):hover, .btn[aria-disabled="true"], .btn[aria-disabled="true"]:hover { background: var(--fill-2); border-color: var(--border); color: var(--text-4); box-shadow: none; opacity: 1; cursor: not-allowed; }
+/*
+ * Disabled reads as off, quietly: a ghost of itself, a faint hairline and quiet words, never a grey
+ * slab. A filled one (the green primary, dark, danger) keeps its fill, faded, so a page's one primary
+ * still reads as the thing to do once it's ready; it sets no color of its own, so the Client Hub's
+ * brand-colored primary fades in the brand color. Loading keeps its look.
+ */
+.btn:disabled:not(.is-loading, .btn-primary, .btn-dark, .btn-danger-solid), .btn:disabled:not(.is-loading, .btn-primary, .btn-dark, .btn-danger-solid):hover,
+.btn[aria-disabled="true"]:not(.btn-primary, .btn-dark, .btn-danger-solid), .btn[aria-disabled="true"]:not(.btn-primary, .btn-dark, .btn-danger-solid):hover { background: transparent; border-color: var(--divider); color: var(--text-3); box-shadow: none; opacity: 1; cursor: not-allowed; }
+.btn:is(.btn-primary, .btn-dark, .btn-danger-solid):is(:disabled, [aria-disabled="true"]):not(.is-loading, .is-done) { box-shadow: none; opacity: 0.5; cursor: not-allowed; }
 .btn-ghost:disabled:not(.is-loading), .btn-ghost:disabled:not(.is-loading):hover, .btn-ghost[aria-disabled="true"], .btn-ghost[aria-disabled="true"]:hover { background: transparent; border-color: transparent; }
+:where(.page-header, .page-actions) .btn:where(:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid, .btn-icon)):is(:disabled, [aria-disabled="true"]):not(.is-loading) { background: transparent; border-color: transparent; }
 .btn.is-loading { opacity: 0.85; cursor: progress; box-shadow: none; }
 /* Done (Button's done prop): the label and a check trade places in one grid cell, on a soft green, so the width holds. */
 .btn-faces { display: inline-grid; gap: inherit; }
@@ -101,28 +201,54 @@ label.btn:focus-within { box-shadow: var(--ring); }
 
 .spinner { display: inline-block; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.7s linear infinite; opacity: 0.9; flex: none; }
 
-/* ---------- Pills, chips, badges ---------- */
-/* A status is a word in a rounded pill (StatusPill.tsx); tags are square (.tag), so the two never read alike. */
-.pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); font-size: var(--fs-12); font-weight: 600; white-space: nowrap; }
-.pill-dot { width: 6px; height: 6px; border-radius: var(--radius-pill); }
-/* A steady state is its dot and plain words; the tint is kept for a state that needs someone. The same padding, so dots line up down a column. */
-.pill.pill-quiet { background: none; color: var(--text-2); font-size: var(--fs-13); font-weight: 500; }
-.page-meta > .pill-quiet:first-child { padding-left: 0; }
-.chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); font-size: var(--fs-12); font-weight: 600; white-space: nowrap; }
-.chip button { display: grid; place-items: center; width: 16px; height: 16px; margin-right: -4px; border: 0; border-radius: 50%; background: transparent; color: inherit; padding: 0; }
+/* ---------- Status, chips, tags, counts ---------- */
+/*
+ * A status is a small dot and plain words (StatusPill.tsx), never a tinted pill. The words take a
+ * color only when someone has to act: amber for a warning, red for danger. Tags are square outlines
+ * (.tag) and counts are plain numbers (.badge), so none of the three reads like another.
+ */
+.pill { display: inline-flex; align-items: center; gap: 6px; min-height: 20px; padding: 0; border-radius: 0; background: none; color: var(--text-2); font-size: var(--fs-12); font-weight: 500; line-height: 1.3; white-space: nowrap; }
+.pill-dot, .pill:not(:has(> .pill-dot, > svg))::before { width: 7px; height: 7px; flex: none; border-radius: var(--radius-pill); background: var(--quiet); }
+.pill:not(:has(> .pill-dot, > svg))::before { content: ""; }
+.pill > svg { color: var(--quiet); }
+.pill[data-tone="good"], .pill[data-tone="success"] { --tone: var(--job); }
+.pill[data-tone="info"] { --tone: var(--invoice); }
+/* On its way, nobody has to act yet (a lead, partly paid): the amber dot only, the words plain. */
+.pill[data-tone="pending"] { --tone: var(--req); }
+.pill[data-tone="warning"] { --tone: var(--req); color: var(--warning); font-weight: 600; }
+.pill[data-tone="danger"] { --tone: var(--danger); color: var(--danger); font-weight: 600; }
+.pill[data-tone] > .pill-dot, .pill[data-tone]::before { background-color: var(--tone, var(--quiet)); }
+.pill[data-tone] > svg { color: var(--tone, var(--quiet)); }
+/* Kept for callers that still ask for it: every status is quiet now. */
+.pill.pill-quiet { background: none; }
+/* A label on something (Volume, Autopay): a quiet fill. A colored one (a change, a margin, Texts off) is colored words, with no box. */
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--fill-2); color: var(--text-2); font-size: var(--fs-12); font-weight: 500; white-space: nowrap; }
+button.chip:hover { background: var(--fill-3); color: var(--ink); }
+.chip button { display: grid; place-items: center; width: 16px; height: 16px; margin-right: -4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; padding: 0; }
 .chip button:hover { background: var(--fill-3); }
-.chip-green { background: var(--green-tint); color: var(--green-dark); }
-.chip-blue { background: var(--info-tint); color: var(--info); }
-.chip-amber { background: var(--warning-tint); color: var(--warning); }
-.chip-red { background: var(--danger-tint); color: var(--danger); }
+:is(.chip-green, .chip-blue, .chip-amber, .chip-red) { gap: 4px; padding: 0; background: none; font-weight: 600; }
+.chip-green { color: var(--job-text); }
+.chip-blue { color: var(--invoice-text); }
+.chip-amber { color: var(--warning); }
+.chip-red { color: var(--danger); }
 /* A tag someone added (a client's, a guide's): square corners and an outline, never a fill. */
-.tag { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-12); font-weight: 600; line-height: 1; white-space: nowrap; }
+.tag { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-12); font-weight: 500; line-height: 1; white-space: nowrap; }
 a.tag:hover { border-color: var(--border-strong); color: var(--ink); }
-.tag button { display: grid; place-items: center; width: 16px; height: 16px; margin-right: -4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; padding: 0; }
+/* Its remove ×: quiet, ink under the pointer. A phone's removable tag is 36px, its × a 44px target (below). */
+.tag button { display: grid; place-items: center; width: 16px; height: 16px; margin-right: -4px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); padding: 0; }
 .tag button:hover { background: var(--fill-2); color: var(--ink); }
-.badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); font-size: var(--fs-11); font-weight: 700; font-variant-numeric: tabular-nums; }
-.badge-green { background: var(--green-solid); color: #fff; }
-.badge-red { background: var(--danger-solid); color: #fff; }
+@media (max-width: 900px) {
+  .tag:has(> button) { height: 36px; padding: 0 0 0 12px; border-radius: 8px; font-size: var(--fs-14); }
+  .tag > button { position: relative; width: 36px; height: 34px; margin-right: 0; }
+  .tag > button::after { content: ""; position: absolute; inset: -5px 0; }
+}
+/* A count is a plain number in the quiet grey, beside its words; red only when the count is of things gone wrong. */
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 0; height: auto; padding: 0; border-radius: 0; background: none; color: var(--quiet); font-size: var(--fs-12); font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.badge-green { color: var(--green); font-weight: 600; }
+.badge-red { color: var(--danger); font-weight: 600; }
+/* Over an icon (the phone's tab bar) there are no words around the count, so it's a small solid pill. */
+.badge.mobile-tab-badge { display: inline-grid; place-items: center; border-radius: var(--radius-pill); background: var(--danger-solid); color: #fff; font-weight: 700; line-height: 1; }
+.badge-green.mobile-tab-badge { background: var(--green-solid); }
 .avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; background: var(--avatar); color: #fff; font-weight: 700; }
 /* Someone's photo in place of their initials (components/ui/Avatar.tsx), in any avatar circle. */
 .avatar-photo { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }
@@ -138,14 +264,15 @@ a.tag:hover { border-color: var(--border-strong); color: var(--ink); }
 .field .optional { font-weight: 400; color: var(--text-3); }
 /* A field fixed after a problem, or an email or phone number that checks out: a small check by the label. */
 .field-ok { display: inline-grid; place-items: center; margin-left: 6px; vertical-align: -2px; color: var(--green-dark); animation: fade-in var(--dur) var(--ease-out); }
+/* Quiet: a hairline on the page's own ground (Page-Settings.dc.html), darker under the pointer, green while typing. */
 .input, .select, .textarea {
-  width: 100%; min-width: 0; height: var(--control); padding: 0 10px; border: 1px solid var(--button-border); border-radius: var(--radius-control);
-  background: var(--surface); font-weight: 400; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); box-shadow: var(--shadow-xs);
+  width: 100%; min-width: 0; height: var(--control); padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--page); font-weight: 400; transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
 /* An example in an empty field is read like any other words: --text-3 is 5.2:1 on a field in the light theme (--text-4 was 3.0:1). */
 .input::placeholder, .textarea::placeholder { color: var(--text-3); }
 .input:hover, .select:hover, .textarea:hover { border-color: var(--border-strong); }
-.select { appearance: none; -webkit-appearance: none; padding-right: 30px; background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 256 256' fill='%235f6f76'%3E%3Cpath d='M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z'/%3E%3C/svg%3E") no-repeat right 10px center; }
+.select { appearance: none; -webkit-appearance: none; padding-right: 30px; background: var(--page) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 256 256' fill='%235f6f76'%3E%3Cpath d='M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z'/%3E%3C/svg%3E") no-repeat right 10px center; }
 :root.dark .select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 256 256' fill='%23b5b3ad'%3E%3Cpath d='M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159l71.51-71.52a12,12,0,0,1,17,17Z'/%3E%3C/svg%3E"); }
 .textarea { height: auto; min-height: 84px; padding: 8px 10px; resize: vertical; line-height: 1.45; }
 .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--green); box-shadow: var(--ring); }
@@ -156,14 +283,23 @@ a.tag:hover { border-color: var(--border-strong); color: var(--ink); }
 .input:user-invalid:focus, .textarea:user-invalid:focus, .select:user-invalid:focus { box-shadow: var(--ring-danger); }
 /* A control drawn by its wrapper (TagInput). */
 .input:has(> input[aria-invalid="true"]) { border-color: var(--danger); }
+/* TagInput: its tags and a small field after them, wrapping, in one field's frame. */
+.tag-input { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; height: auto; min-height: var(--control); padding: 6px 8px; }
+.tag-input-field { flex: 1 0 100px; min-width: 80px; height: 24px; padding: 0; border: 0; outline: none; background: transparent; }
 /* TagInput's suggestions, open while it has focus. */
-.tag-suggest { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30; max-height: min(260px, 50vh); overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-lg); animation: fade-in var(--dur-fast); }
-.tag-suggest .menu-item { height: auto; min-height: 34px; font-weight: 500; }
-.tag-suggest .menu-item[aria-selected="true"] { background: var(--fill-2); }
+.tag-suggest { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30; max-height: min(260px, 50vh); overflow-y: auto; padding: 4px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); animation: fade-in var(--dur-fast); }
+.tag-suggest .menu-item { height: auto; min-height: 32px; font-weight: 500; }
+.tag-suggest .menu-item[aria-selected="true"] { background: var(--menu-hi); }
+@media (max-width: 900px) {
+  /* After the field's own rules above, so they win on a phone. */
+  .tag-input { gap: 8px; }
+  .tag-input-field { height: 36px; font-size: var(--fs-16); }
+  .tag-suggest .menu-item { min-height: 44px; font-size: var(--fs-16); }
+}
 /* The colour only: the background shorthand would reset a select's chevron to repeat (dark mode) or drop it (light). */
 .input:disabled, .select:disabled, .textarea:disabled { background-color: var(--fill); color: var(--text-3); cursor: not-allowed; }
 /* A list whose rows a finger holds to pick (useHoldToPick): holding doesn't select their words instead. */
-@media (pointer: coarse) { tbody[data-hold] tr { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@media (pointer: coarse) { tbody[data-hold] tr, .il-row[data-hold] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /*
  * A code typed one digit to a box (CodeField): boxes like fields, the caret and focus in green. They
  * share the width there is, up to 52px each; with no width of their own (an input's is about 150px),
@@ -198,56 +334,137 @@ a.tag:hover { border-color: var(--border-strong); color: var(--ink); }
 .form-actions .spacer { flex: 1; }
 /* "2 fields need a look" beside the buttons (FormChecks in components/ui/Field.tsx). */
 .form-checks { display: inline-flex; align-items: center; gap: 6px; color: var(--danger); font-size: var(--fs-13); font-weight: 600; animation: fade-in var(--dur) var(--ease-out); }
-.form-checks[hidden] { display: none; }
 @media (max-width: 900px) { .dialog .form-actions .form-checks { flex-basis: 100%; justify-content: center; } }
 /* Save status (components/ui/SaveStatus.tsx) in a page header's meta line: "Saved" fades away. */
-.save-status { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-13); font-weight: 600; transition: opacity var(--dur-slow) var(--ease-out), visibility 0s; }
+.save-status { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); font-size: var(--fs-12); font-weight: 500; transition: opacity var(--dur-slow) var(--ease-out), visibility 0s; }
 .save-status:empty { display: none; }
-.save-status[data-state="saved"] svg { color: var(--green-dark); }
+.save-status svg { width: 13px; height: 13px; }
+.save-status[data-state="saved"] svg { color: var(--green); }
 .save-status[data-state="error"] { color: var(--danger); }
 .save-status[data-hidden] { opacity: 0; visibility: hidden; transition: opacity var(--dur-slow) var(--ease-out), visibility 0s var(--dur-slow); }
 .form-section { display: grid; gap: 14px; padding-top: 16px; border-top: 1px solid var(--divider); }
 /* Under 16px, so without the headings' tighter tracking (base.css). */
-.form-section > h3 { font-size: var(--fs-14); font-weight: 700; letter-spacing: normal; }
+.form-section > h3 { font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; }
 .error-text { color: var(--danger); font-size: var(--fs-13); margin: 0; font-weight: 600; }
 .form-error { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-control); background: var(--danger-tint); color: var(--danger); font-size: var(--fs-13); font-weight: 600; animation: pop-in var(--dur) var(--ease-out); }
 .checkbox { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-14); font-weight: 400; cursor: pointer; }
 .checkbox input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--green); flex: none; }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
+/*
+ * A check box is a hairline square on the list, not the browser's filled grey block (in the dark
+ * theme it read as turned off): its edge 3:1 on what it sits on, green with a white tick (or a dash,
+ * part picked) once it's on. Weightless (:where), so a screen's own size and margin still apply; the
+ * tick scales with the box. The browser's own box where colours are forced, and on paper.
+ */
+:where(input[type="checkbox"]:not(.switch, [role="switch"])) {
+  appearance: none; -webkit-appearance: none; display: inline-grid; place-content: center; flex: none; width: 16px; height: 16px; margin: 0; vertical-align: -3px;
+  border: 1px solid var(--check-edge); border-radius: 25%; background: transparent no-repeat center / 100% 100%; cursor: pointer;
+  transition: background-color var(--dur-fast), border-color var(--dur-fast);
+}
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):hover { border-color: var(--text-2); }
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):is(:checked, :indeterminate) { border-color: var(--green-solid); background-color: var(--green-solid); }
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):checked { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 8.2 2.6 2.6L12 5.4'/%3E%3C/svg%3E"); }
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):indeterminate { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M4.5 8h7'/%3E%3C/svg%3E"); }
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):disabled { opacity: 0.5; cursor: not-allowed; }
+/* The box you just checked pops once as its check lands; a page of boxes already ticked stays still. */
+:where(input[type="checkbox"]:not(.switch, [role="switch"])):checked:focus { animation: check-pop 280ms var(--ease-spring); }
+@keyframes check-pop { from { transform: scale(0.8); } }
+@media (prefers-reduced-motion: reduce) { @keyframes check-pop { to { transform: none; } } }
+@media (forced-colors: active), print {
+  :where(input[type="checkbox"]:not(.switch, [role="switch"])) { appearance: auto; -webkit-appearance: auto; }
+}
 
 /* Switch: <label class="switch-row"><input type="checkbox" class="switch"> Label</label> */
-.switch { appearance: none; -webkit-appearance: none; position: relative; width: 36px; height: 20px; flex: none; margin: 0; border-radius: var(--radius-pill); background: var(--fill-3); cursor: pointer; transition: background var(--dur) var(--ease-out); }
-.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: transform var(--dur) var(--ease-spring); }
-.switch:checked { background: var(--green); }
-.switch:checked::after { transform: translateX(16px); }
+/* 30 by 18 with a 14px knob (Page-Settings.dc.html); a phone's is 44 by 26 with a 20px one (Mobile-Apps.dc.html). */
+.switch { appearance: none; -webkit-appearance: none; position: relative; width: 30px; height: 18px; flex: none; margin: 0; border-radius: var(--radius-pill); background: var(--fill-3); cursor: pointer; transition: background var(--dur) var(--ease-out); }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform var(--dur) var(--ease-spring); }
+.switch:checked { background: var(--green-solid); }
+.switch:checked::after { transform: translateX(12px); }
 .switch:focus-visible { box-shadow: var(--ring); }
 .switch:disabled { opacity: 0.5; cursor: not-allowed; }
-.switch-row { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
-
-/* Segmented control and filter tabs */
-.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
-.tab {
-  height: var(--control-sm); padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); font-weight: 600; font-size: var(--fs-13);
-  color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
+/* Its words at 500 (Page-Settings.dc.html's switch lines), a hint under them quiet. */
+.switch-row { display: flex; align-items: center; gap: 10px; font-weight: 500; cursor: pointer; }
+.switch-row :is(.muted, .hint) { font-weight: 400; color: var(--text-3); }
+@media (max-width: 900px) {
+  .switch { width: 44px; height: 26px; }
+  .switch::after { top: 3px; left: 3px; width: 20px; height: 20px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+  .switch:checked::after { transform: translateX(18px); }
 }
-.tab:hover { border-color: var(--button-border); color: var(--ink); }
+
+/* ---------- Segmented controls, filters and tabs ---------- */
+/*
+ * A list's filters (.tabs) and a choice of views or settings (.segmented) are one control: a filled
+ * track with the chosen item raised off it, its count a plain number. On a phone a list's filters
+ * become a row of chips that scrolls sideways, the chosen one solid. A detail page's sections are
+ * underline tabs (.underline-tabs). Items are the control height less the track, so a filter sits
+ * level with the search field beside it.
+ */
+.tabs, .segmented { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; max-width: 100%; padding: 3px; border-radius: 10px; background: var(--seg-track); }
+/*
+ * Inside a dialog, a menu or a panel the dark theme's surface is the track's own sand-3, so the track
+ * would vanish (light's white surface keeps its warm grey one): there it's a well darker than the
+ * surface, which the raised choice still lifts off.
+ */
+:root.dark :is(.dialog, .menu, .panel) { --seg-track: var(--seg-track-inset); }
+/*
+ * A list's filters stay one row however many there are: past the width they have, the track scrolls
+ * sideways (its scrollbar hidden) and the edge with more past it fades (data-more, lib/indicator.ts),
+ * rather than wrapping into a two-row block. The raised chip scrolls with them.
+ */
+.tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs > .tab { flex: none; }
+/* The track clips its edges now, so a filter's focus outline is drawn just inside it (as in a menu). */
+.tabs > .tab:focus-visible { outline-offset: -2px; }
+.tabs[data-more="right"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+.tabs[data-more="left"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
+.tabs[data-more="both"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent); }
+.tab, .segmented button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: calc(var(--control) - 6px); padding: 0 11px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--text-3); font-size: var(--fs-13); font-weight: 600; white-space: nowrap; -webkit-tap-highlight-color: transparent;
+  transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast);
+}
+.tab:hover, .segmented button:hover { color: var(--ink); }
 .tab:active { transform: scale(0.97); }
-.tab[aria-pressed="true"], .tab[aria-selected="true"] { background: var(--solid); border-color: var(--solid); color: var(--on-solid); }
-.tab .badge { height: 18px; min-width: 18px; font-size: var(--fs-11); background: var(--fill-2); }
-.tab[aria-pressed="true"] .badge, .tab[aria-selected="true"] .badge { background: color-mix(in srgb, currentColor 20%, transparent); color: inherit; }
-/* A count that's a warning (Past due on Invoices) keeps its solid color, chosen or not, rather than white on the grey above. */
-.tab .badge-red, .tab[aria-pressed="true"] .badge-red, .tab[aria-selected="true"] .badge-red { background: var(--danger-solid); color: #fff; }
-.tab .badge-green, .tab[aria-pressed="true"] .badge-green, .tab[aria-selected="true"] .badge-green { background: var(--green-solid); color: #fff; }
-/* Small buttons on a 3px track, so the whole control is as tall as the others (38px). */
-.segmented { display: inline-flex; padding: 3px; gap: 2px; background: var(--fill-2); border-radius: var(--radius-card); }
-.segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: var(--control-sm); padding: 0 12px; border: 0; border-radius: var(--radius-control); background: transparent; font-weight: 700; font-size: var(--fs-13); color: var(--text-2); transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
-.segmented button:hover { color: var(--ink); }
-.segmented button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--shadow-sm); }
-.underline-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; }
-.underline-tabs button, .underline-tabs a { position: relative; height: var(--control); padding: 0 2px; border: 0; background: none; font-weight: 700; color: var(--text-3); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.tab[aria-pressed="true"], .tab[aria-selected="true"], .segmented button[aria-pressed="true"], .segmented button[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--seg-shadow); }
+/*
+ * A toggle on its own, with no track under it (workdays, repeat days, time slots, Net 15/30): a chip
+ * of its own, filled so it reads as pressable, and solid ink once it's on, as a phone's filters are.
+ */
+:not(.tabs, .segmented) > .tab { height: 30px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); }
+:not(.tabs, .segmented) > .tab:hover { background: var(--fill-3); color: var(--ink); }
+:not(.tabs, .segmented) > .tab:is([aria-pressed="true"], [aria-selected="true"]) { background: var(--solid); color: var(--on-solid); box-shadow: none; }
+:not(.tabs, .segmented) > .tab:is([aria-pressed="true"], [aria-selected="true"]):hover { background: var(--solid-hover); color: var(--on-solid); }
+:not(.tabs, .segmented) > .tab:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+:not(.tabs, .segmented) > .tab:is([aria-pressed="true"], [aria-selected="true"]) .badge { color: inherit; opacity: 0.7; }
+/* Its count: quiet, chosen or not. One that's a warning (Past due on Invoices) is red words, not a red badge. */
+.tab .badge { color: var(--quiet); font-size: var(--fs-12); font-weight: 500; }
+.tab .badge-red { color: var(--danger); font-weight: 600; }
+.tab .badge-green { color: var(--green); font-weight: 600; }
+@media (max-width: 900px) {
+  /* Chips in a row that scrolls, as on the phone's lists. 34px, with the 44px target drawn around each. */
+  .tabs { display: flex; flex-wrap: nowrap; gap: 8px; padding: 5px 0; border-radius: 0; background: none; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { position: relative; flex: none; height: 34px; padding: 0 14px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); font-size: var(--fs-14); }
+  .tab::after { content: ""; position: absolute; inset: -5px 0; }
+  .tab[aria-pressed="true"], .tab[aria-selected="true"] { background: var(--solid); color: var(--on-solid); box-shadow: none; }
+  .tab .badge { color: inherit; opacity: 0.65; font-size: var(--fs-13); }
+  .tab:not([aria-pressed="true"], [aria-selected="true"]) .badge-red { color: var(--danger); opacity: 1; }
+  /* On a grouped page's grey ground a chip that isn't picked is white, or it can't be seen (not in a section's white card or a sheet). */
+  .m-grouped .tab:not([aria-pressed="true"], [aria-selected="true"]):not(.sec:not(.sec-flush) > .sec-body *, dialog *) { background: var(--m-card); }
+  .segmented button { font-size: var(--fs-14); }
+  /* A choice is the control less its track; its target is the whole 44px. */
+  .segmented > button { position: relative; }
+  .segmented > button::after { content: ""; position: absolute; inset: -3px 0; }
+  :not(.tabs, .segmented) > .tab { height: 34px; padding: 0 14px; }
+}
+.underline-tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; }
+.underline-tabs button, .underline-tabs a { position: relative; height: 38px; padding: 0; border: 0; background: none; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
 .underline-tabs button:hover, .underline-tabs a:hover { color: var(--ink); }
 .underline-tabs [aria-selected="true"], .underline-tabs [aria-current="page"] { color: var(--ink); }
-.underline-tabs [aria-selected="true"]::after, .underline-tabs [aria-current="page"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: var(--radius-pill); background: var(--green); animation: fade-in var(--dur); }
+.underline-tabs [aria-selected="true"]::after, .underline-tabs [aria-current="page"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--ink); animation: fade-in var(--dur); }
+.underline-tabs .badge { font-size: var(--fs-12); }
+@media (max-width: 900px) { .underline-tabs button, .underline-tabs a { height: 44px; font-size: var(--fs-14); } }
 /* More tabs past an edge (lib/tabStrip.ts): that edge fades out, since the strip's scrollbar is hidden. */
 .underline-tabs[data-more="right"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
 .underline-tabs[data-more="left"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
@@ -271,15 +488,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 }
 :is(.tabs, .segmented, .underline-tabs)[data-indicator="still"]::before { transition: none; }
 :is(.tabs, .segmented, .underline-tabs)[data-indicator] > * { position: relative; z-index: 1; }
-/* Filter pills: the ink pill. The others go clear too, or the pill would vanish behind them on its way. */
-.tabs[data-indicator]::before { border-radius: var(--radius-pill); background: var(--solid); }
-.tabs[data-indicator] > .tab { background: transparent; transition: color var(--dur), border-color var(--dur-fast), transform var(--dur-fast); }
-.tabs[data-indicator] > .tab[aria-pressed="true"], .tabs[data-indicator] > .tab[aria-selected="true"] { border-color: transparent; }
-/* Segmented: the raised chip. */
-.segmented[data-indicator]::before { border-radius: var(--radius-control); background: var(--raised); box-shadow: var(--shadow-sm); }
-.segmented[data-indicator] > button[aria-pressed="true"], .segmented[data-indicator] > button[aria-selected="true"] { background: transparent; box-shadow: none; }
-/* Underline tabs: the green line along the bottom. */
-.underline-tabs[data-indicator]::before { top: auto; bottom: 0; height: 2px; transform: translateX(var(--ind-x)); border-radius: var(--radius-pill); background: var(--green); }
+/* Filters and segmented controls: the raised chip slides along the track, and the chosen item goes clear over it. */
+:is(.tabs, .segmented)[data-indicator]::before { border-radius: 7px; background: var(--raised); box-shadow: var(--seg-shadow); }
+:is(.tabs, .segmented)[data-indicator] > :is([aria-pressed="true"], [aria-selected="true"]) { background: transparent; box-shadow: none; }
+/* A phone's filter chips each keep their own fill, so the chosen one changes in place. */
+@media (max-width: 900px) {
+  .tabs[data-indicator]::before { content: none; }
+  .tabs[data-indicator] > .tab[aria-pressed="true"], .tabs[data-indicator] > .tab[aria-selected="true"] { background: var(--solid); }
+}
+/* Underline tabs: the ink line along the bottom. */
+.underline-tabs[data-indicator]::before { top: auto; bottom: 0; height: 2px; transform: translateX(var(--ind-x)); border-radius: 2px; background: var(--ink); }
 .underline-tabs[data-indicator] > [aria-selected="true"]::after, .underline-tabs[data-indicator] > [aria-current="page"]::after { content: none; }
 @media (prefers-reduced-motion: reduce) {
   :is(.tabs, .segmented, .underline-tabs)[data-indicator]::before { transition: none; }
@@ -288,8 +506,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 /* ---------- Lists and tables ---------- */
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .toolbar .input, .toolbar .input-group { flex: 1 1 240px; max-width: 380px; }
+/* Its filters shrink and scroll before they'd wrap under the search. */
+.toolbar .tabs { flex: 0 1 auto; min-width: 0; }
+/* A phone's list search is a filled field, as the phone kit's (.m-search), not an outlined one; still 44px, green-edged while typing. */
+@media (max-width: 900px) {
+  .toolbar .input { border-color: transparent; border-radius: 12px; background-color: var(--fill-2); }
+  .toolbar .input:hover { border-color: transparent; }
+  .toolbar .input:focus { border-color: var(--green); }
+  .toolbar .input-group > .addon { color: var(--quiet); }
+}
 .table { width: 100%; border-collapse: collapse; }
-.table th { text-align: left; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); padding: 10px 16px; border-bottom: 1px solid var(--divider); white-space: nowrap; }
+.table th { text-align: left; font-size: var(--fs-12); font-weight: 500; color: var(--quiet); padding: 8px 16px; border-bottom: 1px solid var(--divider); white-space: nowrap; }
 .table td { padding: 12px 16px; border-bottom: 1px solid var(--row-divider); vertical-align: middle; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -300,15 +527,33 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .row-link { cursor: pointer; }
 .row-link td { transition: background var(--dur-fast); }
 .row-link:hover td { background: var(--fill); }
-.table td a.cell-link { color: var(--ink); font-weight: 700; }
+.table td a.cell-link { color: var(--ink); font-weight: 600; }
 .table td a.cell-link:hover { color: var(--green-dark); }
 .table-scroll { overflow-x: auto; }
 .table-scroll > .table { min-width: 860px; }
 .is-stale { opacity: 0.6; transition: opacity var(--dur); }
 .list-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--divider); font-size: var(--fs-13); color: var(--text-3); }
+/*
+ * A list on an office screen is a flat list on hairlines, not a box: a card that holds a table straight
+ * away loses its border, corners and fill, its first and last columns line up with the page, every
+ * row keeps its hairline (the last one closes the list) and the footer is a quiet line under it.
+ */
+.card:has(> :is(.table, .table-scroll)) { border: 0; border-radius: 0; background: none; }
+.card:has(> :is(.table, .table-scroll)) :is(th, td):first-child { padding-left: 4px; }
+.card:has(> :is(.table, .table-scroll)) :is(th, td):last-child { padding-right: 4px; }
+.card:has(> :is(.table, .table-scroll)) .table tbody tr:last-child td { border-bottom: 1px solid var(--row-divider); }
+.card:has(> :is(.table, .table-scroll)) > .list-foot { padding: 12px 4px 4px; border-top: 0; font-size: var(--fs-12); color: var(--quiet); }
+.card:has(> :is(.table, .table-scroll)) > .list-foot :is(strong, b) { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.card:has(> :is(.table, .table-scroll)) > .card-head { padding: 0 4px; min-height: 40px; }
+.card:has(> :is(.table, .table-scroll)) > .select-bar { border-radius: 0; background: var(--page); padding-left: 4px; padding-right: 4px; }
 @media (max-width: 900px) {
   .table-stack thead { display: none; }
   .table-stack tr { display: grid; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--row-divider); }
+  .card:has(> :is(.table, .table-scroll)) .table-stack tr { padding-left: 4px; }
+  .card:has(> :is(.table, .table-scroll)) .table-stack tbody tr:last-child { border-bottom: 1px solid var(--row-divider); }
+  /* Stacked, the row draws the line, not each of its cells (the desktop rule above gives the last row's cells one). */
+  .card:has(> :is(.table, .table-scroll)) .table-stack tbody tr:last-child td { border-bottom: 0; }
+  .card:has(> :is(.table, .table-scroll)) .table-stack :is(th, td) { padding: 0; }
   .table-stack tbody tr:last-child { border-bottom: 0; }
   .table-stack td { padding: 0; border: 0; }
   .table-stack .num { text-align: left; }
@@ -317,15 +562,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 
 /* ---------- Picking rows to act on at once (components/ui/Selection.tsx) ---------- */
 /* Stays under the top bar while the list scrolls, so the count and actions are always in reach. */
-.select-bar { position: sticky; top: var(--topbar-height); z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--divider); border-radius: var(--radius-card) var(--radius-card) 0 0; background: var(--surface); }
-.select-bar-all { display: inline-flex; align-items: center; gap: 10px; min-height: 36px; margin-right: auto; font-weight: 600; cursor: pointer; }
-.select-bar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/*
+ * Flat, on the page's ground under the top bar: a quiet "Select all" until something is picked, then
+ * the count in ink with its actions as small quiet buttons and Clear. Its box lines up with the rows' boxes.
+ */
+.select-bar { position: sticky; top: var(--topbar-height); z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; padding: 4px 4px 4px 16px; border-bottom: 1px solid var(--divider); background: var(--page); }
+.select-bar-all { display: inline-flex; align-items: center; gap: 12px; min-height: 36px; margin-right: auto; color: var(--text-3); font-size: var(--fs-13); font-weight: 500; cursor: pointer; }
+.select-bar[data-picked] .select-bar-all { color: var(--ink); font-weight: 600; }
+.select-bar-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+/* Over an inbox list with a mouse: out of sight until something is picked (or the keyboard reaches its
+   box), and its box over the rows' boxes, which sit in the avatars' place. */
+@media (min-width: 901px) and (hover: hover) {
+  .select-bar[data-mode="off"]:not(:focus-within) { position: absolute; width: 1px; height: 1px; min-height: 0; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); border: 0; white-space: nowrap; }
+  .select-bar:has(+ .il) { padding-left: 24px; }
+}
+.select-bar .btn:not(.btn-primary, .btn-danger-solid) { border-color: transparent; color: var(--text-2); }
+.select-bar .btn:not(.btn-primary, .btn-danger-solid):hover { background: var(--fill-2); color: var(--ink); }
+.select-bar .btn-danger:not(.btn-danger-solid) { color: var(--danger); }
 .table .select-cell { width: 48px; padding-right: 0; }
 /* The label is the box's target: bigger than the box, without making the row taller. */
 .select-cell > label { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: -6px; cursor: pointer; }
-.select-cell input, .select-bar-all input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.select-cell input, .select-bar-all input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
 .table tr[data-selected] > td { background: var(--green-tint); }
 @media (pointer: coarse) { .select-cell > label { width: 44px; height: 44px; margin: -12px; } }
+@media (max-width: 900px) { .select-bar { padding: 4px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); } .select-bar-all { min-height: 44px; font-size: var(--fs-15); } .select-bar-all input { width: 20px; height: 20px; } .content > .select-bar { margin-left: calc(-1 * max(16px, env(safe-area-inset-left))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right))); } }
+/* Select / Cancel: a phone's way into picking (Selection.tsx). A desktop's boxes are always there. */
+.select-bar-mode { display: none; }
+@media (max-width: 900px) {
+  /* Picking: one line, the count, then the actions (sideways if they must), then Cancel, which also clears. */
+  .select-bar { flex-wrap: nowrap; }
+  .select-bar-all { flex: none; }
+  .select-bar-actions { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .select-bar-actions::-webkit-scrollbar { display: none; }
+  .select-bar-actions > * { flex: none; }
+  .select-bar-clear { display: none; }
+  .select-bar-mode {
+    position: relative; display: inline-flex; flex: none; align-items: center; height: 32px; margin-left: auto; padding: 0 2px; border: 0; border-radius: var(--radius-sm);
+    background: none; color: var(--green); font-size: var(--fs-15); font-weight: 600; -webkit-tap-highlight-color: transparent;
+  }
+  .select-bar-mode::after { content: ""; position: absolute; inset: -6px -8px; }
+  .select-bar-mode:active { color: var(--green-dark); }
+  /* Not picking: only a quiet Select on the right over the list, on the page's ground, so the rows keep their room. */
+  .select-bar[data-mode="off"] { position: static; justify-content: flex-end; min-height: 0; margin-top: -10px; margin-bottom: -14px; padding-top: 0; padding-bottom: 0; border-bottom: 0; background: none; }
+  .select-bar[data-mode="off"] > .select-bar-all { display: none; }
+}
 /* Stacked on a phone: the box sits at the row's top right, clear of its text. */
 @media (max-width: 900px) {
   .table-stack tr:has(> .select-cell) { position: relative; padding-right: 60px; }
@@ -363,8 +643,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
  */
 .dialog {
   position: fixed; inset: 0; z-index: 50;
-  width: min(560px, calc(100vw - 32px)); max-height: min(calc(100vh - 48px), 860px); border: 0; border-radius: var(--radius-card); padding: 0;
-  box-shadow: var(--shadow-lg); background: var(--surface); color: var(--ink); overflow: hidden; display: none; flex-direction: column;
+  width: min(560px, calc(100vw - 32px)); max-height: min(calc(100vh - 48px), 860px); border: 1px solid var(--menu-border); border-radius: 14px; padding: 0;
+  box-shadow: var(--menu-shadow); background: var(--menu); color: var(--ink); overflow: hidden; display: none; flex-direction: column;
   opacity: 0; transform: translateY(6px) scale(0.97);
   transition-property: opacity, transform, overlay, display; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
 }
@@ -382,16 +662,30 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 @starting-style { .dialog[open]::backdrop { opacity: 0; } }
 /* Behind the copy that plays the exit of a dialog taken away while open (Dialog.tsx). */
 .dialog-ghost-backdrop { position: fixed; inset: 0; z-index: 49; background: var(--overlay); backdrop-filter: blur(2px); pointer-events: none; animation: fade-out var(--dur-exit) var(--ease-exit) forwards; }
-.dialog-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 0; }
-.dialog-head h2 { flex: 1; min-width: 0; font-size: var(--fs-20); font-weight: 700; letter-spacing: var(--tracking-tight); }
-.dialog-head p { margin: 4px 0 0; color: var(--text-3); font-size: var(--fs-13); font-weight: 400; }
+/* A 16px title and a line under it, 13px inside; on a phone it's a bottom sheet like a menu's. */
+.dialog-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 12px 0 20px; }
+.dialog-head h2 { flex: 1; min-width: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); line-height: 1.3; }
+.dialog-head p { margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-13); font-weight: 400; }
 .dialog-close { margin: -6px -8px 0 0; }
 .dialog-content { display: contents; }
-.dialog > form, .dialog-content > *, .dialog .dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 16px 20px 20px; overflow-y: auto; align-content: start; min-height: 0; }
-.dialog h2 { font-size: var(--fs-20); font-weight: 700; }
-.dialog .form-actions { position: sticky; bottom: -20px; margin: 4px -20px -20px; padding: 14px 20px; background: linear-gradient(to bottom, color-mix(in srgb, var(--surface) 90%, transparent), var(--surface) 30%); border-top: 1px solid var(--divider); z-index: 1; }
+.dialog > form, .dialog-content > :where(:not(dialog)), .dialog .dialog-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding: 16px 20px 20px; overflow-y: auto; align-content: start; min-height: 0; }
+.dialog h2 { font-size: var(--fs-16); font-weight: 700; }
+.dialog .form-actions { position: sticky; bottom: -20px; margin: 4px -20px -20px; padding: 12px 14px 12px 20px; background: linear-gradient(to bottom, color-mix(in srgb, var(--menu) 90%, transparent), var(--menu) 30%); border-top: 1px solid var(--divider); z-index: 1; }
+/*
+ * Buttons straight under the dialog, after its body rather than inside it: .dialog-content lays
+ * nothing out (display: contents), so there's no padding to pull out of. A row at the foot, edge to
+ * edge, and not the one-column grid every other child of .dialog-content is.
+ */
+.dialog-content > .form-actions { display: flex; flex: none; margin: 0; bottom: 0; overflow: visible; }
+/* A RelatedList straight in a dialog: the dialog's padding (.rel's padding: 0 comes later), and its rows as a list rather than the grid's gapped cells. */
+.dialog-content > .rel { display: block; padding: 16px 20px 20px; }
+/* The dialog takes the focus as it opens so a screen reader starts at it; it isn't a control, so no ring around the whole sheet. */
+.dialog:focus-visible { outline: none; }
 @media (max-width: 900px) {
-  .dialog, .dialog-lg, .dialog-xl, .dialog-sm { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .dialog, .dialog-lg, .dialog-xl, .dialog-sm { width: 100vw; max-width: 100vw; max-height: calc(100dvh - 24px); margin: auto 0 0; border: 0; border-radius: 24px 24px 0 0; background: var(--m-sheet); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25); }
+  .dialog-head { padding: 20px 16px 0 20px; }
+  .dialog-head h2 { font-size: var(--fs-20); }
+  .dialog .form-actions { background: var(--m-sheet); }
   /*
    * A bottom sheet: up from below, and back down. Its header is a handle that pulls it down
    * (Dialog.tsx): it follows the finger by --pull, and once let go far enough it leaves from there to
@@ -409,8 +703,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
   .dialog[data-pulling] { transition: none; }
   .dialog[data-pulled]:not([open]) { transform: translateY(100%); }
   .dialog-head { position: relative; padding-top: 24px; touch-action: none; }
-  .dialog-head::before { content: ""; position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: var(--radius-pill); background: var(--fill-3); }
-  .dialog .form-actions { padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .dialog-head::before { content: ""; position: absolute; top: 8px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: var(--radius-pill); background: var(--border-strong); }
+  /* Even sides on a sheet, where the buttons stretch edge to edge (the desktop's right side lines up with the close button). */
+  .dialog .form-actions { padding: 12px 20px calc(14px + env(safe-area-inset-bottom)); }
   .dialog .form-actions .btn { flex: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -428,8 +723,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toaster { position: fixed; inset: auto max(20px, env(safe-area-inset-right)) calc(max(20px, env(safe-area-inset-bottom)) + var(--island-space, 0px)) auto; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; width: min(380px, calc(100vw - 32px)); z-index: 200; transition: bottom var(--dur) var(--ease-out); }
 .toaster:not(:popover-open):not([data-fallback]) { display: none; }
 .toast {
-  position: absolute; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 14px; border-radius: var(--radius-card); background: var(--solid); color: var(--on-solid);
-  box-shadow: var(--shadow-lg); font-size: var(--fs-14); font-weight: 600; pointer-events: auto; transform-origin: 50% 0;
+  position: absolute; right: 0; bottom: 0; left: 0; display: flex; align-items: flex-start; gap: 10px; padding: 11px 10px 11px 12px; border-radius: 10px; background: var(--solid); color: var(--on-solid);
+  box-shadow: var(--menu-shadow); font-size: var(--fs-13); font-weight: 600; line-height: 1.4; pointer-events: auto; transform-origin: 50% 0;
   transition: translate var(--dur-enter) var(--ease-enter), scale var(--dur-enter) var(--ease-enter), opacity var(--dur) var(--ease-out), transform var(--dur-enter) var(--ease-spring);
 }
 .toast > * { transition: opacity var(--dur) var(--ease-out); }
@@ -444,7 +739,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toast[data-ending-style] { pointer-events: none; }
 .toast[data-swiping] { transition: none; }
 @media (pointer: coarse) { .toast { touch-action: pan-y; } }
-.toast .toast-icon { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; margin-top: 0; }
+.toast .toast-icon { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; flex: none; margin-top: 0; color: #fff; }
 .toast[data-kind="success"] .toast-icon { background: #4f9a33; }
 .toast[data-kind="error"] .toast-icon { background: #d9443a; }
 .toast[data-kind="info"] .toast-icon { background: #3474d4; }
@@ -457,9 +752,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toast[data-tone="job"] .toast-icon { background: var(--job); }
 .toast[data-tone="invoice"] .toast-icon { background: var(--invoice); }
 .toast .toast-body { flex: 1; min-width: 0; padding-top: 1px; overflow-wrap: anywhere; }
-.toast .toast-desc { font-weight: 400; opacity: 0.8; font-size: var(--fs-13); margin-top: 2px; }
+.toast .toast-desc { font-weight: 400; opacity: 0.75; font-size: var(--fs-13); margin-top: 1px; }
 /* A small button, with its extra height taken out of the layout so a toast with Undo is no taller. */
-.toast .toast-action { position: relative; border: 0; background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; font-weight: 700; font-size: var(--fs-13); height: var(--control-sm); margin: -3px 0; padding: 0 10px; border-radius: var(--radius-control); flex: none; }
+.toast .toast-action { position: relative; border: 0; background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; font-weight: 600; font-size: var(--fs-13); height: 28px; margin: -4px 0; padding: 0 10px; border-radius: 7px; flex: none; }
 .toast .toast-action:hover { background: color-mix(in srgb, currentColor 24%, transparent); }
 /* The time left to press Undo, as a ring around the button that drains (and waits while the toasts are being read). */
 .toast-ring { position: absolute; inset: -3px; width: calc(100% + 6px); height: calc(100% + 6px); overflow: visible; pointer-events: none; }
@@ -467,62 +762,680 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .toast .toast-x { border: 0; background: none; color: color-mix(in srgb, currentColor 60%, transparent); width: 22px; height: 22px; border-radius: var(--radius-sm); display: grid; place-items: center; padding: 0; flex: none; }
 .toast .toast-x:hover { color: inherit; background: color-mix(in srgb, currentColor 12%, transparent); }
 @media (max-width: 900px) { .toaster { inset: auto max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 12px + env(safe-area-inset-bottom) + var(--island-space, 0px)) max(16px, env(safe-area-inset-left)); width: auto; } }
+/* A phone's toast: the kit's 14px corners and bigger words, and a 36px Undo. */
+@media (max-width: 900px) {
+  .toast { padding: 13px 12px 13px 14px; border-radius: 14px; font-size: var(--fs-15); }
+  .toast .toast-desc { font-size: var(--fs-14); }
+  .toast .toast-action { height: 36px; margin: -8px 0; font-size: var(--fs-14); }
+  .toast .toast-x { width: 32px; height: 32px; margin: -6px -4px -6px 0; }
+}
 /* Less motion: no draining ring, and the stack settles into place without sliding. */
 @media (prefers-reduced-motion: reduce) { .toast-ring { display: none; } .toast { transition: opacity var(--dur) var(--ease-out); } .toaster { transition: none; } }
 
-/* ---------- Menus and popovers ---------- */
+/* ---------- Menus and popovers (components/ui/Menu.tsx) ---------- */
 /*
- * A menu's look. Most are Base UI's (Menu.tsx, ContextMenu.tsx), placed by its positioner; a few
- * are popovers of their own (ImageryPicker, LineItems), placed by their own code in the top layer.
- * Either drops in and lifts away, like the dialog (see there): out quicker than in.
+ * 13px items on 32px rows, a 15px icon in the quiet text color, sentence-case section labels, inset
+ * separators, key hints and quiet values on the right, and anything destructive last, in red. A sub
+ * menu opens as a flyout beside its item. On a phone (Menu.tsx sets data-sheet) the same menu is a
+ * bottom sheet: 52px rows, 16px words, a handle, and a sub menu takes the sheet's place with a way back.
  */
 .menu {
-  min-width: 200px; max-width: 320px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-card);
-  background: var(--surface); box-shadow: var(--shadow-md); color: var(--ink); overflow: auto; max-height: min(420px, 70vh);
-  opacity: 0; transform: translateY(-4px) scale(0.97);
-  transition-property: opacity, transform; transition-duration: 140ms; transition-timing-function: var(--ease-exit);
+  position: fixed; margin: 0; inset: auto; min-width: 220px; max-width: 320px; padding: 4px; border: 1px solid var(--menu-border); border-radius: 10px;
+  background: var(--menu); box-shadow: var(--menu-shadow); color: var(--ink); overflow: auto; max-height: min(440px, 70vh); overscroll-behavior: contain;
+  /* Drops in and lifts away, like the dialog (see there): out quicker than in. */
+  z-index: 50; opacity: 0; transform: translateY(-4px) scale(0.97);
+  transition-property: opacity, transform, overlay, display; transition-duration: 140ms; transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
 }
 .menu[popover] { position: fixed; margin: 0; inset: auto; z-index: 50; transition-property: opacity, transform, overlay, display; transition-behavior: allow-discrete; }
 .menu:popover-open, .menu[data-open] { opacity: 1; transform: none; transition-duration: var(--dur); transition-timing-function: var(--ease-enter); }
 .menu[popover]:not(:popover-open), .menu[data-ending-style] { pointer-events: none; }
 @starting-style { .menu:popover-open { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+/* A flyout comes out sideways from its item. */
+.menu-flyout { transform: translateX(-4px); }
+@starting-style { .menu-flyout:popover-open { opacity: 0; transform: translateX(-4px); } }
+.menu-flyout[data-side="left"] { transform: translateX(4px); }
+@starting-style { .menu-flyout[data-side="left"]:popover-open { opacity: 0; transform: translateX(4px); } }
 /*
- * Base UI's: on the page, above the sticky header and the tab bar; no taller than the room it has;
- * coming from where it's anchored (up from below for one that opens upwards, from the side for a
- * submenu), and gone at once when something in it is chosen.
+ * A right-click menu (ContextMenu.tsx) is Base UI's: its positioner places it, above the sticky header
+ * and the tab bar, no taller than the room it has, coming from where it's anchored.
  */
 .menu-positioner { z-index: 50; outline: 0; }
-/* Focus waits on the popup itself when a click opens it, until the arrow keys take it to a row (which shows it): no outline round the whole menu meanwhile. */
-.menu-positioner > .menu { max-height: min(420px, var(--available-height, 70vh)); transform-origin: var(--transform-origin); outline: 0; }
-.menu[data-starting-style], .menu[data-ending-style] { opacity: 0; transform: translateY(-4px) scale(0.97); }
-.menu[data-side="top"]:is([data-starting-style], [data-ending-style]) { transform: translateY(4px) scale(0.97); }
-.menu:is([data-side="left"], [data-side="right"], [data-side="inline-start"], [data-side="inline-end"]):is([data-starting-style], [data-ending-style]) { transform: scale(0.97); }
+.menu-positioner > .menu { position: static; max-height: min(440px, var(--available-height, 70vh)); transform-origin: var(--transform-origin); outline: 0; }
+.menu-positioner > .menu[data-starting-style], .menu-positioner > .menu[data-ending-style] { opacity: 0; transform: translateY(-4px) scale(0.97); }
 .menu[data-instant] { transition-duration: 0s; }
 @media (prefers-reduced-motion: reduce) {
-  .menu, .menu[data-starting-style], .menu[data-ending-style], .menu[data-side]:is([data-starting-style], [data-ending-style]) { transform: none; }
-  @starting-style { .menu:popover-open { transform: none; } }
+  .menu-positioner > .menu[data-starting-style], .menu-positioner > .menu[data-ending-style] { transform: none; }
+  .menu, .menu-flyout, .menu-flyout[data-side="left"] { transform: none; }
+  @starting-style { .menu:popover-open, .menu-flyout:popover-open, .menu-flyout[data-side="left"]:popover-open { transform: none; } }
 }
 .menu-item {
-  display: flex; align-items: center; gap: 10px; width: 100%; height: var(--control); padding: 0 10px; border: 0; border-radius: var(--radius-control); background: none;
-  font-weight: 600; font-size: var(--fs-14); color: var(--ink); text-align: left; white-space: nowrap;
+  position: relative; display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 6px 0 8px; border: 0; border-radius: 6px; background: none;
+  font-size: var(--fs-13); font-weight: 500; color: var(--ink); text-align: left; white-space: nowrap; -webkit-tap-highlight-color: transparent;
 }
-/* Base UI's rows are divs: they take a click like the buttons they replaced, and their words aren't picked up by a drag. */
+.menu-item svg { color: var(--stage, var(--text-3)); }
+.menu-item > svg:first-child, .menu-item > .menu-icon { width: 15px; height: 15px; flex: none; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--menu-hi); color: var(--ink); }
+.menu-item[aria-expanded="true"] { background: var(--menu-hi); }
+.menu-item[data-danger], .menu-item[data-danger] svg { color: var(--danger); }
+.menu-item[data-danger]:hover { color: var(--danger); }
+.menu-item:disabled { opacity: 0.45; cursor: not-allowed; background: none; }
+/* What's on the right (a value, a key, a check, a chevron) sits at the edge, after the words. */
+.menu-trail { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-left: auto; padding-left: 6px; }
+.menu-text { flex: 1 1 auto; min-width: 0; white-space: normal; }
+.menu-desc { display: block; margin-top: 1px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); white-space: normal; }
+.menu-item:has(.menu-desc) { height: auto; min-height: 32px; padding-top: 7px; padding-bottom: 7px; align-items: flex-start; }
+.menu-item:has(.menu-desc) > svg:first-child, .menu-item:has(.menu-desc) > .menu-lead { margin-top: 1px; }
+.menu-item:has(.menu-desc) > .menu-trail { align-self: center; }
+.menu-lead { display: inline-flex; flex: none; }
+.menu-end { display: inline-flex; align-items: center; gap: 6px; color: var(--quiet); font-size: var(--fs-12); font-weight: 400; }
+/* A key hint is quiet text, no box; a two-key one ("N C") keeps a small gap between its letters. */
+.menu-kbd { flex: none; font: inherit; font-size: var(--fs-12); font-weight: 500; color: var(--quiet); word-spacing: 2px; }
+.menu-check, .menu-chevron { display: inline-flex; flex: none; }
+.menu-item .menu-check svg { color: var(--text-2); }
+.menu-item .menu-chevron svg { color: var(--quiet); }
+.menu-item .menu-chevron { margin-left: -2px; }
+/* A check box for an item that turns something on or off among several (menuitemcheckbox). */
+.menu-box { box-sizing: border-box; display: grid; place-items: center; flex: none; width: 14px; height: 14px; border: 1px solid var(--check-edge); border-radius: var(--radius-sm); color: #fff; }
+.menu-item[aria-checked="true"] .menu-box { background: var(--green-solid); border-color: var(--green-solid); }
+.menu-item .menu-box svg { width: 10px; height: 10px; color: #fff; }
+.menu-sub { display: contents; }
+.menu-sep { height: 1px; background: var(--divider); margin: 4px 8px; }
+.menu-label { padding: 6px 8px 4px; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); }
+.menu-label:first-child { padding-top: 4px; }
+/*
+ * A filter's popover (Any tag): a 40px field on a hairline over the list, and a quiet 11px line at the
+ * foot with its action in green ("2 tags · Clear"). Both stay put while a long list scrolls.
+ */
+.menu:has(> .menu-search) { width: 268px; }
+.menu-search { position: sticky; top: -4px; z-index: 2; display: flex; align-items: center; gap: 8px; height: 40px; margin: -4px -4px 4px; padding: 0 12px; border-bottom: 1px solid var(--divider); background: var(--menu); color: var(--quiet); transition: border-color var(--dur-fast); }
+.menu-search:focus-within { border-bottom-color: var(--green); }
+.menu-search-input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; font: inherit; font-size: var(--fs-13); color: var(--ink); }
+.menu-search-input::placeholder { color: var(--quiet); }
+.menu-search-input::-webkit-search-cancel-button { display: none; }
+.menu-empty { padding: 8px 8px 10px; color: var(--text-3); font-size: var(--fs-13); white-space: normal; }
+.menu-foot { position: sticky; bottom: -4px; z-index: 2; display: flex; align-items: center; gap: 6px; min-height: 34px; margin: 4px -4px -4px; padding: 0 6px 0 12px; border-top: 1px solid var(--divider); background: var(--menu); color: var(--quiet); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.menu-foot-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-foot-action { flex: none; height: 26px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--green); font-size: var(--fs-12); font-weight: 600; }
+.menu-foot-action:hover, .menu-foot-action:focus-visible { background: var(--menu-hi); color: var(--green-dark); }
+.menu-foot-action:focus-visible { outline-offset: -2px; }
+.menu-foot-action:disabled { color: var(--text-4); background: none; cursor: default; }
+
+/* ---------- The phone's bottom sheet ---------- */
+.menu[data-sheet] {
+  inset: auto 0 0 0; width: 100%; min-width: 0; max-width: none; max-height: min(88dvh, calc(100dvh - 40px)); padding: 0 0 calc(10px + env(safe-area-inset-bottom));
+  border: 0; border-radius: 24px 24px 0 0; background: var(--m-sheet); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25); opacity: 1; transform: translateY(100%);
+  transition-duration: var(--dur-exit);
+}
+.menu[data-sheet]:popover-open { transform: none; transition-duration: var(--dur-enter); }
+@starting-style { .menu[data-sheet]:popover-open { opacity: 1; transform: translateY(100%); } }
+.menu[data-sheet][data-dragging] { transition: none; }
+.menu[data-sheet]::backdrop {
+  background: var(--scrim, rgba(0, 0, 0, 0.42)); opacity: 0;
+  transition-property: opacity, overlay, display; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
+}
+.menu[data-sheet]:popover-open::backdrop { opacity: 1; transition-duration: var(--dur-enter); transition-timing-function: var(--ease-enter); }
+@starting-style { .menu[data-sheet]:popover-open::backdrop { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .menu[data-sheet] { opacity: 0; transform: none; }
+  .menu[data-sheet]:popover-open { opacity: 1; transform: none; }
+  @starting-style { .menu[data-sheet]:popover-open { opacity: 0; transform: none; } }
+}
+/* The handle and the heading stay put while a long sheet scrolls; drag the handle down to put it away. A desktop menu has neither. */
+.menu:not([data-sheet]) > .menu-top { display: none; }
+.menu-top { position: sticky; top: 0; z-index: 2; background: var(--m-sheet); }
+.menu-grab { display: block; padding: 8px 0 10px; touch-action: none; cursor: grab; }
+.menu-grab::before { content: ""; display: block; width: 38px; height: 5px; margin: 0 auto; border-radius: var(--radius-pill); background: var(--border-strong); }
+/* The sheet's title reads as a title, not one more row: larger and bolder, lined up with the rows' text. */
+.menu-sheet-head { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 16px 8px 20px; }
+.menu-sheet-head:has(> .menu-back:first-child) { padding-left: 16px; }
+.menu-sheet-titles { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.menu-sheet-title, .menu-sheet-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-sheet-title { font-size: var(--fs-18); font-weight: 700; line-height: 1.25; color: var(--ink); }
+.menu-sheet-sub { font-size: var(--fs-13); color: var(--text-3); }
+.menu-back { position: relative; display: grid; place-items: center; flex: none; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+.menu-back::after { content: ""; position: absolute; inset: -2px; }
+.menu-back svg { width: 20px; height: 20px; color: var(--ink); }
+.menu[data-sheet] .menu-item { min-height: 52px; height: auto; padding: 6px 20px; gap: 14px; border-radius: 0; font-size: var(--fs-16); font-weight: 500; white-space: normal; }
+.menu[data-sheet] .menu-item > svg:first-child, .menu[data-sheet] .menu-item > .menu-icon { width: 21px; height: 21px; }
+.menu[data-sheet] .menu-item:hover { background: none; }
+.menu[data-sheet] .menu-item:is(:active, :focus-visible, [aria-expanded="true"]) { background: var(--fill-2); }
+.menu[data-sheet] .menu-item:has(.menu-desc) { align-items: center; }
+.menu[data-sheet] .menu-desc { font-size: var(--fs-13); }
+.menu[data-sheet] .menu-end { font-size: var(--fs-14); }
+.menu[data-sheet] .menu-item .menu-chevron svg { width: 17px; height: 17px; }
+.menu[data-sheet] .menu-item .menu-check svg { width: 20px; height: 20px; color: var(--green); }
+.menu[data-sheet] .menu-box { width: 20px; height: 20px; border-radius: 6px; }
+.menu[data-sheet] .menu-box svg { width: 14px; height: 14px; }
+.menu[data-sheet] .menu-kbd { display: none; }
+.menu[data-sheet] .menu-sep { margin: 6px 20px; }
+.menu[data-sheet] .menu-label { padding: 10px 20px 4px; font-size: var(--fs-13); color: var(--text-3); }
+.menu[data-sheet] .menu-label:first-child { padding-top: 2px; }
+/* A sheet's search is the phone's filled field; its foot is a line under the list. */
+.menu[data-sheet] > .menu-search { position: static; height: 44px; margin: 0 16px 8px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--fill-2); }
+.menu[data-sheet] > .menu-search:focus-within { box-shadow: inset 0 0 0 1px var(--green); }
+.menu[data-sheet] .menu-search-input { font-size: var(--fs-16); }
+.menu[data-sheet] .menu-empty { padding: 12px 20px; font-size: var(--fs-16); }
+.menu[data-sheet] > .menu-foot { position: static; min-height: 48px; margin: 6px 0 0; padding: 0 12px 0 20px; font-size: var(--fs-13); }
+.menu[data-sheet] .menu-foot-action { height: 44px; padding: 0 8px; font-size: var(--fs-16); }
+
+/* ---------- Inbox lists (components/ui/InboxList.tsx, B-Inbox.dc.html) ---------- */
+/*
+ * A list page's records on hairlines, grouped by what needs doing: a 32px initials avatar, the name
+ * and #number, the subject, a quiet 12px meta line, and money or an age on the right. The row's link
+ * is stretched over the whole row (.il-link::after), so the row is one target and one Tab stop; its
+ * own buttons (a check box, "Book it", hover actions) sit above the stretch. The ring for keyboard
+ * focus is drawn around the row, not the link's two lines.
+ */
+.il { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.il-rows { margin: 0; padding: 0; list-style: none; }
+.il > .il-group + .il-group, .il > .il-rows + .il-group, .il > .il-group + .il-rows { margin-top: 18px; }
+.il-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 4px; border-bottom: 1px solid var(--divider); font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.il-head-label { min-width: 0; font: inherit; letter-spacing: normal; color: inherit; }
+.il-head-icon { display: inline-flex; flex: none; color: var(--quiet); }
+.il-head-icon[data-tone="warning"] { color: var(--warning); }
+.il-head-icon[data-tone="danger"] { color: var(--danger); }
+.il-head-icon[data-tone="good"] { color: var(--green); }
+.il-count { font-weight: 500; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.il-head-end { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* An action on the whole group ("Remind both"): green words, no box. */
+.il-head-end :is(a, button) { height: auto; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--green); font-size: inherit; font-weight: 600; }
+.il-head-end :is(a, button):hover { background: none; color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.il-head-end :is(a, button) > svg { display: none; }
+
+.il-row { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; column-gap: 12px; align-items: start; padding: 12px 4px 12px 16px; border-bottom: 1px solid var(--row-divider); transition: background var(--dur-fast); }
+/* The main record lists: no line between rows, only under each group's heading; rows show a rounded fill on hover. */
+@media (min-width: 901px) { .il-plain .il-row { border-bottom: 0; border-radius: 8px; } }
+.il-row-flat { grid-template-columns: minmax(0, 1fr) auto; }
+.il-row-pick { grid-template-columns: 16px 32px minmax(0, 1fr) auto; }
+.il-row-pick.il-row-flat { grid-template-columns: 16px minmax(0, 1fr) auto; }
+.il-row:hover { background: var(--fill); }
+.il-row[data-selected] { background: var(--green-tint); }
+/* The link's own outline would ring only its two lines (its --focus-ring is see-through); the row shows the focus instead. */
+.il-link { --focus-ring: transparent; display: block; min-width: 0; color: inherit; text-decoration: none; }
+.il-link:hover { color: inherit; text-decoration: none; }
+.il-link::after { content: ""; position: absolute; inset: 0; }
+/* InboxRow's onClick: the same link as a button (a viewer, a pane, a dialog on this page). */
+.il-link-button { width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.il-row:has(.il-link:focus-visible) { outline: 2px solid var(--green); outline-offset: -2px; border-radius: 6px; }
+.il-check, .il-meta :is(a, button, label, input, select), .il-l1 :is(a, button), .il-aside :is(a, button, label, input, select, [title]), .il-extra :is(a, button, label, input, select, summary) { position: relative; z-index: 1; }
+/* A row with nothing to open (InboxRow with neither to nor onClick): its lines plain, no fill under the pointer. */
+.il-lines { display: block; min-width: 0; }
+.il-row-static:hover { background: none; }
+/* Lines after the meta line (InboxRow's children). */
+.il-extra { min-width: 0; margin-top: 6px; }
+.il-check { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: 0 -8px; cursor: pointer; }
+/* With a mouse, a row's box takes its avatar's place only under the pointer, with the keyboard in the
+   row, or once anything is picked (data-pick-off is gone). Out of sight, it's still a Tab stop. */
+@media (min-width: 901px) and (hover: hover) {
+  .il-row-pick:not(.il-row-flat) { grid-template-columns: 32px minmax(0, 1fr) auto; }
+  .il-row-pick:not(.il-row-flat) > :is(.il-check, .il-avatar) { grid-area: 1 / 1; }
+  .il-row-pick:not(.il-row-flat) > .il-check { margin: 0; }
+  .il-row-pick[data-pick-off]:not(:hover, :focus-within) > .il-check { opacity: 0; }
+  .il-row-pick:is(:hover, :focus-within, :not([data-pick-off])) > .il-check ~ .il-avatar { visibility: hidden; }
+}
+.il-unread { position: absolute; left: 4px; top: 25px; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--green); }
+.il-avatar { display: grid; place-items: center; width: 32px; height: 32px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.01em; }
+.il-avatar-square { border-radius: 8px; }
+.il-avatar svg { width: 16px; height: 16px; color: var(--text-3); }
+.il-body { min-width: 0; }
+.il-l1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.il-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.il-num { flex: none; font-size: var(--fs-12); color: var(--quiet); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.il-l1 > :is(.tag, .chip, .pill) { flex: none; align-self: center; }
+/* A short note on the first line ("Assessment Thu 2 PM"): blue words with a small icon; data-tone warning or danger when it's a problem. */
+.il-note { display: inline-flex; flex: none; align-items: center; gap: 5px; font-size: var(--fs-12); font-weight: 500; color: var(--info); white-space: nowrap; }
+.il-note svg { width: 13px; height: 13px; }
+.il-note[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.il-note[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.il-note[data-tone="good"] { color: var(--green-dark); }
+.il-subject { display: block; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+/* A quiet line of parts with dots between them (MetaLine). */
+.meta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+.meta-line > span { min-width: 0; }
+.meta-dot { color: var(--quiet); }
+/* A dot where the line wraps (MetaLine's wrapDots): at a line's end it keeps its room, so the wrap stays put. */
+.meta-dot[data-wrap="end"] { visibility: hidden; }
+.meta-dot[data-wrap="start"] { display: none; }
+/* One line, as the kit's: a part too long for it ends in "…" rather than wrapping a dot onto the next line. */
+.il-meta { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 6px; min-width: 0; margin-top: 4px; overflow: hidden; font-size: var(--fs-12); color: var(--text-3); }
+.il-meta > span { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.il-meta > span > :not(svg, .btn, .pill) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.il-meta > span:not(:has(> *)) { display: block; text-overflow: ellipsis; }
+.il-meta > :is(.meta-dot, .pill, .tag), .il-meta > span:has(.btn, .pill) { flex: none; }
+.il-meta:has(.meta-break) { flex-wrap: wrap; }
+/* A part holding several statuses (a sub's papers): they wrap onto more lines rather than running off the row. */
+.il-meta > span:has(> .pill + .pill) { flex: 0 1 auto; flex-wrap: wrap; row-gap: 2px; white-space: normal; overflow: visible; }
+/* Its parts clip their own words, so a button in it keeps its whole focus ring. */
+.il-meta:has(a, button) { overflow: visible; }
+.il-meta svg { width: 13px; height: 13px; flex: none; color: var(--quiet); }
+.il-meta .pill { min-height: 0; }
+/* A part that should start its own line on a phone (a time asked for with its Book it button): no dot before it there. */
+@media (max-width: 900px) {
+  .meta-line > .meta-break, .il-meta > .meta-break { flex-basis: 100%; flex-wrap: wrap; row-gap: 6px; overflow: visible; white-space: normal; }
+  :is(.meta-line, .il-meta) > .meta-dot:has(+ .meta-break) { display: none; }
+}
+/* What someone asked for, waiting on the office ("Asked for Tue, Dec 1 at 9 AM"). */
+.il-ask { color: var(--text-2); }
+/* A button inside a row's lines ("Book it"): a small outlined chip, never a second green primary. */
+:is(.il-meta, .il-l1) .btn { height: 24px; gap: 5px; padding: 0 9px; border: 1px solid var(--divider); border-radius: 6px; background: var(--page); color: var(--ink); font-size: var(--fs-12); font-weight: 600; }
+:is(.il-meta, .il-l1) .btn:hover { border-color: var(--border); background: var(--fill-2); color: var(--ink); }
+:is(.il-meta, .il-l1) .btn > svg:not(.spinner) { display: none; }
+.il-aside { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; min-width: 0; text-align: right; white-space: nowrap; font-size: var(--fs-13); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.il-age { color: var(--text-3); }
+.il-age[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.il-age[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.il-money { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.il-money[data-tone="danger"] { color: var(--danger); }
+.il-sub { font-size: var(--fs-12); color: var(--text-3); }
+.il-sub[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.il-sub[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+/* Who it's with: a small face, or a dashed ring for nobody yet. */
+.il-person { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--avatar); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+.il-person-none { border: 1px dashed var(--border-strong); background: none; }
+.il-people { display: inline-flex; }
+.il-people > .il-person { box-shadow: 0 0 0 2px var(--page); }
+.il-people > .il-person + .il-person { margin-left: -5px; }
+/* Quick actions over the right column while the row is hovered or holds the focus (a desktop's only; never the only way to do something). */
+/* Over the whole right column, however many lines it has (money and a quiet line under it), the buttons at its top. */
+.il-actions { position: absolute; top: -4px; bottom: -4px; right: 0; z-index: 2; display: flex; align-items: flex-start; gap: 2px; padding-left: 12px; background: var(--fill); opacity: 0; pointer-events: none; transition: opacity var(--dur-fast); }
+.il-row:is(:hover, :focus-within) .il-actions { opacity: 1; pointer-events: auto; }
+.il-row[data-selected] .il-actions { background: var(--green-tint); }
+.il-actions .btn { height: 30px; }
+.il-actions .btn:not(.btn-primary) { border-color: transparent; color: var(--text-3); }
+.il-actions .btn:not(.btn-primary):hover { background: var(--fill-3); color: var(--ink); }
+.il-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 14px 4px 4px; font-size: var(--fs-12); color: var(--quiet); }
+.il-foot-end { margin-left: auto; }
+.il-foot > span:empty { display: none; }
+.il-foot :is(b, strong) { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Load more, Show 2 past visits: words, no box, as a section's action is (green on a phone, with a thumb's 44px target). */
+.il-more { position: relative; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink); font-size: var(--fs-13); font-weight: 600; }
+.il-more:hover { text-decoration: underline; text-underline-offset: 2px; }
+.il-more:disabled { cursor: progress; opacity: 0.7; }
+.il-foot-end + .il-more { margin-left: 12px; }
+/* A loading row (InboxSkeleton). */
+.il-row-skeleton:hover { background: none; }
+.il-row-skeleton .il-body { display: grid; gap: 7px; padding-top: 2px; }
+
+@media (max-width: 900px) {
+  /* The phone kit's rows (Mobile-Work.dc.html): edge to edge, a 40px avatar, 16px names, a hairline from the text. */
+  .content > .il:not(.il-inset) { margin-left: calc(-1 * max(16px, env(safe-area-inset-left))); margin-right: calc(-1 * max(16px, env(safe-area-inset-right))); }
+  .il > .il-group + .il-group, .il > .il-rows + .il-group, .il > .il-group + .il-rows { margin-top: 0; }
+  .il-head { gap: 6px; min-height: 0; padding: 18px max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left)); border-bottom: 0; font-size: var(--fs-13); color: var(--text-3); }
+  .il-head-icon svg { width: 15px; height: 15px; }
+  .il-count { font-weight: 600; color: var(--text-3); }
+  .il-count::before { content: "· "; }
+  .il-head-end { font-weight: 600; }
+  /* A group's action ("Remind both") is words, with a thumb's 44px target drawn around them. */
+  .il-head-end :is(a, button) { position: relative; }
+  .il-head-end :is(a, button)::after { content: ""; position: absolute; inset: calc(50% - 22px) -8px; }
+  .il-row { grid-template-columns: 40px minmax(0, 1fr) auto; min-height: 64px; padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left)); border-bottom: 0; }
+  .il-row::before { content: ""; position: absolute; left: calc(max(16px, env(safe-area-inset-left)) + 52px); right: 0; bottom: 0; height: 1px; background: var(--row-divider); }
+  .il-row-flat { grid-template-columns: minmax(0, 1fr) auto; }
+  .il-row-flat::before { left: max(16px, env(safe-area-inset-left)); }
+  .il-row-pick { grid-template-columns: 24px 40px minmax(0, 1fr) auto; }
+  .il-row-pick::before { left: calc(max(16px, env(safe-area-inset-left)) + 88px); }
+  .il-row-pick.il-row-flat { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .il-row:hover { background: none; }
+  .il-row:active { background: var(--fill-2); }
+  .il-row-static:active { background: none; }
+  .il-row[data-selected] { background: var(--green-tint); }
+  .il-row:has(.il-link:focus-visible) { border-radius: 0; }
+  .il-check { width: 44px; height: 44px; margin: -2px -10px 0; }
+  .il-check input { width: 20px; height: 20px; }
+  /* Not picking yet (Selection.tsx's Select): no boxes, the rows as they'd be without them. */
+  .il-row-pick[data-pick-off] { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .il-row-pick[data-pick-off]::before { left: calc(max(16px, env(safe-area-inset-left)) + 52px); }
+  .il-row-pick.il-row-flat[data-pick-off] { grid-template-columns: minmax(0, 1fr) auto; }
+  .il-row-pick.il-row-flat[data-pick-off]::before { left: max(16px, env(safe-area-inset-left)); }
+  .il-row-pick[data-pick-off] > .il-check { display: none; }
+  .il-unread { left: 4px; top: 28px; width: 8px; height: 8px; }
+  .il-avatar { width: 40px; height: 40px; font-size: var(--fs-14); }
+  .il-avatar-square { border-radius: 11px; }
+  .il-avatar svg { width: 20px; height: 20px; }
+  .il-l1 { gap: 6px; font-size: var(--fs-16); }
+  .il-num { font-size: var(--fs-13); font-weight: 500; }
+  .il-subject { font-size: var(--fs-15); }
+  .il-meta { margin-top: 3px; font-size: var(--fs-13); }
+  .il-meta svg { width: 14px; height: 14px; }
+  :is(.il-meta, .il-l1) .btn { height: 30px; font-size: var(--fs-13); }
+  :is(.il-meta, .il-l1) .btn::after { content: ""; position: absolute; inset: -7px -2px; }
+  .il-aside { gap: 5px; padding-top: 2px; }
+  .il-money { font-size: var(--fs-15); }
+  .il-actions { display: none; }
+  .il-foot { padding: 14px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); font-size: var(--fs-13); }
+  .il-more { min-height: 44px; color: var(--green); font-size: var(--fs-14); }
+  .il-more::after { content: ""; position: absolute; inset: 0 -8px; }
+  /* On a grouped screen: each group's rows in a rounded card, under its small heading. */
+  .il-inset .il-head { padding: 18px 4px 8px; }
+  .il-inset .il-rows { overflow: hidden; border-radius: 14px; background: var(--m-card); }
+  .il-inset .il-row { padding-left: 16px; padding-right: 16px; }
+  .il-inset .il-row::before { left: 68px; }
+  .il-inset .il-row:last-child::before { content: none; }
+  .il-inset .il-foot { padding-left: 4px; padding-right: 4px; }
+}
+
+/* ---------- Sections, facts and related lists (components/ui/Section.tsx, Page-Client.dc.html) ---------- */
+/*
+ * A part of a page on a hairline, never a box: a 15px heading with a quiet count and one quiet action
+ * on the right. Facts are label and value on hairline rows; related records are small rows. On a
+ * grouped phone page (.m-grouped) each section is the kit's inset card under a small grey heading.
+ */
+.sec { min-width: 0; }
+.sec-head { display: flex; align-items: center; gap: 8px; min-height: 40px; border-bottom: 1px solid var(--divider); }
+.sec-title { min-width: 0; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; line-height: 1.3; color: var(--ink); }
+.sec-count { font-size: var(--fs-13); font-weight: 500; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.sec-icon { display: inline-flex; flex: none; color: var(--quiet); }
+.sec-action { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* The action reads as a quiet link, whatever it is (a Link, a Button, a .btn). A More menu's trigger stays a small icon button. */
+.sec-action > :is(a, button):not(.btn-primary, .btn-icon) { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; box-shadow: none; color: var(--text-3); font-size: var(--fs-13); font-weight: 600; text-decoration: none; }
+.sec-action > :is(a, button):not(.btn-primary, .btn-icon):hover { background: none; color: var(--ink); text-decoration: none; }
+/* A file picker as the action ("Add photos"): the label round its hidden input, the same quiet link. */
+.sec-action > label:has(> input[type="file"]) { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--text-3); font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.sec-action > label:has(> input[type="file"]):hover { background: none; color: var(--ink); }
+.sec-action > label:has(> input[type="file"]) > svg { width: 14px; height: 14px; color: var(--quiet); }
+/* Disabled, it's the words in the quietest grey, no hairline: it was never a box. */
+.sec-action > button:not(.btn-primary, .btn-icon):disabled { border-color: transparent; color: var(--text-4); }
+.sec-action > :is(a, button):not(.btn-primary, .btn-icon) > svg { width: 14px; height: 14px; color: var(--quiet); }
+.sec-action > .btn-icon { width: 28px; height: 28px; border-color: transparent; color: var(--text-3); }
+.sec-action > .btn-icon:hover { background: var(--fill-2); color: var(--ink); }
+.sec-action > .btn-primary { height: var(--control-sm); }
+.sec-body { min-width: 0; padding-top: 12px; }
+/* Hairline rows start right under the heading's line; their own padding spaces them. */
+.sec-body > :is(.facts, .rel, .il, .empty-inline, .table, .table-scroll):first-child { margin-top: -12px; }
+.sec-body > .empty-inline:only-child { padding-bottom: 0; }
+
+.facts { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; font-size: var(--fs-13); }
+.fact { display: grid; grid-template-columns: minmax(96px, 128px) minmax(0, 1fr); gap: 12px; align-items: baseline; min-height: 38px; padding: 9px 0; border-bottom: 1px solid var(--row-divider); }
+.fact-label { color: var(--text-3); }
+.fact-value { min-width: 0; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.fact-value[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.fact-value[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.fact-value[data-tone="good"] { color: var(--green-dark); font-weight: 600; }
+.fact-value .pill { vertical-align: -3px; }
+.fact-wide { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+
+.rel { margin: 0; padding: 0; list-style: none; }
+.rel-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 9px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+/* A hover fill a little wider than the row, so the words don't sit on its edge. */
+.rel-row-link:hover { background: var(--fill); box-shadow: -8px 0 0 var(--fill), 8px 0 0 var(--fill); }
+.rel-row[aria-current] { background: var(--fill-2); box-shadow: -8px 0 0 var(--fill-2), 8px 0 0 var(--fill-2); }
+.rel-lead { flex: none; min-width: 36px; color: var(--quiet); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.rel-lead:has(.il-person, .avatar, .rel-icon) { min-width: 0; }
+/* A round quiet icon as a row's lead (Home's Needs attention): its tone colors the icon, never a tile. */
+/*
+ * A round icon on a tint: a stage's own color (a quote is ruby wherever it's listed), else its tone's;
+ * red, for money that's late or something that failed, wins over both.
+ */
+.rel-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-3); }
+.rel-icon svg { width: 15px; height: 15px; }
+.rel-icon[data-tone="warning"] { background: var(--warning-tint); color: var(--warning); }
+.rel-icon[data-tone="good"] { background: var(--green-tint); color: var(--green-dark); }
+.rel-icon[data-tone="info"] { background: var(--info-tint); color: var(--info); }
+.rel-icon:has(> [data-icon="requests"]) { background: var(--req-tint); color: var(--req-text); }
+.rel-icon:has(> [data-icon="quote"]) { background: var(--quote-tint); color: var(--quote-text); }
+.rel-icon:has(> [data-icon="job"]) { background: var(--job-tint); color: var(--job-text); }
+.rel-icon:has(> [data-icon="invoice"]) { background: var(--invoice-tint); color: var(--invoice-text); }
+.rel-icon[data-tone="danger"] { background: var(--danger-tint); color: var(--danger); }
+.rel-body { flex: 1; min-width: 0; }
+.rel-link, .rel-head { display: block; min-width: 0; max-width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-link { --focus-ring: transparent; }
+.rel-link:hover { color: inherit; text-decoration: none; }
+.rel-link::after { content: ""; position: absolute; inset: 0; }
+.rel-row:has(.rel-link:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
+.rel-title { font-weight: 600; color: var(--ink); }
+.rel-detail { color: var(--quiet); }
+.rel-sub { margin-top: 2px; font-size: var(--fs-12); color: var(--text-3); }
+.rel-end { display: inline-flex; flex: none; align-items: center; gap: 10px; color: var(--text-2); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rel-end :is(b, strong, .il-money) { color: var(--ink); font-weight: 600; }
+.rel-actions { position: relative; z-index: 1; display: flex; flex: none; align-items: center; gap: 2px; }
+.rel-actions .btn { height: 28px; padding: 0 8px; font-size: var(--fs-12); }
+.rel-actions .btn:not(.btn-primary, .btn-danger-solid, .btn-dark) { border-color: transparent; color: var(--text-2); }
+.rel-actions .btn-danger:not(.btn-danger-solid) { color: var(--danger); }
+.rel-actions .btn-icon { width: 28px; padding: 0; }
+.rel-actions .btn:not(.btn-primary, .btn-danger-solid, .btn-dark):hover { background: var(--fill-2); color: var(--ink); }
+
+@media (max-width: 900px) {
+  .sec-head { min-height: 44px; }
+  .sec-title { font-size: var(--fs-16); }
+  .sec-action > label:has(> input[type="file"]) { min-height: 44px; font-size: var(--fs-14); color: var(--green); }
+  .sec-action > :is(a, button):not(.btn-primary, .btn-icon) { min-height: 44px; font-size: var(--fs-14); color: var(--green); }
+  .sec-action > .btn-icon { width: 40px; height: 40px; }
+  .fact { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 11px 0; font-size: var(--fs-15); }
+  .fact-label { flex: none; max-width: 45%; }
+  .fact-value { font-weight: 500; text-align: right; }
+  .fact-wide { display: grid; justify-content: stretch; }
+  .fact-wide .fact-value { text-align: left; font-weight: 400; }
+  .rel-row { min-height: 48px; padding: 10px 0; font-size: var(--fs-15); }
+  .rel-row-link:hover { background: none; box-shadow: none; }
+  .rel-row-link:active { background: var(--fill-2); box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); }
+  .rel-sub, .rel-lead { font-size: var(--fs-13); }
+  .rel-actions .btn { height: 44px; font-size: var(--fs-14); }
+  .rel-actions .btn-icon { width: 44px; }
+  /* A row that opens something says so with a quiet chevron at its end (the kit's .m-li .chev), unless it has buttons there. Out of the flow, so a screen's own row layout holds. */
+  .rel-row-link:not(:has(> .rel-actions)) { padding-right: 24px; }
+  .rel-row-link:not(:has(> .rel-actions))::after {
+    content: ""; position: absolute; top: 50%; right: 0; width: 16px; height: 16px; margin-top: -8px; background: var(--quiet); pointer-events: none;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  /* A row with a figure and buttons both (a sub's pay): what doesn't fit beside the words goes under them, the buttons at the end. */
+  .rel-row:has(> .rel-end):has(> .rel-actions) { flex-wrap: wrap; row-gap: 4px; }
+  .rel-row:has(> .rel-end):has(> .rel-actions) > .rel-body { flex: 1 1 auto; min-width: min(100%, 11em); }
+  .rel-row:has(> .rel-end):has(> .rel-actions) > .rel-actions { margin-left: auto; }
+  /*
+   * Rows that end in a figure (RelatedList className="rel-figures"): the figure sits on the title's
+   * line and the quiet line runs under both, as an inbox row's does, rather than squeezed into the
+   * column left between the figure and the row's menu.
+   */
+  .rel-figures .rel-row:has(> .rel-end) { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 0; }
+  .rel-figures .rel-row:has(> .rel-end) > .rel-lead { grid-column: 1; grid-row: 1 / span 2; margin-right: 12px; }
+  .rel-figures .rel-row:has(> .rel-end) > .rel-body { display: contents; }
+  .rel-figures .rel-row:has(> .rel-end) :is(.rel-link, .rel-head) { grid-column: 2; grid-row: 1; }
+  .rel-figures .rel-row:has(> .rel-end) .rel-sub { grid-column: 2 / 4; grid-row: 2; }
+  .rel-figures .rel-row:has(> .rel-end) > .rel-end { grid-column: 3; grid-row: 1; margin-left: 12px; }
+  .rel-figures .rel-row:has(> .rel-end) > .rel-actions { grid-column: 4; grid-row: 1 / span 2; margin-left: 8px; }
+}
+
+/* ---------- Stats strip (components/ui/StatStrip.tsx, Page-Invoices.dc.html) ---------- */
+/*
+ * Flat figures with hairlines between them, between a hairline above and below. The grid is shifted
+ * left under a clip (.strip-grid), so whatever wraps onto a new row, the first column's figures line
+ * up with the page and no row starts with a stray line.
+ */
+.strip { overflow: hidden; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+.strip-grid { display: grid; grid-template-columns: repeat(var(--strip-cols, 4), minmax(0, 400px)); margin: -1px 0 0 -17px; }
+.strip[data-count="1"] { --strip-cols: 1; }
+.strip[data-count="2"] { --strip-cols: 2; }
+.strip[data-count="3"] { --strip-cols: 3; }
+.strip[data-count="5"] { --strip-cols: 5; }
+.strip[data-count="6"] { --strip-cols: 6; }
+.strip-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 14px 16px; border: 0; border-top: 1px solid var(--divider); border-left: 1px solid var(--divider); background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; }
+.strip-label { font-size: var(--fs-12); color: var(--quiet); }
+.strip-value { font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.strip-value[data-tone="danger"] { color: var(--danger); }
+.strip-value[data-tone="warning"] { color: var(--warning); }
+.strip-value[data-tone="good"] { color: var(--green-dark); }
+.strip-note { font-size: var(--fs-12); color: var(--text-3); }
+.strip-delta { font-weight: 600; }
+.strip-delta[data-tone="good"] { color: var(--green-dark); }
+.strip-delta[data-tone="danger"] { color: var(--danger); }
+a.strip-link:hover, button.strip-link:hover { color: inherit; text-decoration: none; }
+.strip-link { cursor: pointer; transition: background var(--dur-fast); }
+.strip-link:hover { background: var(--fill); }
+.strip-link:hover .strip-label { color: var(--ink); }
+.strip-link:focus-visible { outline-offset: -2px; }
+@media (max-width: 1100px) {
+  .strip[data-count="4"] { --strip-cols: 2; }
+  .strip:is([data-count="5"], [data-count="6"]) { --strip-cols: 3; }
+}
+@media (max-width: 900px) {
+  /* Two across in a filled, rounded block (Mobile-Sales.dc.html); an odd last one takes the row. */
+  .strip { border: 0; border-radius: 14px; background: var(--fill-2); }
+  .strip-grid { --strip-cols: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: -1px 0 0 -1px; }
+  .strip-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .strip[data-count="1"] .strip-grid { grid-template-columns: minmax(0, 1fr); }
+  .strip-label, .strip-note { font-size: var(--fs-13); }
+  .strip-label { color: var(--text-3); }
+  .strip-link:hover { background: none; }
+  .strip-link:active { background: var(--fill-3); }
+}
+
+/* ---------- A list's toolbar (components/ui/Toolbar.tsx) ---------- */
+/*
+ * Filters on the left; the search, the sort and the filter menus on the right, on one row that never
+ * wraps (the filters shrink and scroll first). On a phone the search is a full-width filled field
+ * with the sort and filter as round buttons beside it, and the filters a row of chips under it.
+ */
+.list-tools { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.list-toolbar { flex-wrap: nowrap; gap: 12px; min-width: 0; }
+.toolbar-end { display: flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 0; margin-left: auto; }
+.toolbar-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.search-field { display: flex; flex: 0 1 auto; align-items: center; gap: 7px; width: 264px; min-width: 150px; height: var(--control-sm); padding: 0 6px 0 10px; border-radius: var(--radius-control); background: var(--fill-2); color: var(--quiet); cursor: text; transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+.search-field:hover { background: var(--fill-3); }
+.search-field:focus-within { background: var(--page); box-shadow: inset 0 0 0 1px var(--green), var(--ring); }
+.search-field input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--ink); font-size: var(--fs-13); }
+.search-field input::placeholder { color: var(--quiet); }
+.search-field input::-webkit-search-cancel-button { cursor: pointer; }
+/* Any search field's clear button: a quiet grey disc with an ×, not the browser's blue one. Weightless, so a field that hides it (.menu-search-input) still does. */
+:where(input[type="search"])::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none; flex: none; width: 15px; height: 15px; margin: 0 0 0 6px; background-color: var(--quiet); cursor: pointer;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cdefs%3E%3Cmask id='x'%3E%3Crect width='16' height='16' fill='white'/%3E%3Cpath d='M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/mask%3E%3C/defs%3E%3Ccircle cx='8' cy='8' r='7' mask='url(%23x)'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cdefs%3E%3Cmask id='x'%3E%3Crect width='16' height='16' fill='white'/%3E%3Cpath d='M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/mask%3E%3C/defs%3E%3Ccircle cx='8' cy='8' r='7' mask='url(%23x)'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+:where(input[type="search"])::-webkit-search-cancel-button:hover { background-color: var(--text-2); }
+.search-field-kbd { flex: none; }
+.toolbar-btn { color: var(--text-2); }
+.toolbar-btn:hover, .toolbar-btn[aria-expanded="true"] { background: var(--fill-2); color: var(--ink); }
+.toolbar-btn.is-on { color: var(--ink); }
+.toolbar-btn-count { color: var(--green); font-weight: 600; }
+@media (max-width: 900px) {
+  .list-tools { gap: 8px; }
+  .list-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .toolbar-end { order: -1; gap: 8px; margin-left: 0; }
+  .search-field { flex: 1 1 auto; width: auto; gap: 8px; height: 44px; padding: 0 12px; border-radius: 12px; }
+  .search-field svg { width: 17px; height: 17px; }
+  .search-field input { font-size: var(--fs-16); }
+  .search-field:focus-within { background: var(--fill-2); box-shadow: inset 0 0 0 1px var(--green); }
+  .search-field-kbd { display: none; }
+  /* The sort and filter menus as round buttons beside the search, their words still their names. */
+  .toolbar-btn { position: relative; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .toolbar-btn:hover, .toolbar-btn[aria-expanded="true"] { background: var(--fill-3); }
+  .toolbar-btn svg { width: 20px; height: 20px; }
+  .toolbar-btn-text { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .toolbar-btn-count { position: absolute; top: 2px; right: 2px; display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; font-size: var(--fs-11); font-weight: 700; box-shadow: 0 0 0 2px var(--page); }
+  /*
+   * The chips scroll to the screen's edges, as the kit's do (not capped at the column's width, which
+   * cut them 32px short of the right edge). The screen's edge cutting a chip says there's more, so
+   * there's no fade: it covered the end of a last chip (its count) when the row ran only a little past.
+   */
+  .list-toolbar > .tabs { max-width: none; margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left))); padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); scroll-padding-inline: 16px; }
+  .list-toolbar > .tabs[data-more] { -webkit-mask-image: none; mask-image: none; }
+}
+
+/* ---------- A record's page (components/ui/DetailPage.tsx, Page-Client.dc.html) ---------- */
+/* The crumb: quiet words and a chevron over the title. On a phone, a round back button. */
+.crumb { position: relative; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; color: var(--text-3); font-size: var(--fs-13); font-weight: 500; text-decoration: none; }
+.crumb:hover { color: var(--ink); text-decoration: none; }
+/* The chevron points back, toward the list, and leans that way as it's pointed at. */
+.crumb > svg { flex: none; width: 16px; height: 16px; margin-left: -3px; color: var(--quiet); transition: transform var(--dur-fast); }
+.crumb:hover > svg { transform: translateX(-2px); }
+.crumb.back-link { margin-bottom: -16px; }
+.detail-crumb { display: flex; flex-basis: 100%; margin-bottom: -4px; }
+/*
+ * A request, quote, job or invoice: its stage's rule along the top of the header, as on Home's
+ * workflow strip, and the way back to its list in the stage's color with its icon.
+ */
+.detail-head[data-stage="requests"] { --c: var(--req); --c-text: var(--req-text); }
+.detail-head[data-stage="quote"] { --c: var(--quote); --c-text: var(--quote-text); }
+.detail-head[data-stage="job"] { --c: var(--job); --c-text: var(--job-text); }
+.detail-head[data-stage="invoice"] { --c: var(--invoice); --c-text: var(--invoice-text); }
+.detail-head[data-stage] .crumb { color: var(--c-text); font-weight: 600; }
+.detail-head[data-stage] .crumb-text > svg { margin-right: 6px; vertical-align: -3px; color: var(--c); }
+@media (min-width: 901px) { .detail-head[data-stage] { border-top: 3px solid var(--c); padding-top: 14px; } }
+.detail-head > .page-title { flex: 1 1 360px; }
+/* The quiet line under the title: the status as a dot and words, then a contact, tags, a date. */
+.detail-meta { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: -4px; font-size: var(--fs-13); color: var(--text-2); }
+.detail-meta > .meta-dot { display: none; }
+.detail-meta .pill { font-size: var(--fs-13); }
+.detail-head > :is(.callout, .save-status) { flex-basis: 100%; }
+.detail-cols { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 340px); gap: 36px; align-items: start; min-width: 0; }
+.detail-cols-one { grid-template-columns: minmax(0, 1fr); }
+.detail-main, .detail-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-content: start; min-width: 0; }
+@media (max-width: 1100px) {
+  .detail-cols { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .detail-side-first > .detail-side { order: -1; }
+}
+.action-bar { display: none; }
+@media (max-width: 900px) {
+  /* Mobile-Work.dc.html: the back and the actions on one row of round buttons, the title under them. */
+  .crumb { justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .crumb::after { content: ""; position: absolute; inset: -2px; }
+  .crumb:hover { background: var(--fill-3); }
+  .crumb > svg { width: 20px; height: 20px; margin: 0; color: var(--ink); }
+  .crumb:hover > svg { transform: none; }
+  .crumb-text { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .crumb.back-link { margin-bottom: -8px; }
+  .detail-crumb { flex-basis: auto; order: 0; margin: 0; }
+  .detail-head > .page-actions { order: 1; }
+  .detail-head > .page-title, .detail-head > .page-title:has(.title-input) { order: 2; flex-basis: 100%; }
+  .detail-head > :is(.detail-meta, .callout, .save-status) { order: 3; }
+  .detail-head:not(:has(> .page-actions)) > .detail-crumb { flex-basis: 100%; }
+  .detail-meta { margin-top: -6px; gap: 4px 12px; font-size: var(--fs-14); }
+  .detail-meta .pill { font-size: var(--fs-14); }
+  .detail-main, .detail-side { gap: 22px; }
+  /* A phone's main actions within thumb reach, pinned above the tab bar. */
+  .action-bar {
+    position: fixed; z-index: 14; left: 0; right: 0; bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); display: flex; gap: 8px;
+    padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); border-top: 1px solid var(--divider);
+    background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .action-bar .btn { flex: 1 1 0; min-width: 0; height: 48px; padding: 0 12px; border-radius: 12px; font-size: var(--fs-16); }
+  .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark) { border-color: transparent; background: var(--fill-2); color: var(--ink); }
+  .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark):hover { background: var(--fill-3); }
+  .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark):is(:disabled, [aria-disabled="true"]):not(.is-loading) { background: var(--fill-2); color: var(--text-4); }
+  .action-bar .btn-primary { flex-grow: 1.4; }
+  .action-bar .btn svg { width: 20px; height: 20px; }
+  /* Its quiet buttons are words only (Mobile-Sales.dc.html's bar); the primary keeps its icon. */
+  .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark, .btn-icon) > svg,
+  .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark, .btn-icon) > .btn-faces > .btn-face:not(.btn-face-done) > svg { display: none; }
+  .content:has(.action-bar) { padding-bottom: calc(var(--mobile-nav-height) + 96px + env(safe-area-inset-bottom)); }
+  :root:has(.action-bar) .toaster { bottom: calc(var(--mobile-nav-height) + 84px + env(safe-area-inset-bottom) + var(--island-space, 0px)); }
+  :root:has(.action-bar) .task-island { bottom: calc(var(--mobile-nav-height) + 84px + env(safe-area-inset-bottom)); }
+  /* Out of the way while the keyboard is up, with the tab bar they sit on (AppShell's useTyping), so they don't float over the form: the bar, and a list's floating primary. */
+  :root:has(.mobile-nav[data-typing]) :is(.action-bar, .page-header > .page-actions:not(:has(> .btn-primary ~ .btn-primary)) > .btn-primary) { display: none; }
+
+  /* A grouped screen (DetailColumns grouped): a grey ground, each section an inset white card under a small heading. */
+  html:has(.m-grouped), html:has(.m-grouped) body { background: var(--m-group); }
+  /* A skeleton's fill is the same grey as this ground in light: a step darker so loading shows (base.css's reduced-motion fill reads it too). */
+  .content:has(.m-grouped) .skeleton { --fill-2: var(--fill-3); }
+  .main:has(.m-grouped) > .topbar { background: color-mix(in srgb, var(--m-group) 92%, transparent); }
+  .content:has(.m-grouped) .action-bar { background: color-mix(in srgb, var(--m-group) 94%, transparent); }
+  .content:has(.m-grouped) :is(.crumb, .search-field, .toolbar-btn, .page-header > .page-actions > .btn:not(.btn-primary, .btn-dark, .btn-danger, .btn-danger-solid), .action-bar .btn:not(.btn-primary, .btn-danger-solid, .btn-dark)) { background: var(--m-card); }
+  .content:has(.m-grouped) .strip { background: var(--m-card); }
+  .content:has(.m-grouped) .strip-item { border-color: var(--row-divider); }
+  .m-grouped .sec-head { min-height: 0; padding: 0 4px 8px; border-bottom: 0; }
+  .m-grouped .sec-title { font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; color: var(--text-3); }
+  /* "Crew clock · 1 of 2": the dot's own space is the gap, not the heading's 8px as well. */
+  .m-grouped .sec-count { margin-left: -4px; font-weight: 600; color: var(--text-3); }
+  .m-grouped .sec-count::before { content: "· "; }
+  /* The action is small words on the small heading, with a thumb's 44px target drawn around them. */
+  .m-grouped .sec-action > label:has(> input[type="file"]) { position: relative; min-height: 0; height: auto; font-size: var(--fs-13); }
+  .m-grouped .sec-action > label:has(> input[type="file"])::after { content: ""; position: absolute; inset: calc(50% - 22px) -8px; }
+  .m-grouped .sec-action > :is(a, button):not(.btn-primary, .btn-icon) { position: relative; min-height: 0; height: auto; font-size: var(--fs-13); }
+  .m-grouped .sec-action > :is(a, button):not(.btn-primary, .btn-icon)::after { content: ""; position: absolute; inset: calc(50% - 22px) -8px; }
+  .m-grouped .sec:not(.sec-flush) > .sec-body { padding: 0 16px; overflow: hidden; border-radius: 14px; background: var(--m-card); }
+  .m-grouped .sec:not(.sec-flush) > .sec-body > :first-child { margin-top: 0; }
+  .m-grouped .sec:not(.sec-flush) > .sec-body > :is(.facts, .rel) > :last-child { border-bottom: 0; }
+  /* A dialog kept in a section (its phone sheet) isn't part of the card: a margin would lift the sheet off the screen's foot. */
+  .m-grouped .sec:not(.sec-flush) > .sec-body > :not(.facts, .rel, .il, dialog) { margin-block: 14px; }
+  /* A list's foot in the card: the card's own inset, not a second one. */
+  .m-grouped .sec:not(.sec-flush) > .sec-body > .il-foot { padding: 0; }
+  .m-grouped .sec:not(.sec-flush) > .sec-body > .empty-inline { margin: 0; padding: 14px 0; }
+  .m-grouped .rel-row-link:active { box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); }
+}
+/* Base UI's rows (a right-click menu's) are divs: they take a click like buttons, their words aren't picked up by a drag, and the row the arrow keys are on shows as hovered. */
 .menu-positioner .menu-item { cursor: pointer; -webkit-user-select: none; user-select: none; }
-.menu-item svg { color: var(--text-3); }
-.menu-item:hover, .menu-item:focus-visible { background: var(--fill-2); color: var(--ink); }
-/* The row the arrow keys or the pointer are on, and the one whose submenu is open. */
-.menu-item[data-highlighted], .menu-item[data-popup-open] { background: var(--fill-2); color: var(--ink); }
-.menu-item[data-danger] { color: var(--danger); }
-.menu-item[data-danger] svg { color: var(--danger); }
-.menu-item[data-danger]:is(:hover, [data-highlighted]) { background: var(--danger-tint); }
-/* Turned off, it can still be reached with the arrow keys, to read why (its title, as a tooltip). */
-.menu-item:disabled, .menu-item[data-disabled] { opacity: 0.45; cursor: not-allowed; background: none; }
-/* A tick's place, kept when it's off so the words line up with the rows that have icons. A submenu's arrow, at the end. */
-.menu-tick { display: grid; place-items: center; flex: none; width: 16px; height: 16px; }
-.menu-tick svg { color: var(--green); }
-.menu-more { display: flex; margin-left: auto; padding-left: 12px; }
-.menu-sep { height: 1px; background: var(--divider); margin: 4px 6px; }
-.menu-label { padding: 8px 10px 4px; font-size: var(--fs-11); font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
+.menu-item[data-highlighted] { background: var(--menu-hi); color: var(--ink); }
+.menu-item[data-disabled] { opacity: 0.45; cursor: not-allowed; background: none; }
 
 /* ---------- Skeletons ---------- */
 .skeleton-wrap { animation: fade-in var(--dur) ease-out 90ms both; }
@@ -564,7 +1477,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 }
 .task-island:not(:popover-open):not([data-fallback]), .task-island[data-fallback]:not([data-shown]) { display: none; }
 @media (max-width: 900px) { .task-island { bottom: calc(var(--mobile-nav-height) + 12px + env(safe-area-inset-bottom)); } }
-.task-island-pill { display: flex; align-items: center; height: var(--control); max-width: min(360px, calc(100vw - 32px)); border-radius: var(--radius-pill); background: var(--solid); box-shadow: var(--shadow-lg); transition: background-color var(--dur) ease-out; }
+.task-island-pill { display: flex; align-items: center; height: var(--control); max-width: min(360px, calc(100vw - 32px)); border-radius: var(--radius-pill); background: var(--solid); box-shadow: var(--menu-shadow); transition: background-color var(--dur) ease-out; }
 .task-island-pill[data-status="failed"] { background: var(--danger-solid); color: #fff; }
 .task-island-main { display: flex; align-items: center; gap: 10px; min-width: 0; height: 100%; padding: 0 16px 0 10px; border: 0; border-radius: inherit; background: none; color: inherit; font-size: var(--fs-13); font-weight: 600; }
 .task-island-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -573,11 +1486,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .task-island-dismiss { flex: none; display: grid; place-items: center; width: 28px; height: 28px; margin: 0 6px 0 -8px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, currentColor 14%, transparent); color: inherit; }
 .task-island-dismiss:hover { background: color-mix(in srgb, currentColor 24%, transparent); }
 .task-island-list {
-  order: -1; display: grid; gap: 2px; width: min(360px, calc(100vw - 32px)); max-height: min(360px, 50vh); overflow-y: auto; padding: 6px; border-radius: var(--radius-card);
-  background: var(--solid); color: var(--on-solid); box-shadow: var(--shadow-lg); transform-origin: bottom center; animation: task-list-in var(--dur-enter) var(--ease-enter);
+  order: -1; display: grid; gap: 2px; width: min(360px, calc(100vw - 32px)); max-height: min(360px, 50vh); overflow-y: auto; padding: 4px; border-radius: 10px;
+  background: var(--solid); color: var(--on-solid); box-shadow: var(--menu-shadow); transform-origin: bottom center; animation: task-list-in var(--dur-enter) var(--ease-enter);
 }
 @keyframes task-list-in { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: none; } }
-.task-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-control); }
+.task-row { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; }
+.task-row + .task-row { box-shadow: 0 -1px 0 color-mix(in srgb, currentColor 12%, transparent); border-radius: 0; }
 .task-row-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .task-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); font-weight: 600; }
 .task-row-detail { font-size: var(--fs-12); font-weight: 400; opacity: 0.75; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
@@ -610,22 +1524,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .crash-details .btn { margin: 0 12px 12px; }
 
 /* ---------- Empty and error states ---------- */
+/*
+ * Nothing in a box: a whole list with nothing in it is its icon, a line and the next step, on the page
+ * itself; an empty section is one quiet line under its heading (<EmptyState inline>). A card that holds
+ * only one of these drops its border and fill (below).
+ */
 .empty { padding: 32px; text-align: center; color: var(--text-3); }
-.empty-state { display: grid; justify-items: center; gap: 10px; padding: 44px 24px; text-align: center; animation: fade-in var(--dur-slow) ease-out; }
-.empty-state .empty-icon { width: 52px; height: 52px; border-radius: var(--radius-card); display: grid; place-items: center; background: var(--fill-2); color: var(--text-3); margin-bottom: 4px; }
-.empty-state h3 { font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
-.empty-state p { margin: 0; max-width: 420px; color: var(--text-3); font-size: var(--fs-14); }
-.empty-state .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
-.empty-state-sm { padding: 24px 16px; gap: 6px; }
-.empty-state-sm .empty-icon { width: 40px; height: 40px; border-radius: var(--radius-card); }
-.error-state .empty-icon { background: var(--danger-tint); color: var(--danger); }
+.empty-state { display: grid; justify-items: center; gap: 6px; padding: 48px 24px; text-align: center; animation: fade-in var(--dur-slow) ease-out; }
+.empty-state .empty-icon { display: grid; place-items: center; width: auto; height: auto; margin-bottom: 6px; background: none; color: var(--quiet); }
+.empty-state h3 { font-size: var(--fs-14); font-weight: 600; letter-spacing: normal; color: var(--ink); }
+.empty-state p { margin: 0; max-width: 420px; color: var(--text-3); font-size: var(--fs-13); }
+.empty-state .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+.empty-state-sm { padding: 24px 16px; gap: 4px; }
+.empty-state-sm .empty-icon { margin-bottom: 4px; }
+.error-state .empty-icon { color: var(--danger); }
+.card:has(> :is(.empty-state, .error-state):only-child) { border: 0; border-radius: 0; background: none; }
 /*
  * An empty section inside a card (<EmptyState inline>): one muted line where the list would start,
  * with its next step after it as a link. A Button or a .btn link passed as the action reads as one.
  */
-.empty-inline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; color: var(--text-3); font-size: var(--fs-14); font-weight: 400; text-align: left; }
+.empty-inline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0; padding: 12px 0; color: var(--text-3); font-size: var(--fs-13); font-weight: 400; text-align: left; }
 /* Straight under a .card-head, it takes a row's padding; inside a .card-pad it already has the card's. */
 .card:not(.card-pad) > .empty-inline { padding: 14px 20px; }
+.card-pad > .empty-inline, .card-pad > .empty-inline:only-child { padding: 0; }
 /* A section with nothing in it yet is that one line under its heading, not a box around the line. The same for a list that is only its footer ("Show 1 past visit"). */
 .card:has(> :is(.empty-inline, .list-foot):only-child) { border: 0; border-radius: 0; background: none; padding: 0; }
 .card:has(> :is(.empty-inline, .list-foot):only-child) > :is(.empty-inline, .list-foot) { justify-content: flex-start; padding: 0; border: 0; }
@@ -636,30 +1557,45 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .empty-inline .btn:focus-visible { box-shadow: var(--ring); }
 .empty-inline .btn:disabled { background: none; border: 0; }
 .empty-inline .btn > svg { display: none; }
+/* On a phone its words get a thumb's 44px target drawn around them (.btn is already position: relative). */
+@media (max-width: 900px) { .empty-inline .btn::after { content: ""; position: absolute; inset: calc(50% - 22px) -8px; } }
 
 /* ---------- Command palette ---------- */
-/* A dialog that grows into place and shrinks away, without the dialog's lift (also on phones). */
-.palette { width: min(640px, calc(100vw - 24px)); margin: 10vh auto auto; transform: scale(0.97); }
+/* A dialog that grows into place and shrinks away, without the dialog's lift (also on phones). It wears the menus' look: their surface, 13px rows, sentence-case group names. */
+.palette { width: min(620px, calc(100vw - 24px)); margin: 10vh auto auto; transform: scale(0.97); border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
 @starting-style { .palette[open] { transform: scale(0.97); } }
-.palette-input { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--divider); color: var(--text-3); }
-.palette-input input { flex: 1; height: 56px; border: 0; outline: none; font-size: var(--fs-16); background: transparent; color: var(--ink); min-width: 0; }
-.palette-list { max-height: min(460px, 60vh); overflow-y: auto; padding: 6px; }
-.palette-group { padding: 10px 10px 4px; font-size: var(--fs-11); font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: var(--tracking-caps); }
-.palette-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: var(--radius-control); background: none; text-align: left; color: var(--ink); }
-.palette-item[aria-selected="true"] { background: var(--fill-2); }
-.palette-item .p-icon { width: 30px; height: 30px; border-radius: var(--radius-control); display: grid; place-items: center; flex: none; background: var(--fill-2); color: var(--text-2); }
-.palette-item[aria-selected="true"] .p-icon { background: var(--raised); }
-.palette-item .p-title { font-weight: 700; }
-.palette-item .p-sub { font-size: var(--fs-12); color: var(--text-3); }
-.palette-foot { display: flex; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--divider); font-size: var(--fs-12); color: var(--text-3); }
-@media (max-width: 900px) { .palette { margin: 0; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; } .palette-list { max-height: none; flex: 1; } }
+.palette-input { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--divider); color: var(--quiet); }
+.palette-input input { flex: 1; height: 48px; border: 0; outline: none; font-size: var(--fs-14); background: transparent; color: var(--ink); min-width: 0; }
+.palette-input input::placeholder { color: var(--quiet); }
+.palette-input .kbd, .palette-foot .kbd { height: 18px; min-width: 18px; justify-content: center; padding: 0 4px; border-color: var(--divider); background: transparent; color: var(--quiet); font-weight: 500; }
+.palette-list { max-height: min(460px, 60vh); overflow-y: auto; padding: 4px; }
+.palette-group { padding: 8px 8px 4px; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); }
+.palette-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 5px 8px; border: 0; border-radius: 6px; background: none; text-align: left; color: var(--ink); font-size: var(--fs-13); }
+.palette-item[aria-selected="true"] { background: var(--menu-hi); }
+.palette-item > svg { color: var(--quiet); }
+.palette-item .p-icon { width: 16px; height: 16px; display: grid; place-items: center; flex: none; background: none; color: var(--text-3); }
+.palette-item .p-icon svg { width: 15px; height: 15px; color: var(--stage, currentColor); }
+.palette-item[aria-selected="true"] .p-icon { background: none; color: var(--ink); }
+.palette-item .p-title { font-weight: 500; }
+.palette-item .p-sub { font-size: var(--fs-12); color: var(--quiet); }
+.palette-foot { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--divider); font-size: var(--fs-11); color: var(--quiet); }
+@media (max-width: 900px) {
+  .palette { margin: 0; width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; background: var(--page); }
+  .palette-list { max-height: none; flex: 1; }
+  .palette-input input { height: 56px; font-size: var(--fs-16); }
+  .palette-item { min-height: 48px; font-size: var(--fs-16); gap: 14px; padding: 6px 12px; }
+  .palette-item .p-icon, .palette-item .p-icon svg { width: 20px; height: 20px; }
+  .palette-item .p-sub { font-size: var(--fs-13); }
+  .palette-group { padding: 14px 12px 6px; font-size: var(--fs-13); color: var(--text-3); }
+}
 @media (prefers-reduced-motion: reduce) {
   .palette { transform: none; }
   @starting-style { .palette[open] { transform: none; } }
 }
 
-/* ---------- Notifications panel ---------- */
-.panel { position: fixed; margin: 0; inset: auto; width: min(400px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 80px)); padding: 0; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-lg); overflow: hidden; display: flex; flex-direction: column; color: var(--ink); }
+/* ---------- Notifications and Help panels ---------- */
+/* Popovers from the top bar, on the menus' surface: a 44px head, 13px rows on hairlines, a dot on what's unread. */
+.panel { position: fixed; margin: 0; inset: auto; width: min(380px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 80px)); padding: 0; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); overflow: hidden; display: flex; flex-direction: column; color: var(--ink); }
 /* Opens and closes like a menu. */
 .panel {
   z-index: 50; opacity: 0; transform: translateY(-4px) scale(0.97);
@@ -672,18 +1608,27 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
   .panel { transform: none; }
   @starting-style { .panel:popover-open { transform: none; } }
 }
-.panel-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; min-height: 56px; }
+.panel-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; min-height: 44px; }
 /* The header and tabs keep their size; only the list scrolls (it used to squash the tabs). */
 .panel-head, .panel > .underline-tabs { flex: none; }
-.panel-head h2 { flex: 1; font-size: var(--fs-16); font-weight: 700; }
+.panel-head h2 { flex: 1; font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; }
+.panel > .underline-tabs { gap: 18px; }
+.panel > .underline-tabs :is(button, a) { height: 34px; }
 .panel-body { overflow-y: auto; flex: 1; min-height: 0; overscroll-behavior: contain; }
-.notice { display: flex; gap: 12px; width: 100%; padding: 12px 16px; border: 0; border-top: 1px solid var(--row-divider); background: var(--surface); text-align: left; color: inherit; transition: background var(--dur-fast); }
-.notice:hover { background: var(--fill); color: inherit; }
-.notice[data-unread]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin: 6px -4px 0 -6px; flex: none; }
-.notice .n-icon { width: 32px; height: 32px; border-radius: var(--radius-control); display: grid; place-items: center; flex: none; background: var(--fill-2); color: var(--text-2); }
-.notice .n-title { font-weight: 700; font-size: var(--fs-13); }
-.notice .n-body { font-size: var(--fs-13); color: var(--text-2); margin-top: 1px; overflow-wrap: anywhere; }
-.notice .n-time { font-size: var(--fs-11); color: var(--text-4); margin-top: 3px; }
+.notice { position: relative; display: flex; gap: 10px; width: 100%; padding: 10px 12px 10px 18px; border: 0; border-top: 1px solid var(--row-divider); background: none; text-align: left; color: inherit; font-size: var(--fs-13); transition: background var(--dur-fast); }
+.notice:hover { background: var(--menu-hi); color: inherit; }
+.notice[data-unread]::before { content: ""; position: absolute; left: 7px; top: 20px; width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin: 0; }
+.notice .n-icon { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--fill-2); color: var(--text-2); }
+.notice .n-icon svg { width: 14px; height: 14px; }
+.notice .n-title { font-weight: 600; font-size: var(--fs-13); }
+.notice .n-body { font-size: var(--fs-13); color: var(--text-3); margin-top: 1px; overflow-wrap: anywhere; }
+.notice .n-time { font-size: var(--fs-12); color: var(--quiet); margin-top: 2px; }
+@media (max-width: 900px) {
+  .notice { padding: 12px 16px 12px 22px; font-size: var(--fs-14); }
+  .notice .n-icon { width: 40px; height: 40px; }
+  .notice .n-icon svg { width: 18px; height: 18px; }
+  .notice :is(.n-title, .n-body) { font-size: var(--fs-14); }
+}
 
 /* ---------- Dropzone ---------- */
 .dropzone { display: grid; place-items: center; gap: 6px; padding: 22px; border: 1.5px dashed var(--button-border); border-radius: var(--radius-card); background: var(--fill); color: var(--text-3); text-align: center; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast); }
@@ -747,27 +1692,32 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 .photo-editor-swatch { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.45); cursor: pointer; }
 .photo-editor-swatch[aria-pressed="true"] { border-color: #151515; box-shadow: 0 0 0 3px #f2f2f2; }
 .photo-editor-problem { color: #ffb4a9; }
+/* Its buttons are on #202020 whatever the theme: light words and a light hairline (a button is see-through, so the theme's ink was dark on dark). */
+.photo-editor .btn:not(.btn-primary, .btn-danger-solid) { border-color: rgba(255, 255, 255, 0.28); color: #f2f2f2; }
+.photo-editor .btn-ghost { border-color: transparent; }
+.photo-editor .btn:not(.btn-primary, .btn-danger-solid):hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.photo-editor .btn:is(:disabled, [aria-disabled="true"]):not(.is-loading), .photo-editor .btn:is(:disabled, [aria-disabled="true"]):not(.is-loading):hover { background: rgba(255, 255, 255, 0.08); border-color: transparent; color: rgba(255, 255, 255, 0.45); }
 @media (max-width: 600px) { .photo-editor-tools { justify-content: center; } }
 
 /* ---------- Timeline (activity, notes) ---------- */
 .timeline { display: grid; }
-.timeline-item { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--row-divider); }
+/* Page-Client.dc.html's notes and messages: a quiet round icon, who and what, the time quiet on the right. No colored tiles; the kind tints only its icon. */
+.timeline-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 10px 20px; border-top: 1px solid var(--row-divider); font-size: var(--fs-13); }
 .timeline-item:first-child { border-top: 0; }
-.timeline-item .t-icon { width: 32px; height: 32px; border-radius: var(--radius-control); display: grid; place-items: center; background: var(--fill-2); color: var(--text-2); }
-.timeline-item .t-meta { font-size: var(--fs-12); color: var(--text-3); }
-.timeline-item[data-kind="note"] .t-icon { background: var(--note); color: var(--warning); }
-.timeline-item[data-kind="email"] .t-icon { background: var(--info-tint); color: var(--info); }
-.timeline-item[data-kind="sms"] .t-icon { background: var(--green-tint); color: var(--green-dark); }
+.timeline-item .t-icon { width: 28px; height: 28px; border-radius: var(--radius-pill); display: grid; place-items: center; background: var(--fill-2); color: var(--text-3); }
+.timeline-item .t-icon svg { width: 14px; height: 14px; }
+.timeline-item .t-meta { font-size: var(--fs-12); color: var(--quiet); }
+.timeline-item[data-kind="note"] .t-icon { color: var(--warning); }
+.timeline-item[data-kind="email"] .t-icon { color: var(--info); }
+.timeline-item[data-kind="sms"] .t-icon { color: var(--green-dark); }
+/* In a Section, the rows line up with the page, under the section's hairline. */
+.sec-body > .timeline:first-child { margin-top: -12px; }
+.sec-body > .timeline > .timeline-item { padding-left: 0; padding-right: 0; border-top: 0; border-bottom: 1px solid var(--row-divider); }
 
 /* Inline-editable page title */
 .title-input { flex: 1 1 360px; width: 100%; min-width: 0; border: 1px solid transparent; border-radius: var(--radius-control); background: transparent; padding: 0 6px; margin-left: -7px; color: var(--ink); font: inherit; letter-spacing: inherit; transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast); }
 .title-input:hover { border-color: var(--border); }
 .title-input:focus { outline: none; border-color: var(--green); box-shadow: var(--ring); background: var(--surface); }
-.pill { background: var(--fill-2); color: var(--text-2); }
-.pill[data-tone="success"] { background: var(--green-tint); color: var(--green-dark); }
-.pill[data-tone="danger"] { background: var(--danger-tint); color: var(--danger); }
-.pill[data-tone="warning"] { background: var(--warning-tint); color: var(--warning); }
-.pill[data-tone="info"] { background: var(--invoice-tint); color: var(--invoice-text); }
 .select-pill { position: relative; display: inline-flex; align-items: center; gap: 6px; height: var(--control); padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--ink); font-weight: 700; font-size: var(--fs-14); cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
 .select-pill:hover { border-color: var(--border-strong); }
 .select-pill:focus-within { box-shadow: var(--ring); border-color: var(--green); }
@@ -793,26 +1743,28 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
 
 /* ---------- Charts (Recharts, see components/ui/Chart.tsx) ---------- */
 .chart { position: relative; margin: 0; min-width: 0; font-size: var(--fs-11); }
-.chart .recharts-cartesian-axis-tick-value { fill: var(--text-3); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
-.chart .recharts-cartesian-grid line { stroke: var(--row-divider); }
+/* Quiet: hairline gridlines and quiet ticks, the series the only color (Page-Finance.dc.html). */
+.chart .recharts-cartesian-axis-tick-value { fill: var(--quiet); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.chart .recharts-cartesian-grid line { stroke: var(--divider); }
 .chart .recharts-surface { outline: none; border-radius: var(--radius-sm); }
 .chart .recharts-wrapper:has(.recharts-surface:focus-visible) { outline: 2px solid var(--green); outline-offset: 4px; border-radius: var(--radius-control); }
 .chart .recharts-tooltip-wrapper { z-index: 5; }
-.chart-empty { position: absolute; inset: 0 0 24px 52px; display: grid; place-items: center; color: var(--text-3); font-size: var(--fs-13); font-weight: 600; pointer-events: none; }
+.chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--quiet); font-size: var(--fs-13); font-weight: 500; pointer-events: none; }
+/* The tooltip is a small menu's surface: its border, shadow and radius. */
 .chart-tooltip {
-  min-width: 88px; padding: 7px 10px; border-radius: var(--radius-control); background: var(--surface); border: 1px solid var(--border);
-  box-shadow: var(--shadow-md); font-size: var(--fs-12); line-height: 1.4; color: var(--ink); animation: fade-in var(--dur-fast) ease-out;
+  min-width: 96px; padding: 7px 10px; border-radius: 10px; background: var(--menu); border: 1px solid var(--menu-border);
+  box-shadow: var(--menu-shadow); font-size: var(--fs-12); line-height: 1.45; color: var(--ink); animation: fade-in var(--dur-fast) ease-out;
 }
-.chart-tooltip-label { color: var(--text-3); font-weight: 600; white-space: nowrap; }
+.chart-tooltip-label { margin-bottom: 1px; color: var(--quiet); font-weight: 500; white-space: nowrap; }
 .chart-tooltip-row { display: flex; align-items: center; gap: 6px; }
 .chart-tooltip-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .chart-tooltip-line { width: 12px; height: 0; border-top: 2px solid; border-radius: var(--radius-pill); flex: none; }
 .chart-tooltip-line.dashed { border-top-style: dashed; }
 .chart-tooltip-name { color: var(--text-2); white-space: nowrap; }
-.chart-tooltip-value { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-tooltip-value { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sparkline { width: 100%; }
-.spark-legend { display: flex; gap: 14px; font-size: var(--fs-11); color: var(--text-3); }
+.spark-legend { display: flex; gap: 14px; font-size: var(--fs-11); color: var(--quiet); }
 .spark-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .spark-legend i { width: 14px; height: 0; border-top: 2px solid var(--green); }
-.spark-legend i.dashed { border-top: 2px dashed var(--text-4); }
+.spark-legend i.dashed { border-top: 1.5px dashed var(--quiet); }
 .stat .sparkline { margin-top: 10px; }

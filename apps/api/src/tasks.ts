@@ -16,7 +16,7 @@ import { rollUpVisits } from "./services/analytics";
 import { runBackups } from "./services/backups";
 import { runAutopayJob } from "./services/autopay";
 import { checkHosting } from "./services/hosting";
-import { purgeTrash, tidyApplicantFiles, tidyPlanFiles, tidySubFiles, tidyUnrecordedFiles } from "./services/planFiles";
+import { purgeTrash, tidyApplicantFiles, tidyExpiredUploads, tidyPlanFiles, tidySubFiles, tidyUnrecordedFiles } from "./services/planFiles";
 import { keepRailwayAlive } from "./services/railway";
 import { checkJobProfits } from "./services/profitAlerts";
 import { checkStorage } from "./services/storageUsage";
@@ -530,9 +530,20 @@ async function hourlyUpkeep(env: Env) {
   // Sign-in codes texted to subs over a day ago (services/signInCodes.ts): long run out, kept until now
   // for looking into a run of requests.
   const codes = await step("tidy_sign_in_codes", admin.rpc("tidy_sign_in_codes"));
+  // Files sent through a booking form's or a sub's upload link that nobody recorded, once the link
+  // has run out (services/planFiles.ts), so a stranger's files don't stay a day.
+  let uploads = null;
+  try {
+    uploads = await tidyExpiredUploads(admin);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    problems.push(`tidy_expired_uploads: ${message}`);
+    console.error("Upkeep step tidy_expired_uploads failed", message);
+    reportError(err, { task: "followups", step: "tidy_expired_uploads" });
+  }
   return {
     overdue: overdue ?? 0, owed_again: owedAgain ?? 0, late_fees: lateFees ?? 0, deposits: deposits ?? 0, installments: installments ?? 0, invoice_reminders: invoiceReminders ?? 0, reminders: reminders ?? 0, equipment: equipment ?? 0, paperwork: paperwork ?? 0, guide_reviews: guideReviews ?? 0, offers: offers ?? 0, subs: { alerts: subAlerts?.length ?? 0, reminded },
-    cards: cards ?? 0, autopay_processing: autopayProcessing, bank_payments: bankPayments, clocks, codes: codes ?? 0, problems,
+    cards: cards ?? 0, autopay_processing: autopayProcessing, bank_payments: bankPayments, clocks, codes: codes ?? 0, uploads, problems,
   };
 }
 

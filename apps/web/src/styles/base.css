@@ -1,6 +1,12 @@
 /* Reset, app shell and page layout. Components live in components.css, feature screens in features.css. */
 
 *, *::before, *::after { box-sizing: border-box; }
+/*
+ * Hidden means hidden: a component's own display (a check box's inline-grid, a row's flex) would
+ * otherwise beat the browser's [hidden] rule, which has no weight against an author's. The one way
+ * to show a [hidden] element is to drop the attribute. hidden="until-found" keeps the browser's own.
+ */
+[hidden]:not([hidden="until-found"]) { display: none !important; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 html, body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--font); font-size: var(--fs-14); line-height: 1.45; }
 body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-rendering: optimizeLegibility; }
@@ -27,6 +33,7 @@ a:where(:not([class], nav a, [role="tablist"] a, .underline-tabs a, li > a):hove
 }
 /* A file picker or a choice drawn by its label (the input itself is out of sight): the label shows the focus. */
 label:is(.btn, .hub-choice):has(input:focus-visible) { outline: 2px solid var(--focus-ring, var(--green)); outline-offset: 2px; }
+.sec-action > label:has(> input[type="file"]:focus-visible) { outline: 2px solid var(--focus-ring, var(--green)); outline-offset: 2px; border-radius: var(--radius-sm); }
 /* On a dark panel of the app's own, the outline is the panel's text colour; on a dark one that isn't themed, white. */
 .toast, .restart-banner, .task-island-pill, .task-island-list { --focus-ring: var(--on-solid); }
 .photo-editor, .hub-refer { --focus-ring: #fff; }
@@ -45,7 +52,25 @@ img, svg { flex-shrink: 0; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
 
+/*
+ * The four stages keep their color wherever their own icon stands for the thing: the current page
+ * in the sidebar, menus, search, the More sheet, a row's round icon. --stage is set on the icon
+ * itself; each of those places opts in with color: var(--stage, its usual color).
+ */
+[data-icon="requests"] { --stage: var(--req); }
+[data-icon="quote"] { --stage: var(--quote); }
+[data-icon="job"] { --stage: var(--job); }
+[data-icon="invoice"] { --stage: var(--invoice); }
+
 /* ---------- App shell ---------- */
+/*
+ * A 232px sidebar on the ground colour, 36px links in the quiet text colour with the current one on a
+ * raised pill (it slides to the page you pick) and its icon in that page's colour, sentence-case group
+ * names, plain counts; a 60px top bar with the business on the left, then search and quiet 38px
+ * buttons on the right, its hairline showing once the page scrolls under it. The sidebar's and top
+ * bar's measures and the 30px logo are the live app's. They're the shell's own and win over tokens.css's.
+ */
+:root { --sidebar-width: 228px; --topbar-height: 60px; --mobile-nav-height: 56px; }
 .shell { min-height: 100vh; display: flex; }
 .sidebar {
   width: var(--sidebar-width); flex: none; background: var(--ground); border-right: 1px solid var(--ground-border);
@@ -53,69 +78,101 @@ img, svg { flex-shrink: 0; }
   /* Clear of a phone's notch and home indicator, sideways (a big phone is wider than 900px then). */
   padding-left: max(12px, env(safe-area-inset-left)); padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
-.brand { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px 8px; color: var(--brand-ink); font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
+.brand { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: 2px 0 14px 8px; border-radius: 6px; color: var(--brand-ink); font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
 .brand:hover { color: var(--brand-ink); }
 .brand svg { flex: none; }
 .brand-name { line-height: 1; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-link {
-  position: relative; display: flex; align-items: center; gap: 12px; height: var(--control); padding: 0 12px; border-radius: var(--radius-control);
-  color: var(--ink); font-weight: 600; transition: background var(--dur-fast), box-shadow var(--dur-fast), color var(--dur-fast);
+  position: relative; display: flex; align-items: center; gap: 12px; height: 38px; padding: 0 12px; border-radius: 8px;
+  color: var(--text-2); font-size: var(--fs-14); font-weight: 500; white-space: nowrap; transition: background var(--dur-fast), color var(--dur-fast);
 }
-.nav-link svg { color: var(--text-2); transition: color var(--dur-fast); }
+.nav-link svg { color: var(--text-2); transition: color var(--dur); }
 .nav-link:hover { background: var(--ground-hover); color: var(--ink); }
-.nav-link[aria-current="page"], .nav-link.active { background: var(--raised); box-shadow: 0 0 0 1px var(--ground-border), var(--shadow-sm); }
-.nav-link[aria-current="page"] svg, .nav-link.active svg { color: var(--green); }
+.nav-link[aria-current="page"], .nav-link.active { background: var(--raised); box-shadow: var(--nav-pill-edge); color: var(--ink); font-weight: 600; }
+.nav-link[aria-current="page"] svg, .nav-link.active svg { color: var(--stage, var(--green)); }
 /*
- * The links scroll between the brand and the foot, so Apps and Settings stay in view however long the
+ * In the scrolling links one raised pill (AppShell's NavPill) stands behind the current page and
+ * slides to the next one, so the link itself stays clear; until it's placed, the link wears its own.
+ */
+:root { --nav-pill-edge: 0 0 0 1px var(--ground-border), 0 1px 2px rgba(15, 42, 53, 0.06); }
+:root.dark { --nav-pill-edge: 0 0 0 1px var(--sand-6); }
+.nav-pill { position: absolute; left: 4px; right: 12px; top: 0; height: 38px; border-radius: 8px; background: var(--raised); box-shadow: var(--nav-pill-edge); pointer-events: none; }
+.nav-pill:not([data-placed]) { display: none; }
+.nav-pill[data-moving] { transition: transform 260ms var(--ease-out); }
+.nav-scroll:has(.nav-pill[data-placed]) .nav-link.active { background: none; box-shadow: none; }
+.nav-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * The links scroll between Create and the foot, so Apps and Settings stay in view however long the
  * list is; it fades at the bottom edge where there's more below. Room around it for a link's focus
  * ring, and its scrollbar sits on the sidebar's own edge.
  */
 .nav-scroll {
-  flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; margin: -4px -12px 0 -4px; padding: 4px 12px 28px 4px;
+  position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; margin: -4px -12px 0 -4px; padding: 4px 12px 28px 4px;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
 }
 .nav-scroll > * { flex: none; }
-.nav-label { padding: 16px 12px 4px; font-size: var(--fs-11); font-weight: 600; color: var(--text-3); }
-.nav-bottom { padding-top: 8px; border-top: 1px solid var(--border); }
-.nav-link .nav-badge { margin-left: auto; }
-.nav-create-dot { width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; display: grid; place-items: center; }
+/* A group's name folds its links; its caret points down while open, right while folded. */
+.nav-label { display: flex; align-items: center; gap: 4px; padding: 16px 12px 4px; border: 0; border-radius: var(--radius-sm); background: none; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); text-align: left; }
+.nav-label:hover { color: var(--text-2); }
+.nav-label svg { flex: none; }
+.nav-bottom { padding-top: 8px; border-top: 1px solid var(--ground-border); }
 /*
- * Create's + only moves when its menu opens (Menu.tsx marks the button data-popup-open): it spins
- * round into an ×, with a little overshoot as it lands, and spins back as the menu closes.
+ * A count is a plain number; new requests sit in a request-amber pill, and a red pill only where
+ * someone's waiting on you (a mention, an invoice past due). Each pops once when its number changes.
  */
-.nav-create-dot { transition: transform 420ms var(--ease-spring); }
-.create-trigger[data-popup-open] .nav-create-dot { transform: rotate(225deg); }
-.nav-link .nav-create-dot svg { color: #fff; }
-.nav-divider { height: 1px; background: var(--border); margin: 8px 12px; }
-.create-trigger { width: 100%; border: 0; background: none; text-align: left; font: inherit; font-weight: 600; }
+.nav-count { flex: none; margin-left: auto; font-size: var(--fs-12); font-weight: 500; color: var(--quiet); font-variant-numeric: tabular-nums; animation: count-pop 380ms var(--ease-spring); }
+.nav-count:is(.nav-count-new, .nav-count-alert) { min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); display: grid; place-items: center; font-weight: 650; }
+.nav-count-new { background: var(--req-tint); color: var(--req-text); }
+.nav-count-alert { background: var(--danger-tint); color: var(--danger); }
+@keyframes count-pop { 40% { transform: scale(1.2); } }
+.nav-dot { flex: none; display: inline-block; width: 7px; height: 7px; margin-left: auto; border-radius: 50%; background: var(--green); }
+/*
+ * Create: a small green circle where the other links have their icon. Pointing at it does nothing;
+ * while its menu is out the + turns into a dark x, and turns back when the menu closes.
+ */
+.create-trigger { width: 100%; border: 0; background: none; text-align: left; font: inherit; font-size: var(--fs-14); font-weight: 500; }
+.create-trigger:hover { background: none; color: var(--text-2); }
+.nav-create-dot { width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; display: grid; place-items: center; flex: none; transition: transform var(--dur-enter) var(--ease-out), background var(--dur-enter) var(--ease-out); }
+.nav-link .nav-create-dot svg { width: 13px; height: 13px; color: #fff; transition: color var(--dur-enter) var(--ease-out); }
+.create-trigger[aria-expanded="true"] .nav-create-dot { transform: rotate(45deg); background: var(--solid); }
+.create-trigger[aria-expanded="true"] .nav-create-dot svg { color: var(--on-solid); }
+.create-trigger[aria-expanded="true"] { background: none; color: var(--ink); }
+.nav-divider { height: 1px; background: var(--ground-border); margin: 8px 12px; }
 .mobile-only { display: none !important; }
 /* A word that labels a value in a stacked table row on a phone, where the column heads are hidden. */
 .mobile-inline { display: none !important; }
-.sidebar-foot { margin-top: auto; padding-top: 12px; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
   position: sticky; top: 0; z-index: 15; display: flex; align-items: center; gap: 6px; min-height: var(--topbar-height);
-  padding: 10px max(24px, env(safe-area-inset-right)) 10px 40px; background: color-mix(in srgb, var(--page) 86%, transparent); backdrop-filter: saturate(1.6) blur(10px);
+  padding: 10px max(24px, env(safe-area-inset-right)) 10px 40px; background: color-mix(in srgb, var(--page) 88%, transparent); backdrop-filter: saturate(1.6) blur(10px);
   -webkit-backdrop-filter: saturate(1.6) blur(10px); border-bottom: 1px solid transparent; transition: border-color var(--dur);
 }
+/* No line between the top bar and the page until the page scrolls under it, as in the live app. */
 .topbar[data-scrolled] { border-bottom-color: var(--divider); }
-.business { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
-.business-tile { width: 30px; height: 30px; border-radius: var(--radius-control); background: var(--avatar); color: #fff; font-size: var(--fs-12); font-weight: 700; display: grid; place-items: center; flex: none; }
-.business-logo { width: auto; min-width: 30px; padding: 3px 6px; background: #fff; border: 1px solid var(--border); }
-.business-logo img { display: block; height: 22px; width: auto; max-width: 96px; object-fit: contain; }
-.business-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-select.business-name { border: 0; background: transparent; font: inherit; font-weight: 700; padding: 4px 2px; border-radius: var(--radius-control); max-width: 260px; }
+.business { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.business-tile { width: 30px; height: 30px; border-radius: 8px; background: var(--avatar); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; display: grid; place-items: center; flex: none; }
+.business-logo { width: auto; min-width: 30px; padding: 2px 5px; background: #fff; border: 1px solid var(--border); }
+/* A dark brand color still has an edge on the dark theme's page. */
+:root.dark .business-tile:not(.business-logo) { box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); }
+.business-logo img { display: block; height: 22px; width: auto; max-width: 88px; object-fit: contain; }
+.business-name { font-size: var(--fs-14); font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+select.business-name { border: 0; background: transparent; font: inherit; font-size: var(--fs-14); font-weight: 650; padding: 4px 2px; border-radius: 6px; max-width: 260px; }
 select.business-name:hover { background: var(--fill-2); }
 .search {
-  flex: 0 1 300px; min-width: 180px; display: flex; align-items: center; gap: 8px; height: var(--control); padding: 0 8px 0 10px;
-  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--ground); color: var(--text-3);
-  text-align: left; transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast);
+  flex: 0 1 300px; min-width: 180px; display: flex; align-items: center; gap: 8px; height: 38px; margin: 0 8px 0 16px; padding: 0 8px 0 11px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--ground); color: var(--quiet); font-size: var(--fs-13); text-align: left;
+  transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
 }
-.search:hover { border-color: var(--button-border); background: var(--surface); }
+.search:hover { background: var(--page); border-color: var(--border-strong); color: var(--text-3); }
 .search span { flex: 1; }
-.kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); font-size: var(--fs-11); font-weight: 600; color: var(--text-3); font-family: inherit; }
+.topbar-gap { flex: 1; }
+/* A key, as the menus and search show one: a hairline box, quiet. */
+.kbd {
+  box-sizing: border-box; display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--divider);
+  background: transparent; font: inherit; font-size: var(--fs-11); font-weight: 500; line-height: 1; color: var(--quiet); white-space: nowrap;
+}
 .icon-btn {
   position: relative; width: var(--control); height: var(--control); display: grid; place-items: center; border: 0; border-radius: var(--radius-control);
   background: transparent; color: var(--ink); transition: background var(--dur-fast), transform var(--dur-fast);
@@ -123,19 +180,23 @@ select.business-name:hover { background: var(--fill-2); }
 .icon-btn:hover { background: var(--fill-2); color: var(--ink); }
 .icon-btn:active { transform: scale(0.94); }
 .icon-btn[aria-expanded="true"] { background: var(--fill-2); }
-.icon-btn .dot-badge {
-  position: absolute; top: 5px; right: 5px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill); background: var(--danger-solid);
-  color: #fff; font-size: var(--fs-11); font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring);
-}
+/* The top bar's own buttons are quiet: 38px, a 20px icon in the third text colour. */
+.topbar .icon-btn { width: 38px; height: 38px; border-radius: 8px; color: var(--text-3); }
+.topbar .icon-btn svg { width: 20px; height: 20px; }
+.topbar .icon-btn:hover, .topbar .icon-btn[aria-expanded="true"] { background: var(--fill-3); color: var(--ink); }
+.notif-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring); }
+.account-avatar { width: 28px; height: 28px; font-size: 11px; letter-spacing: 0.02em; overflow: hidden; }
+.topbar .account-trigger:hover, .topbar .account-trigger[aria-expanded="true"] { background: none; }
+.topbar .account-trigger:hover .account-avatar, .topbar .account-trigger[aria-expanded="true"] .account-avatar { box-shadow: 0 0 0 2px var(--fill-3); }
+/* Who's signed in, at the top of the account menu. */
+.account-face { width: 24px; height: 24px; font-size: 10px; letter-spacing: 0.02em; overflow: hidden; }
+.menu .menu-item:has(.account-face) { font-weight: 600; }
+.menu[data-sheet] .account-face { width: 40px; height: 40px; font-size: 14px; }
 
-.content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 28px; max-width: 1320px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
-.content-narrow { max-width: 880px; }
+.content { padding: 20px max(48px, env(safe-area-inset-right)) 56px 48px; display: flex; flex-direction: column; gap: 24px; width: 100%; animation: page-in var(--dur-slow) var(--ease-out); }
 /* A screen that fills the space under the top bar itself (team chat). */
 .content.content-flush { padding: 0; gap: 0; max-width: none; animation: none; }
-.nav-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
 .mobile-tab-icon { position: relative; display: inline-grid; place-items: center; }
-.mobile-tab-badge { position: absolute; top: -5px; left: calc(100% - 8px); min-width: 18px; height: 18px; padding: 0 5px; font-size: var(--fs-11); box-shadow: 0 0 0 2px var(--page); }
-span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 0; top: -2px; left: calc(100% - 4px); }
 
 /* Main navigation cross-fades between screens (React Router's viewTransition, see AppShell). */
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--dur); animation-timing-function: ease-out; }
@@ -161,11 +222,12 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 
 /* ---------- Page header ---------- */
 .page-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.page-title { flex: 1 1 360px; min-width: 0; font-size: var(--fs-32); font-weight: 700; letter-spacing: var(--tracking-display); line-height: 1.15; overflow-wrap: anywhere; }
+/* Its size and weight are components.css's (.page-title there); here, its place in the row. */
+.page-title { flex: 1 1 360px; min-width: 0; overflow-wrap: anywhere; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.page-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -16px; }
-.page-subtitle { margin: -18px 0 0; color: var(--text-3); font-size: var(--fs-14); }
-.back-link { position: relative; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); margin-bottom: -16px; }
+.page-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -12px; }
+.page-subtitle { margin: -14px 0 0; color: var(--text-3); font-size: var(--fs-14); }
+.back-link { position: relative; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); margin-bottom: -12px; }
 /* On a touch screen (and on the crew's screens, see features.css) a 44px target, drawn around the link rather than added to it, so the link sits where it did. */
 .back-link::before { content: ""; position: absolute; inset: calc(50% - 22px) -12px calc(50% - 22px) -8px; display: none; }
 @media (pointer: coarse) { .back-link::before { display: block; } }
@@ -178,8 +240,6 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 .two-col { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
 .two-col > .wide { flex: 2 1 560px; min-width: 0; }
 .two-col > .narrow { flex: 1 1 320px; min-width: 0; }
-/* A rail with nothing in it for this person (Home, for a crew) takes no room, so the other column has the width. */
-.two-col > .narrow:empty { display: none; }
 .stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
 .stack-sm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; }
 .stack-lg { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-content: start; }
@@ -207,71 +267,271 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
 .prose td, .prose th { border: 1px solid var(--border); padding: 6px 8px; }
 .pre-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* ---------- The shell's popovers: search, notifications, help (Menus.dc.html) ---------- */
+/*
+ * components.css gives them the menus' surface; here is what's the shell's own. Search: a 48px field
+ * with Esc, rows with their quiet second words on the same line and their keys on the right, and the
+ * keys at the foot. Notifications: a head with For you and Activity, rows on hairlines with a dot on
+ * what's new, a tone on the icon, the time on the right. Help: a question for an assistant, then
+ * links in a menu's rows.
+ */
+.palette-field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.palette .palette-esc { cursor: pointer; }
+.palette .palette-esc:hover { color: var(--ink); border-color: var(--border); }
+.palette-cancel { display: none; }
+.palette .palette-group { padding: 8px 8px 4px; }
+.palette .palette-item { min-height: 34px; padding: 0 8px; }
+.palette .p-text { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden; white-space: nowrap; }
+.palette .p-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.palette .p-sub { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-13); font-weight: 400; color: var(--quiet); }
+/* The typed letters bold in ink; each group's count and a row's keys ("G then I") quiet. */
+.palette .p-title b { font-weight: 700; color: var(--ink); }
+.palette .p-sub b { font-weight: 600; color: var(--ink); }
+.palette .p-count { margin-left: 6px; font-weight: 500; }
+.palette .p-keys { flex: none; margin-left: auto; padding-left: 6px; font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; }
+.palette-empty { padding: 22px 12px; text-align: center; font-size: var(--fs-13); color: var(--text-3); }
+.palette .palette-foot { gap: 6px; }
+.palette .palette-foot span + .kbd { margin-left: 8px; }
+
+.notif-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--divider); }
+.notif-head h2 { flex: 1; min-width: 0; font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; }
+.notif-back, .notif-mark-top, .notif-day, .sheet-grab, .sheet-title { display: none; }
+.notif-seg { padding: 2px; border-radius: 8px; }
+.notif-seg button { height: 24px; padding: 0 8px; border-radius: 6px; font-size: var(--fs-12); gap: 5px; }
+.notif-seg .badge { font-size: var(--fs-12); }
+.notif-panel .notice { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 10px 12px 10px 18px; border-top: 0; border-bottom: 1px solid var(--row-divider); }
+.notif-item:last-child .notice { border-bottom: 0; }
+.notif-panel .notice .n-good { color: var(--green); }
+.notif-panel .notice .n-bad { color: var(--danger); }
+.notif-panel .notice .n-warn { color: var(--warning); }
+.n-main { display: grid; gap: 1px; min-width: 0; }
+.notif-panel .notice :is(.n-title, .n-body) { display: block; margin: 0; }
+.notif-panel .notice .n-summary { color: var(--ink); }
+.notif-panel .notice .n-time { margin: 1px 0 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.notif-mark { border: 0; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--green); cursor: pointer; }
+.notif-mark:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.notif-mark-foot { flex: none; width: 100%; padding: 9px 14px; border-top: 1px solid var(--divider); font-size: var(--fs-12); text-align: left; }
+
+.panel.help-panel { width: min(300px, calc(100vw - 24px)); }
+.help-ask { display: grid; gap: 8px; padding: 12px; }
+.help-ask .input { height: 34px; font-size: var(--fs-13); }
+.help-ask-buttons { display: flex; gap: 6px; }
+.help-ask-buttons .btn { height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--fs-12); }
+.help-note { font-size: var(--fs-11); line-height: 1.35; color: var(--quiet); }
+.help-list { padding: 4px; border-top: 1px solid var(--divider); }
+.help-row {
+  display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 6px 6px 6px 8px; border-radius: 6px; color: var(--ink);
+  font-size: var(--fs-13); font-weight: 500; line-height: 1.3; text-decoration: none;
+}
+.help-row:hover { background: var(--menu-hi); color: var(--ink); text-decoration: none; }
+.help-row > svg { width: 15px; height: 15px; color: var(--text-3); flex: none; }
+.help-row-text { flex: 1; min-width: 0; }
+.help-row-desc { display: block; margin-top: 1px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.help-row:has(.help-row-desc) { align-items: flex-start; }
+.help-row:has(.help-row-desc) > svg { margin-top: 1px; }
+.help-row-out { display: inline-flex; flex: none; align-self: center; color: var(--quiet); }
+.help-row-out svg { width: 14px; height: 14px; }
+.help-foot { margin: 0; padding: 9px 12px; border-top: 1px solid var(--divider); font-size: var(--fs-12); color: var(--text-3); }
+
 /* ---------- Mobile navigation (phones and small tablets) ---------- */
 .mobile-nav { display: none; }
 
 @media (max-width: 900px) {
+  :root { --topbar-height: 56px; }
   .sidebar { display: none; }
   .mobile-only { display: grid !important; }
   .mobile-inline { display: inline !important; }
   .hide-mobile { display: none !important; }
-  .topbar { padding: 8px max(12px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); }
+  /* The phone kit's head: the business on the left, round 40px buttons on the right, a hairline once scrolled. */
+  .topbar {
+    gap: 8px; padding: 6px max(12px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left)); border-bottom-color: transparent;
+    background: color-mix(in srgb, var(--page) 92%, transparent); transition: border-color var(--dur);
+  }
+  .topbar[data-scrolled] { border-bottom-color: var(--divider); }
+  /* An open chat conversation is a screen of its own with its own head and back button (Mobile-Team.dc.html): no business bar over it. Chat's height counts on this. */
+  .main:has(> .content-flush [data-view="channel"]) > .topbar { display: none; }
+  /* The same for a conversation open in Messages: its thread head has the back button. */
+  .main:has(> .content .messages-page[data-open]) > .topbar { display: none; }
+  .business { gap: 10px; }
+  .business-tile { width: 30px; height: 30px; border-radius: 8px; font-size: var(--fs-11); }
+  .business-logo img { height: 22px; }
+  .business-name, select.business-name { font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; }
   .search { display: none; }
+  .topbar .icon-btn { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .topbar .icon-btn svg { width: 20px; height: 20px; }
+  .topbar .icon-btn:hover, .topbar .icon-btn[aria-expanded="true"] { background: var(--fill-3); }
+  .notif-dot { top: 7px; right: 8px; width: 8px; height: 8px; background: var(--danger-solid); box-shadow: 0 0 0 2px var(--fill-2); }
+  .topbar .account-trigger, .topbar .account-trigger:hover { background: none; }
+  .account-avatar { width: 36px; height: 36px; font-size: var(--fs-13); }
   /* Clear of the bottom bar, the home indicator under it, and a notch when the phone is sideways. */
   .content {
-    padding: 12px max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 28px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    padding: 8px max(16px, env(safe-area-inset-right)) calc(var(--mobile-nav-height) + 28px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     gap: 20px;
   }
-  .page-title { font-size: var(--fs-24); flex-basis: 100%; }
+  .page-title { flex-basis: 100%; }
   .page-meta { margin-top: -10px; }
+  .page-subtitle { margin-top: -12px; }
   .back-link { margin-bottom: -10px; }
+  /* Mtab.dc.html: five tabs, 24px icons over 10px words, the current one green, over the home indicator. */
   .mobile-nav {
-    display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; inset: auto 0 0 0; height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; inset: auto 0 0 0; height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
     padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    border-top: 1px solid var(--border); z-index: 20;
+    border-top: 1px solid var(--divider); z-index: 20;
   }
   .mobile-nav a, .mobile-nav button {
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: var(--fs-11); font-weight: 600;
-    color: var(--text-3); border: 0; background: none; min-height: 44px; -webkit-tap-highlight-color: transparent; transition: color var(--dur-fast);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; min-height: 44px; padding: 0 2px;
+    font-size: 10px; font-weight: 600; line-height: 1.2; white-space: nowrap; color: var(--quiet); border: 0; background: none; -webkit-tap-highlight-color: transparent; transition: color var(--dur-fast);
   }
+  .mobile-nav svg { width: 24px; height: 24px; transition: transform var(--dur-fast); }
   .mobile-nav a:active svg, .mobile-nav button:active svg { transform: scale(0.88); }
-  .mobile-nav svg { transition: transform var(--dur-fast); }
-  .mobile-nav [aria-current="page"] { color: var(--green); }
+  .mobile-nav a:hover, .mobile-nav button:hover { color: var(--text-2); }
+  .mobile-nav [aria-current="page"], .mobile-nav .active, .mobile-nav .active:hover { color: var(--green); }
   /* Out of the way while the keyboard is up (AppShell's useTyping). */
   .mobile-nav[data-typing] { display: none; }
+
+  /* Search fills the screen: a rounded field with Cancel beside it, then rows with a round icon. */
+  .palette .palette-input { gap: 12px; padding: max(10px, env(safe-area-inset-top)) 16px 10px; border-bottom: 0; }
+  .palette .palette-field { height: 40px; padding: 0 12px; border-radius: 12px; background: var(--fill-2); gap: 8px; }
+  .palette .palette-field svg { width: 17px; height: 17px; }
+  .palette .palette-input input { height: 40px; font-size: var(--fs-16); }
+  .palette .palette-esc { display: none; }
+  .palette-cancel { display: block; flex: none; border: 0; background: none; padding: 8px 2px; font: inherit; font-size: var(--fs-16); font-weight: 500; color: var(--green); }
+  .palette .palette-list { padding: 0 0 max(16px, env(safe-area-inset-bottom)); }
+  .palette .palette-group { padding: 18px 20px 6px; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); }
+  .palette .palette-item { position: relative; min-height: 64px; padding: 12px 20px; gap: 12px; border-radius: 0; }
+  .palette .palette-item::after { content: ""; position: absolute; left: 72px; right: 0; bottom: 0; height: 1px; background: var(--row-divider); }
+  .palette .palette-item[aria-selected="true"] { background: none; }
+  .palette .palette-item:active { background: var(--fill-2); }
+  .palette .palette-item .p-icon, .palette .palette-item[aria-selected="true"] .p-icon { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); }
+  .palette .palette-item .p-icon svg { width: 20px; height: 20px; }
+  .palette .p-text { display: grid; gap: 1px; white-space: nowrap; }
+  .palette .p-title { font-size: var(--fs-16); font-weight: 600; }
+  .palette .p-sub { font-size: 15px; color: var(--text-2); }
+  .palette .p-keys { display: none; }
+
+  /* Notifications is a screen of its own, over the page and under nothing but the tab bar. */
+  .topbar .notif-panel {
+    inset: 0 0 calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)) 0; width: 100%; height: auto; max-width: none; max-height: none;
+    border: 0; border-radius: 0; background: var(--page); box-shadow: none; transform: translateX(24px);
+  }
+  .topbar .notif-panel:popover-open { transform: none; }
+  @starting-style { .topbar .notif-panel:popover-open { opacity: 0; transform: translateX(24px); } }
+  .notif-head {
+    display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; grid-template-areas: "back . mark" "title title title" "seg seg seg"; align-items: center; gap: 0;
+    padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 6px max(16px, env(safe-area-inset-left)); border-bottom: 0;
+  }
+  .notif-back { grid-area: back; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .notif-back svg { width: 20px; height: 20px; }
+  .notif-head h2 { grid-area: title; margin-top: 6px; font-size: var(--fs-30); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; }
+  .notif-mark-top { grid-area: mark; display: block; padding: 10px 0; font-size: 15px; }
+  .notif-mark-foot { display: none; }
+  .notif-seg { grid-area: seg; display: flex; margin-top: 12px; padding: 3px; border-radius: 11px; }
+  .notif-seg button { flex: 1; height: 34px; border-radius: 8px; font-size: var(--fs-14); }
+  .notif-day { display: block; padding: 18px 20px 6px; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); }
+  .notif-panel .notice { position: relative; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; padding: 12px 20px; border-bottom: 0; }
+  .notif-panel .notice::after { content: ""; position: absolute; left: 72px; right: 0; bottom: 0; height: 1px; background: var(--row-divider); }
+  .notif-panel .notice[data-unread]::before { left: 6px; top: 26px; width: 8px; height: 8px; }
+  .notif-panel .notice .n-icon { width: 40px; height: 40px; }
+  .notif-panel .notice .n-icon svg { width: 18px; height: 18px; }
+  .notif-panel .notice .n-title { font-size: var(--fs-16); }
+  .notif-panel .notice .n-body { font-size: 15px; color: var(--text-2); }
+  .notif-panel .notice .n-summary { color: var(--ink); }
+  .notif-panel .notice .n-time { padding-top: 2px; font-size: var(--fs-13); color: var(--text-3); }
+
+  /* Help is a sheet up from the bottom, like a menu's. */
+  .topbar .help-panel {
+    inset: auto 0 0 0; width: 100%; max-width: none; max-height: min(88dvh, calc(100dvh - 40px)); padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    border: 0; border-radius: 24px 24px 0 0; background: var(--m-sheet); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25); overflow-y: auto; opacity: 1; transform: translateY(100%);
+    transition-duration: var(--dur-exit);
+  }
+  .topbar .help-panel:popover-open { transform: none; transition-duration: var(--dur-enter); }
+  @starting-style { .topbar .help-panel:popover-open { opacity: 1; transform: translateY(100%); } }
+  .topbar .help-panel::backdrop {
+    background: var(--scrim); opacity: 0;
+    transition-property: opacity, overlay, display; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
+  }
+  .topbar .help-panel:popover-open::backdrop { opacity: 1; transition-duration: var(--dur-enter); transition-timing-function: var(--ease-enter); }
+  @starting-style { .topbar .help-panel:popover-open::backdrop { opacity: 0; } }
+  .help-panel .sheet-grab { display: block; }
+  .help-panel .sheet-title { display: block; padding: 0 20px 4px; font-size: 17px; font-weight: 600; letter-spacing: normal; }
+  .help-ask { padding: 8px 16px 16px; gap: 10px; }
+  .help-ask .input { height: 44px; font-size: var(--fs-16); }
+  .help-ask-buttons .btn { height: 44px; border-radius: 12px; font-size: var(--fs-14); }
+  .help-note { font-size: var(--fs-13); }
+  .help-list { padding: 6px 0; }
+  .help-row { min-height: 52px; padding: 6px 20px; gap: 14px; border-radius: 0; font-size: var(--fs-16); }
+  .help-row:hover { background: none; }
+  .help-row:active { background: var(--fill-2); }
+  .help-row > svg { width: 21px; height: 21px; }
+  .help-row-desc { font-size: var(--fs-13); }
+  .help-row-out svg { width: 17px; height: 17px; }
+  .help-foot { padding: 12px 20px; font-size: var(--fs-14); }
 }
+
+/* A count over a tab's icon: red for mentions, green for offers waiting; a dot for something new. */
+.tab-count {
+  position: absolute; top: -4px; left: calc(50% + 6px); display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: var(--radius-pill);
+  background: var(--danger-solid); color: #fff; font-size: 10px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--page);
+}
+.tab-count-green { background: var(--green-solid); }
+.tab-dot { position: absolute; top: -1px; left: calc(50% + 7px); width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--page); }
 
 /*
- * The phone's More sheet, Base UI's Drawer (AppShell). It rises from the bottom, follows a finger
- * pulling it down (--drawer-swipe-movement-y) with the backdrop fading as it goes, and leaves faster
- * the harder it was flung (--drawer-swipe-strength). It runs a little past the screen's bottom edge
- * (--bleed), so a pull upwards stretches it instead of showing a gap under it.
+ * The phone's More tab (Mobile-Sheets.dc.html): a bottom sheet with a handle, the things to start
+ * three to a row, then every section under its group's name, with quiet counts and chevrons. A modal
+ * dialog that slides up and back down; dragging the handle follows the finger.
  */
-.sheet-backdrop {
-  position: fixed; inset: 0; z-index: 30; background: var(--overlay);
-  opacity: calc(1 - var(--drawer-swipe-progress, 0)); transition: opacity var(--dur-enter) var(--ease-enter);
+.more-sheet {
+  position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: none; max-height: min(88dvh, calc(100dvh - 40px)); padding: 0 0 calc(12px + env(safe-area-inset-bottom));
+  border: 0; border-radius: 24px 24px 0 0; background: var(--m-sheet); color: var(--ink); box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25); overflow-y: auto; overscroll-behavior: contain;
+  transform: translateY(100%); transition-property: transform, overlay, display; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
 }
-.sheet-backdrop[data-starting-style], .sheet-backdrop[data-ending-style] { opacity: 0; }
-.sheet-backdrop[data-swiping] { transition-duration: 0ms; }
-.sheet-backdrop[data-ending-style] { transition-duration: calc(var(--drawer-swipe-strength, 1) * 320ms); transition-timing-function: var(--ease-exit); }
-.sheet-viewport { position: fixed; inset: 0; z-index: 31; display: flex; align-items: flex-end; }
-.sheet {
-  --bleed: 3rem;
-  width: 100%; max-height: calc(82vh + var(--bleed)); margin-bottom: calc(-1 * var(--bleed)); overflow-y: auto; overscroll-behavior: contain; outline: 0;
-  background: var(--surface); border-radius: var(--radius-card) var(--radius-card) 0 0; box-shadow: var(--shadow-lg);
-  padding: 8px 12px calc(16px + env(safe-area-inset-bottom) + var(--bleed));
-  transform: translateY(var(--drawer-swipe-movement-y, 0px)); transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1);
+.more-sheet[open] { transform: none; transition-duration: var(--dur-enter); transition-timing-function: var(--ease-enter); }
+@starting-style { .more-sheet[open] { transform: translateY(100%); } }
+.more-sheet[data-dragging] { transition: none; }
+.more-sheet:focus { outline: none; }
+.more-sheet::backdrop {
+  background: var(--scrim); opacity: 0;
+  transition-property: opacity, overlay, display; transition-duration: var(--dur-exit); transition-timing-function: var(--ease-exit); transition-behavior: allow-discrete;
 }
-.sheet[data-starting-style], .sheet[data-ending-style] { transform: translateY(calc(100% - var(--bleed) + 2px)); }
-.sheet[data-swiping] { transition-duration: 0ms; user-select: none; }
-.sheet[data-ending-style] { transition-duration: calc(var(--drawer-swipe-strength, 1) * 320ms); }
-.sheet::before { content: ""; display: block; width: 40px; height: 4px; border-radius: var(--radius-pill); background: var(--fill-3); margin: 4px auto 12px; }
-@media (prefers-reduced-motion: reduce) {
-  .sheet, .sheet-backdrop { transition-duration: 1ms; }
+.more-sheet[open]::backdrop { opacity: 1; transition-duration: var(--dur-enter); transition-timing-function: var(--ease-enter); }
+@starting-style { .more-sheet[open]::backdrop { opacity: 0; } }
+.sheet-grab { position: sticky; top: 0; z-index: 1; padding: 8px 0 10px; background: var(--m-sheet); touch-action: none; cursor: grab; }
+.sheet-grab::before { content: ""; display: block; width: 38px; height: 5px; margin: 0 auto; border-radius: var(--radius-pill); background: var(--border-strong); }
+.more-sheet .sheet-grab { display: block; }
+.more-label { margin: 0; padding: 6px 20px 4px; font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; color: var(--text-3); }
+.more-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; padding: 2px 16px 0; }
+/* Three to a row; a last row of one or two tiles shares the width instead of leaving a gap. */
+.more-tiles > .more-tile { grid-column: span 2; }
+.more-tiles > .more-tile:nth-last-child(2):nth-child(3n + 1), .more-tiles > .more-tile:last-child:nth-child(3n + 2) { grid-column: span 3; }
+.more-tiles > .more-tile:last-child:nth-child(3n + 1) { grid-column: span 6; flex-direction: row; gap: 10px; height: 56px; }
+.more-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; height: 76px; padding: 0 6px; border: 0; border-radius: 14px;
+  background: var(--fill-2); color: var(--ink); font: inherit; font-size: var(--fs-12); font-weight: 600; line-height: 1.2; text-align: center; -webkit-tap-highlight-color: transparent; transition: background var(--dur-fast), transform var(--dur-fast);
 }
+.more-tile svg { width: 21px; height: 21px; color: var(--stage, var(--green)); }
+.more-tile:active { background: var(--fill-3); transform: scale(0.97); }
+.more-group { margin-top: 6px; }
+section + .more-group { margin-top: 14px; }
+.more-item {
+  display: flex; align-items: center; gap: 14px; width: 100%; min-height: 52px; padding: 0 20px; border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: var(--fs-16); font-weight: 500; text-align: left; text-decoration: none; -webkit-tap-highlight-color: transparent;
+}
+.more-item:hover { color: var(--ink); text-decoration: none; }
+.more-item:active { background: var(--fill-2); }
+.more-item > svg:first-child { width: 21px; height: 21px; color: var(--text-3); }
+.more-item.active > svg:first-child { color: var(--green); }
+.more-item.active .more-text { font-weight: 600; }
+.more-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-end { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: var(--fs-14); color: var(--quiet); }
+.more-end svg { width: 17px; height: 17px; color: var(--quiet); }
+.more-end .nav-count { font-size: var(--fs-14); font-weight: 400; }
+.more-end .nav-count-alert { font-weight: 600; }
+.more-end .nav-dot { margin: 0 2px; }
+.more-foot::before { content: ""; display: block; height: 1px; margin: 6px 20px; background: var(--divider); }
 
 @media print {
-  .sidebar, .topbar, .mobile-nav, .no-print, .route-progress, .toaster { display: none !important; }
+  .sidebar, .topbar, .mobile-nav, .more-sheet, .no-print, .route-progress, .toaster { display: none !important; }
   .content { padding: 0; max-width: none; animation: none; }
   .card { box-shadow: none !important; break-inside: avoid; }
   body { background: #fff; }
@@ -289,12 +549,21 @@ span.nav-dot.mobile-tab-badge { min-width: 0; width: 9px; height: 9px; padding: 
   @keyframes slide-up { from { opacity: 0; } to { opacity: 1; } }
   * { scroll-behavior: auto !important; }
   /* Nothing shrinks as it's pressed or lifts as it's hovered. */
-  :is(button, a, label, summary, [role="button"], [role="tab"]):active, .mobile-nav :active svg, .app-tile:active .app-icon,
-  .card-link:hover, .stat-button:hover, .thumb:hover img, .back-link:hover svg,
+  :is(button, a, label, summary, [role="button"], [role="tab"]):active, .mobile-nav :active svg, .app-tile:active .app-icon, .more-tile:active,
+  .card-link:hover, .stat-button:hover, .thumb:hover img, .back-link:hover svg, .crumb:hover > svg,
   .deal:hover, .category-card:hover, .guide-card:hover, .hub-actions button:hover { transform: none !important; }
-  /* Create's + still becomes an × while its menu is open, just without the spin. */
-  .create-trigger[data-popup-open] .nav-create-dot { transform: rotate(45deg) !important; transition: none; }
+  /* Create's x and the current page's pill change at once; a count doesn't pop. */
+  .nav-create-dot, .nav-create-dot svg, .nav-pill[data-moving] { transition: none; }
+  @keyframes count-pop { to { transform: none; } }
   .switch::after { transition-duration: 1ms; }
+  /* The sheets fade in and out where they are. */
+  .more-sheet, .more-sheet[open], .topbar .help-panel, .topbar .notif-panel { transform: none !important; }
+  .more-sheet { opacity: 0; transition-property: opacity, overlay, display; }
+  .more-sheet[open] { opacity: 1; }
+  @starting-style { .more-sheet[open] { opacity: 0; } }
+  .topbar .help-panel { opacity: 0; }
+  .topbar .help-panel:popover-open { opacity: 1; }
+  @starting-style { .topbar .help-panel:popover-open { opacity: 0; } }
   .spinner { animation-duration: 1.6s !important; }
   .skeleton { animation: none !important; background: var(--fill-2) !important; }
   /* Screens and the theme still cross-fade, briefly; nothing moves or resizes on the way. */

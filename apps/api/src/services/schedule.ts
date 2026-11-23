@@ -12,6 +12,7 @@ import { dbError, HttpError, isoDate, must, uuid } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { materializeJob, recurringJob } from "../tasks";
 import { arrivalTime, fitQuietly } from "./routes";
+import { settingsAs } from "../lib/companySettings";
 
 /** Who's asking, as requireCompany works it out. */
 export interface Scope {
@@ -23,9 +24,15 @@ export interface Scope {
   userId?: string;
 }
 
+/** The company's time zone. */
+export async function companyTimeZone(s: Scope): Promise<string> {
+  return must(await s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle()).timezone;
+}
+
+/** The company's time zone, and its settings as the person reads them (settingsAs: the working days, the schedule's own settings and the time clock's are a crew's too). */
 export async function companyZone(s: Scope): Promise<{ tz: string; settings: Record<string, any> }> {
-  const company = must(await s.db.from("companies").select("timezone, settings").eq("id", s.companyId).maybeSingle());
-  return { tz: company.timezone, settings: (company.settings ?? {}) as Record<string, any> };
+  const [tz, settings] = await Promise.all([companyTimeZone(s), settingsAs(s.db, s.companyId)]);
+  return { tz, settings };
 }
 
 export const VISIT_FIELDS =
@@ -186,28 +193,38 @@ export function tapTime(status: string | undefined, completedAt: string | undefi
 /** The steps a crew takes a visit through, in order. */
 const CREW_STEPS: Record<string, number> = { unscheduled: 0, scheduled: 0, en_route: 1, in_progress: 2, completed: 3 };
 
-/** What a sub changes on their own visit (the database holds them to it: private.visit_sub_guard). */
+/** The statuses a visit may have for a tap to `status` to go through: those of the steps up to it. */
+const stepsUpTo = (status: string) => Object.keys(CREW_STEPS).filter((k) => CREW_STEPS[k]! <= (CREW_STEPS[status] ?? 0));
+
+/**
+ * What a sub or field crew change on their own visit: its status, forward through the steps after
+ * scheduled and never back one, and its notes (the database holds them to it:
+ * private.visit_sub_guard and private.visit_field_crew_guard).
+ */
 const SUB_FIELDS = ["status", "notes", "forward_only", "completed_at", "from"];
-const SUB_STATUSES = ["scheduled", "en_route", "in_progress", "completed"];
+const SUB_STATUSES = ["en_route", "in_progress", "completed"];
 
 export async function updateVisit(s: Scope, id: string, body: z.infer<typeof visitChangeInput>) {
-  if (s.role === "subcontractor") {
+  const crew = s.role === "subcontractor" || s.role === "field_crew";
+  if (crew) {
     if (Object.keys(body).some((k) => !SUB_FIELDS.includes(k))) throw new HttpError(403, "You can change a visit's status and notes. Ask the office about anything else.");
     if (body.status && !SUB_STATUSES.includes(body.status)) throw new HttpError(403, "Ask the office to cancel or move this visit.");
   }
   const { assignee_ids, equipment_ids, shift_series, forward_only, completed_at, from, ...fields } = body;
   const tapped = tapTime(fields.status, completed_at);
   const current =
-    (forward_only && fields.status) || tapped
+    (fields.status && (forward_only || crew)) || tapped
       ? must(await s.db.from("visits").select("status, completed_at").eq("id", id).eq("company_id", s.companyId).maybeSingle(), "Visit not found.")
       : null;
-  // A crew only moves a visit forward. A tap sent again later (the phone closed the app before it
-  // heard back, say) can arrive after the taps that followed it, so it's skipped, not applied
-  // backwards: a finished visit isn't reopened, and a cancelled one stays cancelled.
-  if (forward_only && fields.status && current) {
-    if (current.status === "cancelled" || (CREW_STEPS[current.status] ?? 0) > (CREW_STEPS[fields.status] ?? 0)) {
-      return { ...must(await s.db.from("visits").select(VISIT_FIELDS).eq("id", id).maybeSingle()), skipped: true };
-    }
+  if (fields.status && current && fields.status !== current.status) {
+    const behind = current.status === "cancelled" || (CREW_STEPS[current.status] ?? 0) > (CREW_STEPS[fields.status] ?? 0);
+    // A crew only moves a visit forward. A tap sent again later (the phone closed the app before it
+    // heard back, say) can arrive after the taps that followed it, so it's skipped, not applied
+    // backwards: a finished visit isn't reopened, and a cancelled one stays cancelled.
+    if (forward_only && behind) return { ...must(await s.db.from("visits").select(VISIT_FIELDS).eq("id", id).maybeSingle()), skipped: true };
+    // Asked outright, a sub or field crew are told who moves it back.
+    if (crew && (current.status === "completed" || current.status === "cancelled")) throw new HttpError(403, "Ask the office to cancel, move or reopen this visit.");
+    if (crew && behind) throw new HttpError(403, "Ask the office to move this visit back a step.");
   }
   // A Complete dated when it was tapped, with who tapped it, as the database would have dated it
   // (private.visit_defaults). Only for a visit not finished before: a finished visit's date stays,
@@ -233,13 +250,18 @@ export async function updateVisit(s: Scope, id: string, body: z.infer<typeof vis
   // On the way: when they should get there, for the client's text ({{eta}}), worked out each time.
   const eta = fields.status === "en_route" ? { eta_at: await arrivalTime(s.db, s.companyId, id, from ?? null, s.userId) } : {};
   if (Object.keys(fields).length) {
-    const { data, error } = await s.db
+    let change = s.db
       .from("visits")
       .update({ ...fields, ...routeFields, ...stamp, ...eta })
       .eq("id", id)
-      .eq("company_id", s.companyId)
-      .select("id, scheduled_on, starts_at, crew_id, status");
+      .eq("company_id", s.companyId);
+    // A forward-only tap goes through only while the visit is still at its step or before it, so a
+    // crewmate's tap that moved it on since it was read above isn't undone. It's skipped instead.
+    const forward = forward_only && fields.status ? stepsUpTo(fields.status) : null;
+    if (forward) change = change.in("status", forward);
+    const { data, error } = await change.select("id, scheduled_on, starts_at, crew_id, status");
     if (error) throw dbError(error);
+    if (!data.length && forward) return { ...must(await s.db.from("visits").select(VISIT_FIELDS).eq("id", id).maybeSingle(), "Visit not found."), skipped: true };
     if (!data.length) throw new HttpError(404, "Visit not found.");
     const now = data[0]!;
     if (moved && now.status === "scheduled" && now.scheduled_on && !now.starts_at) await fitQuietly(s, [id], now.crew_id, now.scheduled_on);
@@ -340,7 +362,7 @@ export async function shiftDay(s: Scope, body: { from_date: string; to_date: str
   if (!DISPATCH.includes(s.role)) throw new HttpError(403, "Your role can't move visits.");
   // Without "Schedule the whole team", a crew lead shifts their own crew (the database checks it's theirs).
   if (!s.permissions.includes("schedule") && !body.crew_id) throw new HttpError(400, "Pick your crew to move its visits.");
-  const { tz } = await companyZone(s);
+  const tz = await companyTimeZone(s);
   let query = s.db
     .from("visits")
     .select("id, starts_at, ends_at")

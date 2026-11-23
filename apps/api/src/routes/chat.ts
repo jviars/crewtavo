@@ -12,7 +12,7 @@ import { ADMINS, channelSlug, CHAT_COLORS, CHAT_REACTIONS, chatRoleKey, isChatCo
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { forgetAudiences, onlineUsers, subscribe, toChannel, toCompany, toUser, type ChatEvent } from "../lib/chatHub";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
@@ -151,15 +151,16 @@ function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatRea
   return CHAT_REACTIONS.map((r) => ({ kind: r.key, users: rows.filter((x) => x.kind === r.key).map((x) => x.user_id) })).filter((r) => r.users.length);
 }
 
-async function chatEnabled(db: Db, companyId: string): Promise<boolean> {
-  const { data, error } = await db.from("companies").select("settings").eq("id", companyId).maybeSingle();
+/** Whether the company has Team chat on: read with the server's key (the browser's role doesn't read the company's settings). */
+async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
+  const { data, error } = await adminClient(env).from("companies").select("settings").eq("id", companyId).maybeSingle();
   if (error) throw dbError(error);
   const settings = (data?.settings ?? {}) as { team_chat?: { enabled?: boolean } };
   return settings.team_chat?.enabled === true;
 }
 
 async function requireOn(c: Context<AppEnv>) {
-  if (!(await chatEnabled(c.var.db, c.var.companyId))) throw new HttpError(409, OFF);
+  if (!(await chatEnabled(c.env, c.var.companyId))) throw new HttpError(409, OFF);
 }
 
 async function messageById(db: Db, id: string): Promise<MessageRow> {
@@ -185,7 +186,7 @@ function chatDbError(error: { message: string; code?: string }): HttpError {
 /** Chat for this person: on or off, their channels with what's new, and the roles to @mention. */
 chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
   const { db, companyId, userId, role } = c.var;
-  if (!(await chatEnabled(db, companyId))) return c.json({ enabled: false, channels: [], roles: [], me: null });
+  if (!(await chatEnabled(c.env, companyId))) return c.json({ enabled: false, channels: [], roles: [], me: null });
   const [overview, me, roles, settings] = await Promise.all([
     db.rpc("chat_overview", { p_company: companyId }),
     db.from("memberships").select("role, role_id").eq("company_id", companyId).eq("user_id", userId).maybeSingle(),

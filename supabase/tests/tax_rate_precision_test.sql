@@ -59,7 +59,7 @@ select public.create_invoice_for_job(:'job') as final \gset
 select t87.check((select tax_rate::text || '/' || tax_amount from public.invoices where id = :'final') = '0.088750/88.75', 'the job''s invoice uses the quote''s 8.875%');
 
 -- A job without a quote uses the company's default rate (its invoices used to have no tax).
-update public.companies set settings = settings || '{"default_tax_rate": 0.09125}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"default_tax_rate": 0.09125}' where id = :'co';
 insert into public.jobs (company_id, client_id, title) values (:'co', :'client', 'Storm windows') returning id as job2 \gset
 insert into public.job_line_items (company_id, job_id, name, quantity, unit_price, taxable) values (:'co', :'job2', 'Storm windows', 1, 1000, true);
 select public.create_invoice_for_job(:'job2') as inv2 \gset

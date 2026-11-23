@@ -11,6 +11,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import styles from "./Marketing.module.css";
 
 export interface Token {
   token: string;
@@ -85,11 +86,12 @@ export function companyAddressLine(address: { line1?: string; line2?: string; ci
 export const previewFooter = (companyName: string, address: string | null | undefined, unsubscribe: boolean) =>
   [companyName, address || null, unsubscribe ? "Unsubscribe" : null].filter(Boolean).join(" · ");
 
-export function EmailPreview({ companyName, address, subject, body, vars, unsubscribe, linkLabel }: { companyName: string; address?: string | null; subject: string; body: string; vars: Record<string, string>; unsubscribe: boolean; linkLabel: string }) {
+/** `heading={false}` where a section above already names it (a campaign's page has a Preview section). */
+export function EmailPreview({ companyName, address, subject, body, vars, unsubscribe, linkLabel, heading = true }: { companyName: string; address?: string | null; subject: string; body: string; vars: Record<string, string>; unsubscribe: boolean; linkLabel: string; heading?: boolean }) {
   const paragraphs = previewParagraphs(body, vars, linkLabel);
   return (
     <div className="stack-sm">
-      <strong>Preview</strong>
+      {heading && <span className={styles.label}>Preview</span>}
       <div className="email-preview">
         {/* The sheet stays white in dark mode too, as the email does: its words keep their own dark colours (features.css). */}
         <div className="sheet-inner">

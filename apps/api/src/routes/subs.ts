@@ -14,6 +14,7 @@
  * and what's still needed.
  */
 import { DISPATCH, endDateProblem, isSubDocumentKind, localDate, OFFICE, subDocumentLabel, SUB_DOCUMENT_EXPIRES, SUB_DOCUMENT_KINDS, type SubDocumentKind } from "@crewtavo/core";
+import { brandColor } from "@crewtavo/core/social";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -23,6 +24,8 @@ import { signToken, verifyToken } from "../lib/crypto";
 import { appUrl, dbError, HttpError, isoDate, must, param, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
 import { readClientLink } from "../lib/links";
+import { noAssistants } from "../lib/noAssistants";
+import { uploadLinks, uploadsLeftToday, UPLOADS_PAUSED } from "../lib/publicUploads";
 import { adminClient } from "../lib/supabase";
 import { clientIp } from "../lib/visitor";
 import { logoImage } from "../services/logo";
@@ -44,15 +47,17 @@ async function officeSub(c: Context<AppEnv>) {
   return must(await c.var.db.from("subcontractors").select("id, active").eq("company_id", c.var.companyId).eq("id", id).maybeSingle(), "Subcontractor not found.");
 }
 
+// The links below open without a sign-in, so never for an AI assistant (lib/noAssistants.ts).
+
 // The sub's link, to copy.
-subs.post("/subs/:id/upload-link", requireUser, office, async (c) => {
+subs.post("/subs/:id/upload-link", requireUser, noAssistants, office, async (c) => {
   const sub = await officeSub(c);
   if (!sub.active) throw new HttpError(400, "This sub is turned off. Turn them back on to send them a link.");
   return c.json(await paperworkLink(c.env, appUrl(c), c.var.companyId, sub.id));
 });
 
 // The sub's link by email and/or text, to their email and phone on file. The link comes back too.
-subs.post("/subs/:id/send-upload-link", requireUser, office, async (c) => {
+subs.post("/subs/:id/send-upload-link", requireUser, noAssistants, office, async (c) => {
   const body = await readJson(
     c,
     z.object({
@@ -90,7 +95,7 @@ subs.delete("/subs/:id", requireUser, office, async (c) => c.json(await deleteSu
 
 // A one-time link that signs the sub in (giving them a sign-in first if they have none), texted,
 // emailed or neither. The link comes back to copy either way.
-subs.post("/subs/:id/sign-in-link", requireUser, office, async (c) => {
+subs.post("/subs/:id/sign-in-link", requireUser, noAssistants, office, async (c) => {
   const body = await readJson(c, z.object({ send: z.enum(["text", "email", "none"]).default("text") }));
   if (!(await allow(c.env, `sub-sign-in-link:${c.var.userId}`, 20, 3600))) throw new HttpError(429, "Too many sign-in links. Wait a while and try again.");
   return c.json(await sendSignInLink(accessScope(c), param(c, "id"), body.send));
@@ -119,13 +124,13 @@ async function linkSub(c: Context<AppEnv>, limit: { kind: string; max: number })
   return { admin, sub, companyId: payload.c };
 }
 
-// What the page shows: who's asking, the sub's business name, and what's still needed.
+// What the page shows: who's asking (in their brand color), the sub's business name, and what's still needed.
 subs.get("/public/paperwork/:token", async (c) => {
   const { admin, sub, companyId } = await linkSub(c, { kind: "page", max: 60 });
   const company = must(await admin.from("companies").select("name, settings").eq("id", companyId).maybeSingle(), EXPIRED);
   const paperwork = await subPaperwork(admin, companyId, sub.id);
   return c.json({
-    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null },
+    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings) },
     sub: { name: sub.name },
     ...paperwork,
     kinds: SUB_DOCUMENT_KINDS.map((k) => ({ key: k.key, label: k.label, expires: SUB_DOCUMENT_EXPIRES[k.key] })),
@@ -147,9 +152,16 @@ const ALLOWED_TYPES = new Set(Object.values(FILE_TYPES).flat());
 const ONLY_THESE = "Send a PDF or a photo (JPG, PNG or HEIC).";
 const extensionOf = (name: string) => name.match(/\.([a-z0-9]{1,8})$/i)?.[1]?.toLowerCase() ?? "";
 
-interface SubFilesToken { purpose: "sub-files"; c: string; s: string; k: SubDocumentKind; p: string; n: string; exp: number }
+/** `z`: the size the sub's page gave for the file (tokens made before sizes were kept have none). */
+interface SubFilesToken { purpose: "sub-files"; c: string; s: string; k: SubDocumentKind; p: string; n: string; z?: number; exp: number }
 
-// A one-time link to upload one document's file, straight to Storage, in the sub's own folder.
+/** How long a document's file has to arrive and be recorded: its link and files token run out then. */
+const FILE_HOURS = 3;
+
+// A one-time link to upload one document's file, straight to Storage, in the sub's own folder. It's
+// on record with the size given for the file (lib/publicUploads.ts): the gateway holds the upload to
+// that size and counts it against the business's day, and none is handed out once the day's worth
+// has come in. One nobody records goes when its link runs out.
 subs.post("/public/paperwork/:token/uploads", async (c) => {
   const body = await readJson(
     c,
@@ -161,13 +173,15 @@ subs.post("/public/paperwork/:token/uploads", async (c) => {
   const { admin, sub, companyId } = await linkSub(c, { kind: "upload", max: 20 });
   const ext = extensionOf(body.file.name);
   if (!FILE_TYPES[ext] || (body.file.type && !FILE_TYPES[ext]!.includes(body.file.type.toLowerCase()))) throw new HttpError(400, ONLY_THESE);
+  if (!(await uploadsLeftToday(c.env, companyId))) throw new HttpError(429, UPLOADS_PAUSED);
   const path = `${companyId}/subs/${sub.id}/${crypto.randomUUID()}.${ext}`;
-  const { data, error } = await admin.storage.from("files").createSignedUploadUrl(path);
-  if (error || !data) throw new HttpError(503, "We couldn't get ready for your file. Try again in a minute.");
+  const exp = Math.floor(Date.now() / 1000) + FILE_HOURS * 60 * 60;
+  const [made] = await uploadLinks(admin, { company: companyId, kind: "paperwork", files: [{ path, bytes: body.file.size }], expiresAt: exp * 1000 });
+  if (!made) throw new HttpError(503, "We couldn't get ready for your file. Try again in a minute.");
   const filesToken = await signToken(c.env, {
-    purpose: "sub-files", c: companyId, s: sub.id, k: body.kind as SubDocumentKind, p: path, n: body.file.name, exp: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
+    purpose: "sub-files", c: companyId, s: sub.id, k: body.kind as SubDocumentKind, p: path, n: body.file.name, z: body.file.size, exp,
   } satisfies SubFilesToken);
-  return c.json({ path, token: data.token, files_token: filesToken }, 201);
+  return c.json({ path, token: made.token, files_token: filesToken }, 201);
 });
 
 // After the upload: the document goes on the sub's paperwork, waiting for the office to check it
@@ -199,6 +213,12 @@ subs.post("/public/paperwork/:token/files", async (c) => {
   if (!ALLOWED_TYPES.has(type)) {
     await admin.storage.from("files").remove([token.p]);
     throw new HttpError(400, ONLY_THESE);
+  }
+  // The gateway holds the upload to the size given for it, but Storage reached another way takes
+  // anything up to its own limit: a bigger file isn't the one that was offered, so it isn't kept.
+  if ((info.size ?? 0) > (token.z ?? UPLOAD_LIMIT)) {
+    await admin.storage.from("files").remove([token.p]);
+    throw new HttpError(413, "That file is bigger than the one you picked. Send it again.");
   }
   const { data, error } = await admin
     .from("sub_documents")

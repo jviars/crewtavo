@@ -1,2 +1,29 @@
-.code { margin: 0; padding: 12px 14px; border-radius: var(--radius-control); background: var(--fill); border: 1px solid var(--border); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; user-select: all; }
-.inline { font-size: var(--fs-13); padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill); overflow-wrap: anywhere; }
+/* A website form's section (WebsiteFormsPanel.tsx); the shared parts are PanelKit's. */
+
+/* Whether messages are coming: the status's dot and words, then what to do or where they went. */
+.status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.status > :global(.pill) { flex: none; }
+.status > :global(.spinner) { align-self: center; }
+
+/* Parts that go together inside a fold: a small gap between them. */
+.group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.group > :global(.callout) + * { margin-top: 2px; }
+.line { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.choice { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; justify-items: start; }
+.choice > :global(.segmented) { max-width: 100%; }
+.after { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; justify-items: start; }
+.after > :global(.input) { justify-self: stretch; }
+
+/* The two folds under the email field, close together. */
+.folds { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 4px 0; border-block: 1px solid var(--row-divider); }
+
+/* Naming a new form: the name, then Add and Cancel, on one row. */
+.addForm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.addForm > :global(.input) { flex: 1 1 220px; min-width: 0; max-width: 360px; }
+
+@media (max-width: 900px) {
+  /* Choices with long names don't fit three across a phone: they stack in the track, each a full-width 44px row. */
+  .choice > :global(.segmented), .after > :global(.segmented) { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; }
+  :is(.choice, .after) > :global(.segmented) > button { justify-content: flex-start; height: 44px; padding: 0 14px; }
+  .addForm > :global(.input) { max-width: none; flex-basis: 100%; }
+}

@@ -73,7 +73,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "ca110000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select cat.check(public.careers_set_enabled(:'co', true), 'the owner installs it');
-select cat.check((select (settings -> 'careers' ->> 'enabled')::boolean from public.companies where id = :'co'), 'installed in the company''s settings');
+select cat.check((select (public.company_settings(id) -> 'careers' ->> 'enabled')::boolean from public.companies where id = :'co'), 'installed in the company''s settings');
 select cat.check((select count(*) = 1 from public.website_forms where company_id = :'co'), 'the first install makes a form');
 select cat.check((select name = 'Job application' and kind = 'careers' and key ~ '^[a-f0-9]{10}$' and email_to = '{ana@pine.test}' from public.website_forms where company_id = :'co'),
   'a careers form called Job application, at a random address, emailing whoever installed it');

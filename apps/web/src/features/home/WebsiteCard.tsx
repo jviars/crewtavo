@@ -1,17 +1,23 @@
-/** Home: visitors to the business's website this week against last week, for people with Marketing (Website Analytics). */
+/**
+ * Home: visitors to the business's website this week against last week, for people with Marketing
+ * (Website Analytics). Two weeks with no visitors at all are the figure alone: a chart of two flat
+ * lines says nothing.
+ */
 import { addDays } from "@crewtavo/core/time";
 import { Link } from "react-router-dom";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { LazySparkline } from "@/components/ui/LazySparkline";
+import { Section } from "@/components/ui/Section";
 import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { Change } from "../finance/change";
 import { shortDate } from "../finance/range";
 import { periodTotals, useWebStats } from "../marketing/website";
+import { ChangeLine } from "./ChangeLine";
+import styles from "./Home.module.css";
 
 const WHOLE = (n: number) => formatNumber(n);
 
-export function WebsiteCard() {
+export function WebsiteSection() {
   const { company } = useSession();
   const today = todayIn(company.timezone);
   const week = { from: addDays(today, -6), to: today, days: 7 };
@@ -23,26 +29,27 @@ export function WebsiteCard() {
     const day = addDays(week.from, i);
     return { label: shortDate(day), now: byDay.get(day) ?? 0, before: byDay.get(addDays(day, -7)) ?? 0 };
   });
+  const anyone = series.some((d) => d.now > 0 || d.before > 0);
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <span className="muted small strong">Website visitors this week</span>
-        <Link to="/marketing?tab=website" className="small strong">Marketing</Link>
+    <Section title="Website visitors" count="This week" action={<Link to="/marketing?tab=website">Marketing</Link>}>
+      <div className={styles.panel}>
+        <div className={styles.figure}><AnimatedNumber value={now.visitors} className={styles.big} /></div>
+        <ChangeLine now={now.visitors} before={before.visitors} compared="the 7 days before" same="Same as last week" vs="last week" />
+        {anyone && (
+          <div className={styles.spark}>
+            <LazySparkline
+              data={series}
+              height={56}
+              format={WHOLE}
+              config={{ now: { label: "This week", color: "var(--green)" }, before: { label: "Week before", color: "var(--text-4)", dashed: true } }}
+            />
+            <div className="spark-legend" aria-hidden="true"><span><i />This week</span><span><i className="dashed" />Week before</span></div>
+          </div>
+        )}
+        <dl className={styles.lines}>
+          <div><dt>Booking requests from your website</dt><dd>{formatNumber(now.requests)}</dd></div>
+        </dl>
       </div>
-      <div className="row" style={{ alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-        <AnimatedNumber value={now.visitors} className="hero-number" />
-        <Change now={now.visitors} before={before.visitors} compared="the 7 days before" same="Same as last week" />
-      </div>
-      <div className="stack-sm" style={{ gap: 4, margin: "2px 0 6px" }}>
-        <LazySparkline
-          data={series}
-          height={56}
-          format={WHOLE}
-          config={{ now: { label: "This week", color: "var(--green)" }, before: { label: "Week before", color: "var(--text-4)", dashed: true } }}
-        />
-        <div className="spark-legend" aria-hidden="true"><span><i />This week</span><span><i className="dashed" />Week before</span></div>
-      </div>
-      <div className="row-between small muted"><span>Booking requests from your website</span><strong className="ink">{formatNumber(now.requests)}</strong></div>
-    </div>
+    </Section>
   );
 }

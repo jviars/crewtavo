@@ -48,7 +48,7 @@ insert into public.clients (company_id, display_name) values (:'co', 'Maple HOA'
 insert into public.properties (company_id, client_id, line1, lat, lng) values (:'co', :'client', '1 Maple Ct', 40.0, -75.0) returning id as prop \gset
 insert into public.jobs (company_id, client_id, property_id, title) values (:'co', :'client', :'prop', 'Weekly mowing') returning id as job \gset
 insert into public.visits (company_id, job_id, property_id, title, crew_id, scheduled_on) values (:'co', :'job', :'prop', 'Mow Maple Ct', :'crew', private.company_today(:'co')) returning id as visit \gset
-update public.companies set settings = settings || '{"depot": {"lat": 40.1, "lng": -75.1}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"depot": {"lat": 40.1, "lng": -75.1}}' where id = :'co';
 commit;
 
 -- ===== Emma clocks in and out on her phone =====================================================

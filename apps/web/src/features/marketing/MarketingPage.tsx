@@ -7,19 +7,23 @@
  * visits when Website Analytics is installed (Home and Website Analytics open them here).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useSyncExternalStore } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { featureOn } from "@/components/shell/nav";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
+import { DetailColumns } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
+import { SHEET_QUERY } from "@/components/ui/menuModel";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading, StatsSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { CardSkeleton, InboxSkeleton, Loading, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate, formatDateTime, formatMoneyCents, timeAgo } from "@/lib/format";
-import { useListAnimation } from "@/lib/motion";
 import { useTabStrip } from "@/lib/tabStrip";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
@@ -27,6 +31,7 @@ import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { AutomatedCampaigns, useAutomatedStates } from "./AutomatedCampaigns";
 import { emailsSentHint } from "./automatedForm";
 import { resultsSummary, useCampaignResults } from "./CampaignResults";
+import styles from "./Marketing.module.css";
 import { PostcardCampaigns } from "./PostcardCampaigns";
 import { PromoCodes } from "./PromoCodes";
 import { EARNED_HINT, Referrals } from "./Referrals";
@@ -35,6 +40,19 @@ import { SenderAddressNote } from "./SenderAddress";
 import { Showcases } from "./Showcases";
 import { Social } from "./Social";
 import { analyticsOn } from "./website";
+
+/** A phone's layout, as menus decide it (the width they turn into sheets at). */
+function usePhone() {
+  return useSyncExternalStore(
+    (changed) => {
+      const query = window.matchMedia?.(SHEET_QUERY);
+      query?.addEventListener("change", changed);
+      return () => query?.removeEventListener("change", changed);
+    },
+    () => Boolean(window.matchMedia?.(SHEET_QUERY).matches),
+    () => false,
+  );
+}
 
 type Tab = "campaigns" | "social" | "showcases" | "promos" | "reviews" | "referrals" | "website";
 // Charts load with the tab, not with the rest of Marketing.
@@ -49,6 +67,7 @@ export function MarketingPage() {
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   // Six tabs don't fit a phone: the one picked is scrolled into view, and the strip shows there are more.
   const tabs = useTabStrip<HTMLDivElement>(tab);
+  const phone = usePhone();
   const summary = useQuery({
     queryKey: ["marketing-summary", session.company.id],
     meta: { silent: true },
@@ -62,36 +81,35 @@ export function MarketingPage() {
   if (!hasRole(session, "admin", "office") || !can(session, "marketing")) return <NoAccess title="Marketing" />;
   if (!featureOn(session.company.settings, "marketing")) return <MarketingOff />;
   const s = summary.data;
+  // App-Marketing.dc.html: the month's figures flat on hairlines, each opening the section it counts.
+  // Short labels, as the board has them, with the 30 days leading the note, so a phone's two across don't wrap them.
+  const strip = summary.isPending ? <StatsSkeleton count={5} /> : s && (
+    <StatStrip label="Marketing" className={styles.stats}>
+      <Stat label="Emails sent" value={s.emails_sent_30d.toLocaleString("en-US")} note={`Past 30 days · ${emailsSentHint(s)}`} onClick={tab === "campaigns" ? undefined : () => setTab("campaigns")} />
+      {/* Someone without the Invoices area has no revenue to see. */}
+      {s.campaign_revenue !== null && <Stat label="Revenue from campaigns" value={formatMoneyCents(s.campaign_revenue)} note="Paid work after a click, before tax" />}
+      <Stat label="Review requests" value={s.reviews_requested_30d.toLocaleString("en-US")} note={`Past 30 days · ${s.reviews_requested_30d ? `${Math.round((s.reviews_clicked_30d / s.reviews_requested_30d) * 100)}% opened the link` : "None sent yet"}`} onClick={tab === "reviews" ? undefined : () => setTab("reviews")} />
+      <Stat label="Referrals" value={s.referrals_total.toLocaleString("en-US")} note={`${s.referrals_won} became ${s.referrals_won === 1 ? "a job" : "jobs"}${s.referral_revenue === null ? "" : ` · ${formatMoneyCents(s.referral_revenue)} paid, before tax`}`} onClick={tab === "referrals" ? undefined : () => setTab("referrals")} />
+      <Stat label={`Referral credits ${statusText("credit", "earned").toLowerCase()}`} value={formatMoneyCents(s.credits_owed)} note={EARNED_HINT} />
+    </StatStrip>
+  );
   return (
     <>
       <PageHeader title="Marketing" />
       <SenderAddressNote what="campaigns, review asks and referral asks by email won't go out" />
-      {summary.isPending ? <StatsSkeleton count={5} /> : s && (
-        <div className="stat-row">
-          <div className="card stat"><div className="label">Emails sent (30 days)</div><div className="value">{s.emails_sent_30d}</div><div className="hint">{emailsSentHint(s)}</div></div>
-          <div className="card stat">
-            <div className="label">Revenue from campaigns</div>
-            <div className="value">{s.campaign_revenue === null ? "—" : formatMoneyCents(s.campaign_revenue)}</div>
-            <div className="hint">{s.campaign_revenue === null ? "Needs the Invoices area" : "Paid work from people who clicked a campaign, before tax"}</div>
-          </div>
-          <div className="card stat"><div className="label">Review requests (30 days)</div><div className="value">{s.reviews_requested_30d}</div><div className="hint">{s.reviews_requested_30d ? `${Math.round((s.reviews_clicked_30d / s.reviews_requested_30d) * 100)}% opened the review link` : "None sent yet"}</div></div>
-          <div className="card stat">
-            <div className="label">Referrals</div>
-            <div className="value">{s.referrals_total}</div>
-            <div className="hint">{s.referrals_won} became jobs{s.referral_revenue === null ? "" : ` · ${formatMoneyCents(s.referral_revenue)} paid, before tax`}</div>
-          </div>
-          <div className="card stat"><div className="label">Referral credits {statusText("credit", "earned").toLowerCase()}</div><div className="value">{formatMoneyCents(s.credits_owed)}</div><div className="hint">{EARNED_HINT}</div></div>
-        </div>
-      )}
-      <div ref={tabs} className="underline-tabs underline-tabs-compact" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "campaigns"} onClick={() => setTab("campaigns")}><Icon name="mail" size={16} />Campaigns</button>
-        <button type="button" role="tab" aria-selected={tab === "social"} onClick={() => setTab("social")}><Icon name="share" size={16} />Social</button>
-        <button type="button" role="tab" aria-selected={tab === "showcases"} onClick={() => setTab("showcases")}><Icon name="image" size={16} />Showcases</button>
-        <button type="button" role="tab" aria-selected={tab === "promos"} onClick={() => setTab("promos")}><Icon name="tag" size={16} />Promo codes</button>
-        <button type="button" role="tab" aria-selected={tab === "reviews"} onClick={() => setTab("reviews")}><Icon name="star" size={16} />Reviews</button>
-        <button type="button" role="tab" aria-selected={tab === "referrals"} onClick={() => setTab("referrals")}><Icon name="gift" size={16} />Referrals</button>
-        {website && <button type="button" role="tab" aria-selected={tab === "website"} onClick={() => setTab("website")}><Icon name="globe" size={16} />Website</button>}
+      {/* On a phone the sections come first, under the title, and the figures only on Campaigns (Mobile-Apps.dc.html): each other section has its own. */}
+      {!phone && strip}
+      {/* Words only, as the board has them; on a phone they're chips that scroll sideways (Mobile-Apps.dc.html). */}
+      <div ref={tabs} className={cx("underline-tabs underline-tabs-compact", styles.tabs)} role="tablist" aria-label="Marketing sections">
+        <button type="button" role="tab" aria-selected={tab === "campaigns"} onClick={() => setTab("campaigns")}>Campaigns</button>
+        <button type="button" role="tab" aria-selected={tab === "social"} onClick={() => setTab("social")}>Social</button>
+        <button type="button" role="tab" aria-selected={tab === "showcases"} onClick={() => setTab("showcases")}>Showcases</button>
+        <button type="button" role="tab" aria-selected={tab === "promos"} onClick={() => setTab("promos")}>Promo codes</button>
+        <button type="button" role="tab" aria-selected={tab === "reviews"} onClick={() => setTab("reviews")}>Reviews</button>
+        <button type="button" role="tab" aria-selected={tab === "referrals"} onClick={() => setTab("referrals")}>Referrals</button>
+        {website && <button type="button" role="tab" aria-selected={tab === "website"} onClick={() => setTab("website")}>Website</button>}
       </div>
+      {phone && tab === "campaigns" && strip}
       {tab === "campaigns" && <Campaigns />}
       {tab === "social" && <Social />}
       {tab === "showcases" && <Showcases />}
@@ -117,29 +135,27 @@ function MarketingOff() {
   return (
     <>
       <PageHeader title="Marketing" />
-      <div className="card">
-        <EmptyState icon="marketing" title="Marketing is off" action={canTurnOn && <Link className="btn btn-primary" to="/apps/marketing">Install Marketing</Link>}>
-          {canTurnOn ? "Ask happy clients for reviews and referrals, send campaigns and post to your social pages. Install it to bring back everything you had." : "Ask an owner or admin to install Marketing from Apps."}
-          {" "}Referral credits clients have earned, or earn later from links already shared, still go on their invoices.
-          {followUp?.enabled && <>{" "}Following up on sent quotes keeps going.</>}
-          {followUp?.enabled && can(session, "automations") && <>{" "}<Link to={`/automations/${followUp.rule_id}`}>Turn it off in Automations</Link>.</>}
-        </EmptyState>
-      </div>
+      {/* Not boxed: the page says it's off, what still works, and how to bring it back. */}
+      <EmptyState icon="marketing" title="Marketing is off" action={canTurnOn && <Link className="btn btn-primary" to="/apps/marketing">Install Marketing</Link>}>
+        {canTurnOn ? "Ask happy clients for reviews and referrals, send campaigns and post to your social pages. Install it to bring back everything you had." : "Ask an owner or admin to install Marketing from Apps."}
+        {" "}Referral credits clients have earned, or earn later from links already shared, still go on their invoices.
+        {followUp?.enabled && <>{" "}Following up on sent quotes keeps going.</>}
+        {followUp?.enabled && can(session, "automations") && <>{" "}<Link to={`/automations/${followUp.rule_id}`}>Turn it off in Automations</Link>.</>}
+      </EmptyState>
       {analyticsOn(session) && (
-        <section className="stack" aria-labelledby="website-visits">
-          <h2 id="website-visits" className="section-title">Website visits</h2>
+        <Section title="Website visits" flush>
           <Suspense fallback={<Loading label="Loading website visits" className="stack"><CardSkeleton height={320} /></Loading>}>
             <WebsiteSection />
           </Suspense>
-        </section>
+        </Section>
       )}
     </>
   );
 }
 
 /**
- * A one-off campaign row's line under its name, after the subject: when it went or goes. A sent one's
- * count is on the results line under it ("8 sent · 0% opened · 0% clicked"), so this says only when
+ * The start of a one-off campaign row's quiet line, under its subject: when it went or goes. A sent
+ * one's count follows in its results ("8 sent · 0% opened · 0% clicked"), so this says only when
  * (and how many failed), and the count only until its results are in.
  */
 export function campaignRowWhen(
@@ -196,53 +212,56 @@ function Campaigns() {
       restore: () => queryClient.setQueryData<Campaign[]>(key, (old) => (old && !old.some((c) => c.id === campaign.id) ? [...old, campaign].sort((a, b) => b.created_at.localeCompare(a.created_at)) : old)),
       commit: () => remove.mutateAsync(campaign.id),
     });
-  const list = useListAnimation<HTMLDivElement>();
 
+  // One group on the grouped phone page: each section an inset card (Mobile-Apps.dc.html › Marketing).
   return (
-    <div className="stack-lg">
+    <DetailColumns grouped>
       {!session.config.features.email && (
-        <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">Email isn't connected yet, so campaigns can't be sent.<ConnectEmailHint /></div></div>
+        <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Email isn't connected yet, so campaigns can't be sent.<ConnectEmailHint /></div></div>
       )}
       <AutomatedCampaigns results={results} />
-      <section className="stack" aria-labelledby="one-off-campaigns">
-        <div className="row-between">
-          <h2 id="one-off-campaigns" className="section-title">One-off campaigns</h2>
-          <Button variant="primary" icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New campaign</Button>
-        </div>
-        {campaigns.isPending ? <TableSkeleton columns={4} rows={3} /> : campaigns.error ? (
-          <div className="card"><ErrorState error={campaigns.error} onRetry={() => campaigns.refetch()} /></div>
+      <Section title="One-off campaigns" count={campaigns.data?.length || undefined} flush action={<Button loading={create.isPending} onClick={() => create.mutate()}>New campaign</Button>}>
+        {campaigns.isPending ? <InboxSkeleton rows={2} /> : campaigns.error ? (
+          <ErrorState compact error={campaigns.error} onRetry={() => campaigns.refetch()} />
         ) : !campaigns.data?.length ? (
-          <div className="card">
-            <EmptyState icon="mail" title="No campaigns yet" action={<Button icon="plus" onClick={() => create.mutate()}>Write a campaign</Button>} />
-          </div>
+          <EmptyState inline title="No campaigns yet" action={<Button size="sm" icon="plus" onClick={() => create.mutate()}>Write a campaign</Button>} />
         ) : (
-          <div className="card" ref={list}>
-            {campaigns.data.map((c) => (
-              <div key={c.id} className="card-row">
-                <Link to={`/marketing/campaigns/${c.id}`} className="grow" style={{ color: "inherit", minWidth: 0 }}>
-                  <strong className="ellipsis" style={{ display: "block" }}>{c.name}</strong>
-                  <span className="muted small ellipsis" style={{ display: "block" }}>
-                    {c.subject || "No subject yet"} · {campaignRowWhen(c, Boolean(results.data))}
-                  </span>
-                  {(c.status === "sent" || c.status === "cancelled") && results.data && (
-                    <span className="muted small ellipsis" style={{ display: "block" }}>{resultsSummary(results.data.find((r) => r.campaign_id === c.id))}</span>
-                  )}
-                </Link>
-                {c.status === "sending" && <div className="progress" style={{ width: 90 }}><span style={{ width: `${c.recipients_count ? (c.sent_count / c.recipients_count) * 100 : 0}%` }} /></div>}
-                <EntityStatus kind="campaign" status={c.status} />
-                <Menu
-                  triggerClassName="btn btn-sm btn-ghost btn-icon"
-                  items={[
-                    { label: c.status === "draft" ? "Edit" : "View", icon: c.status === "draft" ? "edit" : "eye", onSelect: () => navigate(`/marketing/campaigns/${c.id}`) },
-                    { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: () => deleteCampaign(c) },
-                  ]}
+          <InboxList label="One-off campaigns" inset className={styles.flat}>
+            <InboxGroup>
+              {campaigns.data.map((c) => (
+                <InboxRow
+                  key={c.id}
+                  to={`/marketing/campaigns/${c.id}`}
+                  title={c.name}
+                  avatar={false}
+                  subject={c.subject || "No subject yet"}
+                  // When, then what it brought in: on a phone that's a line of its own, so neither is cut short.
+                  meta={[campaignRowWhen(c, Boolean(results.data)), (c.status === "sent" || c.status === "cancelled") && results.data ? <span className="meta-break">{resultsSummary(results.data.find((r) => r.campaign_id === c.id))}</span> : null]}
+                  aside={
+                    <>
+                      <EntityStatus kind="campaign" status={c.status} />
+                      {c.status === "sending" && <div className="progress" style={{ width: 90 }}><span style={{ width: `${c.recipients_count ? (c.sent_count / c.recipients_count) * 100 : 0}%` }} /></div>}
+                    </>
+                  }
+                  actions={
+                    <Menu
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      label={`Actions for ${c.name}`}
+                      title={c.name}
+                      items={[
+                        { label: c.status === "draft" ? "Edit" : "View", icon: c.status === "draft" ? "edit" : "eye", onSelect: () => navigate(`/marketing/campaigns/${c.id}`) },
+                        { separator: true },
+                        { label: "Delete", icon: "trash", danger: true, hidden: c.status === "sending", onSelect: () => deleteCampaign(c) },
+                      ]}
+                    />
+                  }
                 />
-              </div>
-            ))}
-          </div>
+              ))}
+            </InboxGroup>
+          </InboxList>
         )}
-      </section>
+      </Section>
       <PostcardCampaigns />
-    </div>
+    </DetailColumns>
   );
 }

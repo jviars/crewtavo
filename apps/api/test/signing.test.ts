@@ -6,7 +6,7 @@ import { contractInput, contractValues, resolveSections, sectionsHash } from "@c
 import { DEFAULT_TEMPLATE, templateSettings } from "@crewtavo/core/documents";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { readClientLink } from "../src/lib/links";
+import { KEPT_LINK, readClientLink } from "../src/lib/links";
 import { drawnPng } from "./fixtures/drawn";
 
 // Stand-ins for the signed-in person's Supabase client: tables of rows that eq, in, is (including a
@@ -255,13 +255,16 @@ describe("signing on site", () => {
     expect(message).toMatchObject({ to: "alex@example.com", subject: "Your signed estimate from Ridgeline Roofing", replyTo: "office@ridgeline.example", fromName: "Ridgeline Roofing" });
     expect(message.text).toContain("Hi Alex,");
     expect(message.text).toContain("Here's your signed estimate from Ridgeline Roofing. You can view, print or save it any time:");
-    // The homeowner's email has their own link; the salesperson and the timeline get the office's copy.
+    // The homeowner's email has their own link; the salesperson gets the office's copy, and the timeline no link.
     const own = await hubLinkIn(message.text);
     expect(own).toMatchObject({ c: ROOFER, t: "quote", id: QUOTE, own: 1 });
     expect(own!.via).toBeUndefined();
-    expect(await hubLinkIn(body.link)).toMatchObject({ c: ROOFER, t: "quote", id: QUOTE, via: "office" });
+    // An estimator doesn't see the money: their copy leads to a Client Hub home without it (nm).
+    expect(await hubLinkIn(body.link)).toMatchObject({ c: ROOFER, t: "quote", id: QUOTE, via: "office", nm: 1 });
+    expect(own).not.toHaveProperty("nm");
     expect(state.tables.messages).toEqual([expect.objectContaining({ client_id: CLIENT, channel: "email", related_type: "quote", related_id: QUOTE, external_id: "email-1" })]);
-    expect(await hubLinkIn(state.tables.messages![0]!.body)).toMatchObject({ t: "quote", id: QUOTE, via: "office" });
+    expect(state.tables.messages![0]!.body).toContain(KEPT_LINK);
+    expect(state.tables.messages![0]!.body).not.toContain("/hub/");
     expect(background.kickAutomations).toHaveBeenCalledTimes(1);
   });
 
@@ -627,13 +630,14 @@ describe("the signed copy", () => {
     const body = await res.json();
     expect(body).toEqual({ sent: true, link: expect.stringContaining("/hub/") });
     expect(sendSms).toHaveBeenCalledWith(env, { to: "(614) 555-0142", company: ROOFER, body: expect.stringMatching(/^Ridgeline Roofing: Here's your signed estimate\. You can view, print or save it any time: https:\/\/ops\.example\.com\/hub\/\S+\n\nReply STOP to opt out\.$/) });
-    // The text has the client's own link; the person sending it and the timeline get the office's copy.
+    // The text has the client's own link; the person sending it gets the office's copy, and the timeline no link.
     expect((await hubLinkIn(sendSms.mock.calls[0]![1].body))!.via).toBeUndefined();
     expect(await hubLinkIn(sendSms.mock.calls[0]![1].body)).toMatchObject({ own: 1 });
     expect(await hubLinkIn(body.link)).toMatchObject({ t: "quote", id: QUOTE, via: "office" });
     expect(state.tables.messages).toEqual([expect.objectContaining({ channel: "sms", subject: "Signed estimate #1042", related_type: "quote", related_id: QUOTE })]);
     expect(state.tables.messages![0]!.body).toMatch(/^Ridgeline Roofing: Here's your signed estimate\./);
-    expect(await hubLinkIn(state.tables.messages![0]!.body)).toMatchObject({ t: "quote", id: QUOTE, via: "office" });
+    expect(state.tables.messages![0]!.body).toContain(KEPT_LINK);
+    expect(state.tables.messages![0]!.body).not.toContain("/hub/");
   });
 
   it("isn't texted to a client who texted STOP, but goes to another number", async () => {

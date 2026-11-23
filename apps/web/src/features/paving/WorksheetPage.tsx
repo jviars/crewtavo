@@ -6,15 +6,16 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
+import { BackLink, Crumb, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { addressLine, formatDate, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { BASES, calculate, parseWorksheet, sectionsOf, type CalcLine } from "./calculator";
+import styles from "./paving.module.css";
 
 interface Row {
   id: string;
@@ -77,12 +78,12 @@ export function WorksheetPage() {
 
   return (
     <>
-      <div className="no-print">
-        <BackLink to={q ? `/quotes/${q.id}` : "/paving"}>{q?.title ?? "Paving"}</BackLink>
-        <div className="row wrap" style={{ gap: 10, margin: "0 0 16px" }}>
-          <Button variant="primary" icon="printer" onClick={() => window.print()}>Print</Button>
+      <div className={cx("no-print", styles.sheetBar)}>
+        <Crumb to={q ? `/quotes/${q.id}` : "/paving"}>{q?.title ?? "Paving"}</Crumb>
+        <div className={styles.sheetTools}>
+          <span className={styles.sheetNote}><Icon name="lock" size={14} />Your office's copy. It never goes to the client.</span>
           <Link className="btn" to={`/paving/calculator?worksheet=${row.id}`}><Icon name="calculator" size={16} />Open in calculator</Link>
-          <span className="muted small row" style={{ gap: 6 }}><Icon name="lock" size={14} />Your office's copy. It never goes to the client.</span>
+          <Button variant="primary" icon="printer" onClick={() => window.print()}>Print</Button>
         </div>
       </div>
 
@@ -91,7 +92,7 @@ export function WorksheetPage() {
           <div>
             <div className="worksheet-company">{company.name}</div>
             <h1>Paving worksheet</h1>
-            <div className="worksheet-flag">Office copy · not for the client</div>
+            <div className="worksheet-flag">Office copy, not for the client</div>
           </div>
           <dl className="worksheet-meta">
             {q && <div><dt>Quote</dt><dd>{q.number ? `#${q.number} · ` : ""}{q.title}</dd></div>}
@@ -124,18 +125,23 @@ export function WorksheetPage() {
           return (
             <section key={section}>
               <h2>{section}</h2>
-              <table className="worksheet-table">
+              {/* The same columns in every section, so the amounts and totals line up down the sheet. */}
+              <table className={cx("worksheet-table", styles.sheetItems)}>
                 <thead><tr><th>Item</th><th>Figured from</th><th className="num">Amount</th><th className="num">Price</th><th className="num">Total</th></tr></thead>
                 <tbody>
-                  {lines.map((l) => (
-                    <tr key={l.item.id}>
-                      <td>{l.item.name}</td>
-                      <td>{figuredFrom(l)}{l.quantity !== l.worked && <span className="worksheet-aside"> (worked out {amountText(l.worked)})</span>}</td>
-                      <td className="num">{amountText(l.quantity)} {UNITS[l.unit] ?? l.unit}</td>
-                      <td className="num">{formatMoneyCents(l.price)}</td>
-                      <td className="num">{formatMoneyCents(l.total)}</td>
-                    </tr>
-                  ))}
+                  {lines.map((l) => {
+                    const figured = <>{figuredFrom(l)}{l.quantity !== l.worked && <span className="worksheet-aside"> (worked out {amountText(l.worked)})</span>}</>;
+                    return (
+                      <tr key={l.item.id}>
+                        {/* A narrow phone has no room for its own column: what it's figured from goes under the name. */}
+                        <td>{l.item.name}<span className={styles.sheetFigured}>{figured}</span></td>
+                        <td>{figured}</td>
+                        <td className="num">{amountText(l.quantity)} {UNITS[l.unit] ?? l.unit}</td>
+                        <td className="num">{formatMoneyCents(l.price)}</td>
+                        <td className="num">{formatMoneyCents(l.total)}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </section>

@@ -7,14 +7,14 @@ import { adminLevel, LEVEL_PERMISSIONS, LEVEL_SUMMARY, PERMISSIONS, ROLE_LABELS,
 import { formatBytes } from "@crewtavo/core/storage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Menu } from "@/components/ui/Menu";
+import { RelatedRow, Section } from "@/components/ui/Section";
+import { InboxSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
@@ -23,16 +23,23 @@ import { useSopIndex } from "../kb/kbData";
 import { useCompanyRoles, type CompanyRole } from "./roles";
 import { gbField, parseGb, refreshStorage, setAllowance, setsAllowances, useStorageOverview } from "./storage";
 import { AllowanceDialog, GbInput } from "./StorageSettings";
+import { SettingsActions, SwitchRow } from "./SettingsKit";
+import styles from "./settings.module.css";
 import { YourPassword } from "./TeamSettings";
+import { Select } from "@/components/ui/Select";
 
 // The team's levels. A custom role is never a sub's (the database refuses it).
 const LEVELS = STAFF.filter((r) => r !== "owner");
+const GROUPS = [...new Set(PERMISSIONS.map((p) => p.group))];
 const label = (p: Permission) => PERMISSIONS.find((x) => x.key === p)?.label ?? p;
+/** A role's areas in a quiet line: the first few by name, then how many more. */
+const areas = (list: Permission[]) => (list.length <= 3 ? list.map(label).join(", ") : `${list.slice(0, 3).map(label).join(", ")} and ${list.length - 3} more`);
 
 export function RolesSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
   const roles = useCompanyRoles();
+  const navigate = useNavigate();
   const guides = useSopIndex();
   const team = useQuery({ queryKey: ["team", session.company.id], queryFn: () => api.get<Array<{ role_id: string | null; active: boolean }>>("/team") });
   const [editing, setEditing] = useState<CompanyRole | "new" | null>(null);
@@ -50,69 +57,75 @@ export function RolesSettings() {
     },
   });
   const count = (id: string) => team.data?.filter((m) => m.active && m.role_id === id).length ?? 0;
-  const cards = useListAnimation<HTMLDivElement>();
+  const rows = useListAnimation<HTMLUListElement>();
+  const askDelete = async (r: CompanyRole) => {
+    const n = count(r.id);
+    if (await confirm({ title: `Delete “${r.name}”?`, body: n ? `${n} ${n === 1 ? "person has" : "people have"} this role. They keep ${ROLE_LABELS[r.base_role]} access.` : undefined, confirmLabel: "Delete role", danger: true })) remove.mutate(r.id);
+  };
 
   return (
-    <div className="stack">
-      <div className="row-between">
-        <span />
-        <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New role</Button>
-      </div>
-      {roles.error ? (
-        <div className="card"><ErrorState error={roles.error} onRetry={() => roles.refetch()} /></div>
-      ) : roles.isPending ? (
-        <Loading label="Loading roles"><div className="grid-cards">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={3} />)}</div></Loading>
-      ) : roles.data.length === 0 ? (
-        <div className="card"><EmptyState inline title="No custom roles yet" action={<Button onClick={() => setEditing("new")}>Add a role</Button>} /></div>
-      ) : (
-        <div className="grid-cards" ref={cards}>
-          {roles.data.map((r) => (
-            <div key={r.id} className="card card-pad stack-sm role-card">
-              <div className="row-between" style={{ alignItems: "flex-start" }}>
-                <div className="stack-sm" style={{ gap: 2 }}>
-                  <strong style={{ fontSize: 16 }}>{r.name}</strong>
-                  <span className="muted small">{ROLE_LABELS[r.base_role]} access · {count(r.id)} {count(r.id) === 1 ? "person" : "people"}</span>
-                </div>
-                <div className="row" style={{ gap: 2 }}>
-                  <button type="button" className="icon-btn" aria-label={`Edit ${r.name}`} onClick={() => setEditing(r)}><Icon name="edit" size={16} /></button>
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    aria-label={`Delete ${r.name}`}
-                    onClick={async () => {
-                      const n = count(r.id);
-                      if (await confirm({ title: `Delete “${r.name}”?`, body: n ? `${n} ${n === 1 ? "person has" : "people have"} this role. They keep ${ROLE_LABELS[r.base_role]} access.` : undefined, confirmLabel: "Delete role", danger: true })) remove.mutate(r.id);
-                    }}
-                  >
-                    <Icon name="trash" size={16} />
-                  </button>
-                </div>
-              </div>
-              <div className="row wrap" style={{ gap: 6 }}>
-                {r.permissions.length ? r.permissions.map((p) => <span key={p} className="chip">{label(p)}</span>) : <span className="muted small">Their own work only</span>}
-              </div>
-              {r.guide_id && <Link to={`/kb/${r.guide_id}`} className="small">Job description: {guides.data?.pages.find((g) => g.id === r.guide_id)?.title ?? "open the guide"}</Link>}
-              {owner && storageLimit(r.id) && <span className="muted small">Storage: {formatBytes(storageLimit(r.id)!)} each</span>}
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="card">
-        <div className="card-head"><strong>Built-in roles</strong></div>
-        {STAFF.map((r) => (
-          <div key={r} className="card-row" style={{ alignItems: "flex-start" }}>
-            <strong style={{ width: 110, flex: "none" }}>{ROLE_LABELS[r]}</strong>
-            <span className="stack-sm" style={{ gap: 4 }}>
-              <span className="muted small">{LEVEL_SUMMARY[r]}</span>
-              {owner && storage.data && r !== "owner" && (
-                <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setLimitFor({ key: r, name: ROLE_LABELS[r] })} aria-label={`Storage limit for ${ROLE_LABELS[r]}`}>
+    <>
+      <SettingsActions><Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New role</Button></SettingsActions>
+      <Section level={3} title="Your roles" count={roles.data?.length || undefined}>
+        {roles.error ? (
+          <ErrorState compact error={roles.error} onRetry={() => roles.refetch()} />
+        ) : roles.isPending ? (
+          <InboxSkeleton rows={3} />
+        ) : roles.data.length === 0 ? (
+          <EmptyState inline title="No custom roles yet" action={<Button onClick={() => setEditing("new")}>Add a role</Button>} />
+        ) : (
+          <ul className="rel" role="list" ref={rows}>
+            {roles.data.map((r) => {
+              const guide = r.guide_id ? guides.data?.pages.find((g) => g.id === r.guide_id)?.title ?? "open the guide" : null;
+              const n = count(r.id);
+              return (
+                <RelatedRow
+                  key={r.id}
+                  onClick={() => setEditing(r)}
+                  title={r.name}
+                  detail={`${ROLE_LABELS[r.base_role]} access`}
+                  sub={[
+                    // Who has it and what it includes as one run of words, so a long line wraps as words, not around a dot.
+                    `${n} ${n === 1 ? "person" : "people"} · ${r.permissions.length ? areas(r.permissions) : "Their own work only"}`,
+                    owner && storageLimit(r.id) ? `Storage: ${formatBytes(storageLimit(r.id)!)} each` : null,
+                    r.guide_id && <Link key="guide" to={`/kb/${r.guide_id}`} className={styles.inlineLink}>Job description: {guide}</Link>,
+                  ]}
+                  actions={
+                    <Menu
+                      label={`More for ${r.name}`}
+                      title={r.name}
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      items={[
+                        { label: "Edit role", icon: "edit", kbd: "E", onSelect: () => setEditing(r) },
+                        { label: "Open the job description", icon: "book", hidden: !r.guide_id, onSelect: () => navigate(`/kb/${r.guide_id}`) },
+                        { separator: true },
+                        { label: "Delete role", icon: "trash", danger: true, onSelect: () => void askDelete(r) },
+                      ]}
+                    />
+                  }
+                />
+              );
+            })}
+          </ul>
+        )}
+      </Section>
+      <Section level={3} title="Built-in roles">
+        <p className="set-note">Every business has these. A role of your own starts from one of them.</p>
+        <ul className="rel" role="list">
+          {STAFF.map((r) => (
+            <RelatedRow
+              key={r}
+              title={ROLE_LABELS[r]}
+              sub={LEVEL_SUMMARY[r]}
+              actions={owner && storage.data && r !== "owner" ? (
+                <button type="button" className="btn btn-sm" onClick={() => setLimitFor({ key: r, name: ROLE_LABELS[r] })} aria-label={`Storage limit for ${ROLE_LABELS[r]}`}>
                   {storageLimit(r) ? `Storage: ${formatBytes(storageLimit(r)!)} each` : "Storage limit"}
                 </button>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
+              ) : undefined}
+            />
+          ))}
+        </ul>
+      </Section>
       {editing && (
         <RoleDialog
           role={editing === "new" ? null : editing}
@@ -122,7 +135,7 @@ export function RolesSettings() {
         />
       )}
       {limitFor && <AllowanceDialog target={{ role: limitFor.key }} name={limitFor.name} current={storageLimit(limitFor.key)} onClose={() => setLimitFor(null)} />}
-    </div>
+    </>
   );
 }
 
@@ -184,40 +197,63 @@ export function RoleDialog({ role, existing, storage, onClose }: { role: Company
   };
 
   return (
-    <Dialog open onClose={onClose} title={role ? `Edit ${role.name}` : "New role"}>
+    <Dialog open onClose={onClose} title={role ? `Edit ${role.name}` : "New role"} size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(grants ? password : ""); setPassword(""); }}>
-        <Field label="Name" requiredMessage="Give the role a name."><input className="input" value={name} onChange={(e) => { setName(e.target.value); save.reset(); }} maxLength={60} placeholder="e.g. Foreman" required autoFocus /></Field>
-        <Field label="Access level" hint={LEVEL_SUMMARY[level]}>
-          <Select className="select" value={level} onChange={(e) => changeLevel(e.target.value as Role)}>
-            {LEVELS.map((l) => <option key={l} value={l}>{ROLE_LABELS[l]}</option>)}
-          </Select>
-        </Field>
-        {allowed.length > 0 ? (
-          <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend style={{ marginBottom: 8 }}>Can use</legend>
-            <div className="perm-list">
-              {PERMISSIONS.filter((p) => allowed.includes(p.key)).map((p) => (
-                <label key={p.key} className="switch-row">
-                  <input type="checkbox" className="switch" checked={perms.includes(p.key)} onChange={(e) => setPerms(e.target.checked ? [...perms, p.key] : perms.filter((x) => x !== p.key))} />
-                  {p.label}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        ) : (
-          <p className="muted small" style={{ margin: 0 }}>This level sees only their own visits and time.</p>
-        )}
-        <Field label="Job description" optional hint="The guide that says what this job is. It and every guide it links to are the job's training: people with this role have to read them all, and it shows how far each person is.">
-          <Select className="select" value={guideId} onChange={(e) => { setGuideId(e.target.value); save.reset(); }}>
-            <option value="">None</option>
-            {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft)" : ""}</option>)}
-          </Select>
-        </Field>
-        {storage && (
-          <Field label="Storage limit for everyone with this role" optional hint="For each person with this role who has no limit of their own: it stops what they add to Drive, plans and guides. Leave it empty for no limit.">
-            <GbInput value={size} placeholder="No limit" onChange={(v) => { setTyped(v); save.reset(); }} />
-          </Field>
-        )}
+        <div className="role-edit">
+          <div className="role-edit-side">
+            <Field label="Name" requiredMessage="Give the role a name."><input className="input" value={name} onChange={(e) => { setName(e.target.value); save.reset(); }} maxLength={60} placeholder="e.g. Foreman" required autoFocus /></Field>
+            {/* The level first, each with what it reaches (Jobber's preset levels); then its areas, grouped, each saying what it opens. */}
+            <fieldset className="role-fieldset">
+              <legend className="role-legend">Starts from</legend>
+              <div className="set-rows">
+                {LEVELS.map((l) => (
+                  <label key={l} className="set-row set-choice">
+                    <input type="radio" name="role-level" checked={level === l} onChange={() => changeLevel(l)} />
+                    <span className="set-row-text"><span className="set-row-label">{ROLE_LABELS[l]}</span><span className="set-row-hint">{LEVEL_SUMMARY[l]}</span></span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <Field className="role-extra" label="Job description" optional hint="The guide that says what this job is. It and every guide it links to are the job's training: people with this role have to read them all, and it shows how far each person is.">
+              <Select className="select" value={guideId} onChange={(e) => { setGuideId(e.target.value); save.reset(); }}>
+                <option value="">None</option>
+                {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft)" : ""}</option>)}
+              </Select>
+            </Field>
+            {storage && (
+              <Field className="role-extra" label="Storage limit for everyone with this role" optional hint="For each person with this role who has no limit of their own: it stops what they add to Drive, plans and guides. Leave it empty for no limit.">
+                <GbInput value={size} placeholder="No limit" onChange={(v) => { setTyped(v); save.reset(); }} />
+              </Field>
+            )}
+          </div>
+          <div className="role-edit-main">
+            {allowed.length > 0 ? (
+              <fieldset className="role-fieldset">
+                <legend className="role-legend">
+                  Can use <span className="role-count">{kept.length} of {allowed.length}</span>
+                  <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPerms(kept.length === allowed.length ? [] : [...allowed])}>{kept.length === allowed.length ? "Turn all off" : "Turn all on"}</button>
+                </legend>
+                {GROUPS.map((g) => {
+                  const items = PERMISSIONS.filter((p) => p.group === g && allowed.includes(p.key));
+                  return items.length ? (
+                    <div key={g} className="set-rows role-group" role="group" aria-label={g}>
+                      <p className="role-group-title">{g}</p>
+                      {items.map((p) => (
+                        <SwitchRow key={p.key} label={p.label} hint={p.hint} checked={perms.includes(p.key)} onChange={(on) => setPerms(on ? [...perms, p.key] : perms.filter((x) => x !== p.key))} />
+                      ))}
+                    </div>
+                  ) : null;
+                })}
+                {level === "admin" && <p className="set-note">With Business setup, Manage people and roles or Connect apps on, this is an admin role: saving it asks for your password.</p>}
+                {allowed.length < PERMISSIONS.length && (
+                  <p className="set-note">Others, like {PERMISSIONS.find((p) => !allowed.includes(p.key))!.label}, come with a higher level.</p>
+                )}
+              </fieldset>
+            ) : (
+              <p className="set-note">This level sees only their own visits and time.</p>
+            )}
+          </div>
+        </div>
         {grants && <YourPassword value={password} onChange={setPassword} />}
         <FormError error={save.error} />
         <div className="form-actions">

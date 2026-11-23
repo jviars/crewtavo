@@ -16,6 +16,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { editKind, FileViewer } from "@/features/files/FileViewer";
 import { useStorageFull } from "@/features/settings/storage";
@@ -86,7 +87,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const sectionRef = useRef<HTMLElement>(null);
+  const sectionRef = useRef<HTMLDivElement>(null);
   const pickFor = useRef<{ target: PlanTarget; replaces: PlanFile | null } | null>(null);
   const tooLarge = useTooLarge();
   const storageFull = useStorageFull();
@@ -228,13 +229,14 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
     const trashesFile = isOffice || (mine && !entry.older.length && !entry.hiddenHistory);
     const trashesVersion = (isOffice || mine) && (entry.older.length > 0 || entry.hiddenHistory);
     const items: MenuEntry[] = [
-      { label: "Open", icon: "eye", onSelect: () => setViewing({ file: f, canEdit, edit: false }) },
-      { label: "Edit", icon: "pen", hidden: !canEdit || !editKind(f), onSelect: () => setViewing({ file: f, canEdit, edit: true }) },
-      { label: "Download", icon: "download", disabled: !save, onSelect: () => save && (window.location.href = save) },
+      { label: "Open", icon: "eye", kbd: "O", onSelect: () => setViewing({ file: f, canEdit, edit: false }) },
+      { label: "Edit", icon: "pen", kbd: "E", hidden: !canEdit || !editKind(f), onSelect: () => setViewing({ file: f, canEdit, edit: true }) },
+      { label: "Download", icon: "download", kbd: "D", disabled: !save, onSelect: () => save && (window.location.href = save) },
       { label: "Put on the map", icon: "map", hidden: !canAdd || !canMap(f) || f.archived, onSelect: () => navigate(mapUrl(f)) },
       { separator: true, hidden: !canAdd },
       { label: "Upload a new version", icon: "upload", hidden: !canAdd || f.archived, onSelect: () => pick({}, f) },
-      { label: "Edit details", icon: "edit", hidden: !canAdd, onSelect: () => setEditing(f) },
+      // "File details", as its dialog says, so it doesn't read as a second Edit; E edits the file itself, as on Drive.
+      { label: "File details", icon: "info", hidden: !canAdd, onSelect: () => setEditing(f) },
       { label: f.crew_visible ? "Make it office only" : "Show it to the crew", icon: f.crew_visible ? "lock" : "users", hidden: !isOffice, onSelect: () => update.mutate({ id: f.id, patch: { crew_visible: !f.crew_visible } }) },
       { label: f.archived ? "Restore" : "Archive", icon: f.archived ? "undo" : "archive", hidden: !isOffice, onSelect: () => update.mutate({ id: f.id, patch: { archived: !f.archived } }) },
       { separator: true, hidden: !(trashesFile || trashesVersion) },
@@ -287,24 +289,24 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
   const single = defaultTarget();
   // A paste on the page adds to where Add files would (not for a client's several properties: which one?).
   usePastedFiles(sectionRef, canAdd && single ? (list) => send(list, single, null, true) : null);
-  // With nothing in it yet, it's the hint alone, a quiet line under the heading; the box comes back while files are dragged over it.
+  // With nothing in it yet, it's the hint alone, quiet lines under the heading; a dashed edge shows while files are dragged over it.
   const bare = Boolean(files.data) && !visible.length && !sending.length && dropOn !== "card";
 
+  const addAction = canAdd && single ? (
+    <button type="button" onClick={() => pick(single)}><Icon name="upload" size={14} />Add files</button>
+  ) : canAdd && addTargets ? (
+    <Menu
+      label="Add files for a property"
+      title="Add files"
+      triggerClassName="btn btn-sm"
+      trigger={<><Icon name="upload" size={14} />Add files</>}
+      items={[{ heading: "For which property?" }, ...addTargets.map((p) => ({ label: p.label, icon: "pin" as const, onSelect: () => pick({ property_id: p.id }) }))]}
+    />
+  ) : undefined;
+
   return (
-    <section ref={sectionRef} className="stack" aria-labelledby={`plans-${scopeKey(scope).join("-")}`}>
-      <div className="section-head">
-        <h2 id={`plans-${scopeKey(scope).join("-")}`} className="section-title">Plans and files</h2>
-        {canAdd && single && <Button size="sm" icon="upload" onClick={() => pick(single)}>Add files</Button>}
-        {canAdd && addTargets && (
-          <Menu
-            label="Add files for a property"
-            triggerClassName="btn btn-sm"
-            trigger={<><Icon name="upload" size={14} />Add files</>}
-            items={[{ heading: "For which property?" }, ...addTargets.map((p) => ({ label: p.label, icon: "pin" as const, onSelect: () => pick({ property_id: p.id }) }))]}
-          />
-        )}
-      </div>
-      <div className={bare ? undefined : `card card-pad ${dropOn === "card" ? styles.dropping : ""}`} {...dropProps("card", single)}>
+    <Section title="Plans and files" count={visible.length || undefined} action={addAction} className={styles.section}>
+      <div ref={sectionRef} className={styles.zone} data-bare={bare || undefined} data-dropping={dropOn === "card" || undefined} {...dropProps("card", single)}>
         <input
           ref={picker}
           type="file"
@@ -318,7 +320,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             send(ask.replaces ? list.slice(0, 1) : list, ask.target, ask.replaces);
           }}
         />
-        {files.isPending && <div className="stack-sm"><Skeleton width="60%" /><Skeleton width="40%" /></div>}
+        {files.isPending && <div className="stack-sm" aria-busy="true"><Skeleton width="60%" /><Skeleton width="40%" /></div>}
         {files.error && <span className="field-error">Couldn't load the files. <button type="button" className="link-btn" onClick={() => files.refetch()}>Try again</button></span>}
         {sending.length > 0 && (
           <div className={styles.list}>
@@ -338,9 +340,9 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
           </div>
         )}
         {files.data && !visible.length && !sending.length && (
-          <div className="stack-sm">
-            <span className="muted small">{emptyText}</span>
-            {canAdd && single && <span className={styles.dropHint}>PDFs, pictures or any other file, up to {fileSize(200 * 1024 * 1024)} each. You can also drop them here, or paste a screenshot.</span>}
+          <div className={styles.empty}>
+            <p>{emptyText}</p>
+            {canAdd && single && <p className={styles.dropHint}>PDFs, pictures or any other file, up to {fileSize(200 * 1024 * 1024)} each. You can also drop them here, or paste a screenshot.</p>}
           </div>
         )}
         {files.data &&
@@ -353,7 +355,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
             ) : null,
           )}
         {isOffice && archivedCount > 0 && (
-          <button type="button" className={styles.olderToggle} style={{ marginTop: 10 }} onClick={() => setShowArchived(!showArchived)}>
+          <button type="button" className={styles.olderToggle} onClick={() => setShowArchived(!showArchived)}>
             {showArchived ? "Hide archived files" : `Show ${archivedCount} archived ${archivedCount === 1 ? "file" : "files"}`}
           </button>
         )}
@@ -373,7 +375,7 @@ export function PlansCard({ scope }: { scope: PlansScope }) {
         />
       )}
       {tooLarge.dialog}
-    </section>
+    </Section>
   );
 }
 
@@ -416,8 +418,8 @@ function PlanRow({ entry, save, links, menu, onOpen }: {
         <span className={styles.meta}>{planMeta(entry)}</span>
         {(!f.crew_visible || f.archived) && (
           <div className={styles.chips}>
-            {!f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={12} />Office only</span>}
-            {f.archived && <span className="chip">Archived</span>}
+            {!f.crew_visible && <span className={styles.flag}><Icon name="lock" size={12} />Office only</span>}
+            {f.archived && <span className={styles.flag}><Icon name="archive" size={12} />Archived</span>}
           </div>
         )}
         {f.notes && <p className={styles.notes}>{f.notes}</p>}
@@ -444,7 +446,7 @@ function PlanRow({ entry, save, links, menu, onOpen }: {
       </div>
       <div className={styles.actions}>
         {save && <a className="btn btn-sm btn-ghost btn-icon" href={save} aria-label={`Download ${f.title}`} title="Download"><Icon name="download" size={14} /></a>}
-        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} items={menu} />
+        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} title={f.title} items={menu} />
       </div>
     </div>
   );

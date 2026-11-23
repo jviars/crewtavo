@@ -11,9 +11,10 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import { RelatedRow } from "@/components/ui/Section";
 import { api, supabase, unwrap } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { uploadFile } from "@/lib/files";
@@ -22,6 +23,7 @@ import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ExpenseDialog } from "./ExpensesCard";
+import styles from "./jobMoney.module.css";
 import { draftState, dropZoneOff, nextWaiting, READ_IT, TO_FILL_LINE, unreadReason, WAITING_LINE, WAITING_RETRY_MS, WAITING_WHY } from "./receiptDraftWords";
 import { readingOn, type ReadAnswer } from "./receiptReading";
 import { translateError } from "@crewtavo/core/i18n/patterns";
@@ -61,7 +63,11 @@ export function useReceiptDrafts(jobId?: string) {
   });
 }
 
-export function ReceiptDrafts({ jobId, onSaved }: { jobId?: string; onSaved?: () => unknown }) {
+/**
+ * `part`: the drafts and the drop zone together (Finance → Profit), or one of them, for a job's
+ * Expenses, which lists the drafts first (they need someone) and the drop zone last.
+ */
+export function ReceiptDrafts({ jobId, onSaved, part = "all" }: { jobId?: string; onSaved?: () => unknown; part?: "all" | "list" | "drop" }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const seesCosts = hasRole(session, "admin", "office") && can(session, "job_costs");
@@ -94,7 +100,8 @@ export function ReceiptDrafts({ jobId, onSaved }: { jobId?: string; onSaved?: ()
   const latest = useRef({ drafts: drafts.data ?? [], read });
   latest.current = { drafts: drafts.data ?? [], read };
   useEffect(() => {
-    if (!waiting || !on) return;
+    // Once per screen: the list's part carries on, not the drop zone beside it.
+    if (!waiting || !on || part === "drop") return;
     let busy = false;
     const carryOn = async () => {
       if (busy) return;
@@ -111,7 +118,7 @@ export function ReceiptDrafts({ jobId, onSaved }: { jobId?: string; onSaved?: ()
     };
     const timer = setInterval(() => void carryOn(), WAITING_RETRY_MS);
     return () => clearInterval(timer);
-  }, [waiting, on]);
+  }, [waiting, on, part]);
   // Each file uploaded and made a draft, then read: two at a time, so a stack of them doesn't wait on one.
   const add = async (files: FileList | null) => {
     const list = [...(files ?? [])];
@@ -144,57 +151,79 @@ export function ReceiptDrafts({ jobId, onSaved }: { jobId?: string; onSaved?: ()
   if (!seesCosts) return null;
   const rows = drafts.data ?? [];
   const firstWaiting = rows.find((d) => d.status === "waiting")?.id;
+  const list = part !== "drop" && rows.length > 0 && (
+    <div>
+      <h3 className={styles.subhead}>{t("Receipts to check and save")}<span className={styles.count}>{rows.length}</span></h3>
+      <ul className="rel" role="list" aria-label={t("Receipts to check and save")}>
+        {rows.map((d) => {
+          const r = d.read?.reading;
+          const state = draftState(d, Date.now());
+          const job = d.job ?? (d.read?.job ? { number: d.read.job.number, title: d.read.job.title } : null);
+          return (
+            <RelatedRow
+              key={d.id}
+              // The row checks it too: on a phone it's the way in, with the menu beside it.
+              onClick={state === "reading" ? undefined : () => setChecking(d)}
+              // No lead: the same receipt on every row says nothing. One being read turns quietly in its place.
+              lead={state === "reading" ? <span className="spinner" style={{ width: 14, height: 14 }} aria-hidden="true" /> : undefined}
+              title={r?.vendor || d.file_name || t("Receipt")}
+              sub={
+                state === "reading" ? t("Reading…")
+                  : state === "to_fill" || state === "waiting" ? [state === "waiting" ? WAITING_LINE : TO_FILL_LINE, !jobId && d.job ? t("Job #{number}", { number: d.job.number }) : null]
+                    : state === "failed" ? [t("Couldn't be read: fill it in"), d.error ? translateError(getLocale(), d.error) : null]
+                      : [r?.date ? formatDate(r.date) : null, !jobId && job ? (d.job ? t("Job #{number}", { number: job.number }) : t("Job #{number} (suggested)", { number: job.number })) : null, d.read?.problems.length ? <span className={styles.warn}>{t("{count} to check", { count: d.read.problems.length })}</span> : null]
+              }
+              // What was read, quiet until it's checked and saved as an expense (in ink, like the saved ones).
+              end={state === "read" && r?.total != null ? formatMoneyCents(r.total) : undefined}
+              actions={(
+                <>
+                  <Button size="sm" className="hide-mobile" disabled={state === "reading"} onClick={() => setChecking(d)}>{t("Check and save")}</Button>
+                  <Menu
+                    label={t("Receipt actions")}
+                    title={r?.vendor || d.file_name || t("Receipt")}
+                    items={[
+                      { label: state === "failed" ? t("Read again") : READ_IT, icon: "refresh", hidden: !(state === "failed" || ((state === "to_fill" || state === "waiting") && on)), onSelect: () => void read(d.id) },
+                      { separator: true },
+                      { label: t("Discard"), icon: "trash", danger: true, onSelect: () => discard.mutate(d.id) },
+                    ]}
+                  />
+                </>
+              )}
+            />
+          );
+        })}
+      </ul>
+      {/* Why some wait, said once: the hour's reading is used up, and they carry on by themselves. */}
+      {firstWaiting && <p className={styles.rule} style={{ marginTop: 8 }}>{WAITING_WHY}</p>}
+    </div>
+  );
+  const drop = part !== "list" && (
+    <label
+      className={cx("dropzone", styles.drop)}
+      data-over={over || undefined}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); void add(e.dataTransfer.files); }}
+    >
+      {adding > 0 ? <span className="spinner" style={{ width: 18, height: 18 }} aria-hidden="true" /> : <Icon name="upload" size={18} />}
+      <span className={styles.dropText} aria-live="polite">
+        {adding > 0 ? t("Adding {count}…", { count: adding }) : (
+          <>
+            <span className="hide-mobile">{t("Drop several receipts or supplier invoices here, or click to choose")}</span>
+            {/* A phone has nothing to drag them from, nor a click. */}
+            <span className="mobile-inline">{t("Add several receipts or supplier invoices")}</span>
+          </>
+        )}
+        <small>{off ? off.hint : t("Photos or PDFs. Each waits here to be checked and saved: none counts in job costing until it is.")}</small>
+      </span>
+      <input type="file" multiple accept="image/*,application/pdf" className="sr-only" onChange={(e) => { void add(e.target.files); e.target.value = ""; }} />
+    </label>
+  );
+  if (part === "list" && !list && !checking) return null;
   return (
-    <div className="stack-sm">
-      {rows.length > 0 && (
-        <div className="card">
-          <div className="card-row"><strong className="grow small">{t("Receipts to check and save")}</strong><span className="muted small">{rows.length}</span></div>
-          {rows.map((d) => {
-            const r = d.read?.reading;
-            const state = draftState(d, Date.now());
-            const job = d.job ?? (d.read?.job ? { number: d.read.job.number, title: d.read.job.title } : null);
-            return (
-              <div key={d.id} className="card-row">
-                <span className="n-icon" style={{ width: 36, height: 36, borderRadius: 8, display: "grid", placeItems: "center", background: "var(--fill-2)", color: "var(--text-3)", flex: "none" }}><Icon name="receipt" size={18} /></span>
-                <span className="grow">
-                  <strong>{r?.vendor || d.file_name || t("Receipt")}</strong>
-                  <span className="muted small" style={{ display: "block" }}>
-                    {state === "reading" ? t("Reading…")
-                      : state === "to_fill" || state === "waiting" ? [state === "waiting" ? WAITING_LINE : TO_FILL_LINE, !jobId && d.job ? t("Job #{number}", { number: d.job.number }) : null].filter(Boolean).join(" · ")
-                        : state === "failed" ? t("Couldn't be read: fill it in")
-                          : [r?.total != null ? formatMoneyCents(r.total) : null, r?.date ? formatDate(r.date) : null, !jobId && job ? (d.job ? t("Job #{number}", { number: job.number }) : t("Job #{number} (suggested)", { number: job.number })) : null, d.read?.problems.length ? t("{count} to check", { count: d.read.problems.length }) : null].filter(Boolean).join(" · ")}
-                  </span>
-                  {/* Why, when it's known: reading is off now, the server is from before this, the file couldn't be opened. */}
-                  {state === "failed" && d.error && <span className="muted small" style={{ display: "block" }}>{translateError(getLocale(), d.error)}</span>}
-                  {state === "waiting" && d.id === firstWaiting && <span className="muted small" style={{ display: "block" }}>{WAITING_WHY}</span>}
-                </span>
-                <Button size="sm" disabled={state === "reading"} onClick={() => setChecking(d)}>{t("Check and save")}</Button>
-                <Menu
-                  triggerClassName="btn btn-sm btn-ghost btn-icon"
-                  label={t("Receipt actions")}
-                  items={[
-                    { label: state === "failed" ? t("Read again") : READ_IT, icon: "refresh", hidden: !(state === "failed" || ((state === "to_fill" || state === "waiting") && on)), onSelect: () => void read(d.id) },
-                    { label: t("Discard"), icon: "trash", danger: true, onSelect: () => discard.mutate(d.id) },
-                  ]}
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <label
-        className="dropzone"
-        style={{ padding: 12 }}
-        data-over={over || undefined}
-        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); void add(e.dataTransfer.files); }}
-      >
-        <Icon name="upload" size={18} />
-        <span className="small strong">{adding > 0 ? t("Adding {count}…", { count: adding }) : t("Drop several receipts or supplier invoices here, or click to choose")}</span>
-        <span className="small muted">{off ? off.hint : t("Photos or PDFs. Each waits here to be checked and saved: none counts in job costing until it is.")}</span>
-        <input type="file" multiple accept="image/*,application/pdf" className="sr-only" onChange={(e) => { void add(e.target.files); e.target.value = ""; }} />
-      </label>
+    <div className={part === "all" ? cx(styles.parts, "rel-figures") : undefined}>
+      {list}
+      {drop}
       {checking && (
         <ExpenseDialog
           jobId={jobId ?? null}

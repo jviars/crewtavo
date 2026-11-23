@@ -31,13 +31,13 @@ export function FieldAddedLines({ jobId, lines }: { jobId: string; lines: readon
   const who = (id: string | null) => people.data?.find((p) => p.user_id === id)?.full_name || "The crew";
   return (
     <div className="callout callout-info">
-      <Icon name="truck" size={20} />
-      <div className="grow stack-sm">
-        <strong>Added in the field</strong>
+      <Icon name="truck" size={16} />
+      <div className="grow">
+        <div>Added in the field</div>
         {added.map((l) => (
-          <span key={l.id} className="small">
-            {l.name} · {qty(Number(l.quantity))} {l.unit} · {who(l.added_in_field_by)}, {formatDateTime(l.added_in_field_at!, company.timezone)}
-          </span>
+          <div key={l.id}>
+            {l.name} · {qty(Number(l.quantity))} {l.unit} <span className="muted">· {who(l.added_in_field_by)}, {formatDateTime(l.added_in_field_at!, company.timezone)}</span>
+          </div>
         ))}
       </div>
     </div>

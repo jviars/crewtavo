@@ -22,10 +22,12 @@ import type { Env } from "../env";
 import { abcConnection, AbcProblem } from "../integrations/abcSupply";
 import { isEmail } from "../lib/email";
 import { asJson, dbError, HttpError, must } from "../lib/http";
+import { keptSettings } from "../lib/keptSettings";
 import { adminClient, type Db } from "../lib/supabase";
 import { formulaValue, MEASUREMENT_VALUE_FIELDS, measurementVariables, type MeasurementValues, type MeasurementVariables } from "./measurements";
 import { addMissingCustomFields, addMissingServices } from "./presetServices";
 import { deliver, rangeMessage, type SalesScope, type SendBody } from "./sales";
+import { settingsAs } from "../lib/companySettings";
 
 /** Quotes whose lines can still change. */
 export const EDITABLE = ["draft", "sent", "changes_requested"];
@@ -274,8 +276,7 @@ export function workKind(settings: unknown, made: string | null | undefined, roo
  * they're priced from.
  */
 export async function packageWork(db: Db, companyId: string, quote: { id: string; work_kind: string | null }, packageIds: readonly string[]) {
-  const [company, measurement] = await Promise.all([db.from("companies").select("settings").eq("id", companyId).maybeSingle(), quoteMeasurement(db, companyId, quote.id)]);
-  const { settings } = must(company, "Company not found.");
+  const [settings, measurement] = await Promise.all([settingsAs(db, companyId), quoteMeasurement(db, companyId, quote.id)]);
   // Only a business with both apps and an estimate made outside their sections asks its packages.
   const asks = roofingOn(settings) && pavingOn(settings) && !quote.work_kind && packageIds.length > 0;
   const roofs = asks ? must(await db.from("roof_packages").select("roof_service_id").eq("company_id", companyId).in("id", [...packageIds])).map((p) => p.roof_service_id) : [];
@@ -496,11 +497,12 @@ async function markSent(db: Db, companyId: string, quoteId: string) {
 
 /** Send the homeowner a price range instead of the exact price (rangeOf), by email or text, or just make their link. */
 export async function sendRange(s: SalesScope, quoteId: string, body: SendBody) {
-  const [quote, company] = await Promise.all([
+  const [quote, company, kept] = await Promise.all([
     rangeQuote(s.db, s.companyId, quoteId),
-    s.db.from("companies").select("name, currency, settings").eq("id", s.companyId).maybeSingle().then((r) => must(r)),
+    adminClient(s.env).from("companies").select("name, currency, settings").eq("id", s.companyId).maybeSingle().then((r) => must(r)),
+    keptSettings(s.db, s.companyId),
   ]);
-  const { range, options } = rangeOf(quote, rangeSettings(company.settings));
+  const { range, options } = rangeOf(quote, rangeSettings(kept));
   // Check where it's going before the quote changes, so a missing email doesn't leave it half sent.
   if (body.channel === "email" && !isEmail(body.to || quote.client?.email)) throw new HttpError(400, "Add a valid email address for this client first.");
   if (body.channel === "sms" && !(body.to || quote.client?.phone)) throw new HttpError(400, "This client has no phone number.");
@@ -524,17 +526,18 @@ export const RANGE_NOT_WAITING = "This price range isn't waiting for an answer."
  * the estimate says who marked it, and how they said yes when the office says.
  */
 export async function markRangeAccepted(env: Env, db: Db, companyId: string, userId: string, quoteId: string, body: { note?: string; option_id?: string } = {}) {
-  const [quote, company, profile] = await Promise.all([
+  const [quote, company, profile, kept] = await Promise.all([
     rangeQuote(db, companyId, quoteId),
-    db.from("companies").select("currency, settings").eq("id", companyId).maybeSingle(),
+    adminClient(env).from("companies").select("currency, settings").eq("id", companyId).maybeSingle(),
     db.from("profiles").select("full_name").eq("user_id", userId).maybeSingle(),
+    keptSettings(db, companyId),
   ]);
   const option = body.option_id ? quote.options.find((o) => o.id === body.option_id) : null;
   if (body.option_id && !option) throw new HttpError(409, "The options on this estimate changed. Look them over and try again.");
 
   let range = { low: Number(quote.range_low), high: Number(quote.range_high) };
   if (quote.status === "draft" && !quote.priced_on_site_at && !quote.exact_sent_at) {
-    range = rangeOf(quote, rangeSettings(company.data?.settings)).range;
+    range = rangeOf(quote, rangeSettings(kept)).range;
     await saveRange(db, companyId, quote, range);
     await markSent(db, companyId, quoteId);
   } else if (!inRangeMode(quote) || quote.range_accepted_at) {

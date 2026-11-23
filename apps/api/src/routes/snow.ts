@@ -28,7 +28,7 @@ snow.post("/snow/enabled", requireUser, requireCompany(ADMINS, "apps"), async (c
 
 /** The business's today and tomorrow and its forecast source: what every snow forecast here goes by. And where its shop is on the map (Settings → Company), or null. */
 async function snowDay(c: Context<AppEnv>) {
-  const company = must(await c.var.db.from("companies").select("timezone, weather_source:settings->weather_source, depot:settings->depot").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("timezone, weather_source:settings->weather_source, depot:settings->depot").eq("id", c.var.companyId).maybeSingle());
   const today = localDate(new Date(), company.timezone);
   const depot = company.depot as { lat?: unknown; lng?: unknown } | null;
   const shop = typeof depot?.lat === "number" && typeof depot.lng === "number" ? { lat: depot.lat, lng: depot.lng } : null;

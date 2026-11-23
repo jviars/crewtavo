@@ -141,8 +141,9 @@ describe("the Jobs list", () => {
   it("prices a recurring job's visit without its one-time promo code", () => {
     const jobsPage = source("../src/features/jobs/JobsPage.tsx");
     expect(jobsPage).toContain("lines:job_line_items(quantity, unit_price, discount_billing)");
-    expect(jobsPage).toContain("{formatMoney(visitPrice(j.financials?.contract_total, j.lines))}/visit");
-    expect(jobsPage).not.toContain("{formatMoney(j.financials?.contract_total ?? 0)}/visit");
+    // The unit is quiet after the figure (Page-Jobs.dc.html): "$285/visit".
+    expect(jobsPage).toContain("{formatMoney(visitPrice(j.financials?.contract_total, j.lines))}<span className={styles.per}>/visit</span>");
+    expect(jobsPage).not.toContain("{formatMoney(j.financials?.contract_total ?? 0)}<span className={styles.per}>/visit");
   });
 });
 

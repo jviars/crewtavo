@@ -10,12 +10,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { Select } from "@/components/ui/Select";
+import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { formatDate, formatNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import { Select } from "@/components/ui/Select";
 
 export interface DrawingRow {
   id: string;
@@ -122,11 +124,10 @@ export function ShareDrawing({
   const name = (row: { client: unknown }) => (row.client as { display_name: string } | null)?.display_name;
 
   return (
-    <div className="card card-pad stack-sm">
-      <strong>Put it on a quote or invoice</strong>
-      <span className="muted small">The picture and sizes go with it. You choose whether the client sees them.</span>
+    <Section title="Put it on a quote or invoice" className="drawing-share">
+      <p className="drawing-note">The picture and sizes go with it. You choose whether the client sees them.</p>
       {options.isPending ? (
-        <span className="muted small">Loading quotes and invoices…</span>
+        <span className="drawing-note">Loading quotes and invoices…</span>
       ) : options.error ? (
         <span className="field-error">Couldn't load quotes and invoices. <button type="button" className="link-btn" onClick={() => options.refetch()}>Try again</button></span>
       ) : (
@@ -148,25 +149,27 @@ export function ShareDrawing({
           </label>
           {drawing.invoice_id && <ClientSees checked={drawing.show_on_invoice} disabled={update.isPending} where="invoice" onChange={(on) => update.mutate({ show_on_invoice: on })} />}
           {!options.data.quotes.length && !options.data.invoices.length && (
-            <span className="muted small">{clientId ? "This client has no open quotes or invoices yet." : "There are no open quotes or invoices yet."} Start one, then attach the drawing from its Drawings card.</span>
+            <p className="drawing-note">{clientId ? "This client has no open quotes or invoices yet." : "There are no open quotes or invoices yet."} Start one, then attach the drawing from its Drawings card.</p>
           )}
-          <span className="muted small">
+          <p className="drawing-note">
             {attached ? "Clients see a shown drawing on that quote or invoice, in the Client Hub and in its PDF. Hidden ones are for your team only." : "Pick a quote or invoice to put it on."}
-          </span>
+          </p>
         </>
       )}
-      {!hasPicture && (drawing.show_on_quote || drawing.show_on_invoice) && <span className="small" style={{ color: "var(--warning)" }}>No map picture was saved with this drawing, so the client would see the sizes only. Save again to add one.</span>}
-      <div className="row wrap" style={{ gap: 8 }}>
-        {drawing.quote_id && <Link className="btn btn-sm" to={`/quotes/${drawing.quote_id}`}><Icon name="quote" size={14} />Open the quote</Link>}
-        {drawing.invoice_id && <Link className="btn btn-sm" to={`/invoices/${drawing.invoice_id}`}><Icon name="invoice" size={14} />Open the invoice</Link>}
-      </div>
-    </div>
+      {!hasPicture && (drawing.show_on_quote || drawing.show_on_invoice) && <p className="drawing-note" data-tone="warning">No map picture was saved with this drawing, so the client would see the sizes only. Save again to add one.</p>}
+      {(drawing.quote_id || drawing.invoice_id) && (
+        <div className="drawing-links">
+          {drawing.quote_id && <Link className="btn btn-sm" to={`/quotes/${drawing.quote_id}`}><Icon name="quote" size={14} />Open the quote</Link>}
+          {drawing.invoice_id && <Link className="btn btn-sm" to={`/invoices/${drawing.invoice_id}`}><Icon name="invoice" size={14} />Open the invoice</Link>}
+        </div>
+      )}
+    </Section>
   );
 }
 
 function ClientSees({ checked, disabled, where, onChange }: { checked: boolean; disabled: boolean; where: "quote" | "invoice"; onChange: (on: boolean) => void }) {
   return (
-    <label className="switch-row" style={{ fontWeight: 400, marginTop: -4 }}>
+    <label className="switch-row drawing-switch">
       <input type="checkbox" className="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       Client sees it on this {where}
     </label>
@@ -218,26 +221,29 @@ export function DrawingsCard({
     const open = `/measure?measurement=${m.id}&${kind}=${parentId}`;
     return (
       <div key={m.id} className="drawing-row">
-        <Link to={open} className="drawing-row-thumb" aria-label={`Open ${m.title}`}><DrawingThumb url={m.snapshot_path ? pictures.data?.[m.snapshot_path] : undefined} title={m.title} /></Link>
-        <div className="grow drawing-row-body">
-          <Link to={open} className="strong text-sm drawing-row-title">{m.title}</Link>
-          <span className="muted small">{sizes(m)} · {formatDate(m.created_at)}</span>
+        {/* The saved map picture leads the row; a drawing with none (from a report) is its words alone, with no empty tile. */}
+        {m.snapshot_path && <Link to={open} className="drawing-row-thumb" aria-label={`Open ${m.title}`}><DrawingThumb url={pictures.data?.[m.snapshot_path]} title={m.title} size={48} /></Link>}
+        <div className="drawing-row-body">
+          <Link to={open} className="drawing-row-title">{m.title}</Link>
+          <span className="drawing-row-meta">{sizes(m)} · {formatDate(m.created_at)}</span>
           {attached && editable && (
-            <label className="switch-row small" style={{ fontWeight: 400 }}>
+            <label className="switch-row drawing-switch">
               <input type="checkbox" className="switch" checked={m[shownKey]} disabled={update.isPending} onChange={(e) => update.mutate({ id: m.id, patch: { [shownKey]: e.target.checked } })} />
               Client sees it
             </label>
           )}
-          {attached && !editable && m[shownKey] && <span className="chip chip-green" style={{ justifySelf: "start" }}>Client sees it</span>}
-          {attached && m[shownKey] && !m.snapshot_path && <span className="small" style={{ color: "var(--warning)" }}>No picture saved; the client sees the sizes only.</span>}
+          {attached && !editable && m[shownKey] && <StatusPill label="Client sees it" tone="good" />}
+          {attached && m[shownKey] && !m.snapshot_path && <span className="drawing-row-meta" data-tone="warning">No picture saved; the client sees the sizes only.</span>}
           {rowExtra?.(m)}
         </div>
         {editable && (attached ? (
           <Menu
             triggerClassName="btn btn-sm btn-ghost btn-icon"
             label="Drawing actions"
+            title={m.title}
             items={[
               { label: "Open the drawing", icon: "area", onSelect: () => navigate(open) },
+              { separator: true },
               { label: `Take off this ${noun}`, icon: "x", onSelect: () => update.mutate({ id: m.id, patch: { [column]: null } }) },
             ]}
           />
@@ -249,25 +255,21 @@ export function DrawingsCard({
   };
 
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>Drawings</strong>
-        <Link className="btn btn-sm" to={measureUrl}><Icon name="area" size={14} />Measure</Link>
-      </div>
-      {drawings.isPending && <span className="muted small">Loading…</span>}
+    <Section title="Drawings" count={on.length || undefined} className="drawings" action={<Link to={measureUrl}><Icon name="area" size={14} />Measure</Link>}>
+      {drawings.isPending && <span className="drawing-note">Loading…</span>}
       {drawings.error && <span className="field-error">Couldn't load drawings. <button type="button" className="link-btn" onClick={() => drawings.refetch()}>Try again</button></span>}
       {/* One quiet line: "Measure" above is the way to make one. */}
       {drawings.data && !rows.length && <EmptyState inline title="No drawings yet" />}
-      {on.map((m) => row(m, true))}
+      {on.length > 0 && <div className="drawing-list">{on.map((m) => row(m, true))}</div>}
       {editable && others.length > 0 && (
         <>
-          <span className="muted small" style={{ marginTop: 4 }}>{on.length ? "More for this client" : `Drawings for this client you can add to the ${noun}`}</span>
-          {others.map((m) => row(m, false))}
+          <span className="drawing-group-label">{on.length ? "More for this client" : `Drawings for this client you can add to the ${noun}`}</span>
+          <div className="drawing-list">{others.map((m) => row(m, false))}</div>
         </>
       )}
       {/* What works with a drawing (the quote's depth for its formulas) waits until there is one. */}
       {rows.length > 0 && children}
-    </div>
+    </Section>
   );
 }
 

@@ -146,7 +146,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
     <>
       <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
       <h1 className="hub-h1">Pay automatically</h1>
-      {preview && <div className="callout callout-info"><Icon name="eye" size={20} /><div className="grow">Preview: your client sets up autopay here.</div></div>}
+      {preview && <div className="callout callout-info"><Icon name="eye" size={16} /><div className="grow">Preview: your client sets up autopay here.</div></div>}
     </>
   );
 
@@ -154,7 +154,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
     return (
       <>
         {top}
-        <div className="hub-card hub-calm">Autopay isn't available right now. Contact {data.company.name} to set it up.</div>
+        <p className="hub-card hub-calm">Autopay isn't available right now. Contact {data.company.name} to set it up.</p>
       </>
     );
   }
@@ -164,7 +164,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
     return (
       <>
         {top}
-        <div className="hub-card hub-calm" role="status"><Icon name="card" size={20} />Saving your card. One moment.</div>
+        <p className="hub-card hub-calm" role="status"><Icon name="card" size={18} />Saving your card. One moment.</p>
       </>
     );
   }
@@ -180,10 +180,10 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
       <>
         {top}
         <div className="hub-card hub-done" role="status">
-          <span className="success-mark"><Icon name="check" size={30} bold /></span>
+          <span className="hub-done-mark" data-tone={turnedOff ? "quiet" : undefined}><Icon name={turnedOff ? "card" : "check"} size={30} bold /></span>
           <h2>{title}</h2>
           <p>{text}</p>
-          <Button onClick={back}>Back to your account</Button>
+          <div className="hub-done-actions"><button type="button" className="hub-btn hub-btn-ghost" onClick={back}>Back to your account</button></div>
         </div>
       </>
     );
@@ -228,45 +228,40 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
         {top}
         {autopay.reagree && method && (
           // Agreed before the terms covered monthly plans: their plan's charges wait for us until they agree to today's.
-          <section className="card card-pad stack" aria-labelledby="autopay-reagree">
+          <section className="hub-card hub-pad hub-stack" aria-labelledby="autopay-reagree">
             <h2 id="autopay-reagree" className="hub-step-title">Our autopay terms changed</h2>
-            <p className="muted" style={{ margin: 0 }}>They now cover your monthly plan. Agree to them to keep paying for it automatically with {method.label}.</p>
+            <p className="hub-lede">They now cover your monthly plan. Agree to them to keep paying for it automatically with {method.label}.</p>
             {terms}
-            <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
+            <form className="hub-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
               {agreeBox}
-              <div className="hub-step-actions">
+              <div className="hub-form-actions">
                 <Button type="submit" variant="primary" size="lg" icon="check" disabled={!agree || preview} loading={confirm.isPending}>Agree</Button>
               </div>
             </form>
           </section>
         )}
-        <section className="hub-card hub-autopay" aria-label="Your autopay">
-          <div className="hub-autopay-body">
-            <span className={`hub-icon-tile ${onHold ? "amber" : autopay.status === "active" ? "good" : autopay.status === "needs_update" ? "red" : "amber"}`}><Icon name="card" size={20} /></span>
-            <span className="grow stack-xs">
-              <strong className="hub-title">{label}</strong>
-              <span className="hub-meta">
-                {[autopay.since ? `Since ${shortDay(autopay.since, tz)}` : null, autopay.method?.exp ? `Expires ${autopay.method.exp}` : null].filter(Boolean).join(" · ")}
-              </span>
-            </span>
-          </div>
+        <section className="hub-card hub-todo hub-autopay" aria-label="Your autopay" data-tone={onHold || autopay.status === "paused" ? "warning" : autopay.status === "needs_update" ? "danger" : undefined}>
+          <span className="hub-autopay-head"><Icon name={autopay.method?.type === "us_bank_account" ? "bank" : "card"} size={18} /><strong className="hub-title">{label}</strong></span>
+          <span className="hub-sub">
+            {[autopay.since ? `Since ${shortDay(autopay.since, tz)}` : null, autopay.method?.exp ? `Expires ${autopay.method.exp}` : null].filter(Boolean).join(" · ")}
+          </span>
           <p className="hub-autopay-state">{state}</p>
           {/* Paused by the office (a new card would start it again), or on hold: only turning it off. */}
-          <div className="hub-card-actions" data-count={autopay.status === "paused" || onHold ? 1 : 2}>
+          <div className="hub-acts" data-count={autopay.status === "paused" || onHold ? 1 : 2}>
             {autopay.status !== "paused" && !onHold && (
-              <button type="button" disabled={preview} onClick={() => { setChanging(true); goTo("card"); }}>
+              <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" disabled={preview} onClick={() => { setChanging(true); goTo("card"); }}>
                 <Icon name="card" size={16} />{autopay.status === "needs_update" ? "Update card" : "Change card"}
               </button>
             )}
-            <button type="button" disabled={preview || askOff} onClick={() => setAskOff(true)}><Icon name="x" size={16} />Turn off autopay</button>
+            <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" disabled={preview || askOff} onClick={() => setAskOff(true)}><Icon name="x" size={16} />Turn off autopay</button>
           </div>
         </section>
         {askOff && (
           <div className="callout callout-warning" role="group" aria-labelledby="autopay-off-title">
-            <Icon name="alert" size={20} />
-            <div className="grow stack-sm">
-              <strong id="autopay-off-title">Turn off autopay? We'll send invoices to pay instead.</strong>
-              <div className="hub-step-actions">
+            <Icon name="alert" size={16} />
+            <div className="grow hub-ask">
+              <div id="autopay-off-title">Turn off autopay? We'll send invoices to pay instead.</div>
+              <div className="hub-form-actions">
                 <Button variant="danger" loading={off.isPending} onClick={() => off.mutate()}>Turn off autopay</Button>
                 <Button variant="ghost" onClick={() => setAskOff(false)}>Keep it on</Button>
               </div>
@@ -292,7 +287,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
           <li key={s.step} aria-current={s.step === current ? "step" : undefined} data-done={i < at || undefined}>
             {i < at ? (
               <button type="button" onClick={() => goTo(s.step)}>
-                <span className="hub-step-n"><Icon name="check" size={14} bold /></span>
+                <span className="hub-step-n"><Icon name="check" size={13} bold /></span>
                 {s.label}
                 <span className="sr-only"> (done, go back)</span>
               </button>
@@ -307,7 +302,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
       </ol>
 
       {current === "how" && (
-        <section className="card card-pad stack" aria-labelledby="autopay-how">
+        <section className="hub-card hub-pad hub-stack" aria-labelledby="autopay-how">
           <h2 id="autopay-how" ref={heading} tabIndex={-1} className="hub-step-title">How it works</h2>
           <ul className="hub-autopay-points">
             <li><Icon name="card" size={18} /><span>We charge your card or bank account {autopay.timing}.{autopay.per_visit === null ? "" : autopay.per_visit_taxed ? ` It's ${formatMoneyCents(autopay.per_visit)} per visit, plus tax.` : ` Each visit is ${formatMoneyCents(autopay.per_visit)}.`}</span></li>
@@ -316,23 +311,23 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
             <li><Icon name="x" size={18} /><span>Turn it off anytime on this page{data.company.phone ? `, or call us at ${data.company.phone}` : ", or by calling us"}.</span></li>
           </ul>
           {terms}
-          <div className="hub-step-actions">
-            <Button variant="primary" size="lg" icon="arrowRight" onClick={() => goTo(method ? "agree" : "card")}>Continue</Button>
+          <div className="hub-form-actions">
+            <Button variant="primary" size="lg" onClick={() => goTo(method ? "agree" : "card")}>Continue</Button>
           </div>
         </section>
       )}
 
       {current === "card" && (
-        <section className="card card-pad stack" aria-labelledby="autopay-card">
+        <section className="hub-card hub-pad hub-stack" aria-labelledby="autopay-card">
           <h2 id="autopay-card" ref={heading} tabIndex={-1} className="hub-step-title">Add a card or bank account</h2>
           {refused ? (
-            <div className="callout callout-danger" role="alert"><Icon name="alert" size={20} /><div className="grow">{refused}</div></div>
+            <div className="callout callout-danger" role="alert"><Icon name="alert" size={16} /><div className="grow">{refused}</div></div>
           ) : method ? (
-            <p className="muted" style={{ margin: 0 }}>{autopay.imported && !saved ? `${method.label}, saved with us before.` : `${method.label} is saved.`} You can use it, or add another.</p>
+            <p className="hub-lede">{autopay.imported && !saved ? `${method.label}, saved with us before.` : `${method.label} is saved.`} You can use it, or add another.</p>
           ) : (
-            <p className="muted" style={{ margin: 0 }}>You'll enter it on Stripe's secure page, then come back here. Your bank may ask you to confirm it. We never see the full card number.</p>
+            <p className="hub-lede">You'll enter it on Stripe's secure page, then come back here. Your bank may ask you to confirm it. We never see the full card number.</p>
           )}
-          <div className="hub-step-actions">
+          <div className="hub-form-actions">
             {method && !refused && <Button variant="primary" size="lg" icon="arrowRight" wrap onClick={() => goTo("agree")}>Use {method.label}</Button>}
             <Button variant={method && !refused ? "secondary" : "primary"} size="lg" icon="lock" disabled={preview} loading={setup.isPending} onClick={() => setup.mutate()}>
               {refused ? "Try another card" : method ? "Add another card" : "Add a card or bank account"}
@@ -343,17 +338,17 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
       )}
 
       {current === "agree" && method && (
-        <section className="card card-pad stack" aria-labelledby="autopay-agree">
+        <section className="hub-card hub-pad hub-stack" aria-labelledby="autopay-agree">
           <h2 id="autopay-agree" ref={heading} tabIndex={-1} className="hub-step-title">Agree and finish</h2>
           <div className="hub-autopay-method">
             <Icon name={method.type === "us_bank_account" ? "bank" : "card"} size={20} />
             <strong>{method.label}</strong>
-            {method.exp && <span className="muted small">Expires {method.exp}</span>}
+            {method.exp && <span className="hub-sub">Expires {method.exp}</span>}
           </div>
           {terms}
-          <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
+          <form className="hub-form" onSubmit={(e: FormEvent) => { e.preventDefault(); if (agree) confirm.mutate(); }}>
             {agreeBox}
-            <div className="hub-step-actions">
+            <div className="hub-form-actions">
               <Button type="submit" variant="primary" size="lg" icon="check" disabled={!agree || preview} loading={confirm.isPending}>Finish</Button>
             </div>
           </form>

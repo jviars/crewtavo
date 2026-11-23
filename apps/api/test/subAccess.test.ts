@@ -261,10 +261,10 @@ const NOT_SIGNED_IN_ROUTES = [
   // estimates (letterheads, packages, price list items), each under a name never reused.
   "GET /api/public/paperwork/:token", "POST /api/public/paperwork/:token/uploads", "POST /api/public/paperwork/:token/files",
   "GET /api/hub/:token", "POST /api/hub/:token/approve", "POST /api/hub/:token/request-changes", "POST /api/hub/:token/accept-range", "POST /api/hub/:token/promo",
-  "DELETE /api/hub/:token/promo", "POST /api/hub/:token/pay", "POST /api/hub/:token/message", "GET /api/hub/:token/drawings/:file", "GET /api/hub/:token/visits/:file",
+  "DELETE /api/hub/:token/promo", "POST /api/hub/:token/pay", "POST /api/hub/:token/message", "GET /api/hub/:token/drawings/:file", "GET /api/hub/:token/photos/:file", "GET /api/hub/:token/visits/:file",
   "GET /api/hub/:token/visits/:id/slots", "POST /api/hub/:token/visits/:id/change",
   "POST /api/hub/:token/request", "POST /api/hub/:token/autopay/setup", "POST /api/hub/:token/autopay/finish", "POST /api/hub/:token/autopay/confirm",
-  "POST /api/hub/:token/autopay/off", "POST /api/hub/:token/tip", "POST /api/public/forms/:company/:form/promo", "GET /api/public/forms/:company/:form", "GET /api/public/forms/:company/:form/openings", "POST /api/public/forms/:company/:form",
+  "POST /api/hub/:token/autopay/off", "POST /api/hub/:token/tip", "POST /api/hub/:token/print-ticket", "POST /api/public/forms/:company/:form/promo", "GET /api/public/forms/:company/:form", "GET /api/public/forms/:company/:form/openings", "POST /api/public/forms/:company/:form",
   "POST /api/public/forms/:company/:form/files", "GET /api/public/logo/:company/:file", "GET /api/public/letterhead/:company/:file", "POST /api/public/documents/:file",
   "GET /api/public/package/:company/:file", "GET /api/public/service/:company/:file", "GET /api/public/unsubscribe/:token", "POST /api/public/unsubscribe/:token",
   "GET /api/public/r/:token", "GET /api/public/refer/:token", "POST /api/public/refer/:token",
@@ -405,7 +405,7 @@ describe("the API, for a sub", () => {
     expect((await as(AL, `/visits/${VISIT}`, { method: "PATCH", body: { status: "en_route", forward_only: true } })).status).toBe(200);
     expect((await as(AL, `/visits/${VISIT}`, { method: "PATCH", body: { notes: "Soft decking" } })).status).toBe(200);
     expect(world.tables.visits[0]).toMatchObject({ status: "en_route", notes: "Soft decking" });
-    for (const change of [{ title: "Easy" }, { scheduled_on: "2026-10-26" }, { assignee_ids: [AL] }, { status: "cancelled" }, { status: "unscheduled" }]) {
+    for (const change of [{ title: "Easy" }, { scheduled_on: "2026-10-26" }, { assignee_ids: [AL] }, { status: "cancelled" }, { status: "unscheduled" }, { status: "scheduled" }]) {
       const res = await as(AL, `/visits/${VISIT}`, { method: "PATCH", body: change });
       expect(res.status, JSON.stringify(change)).toBe(403);
     }
@@ -1002,6 +1002,24 @@ describe("connecting an AI assistant", () => {
     // Saying no, or anything else Auth is asked, goes through.
     expect((await guardConsent(env, consent(AL, "deny"), "/auth/v1", send)).status).toBe(200);
     expect(passed).toEqual([JSON.stringify({ action: "deny" })]);
+  });
+
+  it("is refused for a sub's sign-in by any spelling of the consent's address", async () => {
+    serve({ tables: { memberships: [{ company_id: CO, user_id: AL, role: "subcontractor", active: true }] }, accounts: {} });
+    passed.length = 0;
+    for (const path of ["/oauth/authorizations/auth-1/consent/", "//oauth/authorizations/auth-1/consent", "/OAuth/Authorizations/auth-1/Consent", "/oauth/authorizations/auth-1/%63onsent"]) {
+      const request = new Request(`https://ops.example.com/auth/v1${path}`, { method: "POST", headers: { Authorization: `Bearer ${tokenFor(AL)}`, "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve" }) });
+      const res = await guardConsent(env, request, "/auth/v1", send);
+      expect(res.status, path).toBe(403);
+    }
+    expect(passed).toEqual([]);
+  });
+
+  it("reads no more of an answer than one could be", async () => {
+    passed.length = 0;
+    const huge = new Request("https://ops.example.com/auth/v1/oauth/authorizations/auth-1/consent", { method: "POST", headers: { Authorization: `Bearer ${tokenFor(OFFICE)}`, "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve", pad: "x".repeat(70 * 1024) }) });
+    expect((await guardConsent(env, huge, "/auth/v1", send)).status).toBe(413);
+    expect(passed).toEqual([]);
   });
 
   it("goes through for someone on a team", async () => {

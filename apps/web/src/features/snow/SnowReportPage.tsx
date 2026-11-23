@@ -8,9 +8,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
+import { DetailHeader } from "@/components/ui/DetailPage";
+import { Icon } from "@/components/ui/Icon";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
+import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { addressLine, formatDate, formatDateTime } from "@/lib/format";
@@ -41,6 +44,7 @@ function lasted(from: string, to: string): string {
 export function SnowReportPage() {
   const { company } = useSession();
   const { visitId = "" } = useParams();
+  // The tab's title is the PDF's name when it's saved, so it stays the report's, whoever it's for.
   useDocumentTitle("Snow service report");
   const report = useQuery({ queryKey: ["snow", company.id, "report", visitId], queryFn: () => loadReport(visitId) });
   const team = useQuery({ queryKey: ["team", company.id, "with-subs"], staleTime: 5 * 60_000, queryFn: () => api.get<Member[]>("/team?with_subs=1") });
@@ -74,11 +78,22 @@ export function SnowReportPage() {
   return (
     <>
       <div className="no-print">
-        <BackLink to="/snow?tab=log">Season</BackLink>
-        <div className="row wrap" style={{ gap: 10, margin: "0 0 16px" }}>
-          <Button variant="primary" icon="printer" onClick={() => window.print()}>Print or save as PDF</Button>
-          {visit.status !== "completed" && <span className="muted small">This visit isn't marked done yet, so the report is what's recorded so far.</span>}
-        </div>
+        <DetailHeader
+          crumb={{ to: "/snow?tab=log", label: "Season" }}
+          title="Service report"
+          documentTitle="Snow service report"
+          // The visit's own status; one that isn't done says what that means for the report just under it.
+          status={<EntityStatus kind="visit" status={visit.status} />}
+          meta={[visit.job?.client?.display_name, visit.scheduled_on && formatDate(visit.scheduled_on), visit.job && `Job #${visit.job.number}`]}
+          actions={<Button variant="primary" icon="printer" onClick={() => window.print()}>Print or save as PDF</Button>}
+        >
+          {visit.status !== "completed" && (
+            <div className="callout callout-warning">
+              <Icon name="alert" size={16} />
+              <div className="grow">This visit isn't marked done yet, so the report is what's recorded so far.</div>
+            </div>
+          )}
+        </DetailHeader>
       </div>
       <article className="worksheet">
         <header className="worksheet-head">

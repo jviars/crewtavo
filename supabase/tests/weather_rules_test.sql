@@ -1,7 +1,8 @@
 -- Database tests for weather rules a business sets itself (20261105000200_weather_rules): the owner
 -- and the office with the Settings area replace them all at once, checked and tidied, keeping the
 -- rest of the settings; the estimator, the crew, an office role without Settings and another business
--- can't; and an AI assistant may set them only when it may change the price list.
+-- can't; and an AI assistant may set them only when it may change the schedule (they warn about
+-- visits and change no price: 20261123100600_assistant_prices_are_money.sql).
 -- Run with scripts/test-db.sh (plain Postgres + prelude.sql). Any failed check stops with an error.
 \set ON_ERROR_STOP on
 \set QUIET on
@@ -52,13 +53,13 @@ insert into public.memberships (company_id, user_id, role, role_id) values
   (:'co', :'erin', 'estimator', null),
   (:'co', :'cole', 'field_crew', null),
   (:'co', :'gail', 'office', :'dispatcher');
-update public.companies set settings = settings || '{"payment_terms_days": 15}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"payment_terms_days": 15}' where id = :'co';
 
 select public.set_weather_rules(:'co', '[{"applies_to": " Paver patio ", "max_rain_pct": 50, "requires_dry_hours": 24, "note": "drop me"},
   {"applies_to": "", "min_temp_f": 40, "max_temp_f": 90, "max_wind_mph": 20, "max_rain_pct": null}]') as saved \gset
 select t_wr.check(:'saved'::jsonb = '[{"applies_to": "Paver patio", "max_rain_pct": 50, "requires_dry_hours": 24}, {"min_temp_f": 40, "max_temp_f": 90, "max_wind_mph": 20}]',
   'the owner sets the rules, tidied: names trimmed, a blank one for every job, unknown fields and empty limits dropped');
-select t_wr.check((select settings -> 'weather_rules' = :'saved'::jsonb and (settings ->> 'payment_terms_days')::int = 15 from public.companies where id = :'co'),
+select t_wr.check((select public.company_settings(id) -> 'weather_rules' = :'saved'::jsonb and (public.company_settings(id) ->> 'payment_terms_days')::int = 15 from public.companies where id = :'co'),
   'they''re saved where the weather task reads them, and the other settings stay');
 commit;
 
@@ -67,7 +68,7 @@ begin;
 set local role authenticated;
 select t_wr.as_user(:'otto');
 select public.set_weather_rules(:'co', '[{"applies_to": "Sealcoat", "min_temp_f": 50, "requires_dry_hours": 24}]');
-select t_wr.check((select settings -> 'weather_rules' = '[{"applies_to": "Sealcoat", "min_temp_f": 50, "requires_dry_hours": 24}]' from public.companies where id = :'co'),
+select t_wr.check((select public.company_settings(id) -> 'weather_rules' = '[{"applies_to": "Sealcoat", "min_temp_f": 50, "requires_dry_hours": 24}]' from public.companies where id = :'co'),
   'the office replaces them all at once');
 commit;
 
@@ -82,7 +83,7 @@ select t_wr.expect_error(format($q$select public.set_weather_rules(%L, '[]')$q$,
 select t_wr.as_user(:'nora');
 select t_wr.expect_error(format($q$select public.set_weather_rules(%L, '[]')$q$, :'co'), 'nor another business');
 select t_wr.as_user(:'wren');
-select t_wr.check((select jsonb_array_length(settings -> 'weather_rules') = 1 from public.companies where id = :'co'), 'and the rules are as they were');
+select t_wr.check((select jsonb_array_length(public.company_settings(id) -> 'weather_rules') = 1 from public.companies where id = :'co'), 'and the rules are as they were');
 commit;
 
 -- Only rules that make sense are saved; one that doesn't saves nothing.
@@ -96,30 +97,31 @@ select t_wr.expect_error(format($q$select public.set_weather_rules(%L, '[{"max_w
 select t_wr.expect_error(format($q$select public.set_weather_rules(%L, '[{"min_temp_f": 80, "max_temp_f": 60}]')$q$, :'co'), 'the lowest temperature is below the highest');
 select t_wr.expect_error(format($q$select public.set_weather_rules(%L, '[{"requires_dry_hours": 0}]')$q$, :'co'), 'dry hours are at least one');
 select t_wr.expect_error(format($q$select public.set_weather_rules(%L, %L)$q$, :'co', (select jsonb_agg('{"max_rain_pct": 50}'::jsonb) from generate_series(1, 51))), 'up to 50 rules');
-select t_wr.check((select settings -> 'weather_rules' = '[{"applies_to": "Sealcoat", "min_temp_f": 50, "requires_dry_hours": 24}]' from public.companies where id = :'co'),
+select t_wr.check((select public.company_settings(id) -> 'weather_rules' = '[{"applies_to": "Sealcoat", "min_temp_f": 50, "requires_dry_hours": 24}]' from public.companies where id = :'co'),
   'and none of those changed what was saved');
 select public.set_weather_rules(:'co', '[]');
-select t_wr.check((select settings -> 'weather_rules' = '[]' from public.companies where id = :'co'), 'an empty list clears them');
+select t_wr.check((select public.company_settings(id) -> 'weather_rules' = '[]' from public.companies where id = :'co'), 'an empty list clears them');
 rollback;
 
--- An AI assistant sets them through the function, when it may change the price list.
-\set pricing 'e7a1c000-0000-0000-0000-00000000000a'
+-- An AI assistant sets them through the function, when it may change the schedule.
+\set scheduling 'e7a1c000-0000-0000-0000-00000000000a'
 \set crewing 'e7a1c000-0000-0000-0000-00000000000b'
+\set pricing 'e7a1c000-0000-0000-0000-00000000000c'
 begin;
 set local role authenticated;
 select t_wr.as_user(:'wren');
-insert into public.assistant_connections (client_id, level, areas) values (:'pricing', 'areas', '{prices}'), (:'crewing', 'areas', '{crews}');
+insert into public.assistant_connections (client_id, level, areas) values (:'scheduling', 'areas', '{schedule}'), (:'crewing', 'areas', '{crews}'), (:'pricing', 'areas', '{prices}');
 commit;
 
 begin;
 set local role authenticated;
-select t_wr.as_user(:'wren', :'pricing');
+select t_wr.as_user(:'wren', :'scheduling');
 select set_config('request.method', 'POST', true), set_config('request.path', '/rpc/set_weather_rules', true);
 select hooks.before_request();
-select t_wr.check(current_setting('transaction_read_only') = 'off', 'an assistant that may change the price list can write with it');
+select t_wr.check(current_setting('transaction_read_only') = 'off', 'an assistant that may change the schedule can write with it');
 select public.set_weather_rules(:'co', '[{"applies_to": "Paver patio", "max_rain_pct": 40}]');
-select t_wr.check((select settings -> 'weather_rules' = '[{"applies_to": "Paver patio", "max_rain_pct": 40}]' from public.companies where id = :'co'), 'and the company guard lets the rules through');
-select t_wr.expect_error(format($q$update public.companies set settings = settings || '{"formulas": []}' where id = %L$q$, :'co'), 'but nothing else the guard keeps from assistants');
+select t_wr.check((select public.company_settings(id) -> 'weather_rules' = '[{"applies_to": "Paver patio", "max_rain_pct": 40}]' from public.companies where id = :'co'), 'and the company guard lets the rules through');
+select t_wr.expect_error(format($q$update public.companies set settings = public.company_settings(id) || '{"formulas": []}' where id = %L$q$, :'co'), 'but nothing else the guard keeps from assistants');
 rollback;
 begin;
 set local role authenticated;
@@ -127,6 +129,13 @@ select t_wr.as_user(:'wren', :'crewing');
 select set_config('request.method', 'POST', true), set_config('request.path', '/rpc/set_weather_rules', true);
 select hooks.before_request();
 select t_wr.check(current_setting('transaction_read_only') = 'on', 'one that may only change crews can''t');
+rollback;
+begin;
+set local role authenticated;
+select t_wr.as_user(:'wren', :'pricing');
+select set_config('request.method', 'POST', true), set_config('request.path', '/rpc/set_weather_rules', true);
+select hooks.before_request();
+select t_wr.check(current_setting('transaction_read_only') = 'on', 'nor one that may only change prices');
 rollback;
 
 \echo 'All weather rules tests passed.'

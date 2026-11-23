@@ -14,9 +14,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { Icon } from "@/components/ui/Icon";
+import { BrandMark } from "@/components/shell/BrandMark";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { EmptyState } from "@/components/ui/States";
 import { supabase } from "@/lib/api";
 import { onlySubs, useSessionIfAny } from "@/lib/session";
 import { authMessage, AuthLayout } from "./LoginPage";
@@ -77,28 +77,32 @@ export function OAuthConsentPage() {
     window.location.assign(data.redirect_url);
   }
 
-  const shell = (body: React.ReactNode) => (
-    <AuthLayout>
-      <div className={`card card-pad ${styles.card}`} style={{ padding: 28, width: "min(440px, 100%)" }}>{body}</div>
+  const shell = (body: React.ReactNode) => <AuthLayout>{body}</AuthLayout>;
+  /** A message in place of the request: a quiet icon, a title, what to do. */
+  const message = (icon: IconName, title: string, text: React.ReactNode, action?: React.ReactNode) => (
+    <AuthLayout center>
+      <span className={styles.mailTile} aria-hidden="true"><Icon name={icon} size={28} /></span>
+      <h1 className={styles.title}>{title}</h1>
+      {text && <p className={styles.sub} style={{ maxWidth: 440 }}>{text}</p>}
+      {action && <div className={styles.acts}>{action}</div>}
     </AuthLayout>
   );
 
-  if (!authorizationId) return shell(<EmptyState icon="link" title="This link is incomplete" />);
+  if (!authorizationId) return message("link", "This link is incomplete", null);
   if (onlySub) {
-    return shell(
-      <EmptyState icon="lock" title="Can't connect an AI assistant" action={<Button loading={busy === "deny"} disabled={busy !== null} onClick={() => decide(false)}>Go back</Button>}>
-        {error ?? NO_ASSISTANTS_FOR_SUBS}
-      </EmptyState>,
-    );
+    return message("lock", "Can't connect an AI assistant", error ?? NO_ASSISTANTS_FOR_SUBS, <Button loading={busy === "deny"} disabled={busy !== null} onClick={() => decide(false)}>Go back</Button>);
   }
-  if (details.error) return shell(<EmptyState icon="alert" title="This request can't be used" action={<Button onClick={() => details.refetch()} icon="refresh">Try again</Button>}>{(details.error as Error).message}</EmptyState>);
+  if (details.error) return message("alert", "This request can't be used", (details.error as Error).message, <Button onClick={() => details.refetch()} icon="refresh">Try again</Button>);
   if (details.isPending || !details.data || !("client" in details.data))
     return shell(
-      <div className="stack" style={{ gap: 16 }} aria-label="Loading" aria-busy="true">
-        <div className={styles.apps}><Skeleton width={52} height={52} radius={12} /><span className={styles.dots}>•••</span><Skeleton width={52} height={52} radius={12} /></div>
-        <Skeleton width="80%" height={22} style={{ justifySelf: "center" }} />
-        <Skeleton height={110} radius={12} />
-        <Skeleton height={46} radius={8} />
+      <div className={styles.flow} aria-label="Loading" aria-busy="true">
+        <div className={styles.apps}><Skeleton width={52} height={52} radius={14} /><span className={styles.link} /><Skeleton width={52} height={52} radius={14} /></div>
+        <Skeleton width="70%" height={28} style={{ justifySelf: "center", alignSelf: "center", marginTop: 22 }} />
+        <div className={styles.skeletonStack}>
+          <Skeleton height={64} radius={10} />
+          <Skeleton height={88} radius={10} />
+          <Skeleton height={46} radius={10} />
+        </div>
       </div>,
     );
 
@@ -111,34 +115,50 @@ export function OAuthConsentPage() {
   const logo = known ? (client as { logo_uri?: string }).logo_uri : undefined;
   // Connected before and given more than reading: it keeps that, so the screen doesn't say otherwise.
   const kept = given.data && given.data.level !== "read" ? describeAssistantAccess(given.data) : null;
+  const where = (
+    <>
+      <strong className={styles.host}>{destination.host}</strong>
+      <span>{destination.note}</span>
+    </>
+  );
   return shell(
-    <div className="stack" style={{ gap: 18 }}>
+    <div className={styles.flow}>
       <div className={styles.apps} aria-hidden="true">
         <span className={styles.appTile}>{logo ? <img src={logo} alt="" /> : name.slice(0, 1)}</span>
-        <span className={styles.dots}>•••</span>
-        <span className={styles.appTile} style={{ background: "var(--solid)", color: "var(--on-solid)" }}><Icon name="layers" size={24} /></span>
+        <span className={styles.link}><Icon name="link" size={14} /></span>
+        <span className={styles.appTile} data-us=""><BrandMark size={26} /></span>
       </div>
-      <div className="stack-sm" style={{ gap: 6, textAlign: "center" }}>
-        <h1 className={styles.title}>{known ? `Connect ${name}?` : `Connect an app called ${name}?`}</h1>
-        <p className="muted" style={{ margin: 0 }}>Signed in as <strong style={{ color: "var(--ink)" }}>{user.email}</strong></p>
+      <div className={styles.consentHead}>
+        <h1 className={styles.title} style={{ fontSize: "var(--fs-24)" }}>{known ? `Connect ${name}?` : `Connect an app called ${name}?`}</h1>
+        <p className={styles.sub}>Signed in as <strong>{user.email}</strong></p>
       </div>
-      <div className={known ? "callout" : "callout callout-warning"} role={known ? undefined : "alert"} data-destination={destination.kind}>
-        <Icon name={known ? "check" : "alert"} size={16} />
-        <span className="grow stack-sm" style={{ gap: 2 }}>
-          <span className="small strong">It connects to</span>
-          <strong className={styles.host}>{destination.host}</strong>
-          <span className="small">{destination.note}</span>
-        </span>
-      </div>
-      <span className="muted small strong" style={{ marginBottom: -10 }}>It will be able to read</span>
-      <ul className={styles.scopes} aria-label="It will be able to read">
-        <li><Icon name="check" size={14} bold />{CAN_READ}</li>
-      </ul>
-      <span className="muted small" style={{ marginTop: -8 }}>{kept ? keepsAccess(kept) : CANT_CHANGE}</span>
-      {error && <div className="callout callout-warning" role="alert" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small" style={{ fontWeight: 600 }}>{error}</span></div>}
-      <div className="stack-sm" style={{ gap: 8 }}>
-        <Button variant="primary" size="lg" loading={busy === "allow"} disabled={busy !== null} onClick={() => decide(true)}>Allow access</Button>
-        <Button size="lg" variant="ghost" loading={busy === "deny"} disabled={busy !== null} onClick={() => decide(false)}>Cancel</Button>
+      {!known && (
+        <div className={`callout callout-warning ${styles.consentWarn}`} role="alert" data-destination={destination.kind}>
+          <Icon name="alert" size={16} />
+          <span className={`grow ${styles.destination}`}><span className="strong">It connects to</span>{where}</span>
+        </div>
+      )}
+      <dl className={styles.facts}>
+        {known && (
+          <div className={styles.fact} data-destination={destination.kind}>
+            <dt>It connects to</dt>
+            <dd className={styles.destination} data-known=""><Icon name="check" size={16} />{where}</dd>
+          </div>
+        )}
+        <div className={styles.fact}>
+          <dt>It will be able to read</dt>
+          <dd>
+            <ul className={styles.scopes} aria-label="It will be able to read">
+              <li><Icon name="check" size={14} bold />{CAN_READ}</li>
+            </ul>
+          </dd>
+        </div>
+      </dl>
+      <p className={styles.note} style={{ marginTop: 12 }}>{kept ? keepsAccess(kept) : CANT_CHANGE}</p>
+      {error && <div className="callout callout-warning" role="alert" style={{ marginTop: 16 }}><Icon name="alert" size={16} /><span className="grow" style={{ fontWeight: 600 }}>{error}</span></div>}
+      <div className={styles.acts} data-stack="">
+        <Button variant="primary" loading={busy === "allow"} disabled={busy !== null} onClick={() => decide(true)}>Allow access</Button>
+        <Button variant="ghost" loading={busy === "deny"} disabled={busy !== null} onClick={() => decide(false)}>Cancel</Button>
       </div>
     </div>,
   );

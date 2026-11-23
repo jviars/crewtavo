@@ -676,14 +676,14 @@ isOneToOne: false
                   ]
                 },"client_contacts": {
                   Row: {
-                    "client_id": string,"company_id": string,"created_at": string,"email": string | null,"id": string,"is_primary": boolean,"name": string,"notify_email": boolean,"notify_sms": boolean,"phone": string | null,"role": string | null,"sms_consent_at": string | null,"sms_consent_source": string | null,"updated_at": string
+                    "client_id": string,"company_id": string,"contact_from_assistant": boolean,"created_at": string,"email": string | null,"id": string,"is_primary": boolean,"name": string,"notify_email": boolean,"notify_sms": boolean,"phone": string | null,"role": string | null,"sms_consent_at": string | null,"sms_consent_source": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "client_id": string,"company_id": string,"created_at"?: string,"email"?: string | null,"id"?: string,"is_primary"?: boolean,"name": string,"notify_email"?: boolean,"notify_sms"?: boolean,"phone"?: string | null,"role"?: string | null,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"updated_at"?: string
+                    "client_id": string,"company_id": string,"contact_from_assistant"?: boolean,"created_at"?: string,"email"?: string | null,"id"?: string,"is_primary"?: boolean,"name": string,"notify_email"?: boolean,"notify_sms"?: boolean,"phone"?: string | null,"role"?: string | null,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "client_id"?: string,"company_id"?: string,"created_at"?: string,"email"?: string | null,"id"?: string,"is_primary"?: boolean,"name"?: string,"notify_email"?: boolean,"notify_sms"?: boolean,"phone"?: string | null,"role"?: string | null,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"updated_at"?: string
+                    "client_id"?: string,"company_id"?: string,"contact_from_assistant"?: boolean,"created_at"?: string,"email"?: string | null,"id"?: string,"is_primary"?: boolean,"name"?: string,"notify_email"?: boolean,"notify_sms"?: boolean,"phone"?: string | null,"role"?: string | null,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -754,14 +754,14 @@ isOneToOne: false
                   ]
                 },"clients": {
                   Row: {
-                    "billing_address": NonNullable<Json>,"company_id": string,"company_name": string | null,"created_at": string,"custom_fields": NonNullable<Json>,"display_name": string,"email": string | null,"id": string,"lead_source": string | null,"links_reset_at": string | null,"marketing_opt_out": boolean,"name_key": string | null,"name_short": string | null,"notes": string | null,"payment_terms_days": number | null,"phone": string | null,"referred_by": string | null,"review_opt_out": boolean,"reviewed_at": string | null,"search": unknown,"sms_consent_at": string | null,"sms_consent_source": string | null,"sms_opt_out_at": string | null,"social_photos_opt_out": boolean,"status": string,"tags": (string)[],"tax_exempt": boolean,"tax_exempt_note": string | null,"updated_at": string
+                    "billing_address": NonNullable<Json>,"company_id": string,"company_name": string | null,"contact_from_assistant": boolean,"created_at": string,"custom_fields": NonNullable<Json>,"display_name": string,"email": string | null,"id": string,"lead_source": string | null,"links_reset_at": string | null,"marketing_opt_out": boolean,"name_key": string | null,"name_short": string | null,"notes": string | null,"payment_terms_days": number | null,"phone": string | null,"referred_by": string | null,"review_opt_out": boolean,"reviewed_at": string | null,"search": unknown,"sms_consent_at": string | null,"sms_consent_source": string | null,"sms_opt_out_at": string | null,"social_photos_opt_out": boolean,"status": string,"tags": (string)[],"tax_exempt": boolean,"tax_exempt_note": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "billing_address"?: NonNullable<Json>,"company_id": string,"company_name"?: string | null,"created_at"?: string,"custom_fields"?: NonNullable<Json>,"display_name": string,"email"?: string | null,"id"?: string,"lead_source"?: string | null,"links_reset_at"?: string | null,"marketing_opt_out"?: boolean,"name_key"?: never,"name_short"?: never,"notes"?: string | null,"payment_terms_days"?: number | null,"phone"?: string | null,"referred_by"?: string | null,"review_opt_out"?: boolean,"reviewed_at"?: string | null,"search"?: never,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"sms_opt_out_at"?: string | null,"social_photos_opt_out"?: boolean,"status"?: string,"tags"?: (string)[],"tax_exempt"?: boolean,"tax_exempt_note"?: string | null,"updated_at"?: string
+                    "billing_address"?: NonNullable<Json>,"company_id": string,"company_name"?: string | null,"contact_from_assistant"?: boolean,"created_at"?: string,"custom_fields"?: NonNullable<Json>,"display_name": string,"email"?: string | null,"id"?: string,"lead_source"?: string | null,"links_reset_at"?: string | null,"marketing_opt_out"?: boolean,"name_key"?: never,"name_short"?: never,"notes"?: string | null,"payment_terms_days"?: number | null,"phone"?: string | null,"referred_by"?: string | null,"review_opt_out"?: boolean,"reviewed_at"?: string | null,"search"?: never,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"sms_opt_out_at"?: string | null,"social_photos_opt_out"?: boolean,"status"?: string,"tags"?: (string)[],"tax_exempt"?: boolean,"tax_exempt_note"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "billing_address"?: NonNullable<Json>,"company_id"?: string,"company_name"?: string | null,"created_at"?: string,"custom_fields"?: NonNullable<Json>,"display_name"?: string,"email"?: string | null,"id"?: string,"lead_source"?: string | null,"links_reset_at"?: string | null,"marketing_opt_out"?: boolean,"name_key"?: never,"name_short"?: never,"notes"?: string | null,"payment_terms_days"?: number | null,"phone"?: string | null,"referred_by"?: string | null,"review_opt_out"?: boolean,"reviewed_at"?: string | null,"search"?: never,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"sms_opt_out_at"?: string | null,"social_photos_opt_out"?: boolean,"status"?: string,"tags"?: (string)[],"tax_exempt"?: boolean,"tax_exempt_note"?: string | null,"updated_at"?: string
+                    "billing_address"?: NonNullable<Json>,"company_id"?: string,"company_name"?: string | null,"contact_from_assistant"?: boolean,"created_at"?: string,"custom_fields"?: NonNullable<Json>,"display_name"?: string,"email"?: string | null,"id"?: string,"lead_source"?: string | null,"links_reset_at"?: string | null,"marketing_opt_out"?: boolean,"name_key"?: never,"name_short"?: never,"notes"?: string | null,"payment_terms_days"?: number | null,"phone"?: string | null,"referred_by"?: string | null,"review_opt_out"?: boolean,"reviewed_at"?: string | null,"search"?: never,"sms_consent_at"?: string | null,"sms_consent_source"?: string | null,"sms_opt_out_at"?: string | null,"social_photos_opt_out"?: boolean,"status"?: string,"tags"?: (string)[],"tax_exempt"?: boolean,"tax_exempt_note"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -791,6 +791,26 @@ isOneToOne: false
                   }
                   Relationships: [
                     
+                  ]
+                },"company_private_settings": {
+                  Row: {
+                    "company_id": string,"settings": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"settings"?: NonNullable<Json>
+                  }
+                  Update: {
+                    "company_id"?: string,"settings"?: NonNullable<Json>
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "company_private_settings_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: true
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
                   ]
                 },"company_roles": {
                   Row: {
@@ -4635,6 +4655,9 @@ isOneToOne: false
               "currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
             }[]
                            },
+"company_settings":
+{ Args: { "p_company": string }; Returns: Json
+                           },
 "convert_quote_to_job":
 { Args: { "p_quote": string }; Returns: string
                            },
@@ -5644,6 +5667,11 @@ isOneToOne: false
                            },
 "visit_notice_is_repeat":
 { Args: { "p_run": number }; Returns: boolean
+                           },
+"visit_prices":
+{ Args: { "p_visits": (string)[] }; Returns: {
+              "id": string,"price": number,"price_note": string
+            }[]
                            },
 "web_analytics_save":
 { Args: { "p_changes": Json,"p_company": string }; Returns: Json

@@ -13,13 +13,13 @@
  */
 import { WEATHER_SOURCE_LABELS, type PlaceWeather, type Sky } from "@crewtavo/core/weather";
 import { useQuery } from "@tanstack/react-query";
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
 import { CHART_MOTION, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/Chart";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Dialog } from "@/components/ui/Dialog";
-import { Select } from "@/components/ui/Select";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
@@ -129,12 +129,7 @@ export function WeatherDialog({ sites, place, onPick, onClose }: { sites: Site[]
   return (
     <Dialog open onClose={onClose} title="Weather" size="xl" focusField={false} className={styles.dialog}>
       <div className={styles.body}>
-        {places.length + (shop ? 1 : 0) > 1 && (
-          <Select className="select" value={at ?? ""} onChange={(e) => onPick(e.target.value)} aria-label="Whose weather">
-            {shop && <option value={SHOP}>Your shop</option>}
-            {places.map((s) => <option key={s.job_id} value={s.job_id}>{customer(s)}{s.job.property?.city ? ` · ${s.job.property.city}` : ""}</option>)}
-          </Select>
-        )}
+        {places.length + (shop ? 1 : 0) > 1 && <PlacePicker shop={Boolean(shop)} places={places} at={at} onPick={onPick} />}
         {!at ? (
           <p className="muted">The weather is shown at your shop, once its address is in Settings → Company, and at a snow customer's property, once its address is on the map.</p>
         ) : weather.error && !w ? (
@@ -163,6 +158,34 @@ export function WeatherDialog({ sites, place, onPick, onClose }: { sites: Site[]
         )}
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Whose weather: a quiet button with the place's name, opening a menu of the shop and each snow
+ * customer with a check by the one shown (a sheet on a phone), and a search once there are many.
+ */
+function PlacePicker({ shop, places, at, onPick }: { shop: boolean; places: Site[]; at: string | null; onPick: (place: string) => void }) {
+  const [query, setQuery] = useState("");
+  const site = places.find((s) => s.job_id === at);
+  const current = site ? customer(site) : "Your shop";
+  const q = query.trim().toLowerCase();
+  const found = places.filter((s) => !q || `${customer(s)} ${s.job.property?.city ?? ""}`.toLowerCase().includes(q));
+  const many = places.length > 8;
+  const items: MenuEntry[] = [
+    ...(shop && (!q || "your shop".includes(q)) ? [{ label: "Your shop", icon: "home" as const, checked: at === SHOP, onSelect: () => onPick(SHOP) }, ...(found.length ? [{ separator: true as const }] : [])] : []),
+    ...found.map((s) => ({ label: customer(s), description: s.job.property?.city ?? undefined, icon: "pin" as const, checked: s.job_id === at, onSelect: () => onPick(s.job_id) })),
+  ];
+  return (
+    <Menu
+      items={items}
+      label={`Whose weather: ${current}`}
+      title="Whose weather"
+      align="start"
+      triggerClassName={`btn btn-ghost ${styles.picker}`}
+      trigger={<><Icon name={site ? "pin" : "home"} size={16} /><span>{current}</span><Icon name="chevronDown" size={14} /></>}
+      search={many ? { value: query, onChange: setQuery, placeholder: "Find a customer" } : undefined}
+    />
   );
 }
 

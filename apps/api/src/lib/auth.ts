@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv, Env } from "../env";
 import { ASSISTANT_NO_API, assistantsOff, companySwitch, isRead } from "./assistants";
-import { dbError, HttpError, uuid } from "./http";
+import { dbError, HttpError, signInHome, uuid } from "./http";
 import { allow } from "./limit";
 import { sealAuthToken } from "./signInGuard";
 import { stackServices } from "./stack";
@@ -83,16 +83,18 @@ export function requireCompany(roles: readonly Role[] = STAFF, permission?: Perm
 
 /**
  * A one-time link from an email (invite, password reset, sign-in) that opens the app, which redeems
- * the token itself (supabase.auth.verifyOtp in apps/web/src/lib/session.tsx). Supabase's own
- * action_link instead bounces through its redirect allow-list and falls back to the project's Site
- * URL (localhost on a new project), so it breaks until someone edits the Supabase dashboard.
+ * the token itself (apps/web/src/lib/emailLink.ts). Supabase's own action_link instead bounces
+ * through its redirect allow-list and falls back to the project's Site URL (localhost on a new
+ * project), so it breaks until someone edits the Supabase dashboard. It always opens on APP_URL
+ * (signInHome), never the address the request asking for it came to.
  * `welcome` shows the "set your password" screen for a person who was invited but never signed in.
  */
-export async function emailAuthLink(env: Env, base: string, tokenHash: string, type: "invite" | "recovery" | "magiclink", welcome = false): Promise<string> {
+export async function emailAuthLink(env: Env, tokenHash: string, type: "invite" | "recovery" | "magiclink", welcome = false): Promise<string> {
+  const home = signInHome(env);
   // In an instance the token goes out sealed: Auth's token alone isn't redeemed (lib/signInGuard.ts).
   const params = new URLSearchParams({ token_hash: await sealAuthToken(env, tokenHash, type), type });
   if (welcome) params.set("welcome", "1");
-  return `${base}/?${params}`;
+  return `${home}/?${params}`;
 }
 
 /** A password that isn't the account's. */
@@ -113,19 +115,20 @@ function authService(env: AppEnv["Bindings"]): string {
   return stackServices(env as unknown as Record<string, string | undefined>)?.auth.replace(/\/$/, "") ?? `${env.SUPABASE_URL.replace(/\/$/, "")}/auth/v1`;
 }
 
-/** Tries one person gets an hour across all their sign-ins, for each kind of check. */
+/** Tries one person gets an hour, across all their sign-ins and every kind of check. */
 const TRIES_PER_PERSON = 50;
 
 /**
  * The signed-in person's current password, asked for before something a leftover session or an
  * unlocked phone shouldn't do quietly (new spare keys, changing the Stripe key or the password).
  * Checked with a throwaway sign-in that's ended right away; `limit` names the tries counted, `max`
- * an hour for each sign-in, so a stolen session can't use up the owner's own, and 50 an hour for
- * the person, so many sessions can't guess without end. Their profile comes back, for the record.
+ * an hour for each sign-in, so a stolen session can't use up the owner's own. On top of that, 50
+ * an hour for the person, one count for every kind of check, so neither many sessions nor many
+ * kinds of check can guess without end. Their profile comes back, for the record.
  */
 export async function confirmPassword(c: Context<AppEnv>, password: string, limit: string, max = 5): Promise<{ email: string; full_name: string | null }> {
   const { userId, sessionId } = c.var;
-  if (!(await allow(c.env, `${limit}:${userId}:${sessionId}`, max, 3600)) || !(await allow(c.env, `${limit}:${userId}`, TRIES_PER_PERSON, 3600))) {
+  if (!(await allow(c.env, `${limit}:${userId}:${sessionId}`, max, 3600)) || !(await allow(c.env, `password-check:${userId}`, TRIES_PER_PERSON, 3600))) {
     throw new HttpError(429, "Too many tries. Wait an hour and try again.");
   }
   const { data: profile } = await adminClient(c.env).from("profiles").select("email, full_name").eq("user_id", userId).maybeSingle();

@@ -249,26 +249,55 @@ export function fieldLabel(name: string): string {
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : name;
 }
 
+/** The line that stands for a visitor's blank lines in the office's email (visitorLines): a no-break space. */
+const VISITOR_GAP = "\u00a0";
+
+/**
+ * What a visitor typed, as it goes in the office's email: its lines kept, and each run of blank lines
+ * between them a line holding only a no-break space (VISITOR_GAP). Their paragraphs still read apart,
+ * but the email never has two line breaks in a row from them, so none of it stands as a paragraph of
+ * its own there, where a link alone in one would be a button (apps/api/src/lib/email.ts). A job
+ * application's email (careers.ts) does the same.
+ */
+export function visitorLines(value: string): string {
+  const lines: string[] = [];
+  for (const line of value.replace(/\r\n?/g, "\n").split("\n")) {
+    if (line.trim()) lines.push(line);
+    else if (lines.length && lines.at(-1) !== VISITOR_GAP) lines.push(VISITOR_GAP);
+  }
+  if (lines.at(-1) === VISITOR_GAP) lines.pop();
+  return lines.join("\n");
+}
+
+/** And what a visitor typed that's shown on one line: a field's name, a promo code. */
+export const visitorLine = (value: string) => value.replace(/\s+/g, " ").trim();
+
 /** What became of a message's promo code: ready to apply (no problem), or why it wasn't applied. */
 export type PromoResult = { code: string; problem: string | null } | null;
 
 /** The office email's line for a message's promo code. */
 export function promoLine(promo: PromoResult): string | null {
   if (!promo) return null;
-  if (!promo.problem) return `Promo code ${promo.code}, ready to apply on the quote.`;
-  return `Promo code ${promo.code} wasn't applied: ${promo.problem.charAt(0).toLowerCase()}${promo.problem.slice(1)}`;
+  const code = visitorLine(promo.code);
+  if (!promo.problem) return `Promo code ${code}, ready to apply on the quote.`;
+  return `Promo code ${code} wasn't applied: ${promo.problem.charAt(0).toLowerCase()}${promo.problem.slice(1)}`;
 }
 
-/** The email the people a form names get for each message: its subject and words (lib/email.ts renders them). */
-export function messageEmail(input: { formName: string; submission: Submission; link: string; promo?: PromoResult }): { subject: string; text: string } {
+/**
+ * The email the people a form names get for each message: its subject and words (lib/email.ts
+ * renders them). `link`: the request in Crewtavo; null when the server doesn't know its own address,
+ * and the email says where to find it instead.
+ */
+export function messageEmail(input: { formName: string; submission: Submission; link: string | null; promo?: PromoResult }): { subject: string; text: string } {
   const { submission: s, formName, link } = input;
   const who = s.name ?? s.email ?? s.phone ?? "someone";
   const short: string[] = [];
   const long: string[] = [];
   for (const [name, value] of s.fields) {
-    const shown = Array.isArray(value) ? value.join(", ") : value;
-    if (shown.includes("\n") || shown.length > 80) long.push(`${fieldLabel(name)}:\n${shown}`);
-    else short.push(`${fieldLabel(name)}: ${shown}`);
+    const shown = visitorLines(Array.isArray(value) ? value.join(", ") : value);
+    const label = visitorLine(fieldLabel(name));
+    if (shown.includes("\n") || shown.length > 80) long.push(`${label}:\n${shown}`);
+    else short.push(`${label}: ${shown}`);
   }
   const first = (s.name ?? "").split(/\s+/)[0];
   return {
@@ -278,7 +307,7 @@ export function messageEmail(input: { formName: string; submission: Submission; 
       short.join("\n"),
       ...long,
       promoLine(input.promo ?? null),
-      link,
+      link ?? "It's in Requests in Crewtavo.",
       s.email ? `Reply to this email to answer ${first || "them"}.` : null,
     ].filter(Boolean).join("\n\n"),
   };

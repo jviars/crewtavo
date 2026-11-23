@@ -20,9 +20,9 @@ describe("Settings → Weather rules", () => {
     }
   });
 
-  it("is in Business, found by searching for the weather", () => {
-    const business = settingsGroups({ role: "owner", permissions: [], config: { singleCompany: false, platform: "docker" } } as never).find((g) => g.title === "Business")!.items;
-    const weather = business.find((i) => i.label === "Weather rules")!;
+  it("is in Scheduling, found by searching for the weather", () => {
+    const scheduling = settingsGroups({ role: "owner", permissions: [], config: { singleCompany: false, platform: "docker" } } as never).find((g) => g.title === "Scheduling")!.items;
+    const weather = scheduling.find((i) => i.label === "Weather rules")!;
     expect(weather).toMatchObject({ tab: "weather", icon: "sun" });
     expect(weather.keywords).toContain("weather rain wind temperature hold");
   });

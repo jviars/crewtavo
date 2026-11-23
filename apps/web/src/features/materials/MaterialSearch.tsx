@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -30,7 +31,7 @@ export function MaterialSearch({ initial = "", onPick, autoFocus }: { initial?: 
   const items = results.data?.items ?? [];
   return (
     <div className="stack-sm" style={{ gap: 10 }}>
-      <div className="input-group">
+      <div className="input-group material-search">
         <span className="addon"><Icon name="search" size={14} /></span>
         <input
           className="input"
@@ -46,7 +47,15 @@ export function MaterialSearch({ initial = "", onPick, autoFocus }: { initial?: 
       {query.length < 2 ? (
         <span className="muted small">Search by brand, product and color, like <strong>Timberline Charcoal</strong> or <strong>drip edge white</strong>, or paste an ABC item number.</span>
       ) : results.isPending ? (
-        <span className="muted small" role="status">Looking at your branch…</span>
+        <div className="material-results" role="status">
+          <span className="sr-only">Looking at your branch…</span>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="material-result" aria-hidden="true">
+              <span className="grow" style={{ gap: 6 }}><Skeleton width={["52%", "40%", "46%"][i]} height={11} /><Skeleton width="22%" height={9} /></span>
+              <Skeleton width={64} height={11} />
+            </div>
+          ))}
+        </div>
       ) : results.error ? (
         <span className="field-error" role="alert">{(results.error as Error).message}</span>
       ) : !items.length ? (
@@ -59,11 +68,12 @@ export function MaterialSearch({ initial = "", onPick, autoFocus }: { initial?: 
               <>
                 <span className="grow">
                   <strong>{item.name}</strong>
-                  <span className="muted small">{[item.item_number, item.color].filter(Boolean).join(" · ")}</span>
+                  <span className="muted">{[item.item_number, item.color].filter(Boolean).join(" · ")}</span>
                 </span>
                 <span className="num material-price">
-                  {item.unit_price !== null ? <><strong>{formatMoneyCents(item.unit_price)}</strong><span className="muted small"> / {unit.toLowerCase()}</span></> : <span className="muted small">{item.note ?? "No price"}</span>}
+                  {item.unit_price !== null ? <><strong>{formatMoneyCents(item.unit_price)}</strong> / {unit.toLowerCase()}</> : (item.note ?? "No price")}
                 </span>
+                {onPick && <span className="icon-chevron" aria-hidden="true"><Icon name="chevronRight" size={16} /></span>}
               </>
             );
             return onPick ? (

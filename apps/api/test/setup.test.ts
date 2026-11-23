@@ -4,6 +4,7 @@ import { readEnv, type Env } from "../src/env";
 import { decryptJson, encryptJson, signToken, verifyToken } from "../src/lib/crypto";
 import { createHmac } from "node:crypto";
 import { emailAuthLink } from "../src/lib/auth";
+import { NO_APP_URL } from "../src/lib/http";
 import { apiKey, stackServices, withStack } from "../src/lib/stack";
 import { setStartup } from "../src/lib/startup";
 
@@ -60,16 +61,20 @@ describe("readEnv", () => {
 });
 
 describe("emailed auth links", () => {
-  const dev = { SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SECRET_KEY: "sb_secret_test" };
+  const dev = { SUPABASE_URL: "http://127.0.0.1:54321", SUPABASE_SECRET_KEY: "sb_secret_test", APP_URL: "https://ops.example.com/" };
   it("open the app with the token, not Supabase's redirect", async () => {
-    expect(await emailAuthLink(dev, "https://ops.example.com", "hash123", "invite")).toBe("https://ops.example.com/?token_hash=hash123&type=invite");
-    expect(await emailAuthLink(dev, "https://ops.example.com", "h", "recovery", true)).toBe("https://ops.example.com/?token_hash=h&type=recovery&welcome=1");
+    expect(await emailAuthLink(dev, "hash123", "invite")).toBe("https://ops.example.com/?token_hash=hash123&type=invite");
+    expect(await emailAuthLink(dev, "h", "recovery", true)).toBe("https://ops.example.com/?token_hash=h&type=recovery&welcome=1");
   });
 
   it("carry the server's signature in an instance, where the gateway redeems nothing else", async () => {
-    const link = new URL(await emailAuthLink({ ...dev, CREWTAVO_GATEWAY: "1" }, "https://ops.example.com", "hash123", "invite"));
+    const link = new URL(await emailAuthLink({ ...dev, CREWTAVO_GATEWAY: "1" }, "hash123", "invite"));
     expect(link.searchParams.get("token_hash")).toMatch(/^hash123\.[0-9a-f]{40}$/);
     expect(link.searchParams.get("type")).toBe("invite");
+  });
+
+  it("aren't made without APP_URL: never on whatever address a request came to", async () => {
+    await expect(emailAuthLink({ ...dev, APP_URL: undefined }, "hash123", "recovery")).rejects.toMatchObject({ status: 503, message: NO_APP_URL });
   });
 });
 

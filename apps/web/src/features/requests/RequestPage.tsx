@@ -1,34 +1,46 @@
-import { SALES, type Role } from "@crewtavo/core/roles";
+import { ROLE_LABELS, SALES, type Role } from "@crewtavo/core/roles";
+import { bookingSpan } from "@crewtavo/core/slots";
 import { fieldLabel, fieldRole } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
 import { ClientPreview } from "@/components/ui/ClientPreview";
+import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
+import { RowPerson } from "@/components/ui/InboxList";
+import { MapsLink } from "@/components/ui/MapsLink";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
 import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { addressLine, formatDateTime, formatDate, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
-import { ContactLine } from "../clients/ContactsCard";
 import { PropertySelect } from "../clients/ClientForm";
 import type { WebVisit } from "../marketing/website";
-import { WebVisitRows } from "../marketing/WebVisitRows";
+import { WebVisitFacts } from "../marketing/WebVisitRows";
 import { PlansCard } from "../plans/PlansCard";
 import { readyDraft } from "../quotes/DraftedCallout";
 import { VisitDialog, type VisitInput } from "../schedule/VisitDialog";
 import { askedFor, BookAskedTime } from "./AskedTime";
-import { memberName, requestSource, useTeam } from "./RequestsPage";
+import { memberName, requestSource, SOURCE_ICONS, useTeam } from "./RequestsPage";
+import styles from "./RequestPage.module.css";
 
+const DAY = 86_400_000;
+
+/**
+ * A request's page (Page-Client / Page-Quote boards): the crumb, the title with the next step as the
+ * one green button, a quiet line with its number, status, client and where it came from, then what
+ * they asked for, its quotes and assessments on hairlines, and its facts beside them. On a phone the
+ * next step is pinned above the tab bar.
+ */
 export function RequestPage() {
   const { id = "" } = useParams();
   const session = useSession();
@@ -37,6 +49,7 @@ export function RequestPage() {
   const [visit, setVisit] = useState<VisitInput | null>(null);
   const [editing, setEditing] = useState(false);
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
+  const timeZone = session.company.timezone;
 
   const request = useQuery({
     queryKey: ["request", id],
@@ -114,6 +127,7 @@ export function RequestPage() {
   if (request.isPending) return <DetailSkeleton />;
   if (request.error || !r) return <PageError error={request.error} onRetry={() => request.refetch()} back={<BackLink to="/requests">Requests</BackLink>} />;
 
+  const now = Date.now();
   // A website form's promo code shows as the Promo code row, so it isn't listed twice (it stays in the answers).
   const promoShown = Boolean(r.website_form_id && (r.promo_code || r.rejected_promo_code));
   const answers = Object.entries((r.answers ?? {}) as Record<string, unknown>).filter(
@@ -121,182 +135,252 @@ export function RequestPage() {
   );
   const questions = ((r.form?.questions ?? []) as Array<{ key: string; label: string }>).reduce<Record<string, string>>((m, q) => ({ ...m, [q.key]: q.label }), {});
   const open = !["converted", "archived"].includes(r.status);
+  const archived = r.status === "archived";
   // A quote drafted by itself as this came in (Settings → Company): the request is still as it arrived, so this says it's there.
   const drafted = readyDraft(r.quotes);
+  const quotes = [...r.quotes].sort((a, b) => Number(b.number) - Number(a.number));
+  // A time picked on a booking form that needs the office's OK: held for them until it's answered.
+  const asked = askedFor(r, timeZone);
+  const askPending = Boolean(asked) && !r.visits.some((v) => v.kind === "assessment" && v.status !== "cancelled");
+  // Booking that time is the next step while it can still be booked; then the quote, once there is one; else starting one.
+  const bookFirst = askPending && canSell && Date.parse(r.asked_starts_at!) > now;
+  const openQuote = quotes.length > 0 && !bookFirst ? quotes[0] : null;
+  const waitingDays = r.status === "new" && now - Date.parse(r.created_at) > 2 * DAY ? Math.floor((now - Date.parse(r.created_at)) / DAY) : 0;
+  const salesperson = memberName(team.data?.find((m) => m.user_id === r.assigned_to));
   // The request's salesperson goes out, unless someone picks another.
   const assessment = (): VisitInput => ({ request_id: r.id, property_id: r.property?.id ?? null, title: `Assessment: ${r.title}`, kind: "assessment", assignee_ids: r.assigned_to ? [r.assigned_to] : [], context: { label: `Request #${r.number} · ${r.client?.display_name ?? ""}`, to: `/requests/${r.id}` } });
+  const visitWhen = (v: (typeof r.visits)[number]) => (v.starts_at ? bookingSpan(v.starts_at, v.ends_at, timeZone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled");
+  const visitPeople = (v: (typeof r.visits)[number]) => v.assignees.map((a) => memberName(team.data?.find((m) => m.user_id === a.user_id))).filter(Boolean).join(", ");
+
+  // Whoever can sell, and whoever has it now (even off the team since), with a face and their role.
+  const assignItems: MenuEntry[] = [
+    { label: "Nobody yet", lead: <span aria-hidden="true"><RowPerson name={null} /></span>, checked: !r.assigned_to, onSelect: () => r.assigned_to && assign.mutate(null) },
+    { separator: true },
+    ...(team.data ?? [])
+      .filter((m) => (m.active && SALES.includes(m.role as Role)) || m.user_id === r.assigned_to)
+      .map((m) => ({
+        label: memberName(m)!,
+        lead: <span aria-hidden="true"><RowPerson name={memberName(m)} /></span>,
+        end: m.user_id === session.userId ? "You" : !m.active ? "Left the team" : (ROLE_LABELS[m.role as Role] ?? undefined),
+        checked: m.user_id === r.assigned_to,
+        onSelect: () => m.user_id !== r.assigned_to && assign.mutate(m.user_id),
+      })),
+  ];
+
+  const more: MenuEntry[] = [
+    { label: "Edit request", icon: "edit", kbd: "E", onSelect: () => setEditing(true) },
+    { label: "Assign to", icon: "user", kbd: "A", items: assignItems, disabled: team.isPending },
+    { label: "Measure on the map", icon: "area", kbd: "M", hidden: !r.property, onSelect: () => navigate(`/measure?request=${r.id}&property=${r.property!.id}${r.property!.lat != null ? `&lat=${r.property!.lat}&lng=${r.property!.lng}` : ""}`) },
+    // Once it has a quote, opening that is the green button, and another quote is only an option.
+    { label: "Create another quote", icon: "quote", hidden: !open || !openQuote, onSelect: () => toQuote.mutate() },
+    { label: "Convert straight to a job", icon: "job", hidden: !open, onSelect: () => toJob.mutate() },
+    { separator: true },
+    { label: archived ? "Reopen request" : "Archive request", icon: archived ? "undo" : "archive", onSelect: () => setStatus.mutate(archived ? "new" : "archived") },
+    {
+      label: "Delete request",
+      icon: "trash",
+      danger: true,
+      hidden: r.quotes.length > 0,
+      onSelect: async () => {
+        if (await confirm({ title: "Delete this request?", body: "Its assessments are deleted too. This can't be undone.", confirmLabel: "Delete", danger: true })) remove.mutate();
+      },
+    },
+  ];
+
+  // The quote action, in the header on a desktop and pinned above the tab bar on a phone.
+  const quoteButton = (hide?: string) =>
+    openQuote ? (
+      <Link className={`btn btn-primary ${hide ?? ""}`} to={`/quotes/${openQuote.id}`}><Icon name="quote" size={16} />Open quote #{openQuote.number}</Link>
+    ) : (
+      <Button className={hide} variant={bookFirst ? "secondary" : "primary"} icon="quote" loading={toQuote.isPending} disabled={toDraft.isPending} onClick={() => toQuote.mutate()}>Create quote</Button>
+    );
+
+  const salesPicker = canSell ? (
+    <Menu
+      items={assignItems}
+      label={`Salesperson: ${salesperson ?? "Nobody yet"}. Change`}
+      title="Salesperson"
+      align="start"
+      triggerClassName={styles.picker}
+      trigger={
+        <>
+          <RowPerson name={salesperson} empty="Nobody yet" />
+          <span className={salesperson ? undefined : styles.nobody}>{salesperson ?? "Nobody yet"}</span>
+          <Icon name="chevronDown" size={14} />
+        </>
+      }
+    />
+  ) : (
+    <span className={styles.person}><RowPerson name={salesperson} empty="Nobody yet" />{salesperson ?? "Nobody yet"}</span>
+  );
 
   return (
     <>
-      <BackLink to="/requests">Requests</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: "/requests", label: "Requests" }}
         title={r.title}
+        meta={[
+          `Request #${r.number}`,
+          // A new one is on its way, nobody's late yet: an amber dot and plain words. Waiting too long is the amber words.
+          <EntityStatus kind="request" status={r.status} />,
+          waitingDays > 0 && <span className={styles.waiting}><Icon name="clock" size={13} />Waiting {waitingDays} days</span>,
+          r.client && <ClientPreview id={r.client.id}><Link to={`/clients/${r.client.id}`} className={styles.client}>{r.client.display_name}</Link></ClientPreview>,
+          <span className={styles.source}><Icon name={(r.website_form_id ? "globe" : SOURCE_ICONS[r.source]) ?? "globe"} size={13} />{requestSource(r)}</span>,
+        ]}
         actions={
-          canSell && (
+          canSell && open && (
             <>
-              {open && <Button icon="calendar" onClick={() => setVisit(assessment())}>Schedule assessment</Button>}
-              {/* The next step, until it has a quote: then that quote is, and another is only an option. */}
-              {open && <Button variant={r.quotes.length ? "secondary" : "primary"} icon="quote" loading={toQuote.isPending} disabled={toDraft.isPending} onClick={() => toQuote.mutate()}>Create quote</Button>}
-              {open && <Button icon="sparkle" loading={toDraft.isPending} disabled={toQuote.isPending} onClick={() => toDraft.mutate()}>Draft a quote</Button>}
-              <Menu
-                items={[
-                  { label: "Edit request", icon: "edit", onSelect: () => setEditing(true) },
-                  { label: "Measure on the map", icon: "area", hidden: !r.property, onSelect: () => navigate(`/measure?request=${r.id}&property=${r.property!.id}${r.property!.lat != null ? `&lat=${r.property!.lat}&lng=${r.property!.lng}` : ""}`) },
-                  { label: "Convert straight to a job", icon: "job", hidden: !open, onSelect: () => toJob.mutate() },
-                  { separator: true },
-                  { label: r.status === "archived" ? "Reopen request" : "Archive request", icon: r.status === "archived" ? "undo" : "archive", onSelect: () => setStatus.mutate(r.status === "archived" ? "new" : "archived") },
-                  {
-                    label: "Delete request",
-                    icon: "trash",
-                    danger: true,
-                    hidden: r.quotes.length > 0,
-                    onSelect: async () => {
-                      if (await confirm({ title: "Delete this request?", body: "Its assessments are deleted too. This can't be undone.", confirmLabel: "Delete", danger: true })) remove.mutate();
-                    },
-                  },
-                ]}
-              />
+              <Button icon="sparkle" loading={toDraft.isPending} disabled={toQuote.isPending} onClick={() => toDraft.mutate()}>Draft a quote</Button>
+              <Button className="hide-mobile" icon="calendar" onClick={() => setVisit(assessment())}>Schedule assessment</Button>
+              {quoteButton("hide-mobile")}
             </>
           )
         }
+        more={canSell ? more : undefined}
+        moreTitle={r.title}
       />
-      <div className="page-meta">
-        <span className="muted">Request #{r.number}</span>
-        <EntityStatus kind="request" status={r.status} />
-        {r.client && <ClientPreview id={r.client.id}><Link to={`/clients/${r.client.id}`} className="strong">{r.client.display_name}</Link></ClientPreview>}
-        <span className="chip">{requestSource(r)}</span>
-      </div>
 
-      {/* A time picked on a booking form that needs the office's OK: held for them until it's answered. */}
-      {askedFor(r, session.company.timezone) && !r.visits.some((v) => v.kind === "assessment" && v.status !== "cancelled") && (
-        <div className="callout callout-info">
-          <Icon name="calendar" size={20} />
-          <div className="grow">
-            <strong>Asked for {askedFor(r, session.company.timezone)}</strong>
-            <div className="small" style={{ fontWeight: 400 }}>{r.client?.display_name ?? "The client"} picked this time online and was told it isn't confirmed yet. Book it, or schedule the assessment for another time.</div>
+      <DetailColumns
+        grouped
+        side={
+          <Section title="Details">
+            <Facts className={styles.facts}>
+              <Fact label="Email">{r.client?.email && <a href={`mailto:${r.client.email}`}>{r.client.email}</a>}</Fact>
+              <Fact label="Phone">{r.client?.phone && <a href={`tel:${r.client.phone}`}>{r.client.phone}</a>}</Fact>
+              <Fact label="Property">{r.property && <MapsLink place={r.property} className={styles.address}>{addressLine(r.property)}</MapsLink>}</Fact>
+              <Fact label="Salesperson">{salesPicker}</Fact>
+              <Fact label="Received">{formatDateTime(r.created_at)}{r.form ? ` via ${r.form.name}` : ""}</Fact>
+              <Fact label="Promo code">
+                {r.promo_code ? (
+                  <span className={styles.code}>{r.promo_code}</span>
+                ) : (
+                  r.rejected_promo_code && (
+                    <>
+                      <span className={`${styles.code} ${styles.rejected}`}>{r.rejected_promo_code}</span>
+                      <span className={styles.why}>Not applied: {r.promo_problem ?? "That code isn't valid."}</span>
+                    </>
+                  )
+                )}
+              </Fact>
+              {r.web_visit && <WebVisitFacts visit={r.web_visit as unknown as WebVisit} />}
+            </Facts>
+          </Section>
+        }
+      >
+        {askPending && (
+          <div className="callout callout-info">
+            <Icon name="calendar" size={16} />
+            <div className="grow">
+              <div>Asked for {asked}</div>
+              {r.client?.display_name ?? "The client"} picked this time online and was told it isn't confirmed yet. Book it, or schedule the assessment for another time.
+            </div>
+            {/* On a phone it's the pinned bar's green button instead. */}
+            {canSell && <BookAskedTime request={r} size="sm" className={bookFirst ? "hide-mobile" : undefined} onBooked={refresh} />}
           </div>
-          {canSell && <BookAskedTime request={r} onBooked={refresh} />}
-        </div>
-      )}
+        )}
 
-      {drafted && (
-        <div className="callout callout-info">
-          <Icon name="sparkle" size={20} />
-          <div className="grow">
-            <strong>A draft quote is ready</strong>
-            <div className="small" style={{ fontWeight: 400 }}>
+        {drafted && (
+          <div className="callout callout-info">
+            <Icon name="sparkle" size={16} />
+            <div className="grow">
+              <div>A draft quote is ready</div>
               Quote #{drafted.quote.number} was drafted {drafted.by === "claude" ? "by AI" : "from your price list"} when this request came in.{drafted.by === "claude" ? " It can be wrong: check it before you send it." : ""} Nothing has been sent, and the request is as it arrived until you send the quote.
             </div>
+            {/* Unless it's what the page's green button opens already. */}
+            {!(canSell && open && openQuote?.id === drafted.quote.id) && <Link to={`/quotes/${drafted.quote.id}`} className="btn">Open the draft</Link>}
           </div>
-          <Link to={`/quotes/${drafted.quote.id}`} className="strong">Open the draft</Link>
-        </div>
-      )}
+        )}
 
-      {r.status === "new" && Date.now() - Date.parse(r.created_at) > 2 * 86_400_000 && (
-        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">Waiting over 2 days. Schedule an assessment or start a quote.</div></div>
-      )}
+        {archived && (
+          <div className={`callout ${styles.oneLine}`}>
+            <Icon name="archive" size={16} />
+            <div className="grow">This request is archived.</div>
+            {canSell && <Button size="sm" icon="undo" loading={setStatus.isPending} onClick={() => setStatus.mutate("new")}>Reopen request</Button>}
+          </div>
+        )}
 
-      <div className="two-col">
-        <div className="wide stack-lg">
-          <section className="card card-pad stack-sm">
-            <strong>What they asked for</strong>
-            {r.details ? (
-              <p className="pre-wrap" style={{ margin: 0 }}>{r.details}</p>
-            ) : (
-              !answers.length && <EmptyState inline title="No details given" action={canSell && <Button onClick={() => setEditing(true)}>Add details</Button>} />
-            )}
-            {answers.length > 0 && (
-              <dl className="kv" style={{ marginTop: 8 }}>
-                {answers.map(([key, value]) => (
-                  <div key={key} style={{ display: "contents" }}>
-                    {/* A website form's answers are under its own field names (Apps → Website Forms). */}
-                    <dt>{questions[key] ?? (r.website_form_id ? fieldLabel(key) : statusLabel(key))}</dt>
-                    <dd>{Array.isArray(value) ? value.join(", ") : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value)}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </section>
-
-          <PlansCard scope={{ kind: "request", id: r.id, propertyId: r.property?.id ?? null }} />
-
-          <section className="stack">
-            <div className="section-head">
-              <h2 className="section-title">Assessments</h2>
-              {canSell && open && <Button size="sm" icon="plus" onClick={() => setVisit(assessment())}>Schedule</Button>}
-            </div>
-            <div className="card">
-              {r.visits.length === 0 && <EmptyState inline title="No assessments yet" />}
-              {r.visits.map((v) => (
-                <button key={v.id} type="button" className="card-row" onClick={() => canSell && setVisit({ ...v, request_id: r.id, property_id: r.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id) })}>
-                  <Icon name="calendar" size={20} />
-                  <span className="grow">
-                    <strong>{v.title}</strong>
-                    <span className="muted text-sm" style={{ display: "block" }}>{v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}</span>
-                  </span>
-                  <EntityStatus kind="visit" status={v.status} />
-                </button>
-              ))}
-            </div>
-            {canSell && r.status === "assessment_scheduled" && (
-              <Button icon="check" style={{ justifySelf: "start" }} loading={setStatus.isPending} onClick={() => setStatus.mutate("assessment_complete")}>Mark assessment done</Button>
-            )}
-          </section>
-
-          {r.quotes.length > 0 && (
-            <section className="stack">
-              <h2 className="section-title">Quotes</h2>
-              <div className="card">
-                {r.quotes.map((q) => (
-                  <Link key={q.id} to={`/quotes/${q.id}`} className="card-row">
-                    <span className="muted tabular">#{q.number}</span>
-                    <strong className="grow ellipsis">{q.title}</strong>
-                    <span className="tabular">{formatMoney(q.total)}</span>
-                    <EntityStatus kind="quote" status={q.status} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
-        <aside className="narrow stack">
-          <div className="card card-pad stack-sm">
-            <strong>Client</strong>
-            {r.client && <Link to={`/clients/${r.client.id}`} className="strong">{r.client.display_name}</Link>}
-            {r.client?.email && <ContactLine icon="mail" href={`mailto:${r.client.email}`}>{r.client.email}</ContactLine>}
-            {r.client?.phone && <ContactLine icon="phone" href={`tel:${r.client.phone}`}>{r.client.phone}</ContactLine>}
-            <dl className="kv" style={{ marginTop: 8 }}>
-              <dt>Property</dt><dd>{r.property ? addressLine(r.property) : "—"}</dd>
-              <dt>Salesperson</dt>
-              <dd>
-                {canSell ? (
-                  <Select className="select input-sm" aria-label="Salesperson" value={r.assigned_to ?? ""} disabled={assign.isPending || team.isPending} onChange={(e) => assign.mutate(e.target.value || null)}>
-                    <option value="">Nobody yet</option>
-                    {(team.data ?? [])
-                      .filter((m) => (m.active && SALES.includes(m.role as Role)) || m.user_id === r.assigned_to)
-                      .map((m) => <option key={m.user_id} value={m.user_id}>{memberName(m)}{m.user_id === session.userId ? " (you)" : ""}{m.active ? "" : " (no longer on the team)"}</option>)}
-                  </Select>
-                ) : (
-                  memberName(team.data?.find((m) => m.user_id === r.assigned_to)) ?? "Nobody yet"
-                )}
-              </dd>
-              <dt>Received</dt><dd>{formatDateTime(r.created_at)}{r.form ? ` via ${r.form.name}` : ""}</dd>
-              {r.promo_code && <><dt>Promo code</dt><dd><span className="promo-code">{r.promo_code}</span></dd></>}
-              {!r.promo_code && r.rejected_promo_code && (
-                <>
-                  <dt>Promo code</dt>
-                  <dd>
-                    <span className="promo-code promo-code-rejected">{r.rejected_promo_code}</span>
-                    <span className="muted small" style={{ display: "block", marginTop: 4 }}>Not applied: {r.promo_problem ?? "That code isn't valid."}</span>
-                  </dd>
-                </>
+        <Section title="What they asked for" action={canSell && (r.details || answers.length > 0) && <button type="button" onClick={() => setEditing(true)}>Edit</button>}>
+          {!r.details && !answers.length ? (
+            <EmptyState inline title="No details given" action={canSell && <Button size="sm" icon="edit" onClick={() => setEditing(true)}>Add details</Button>} />
+          ) : (
+            <>
+              {r.details && <p className={styles.details}>{r.details}</p>}
+              {answers.length > 0 && (
+                <Facts label="Their answers">
+                  {answers.map(([key, value]) => (
+                    // A website form's answers are under its own field names (Apps → Website Forms).
+                    <Fact key={key} label={questions[key] ?? (r.website_form_id ? fieldLabel(key) : statusLabel(key))}>
+                      {Array.isArray(value) ? value.join(", ") : typeof value === "boolean" ? (value ? "Yes" : "No") : String(value)}
+                    </Fact>
+                  ))}
+                </Facts>
               )}
-              {r.web_visit && <WebVisitRows visit={r.web_visit as unknown as WebVisit} />}
-            </dl>
-          </div>
-        </aside>
-      </div>
+            </>
+          )}
+        </Section>
+
+        {quotes.length > 0 && (
+          <Section title="Quotes" count={quotes.length}>
+            <RelatedList label="Quotes">
+              {quotes.map((q) => (
+                <RelatedRow key={q.id} to={`/quotes/${q.id}`} lead={`#${q.number}`} title={q.title} sub={<EntityStatus kind="quote" status={q.status} />} end={<b>{formatMoney(q.total)}</b>} />
+              ))}
+            </RelatedList>
+          </Section>
+        )}
+
+        {/* A closed request with none has nothing to say here. */}
+        {(open || r.visits.length > 0) && (
+          <Section
+            title="Assessments"
+            count={r.visits.length || undefined}
+            action={
+              canSell &&
+              (r.status === "assessment_scheduled" ? (
+                <button type="button" disabled={setStatus.isPending} onClick={() => setStatus.mutate("assessment_complete")}><Icon name="check" size={14} />Mark assessment done</button>
+              ) : (
+                open && r.visits.length > 0 && <button type="button" onClick={() => setVisit(assessment())}><Icon name="plus" size={14} />Schedule</button>
+              ))
+            }
+          >
+            {r.visits.length === 0 ? (
+              <EmptyState inline title="No assessments yet" action={canSell && open && <Button size="sm" icon="calendar" onClick={() => setVisit(assessment())}>Schedule assessment</Button>} />
+            ) : (
+              <RelatedList label="Assessments">
+                {r.visits.map((v) => (
+                  <RelatedRow
+                    key={v.id}
+                    lead={<span className="rel-icon"><Icon name="calendar" size={15} /></span>}
+                    title={visitWhen(v)}
+                    sub={[<EntityStatus kind="visit" status={v.status} />, visitPeople(v), v.notes]}
+                    onClick={canSell ? () => setVisit({ ...v, request_id: r.id, property_id: r.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id) }) : undefined}
+                  />
+                ))}
+              </RelatedList>
+            )}
+          </Section>
+        )}
+
+        <PlansCard scope={{ kind: "request", id: r.id, propertyId: r.property?.id ?? null }} />
+      </DetailColumns>
+
+      {canSell && open && (
+        <ActionBar>
+          {bookFirst ? (
+            // Booking the time they asked for comes first; another time is under Assessments.
+            <>
+              {quoteButton()}
+              <BookAskedTime request={r} onBooked={refresh} />
+            </>
+          ) : (
+            <>
+              {/* Room for one short word beside the green button; its name stays the whole action. */}
+              <Button icon="calendar" aria-label="Schedule assessment" onClick={() => setVisit(assessment())}>Assessment</Button>
+              {quoteButton()}
+            </>
+          )}
+        </ActionBar>
+      )}
 
       {visit && <VisitDialog visit={visit} onClose={() => setVisit(null)} onSaved={refresh} />}
       {editing && <EditRequestDialog request={{ id: r.id, title: r.title, details: r.details, client_id: r.client?.id ?? null, property_id: r.property?.id ?? null }} onClose={() => setEditing(false)} onSaved={refresh} />}

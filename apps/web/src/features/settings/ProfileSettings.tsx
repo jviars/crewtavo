@@ -6,6 +6,7 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Face } from "@/components/ui/Avatar";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { MapsAppSetting } from "@/components/ui/MapsLink";
+import { Section } from "@/components/ui/Section";
 import { api, supabase } from "@/lib/api";
 import { can, hasRole, isSub, useSession } from "@/lib/session";
 import { setTheme, useTheme, type ThemeChoice } from "@/lib/theme";
@@ -16,6 +17,7 @@ import { CalendarFeedCard } from "./CalendarFeedCard";
 import { LanguageCard } from "./Language";
 import { NotificationSettings } from "./NotificationSettings";
 import { PhotoButtons } from "./ProfilePhoto";
+import { SaveBar } from "./SettingsKit";
 import { SignatureCard } from "./SignatureCard";
 import { SpareKeysCard } from "./SpareKeysCard";
 import { languageChoice, msg, t } from "@/lib/i18n";
@@ -64,60 +66,71 @@ export function ProfileSettings() {
   const saved = useJustDone(save);
   const changed = useJustDone(changePassword);
   return (
-    <div className="two-col">
-      <form className="wide card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <div className="row" style={{ gap: 14 }}>
-          <span className="avatar" style={{ width: 72, height: 72, fontSize: 24, background: color }}><Face name={name || email} photo={session.profile.avatar_url} /></span>
-          <div className="stack-sm" style={{ gap: 8 }}>
-            <div>
-              <strong style={{ fontSize: 16 }}>{name || t("Your name")}</strong>
-              {email && <div className="muted small">{email}</div>}
+    <>
+      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+        <Section level={3} title={t("Your details")}>
+          <div className="set-me">
+            <span className="avatar" style={{ background: color }}><Face name={name || email} photo={session.profile.avatar_url} /></span>
+            <div className="set-me-text">
+              <strong>{name || t("Your name")}</strong>
+              {email && <span className="hint">{email}</span>}
+              <PhotoButtons userId={session.userId} photo={session.profile.avatar_url} />
             </div>
-            <PhotoButtons userId={session.userId} photo={session.profile.avatar_url} />
           </div>
-        </div>
-        <div className="form-grid">
-          <Field label={t("Full name")}><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
-          <Field label={t("Mobile phone")} optional hint={madeForSub ? t("Texts about your jobs go here. Leave it empty to get them at the number {company} has for you.", { company: session.company.name }) : undefined}>
-            <input className="input" type="tel" value={phone} onChange={(e) => setPhone(formatPhoneTyping(e.target.value))} maxLength={40} autoComplete="tel" />
-          </Field>
-        </div>
-        {!sub && <div className="field">
-          <span>{t("Color on the schedule")}</span>
-          <div className="row wrap" style={{ gap: 8 }}>
-            {COLORS.map((c) => (
-              <button key={c} type="button" aria-label={t("Color {color}", { color: c })} aria-pressed={color === c} onClick={() => setColor(c)} style={{ width: 32, height: 32, borderRadius: "50%", background: c, border: color === c ? "3px solid var(--surface)" : "0", boxShadow: color === c ? `0 0 0 2px ${c}` : "none", cursor: "pointer", transition: "box-shadow 150ms" }} />
-            ))}
+          <div className="set-grid">
+            <Field label={t("Full name")}><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={120} autoComplete="name" /></Field>
+            <Field label={t("Mobile phone")} optional hint={madeForSub ? t("Texts about your jobs go here. Leave it empty to get them at the number {company} has for you.", { company: session.company.name }) : undefined}>
+              <input className="input" type="tel" value={phone} onChange={(e) => setPhone(formatPhoneTyping(e.target.value))} maxLength={40} autoComplete="tel" />
+            </Field>
+            {!sub && <div className="field set-full">
+              <span id="schedule-color-label">{t("Color on the schedule")}</span>
+              <div className="set-swatches" role="group" aria-labelledby="schedule-color-label">
+                {COLORS.map((c) => (
+                  <button key={c} type="button" className="set-swatch" aria-label={t("Color {color}", { color: c })} aria-pressed={color === c} onClick={() => setColor(c)} style={{ background: c }} />
+                ))}
+              </div>
+            </div>}
           </div>
-        </div>}
+        </Section>
         <FormError error={save.error} />
-        <div className="form-actions"><FormChecks /><Button type="submit" variant="primary" loading={save.isPending} done={saved}>{t("Save profile")}</Button></div>
+        <SaveBar><Button type="submit" variant="primary" loading={save.isPending} done={saved}>{t("Save profile")}</Button><FormChecks /></SaveBar>
       </form>
-      <div className="narrow stack">
       {signs && <SignatureCard />}
       <NotificationSettings phone={session.profile.phone} />
-      <Appearance />
-      {languageChoice() && <LanguageCard />}
-      <MapsAppSetting />
-      {!sub && <MeasureMapSetting />}
+      <Section level={3} title={t("Appearance and language")}>
+        <div className="set-items">
+          <Appearance />
+          {languageChoice() && <LanguageCard />}
+        </div>
+      </Section>
+      <Section level={3} title={t("Maps and directions")}>
+        {/* Each says what it is and where it's kept, as an item of its own. */}
+        <div className="set-items">
+          <MapsAppSetting />
+          {!sub && <MeasureMapSetting />}
+        </div>
+      </Section>
       {!sub && <CalendarFeedCard />}
       <SpareKeysCard />
       {madeForSub && (
-        <div className="card card-pad stack-sm">
-          <strong>{t("Signing in")}</strong>
-          <span className="muted small">{signingInNote(session.company.name, subCodeWays(session.config.features, session.subcontractor))}</span>
-        </div>
+        <Section level={3} title={t("Signing in")}>
+          <p className="set-note">{signingInNote(session.company.name, subCodeWays(session.config.features, session.subcontractor))}</p>
+        </Section>
       )}
-      {!madeForSub && <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
-        <strong>{t("Change password")}</strong>
-        <Field label={t("Current password")} hint={t("Leave it empty if you don't have one yet.")}><input className="input" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" /></Field>
-        <Field label={t("New password")} hint={t("At least 8 characters.")}><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required minLength={8} /></Field>
-        <Field label={t("Confirm new password")} error={confirmPw && password !== confirmPw ? t("The passwords don't match.") : null}><input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" required /></Field>
-        <FormError error={changePassword.error} />
-        <Button type="submit" loading={changePassword.isPending} done={changed} doneLabel={t("Password changed")} style={{ justifySelf: "start" }}>{t("Change password")}</Button>
-      </form>}
-      </div>
-    </div>
+      {!madeForSub && (
+        <Section level={3} title={t("Password")}>
+          <form className="set-grid" onSubmit={(e: FormEvent) => { e.preventDefault(); changePassword.mutate(); }}>
+            <Field label={t("Current password")} className="set-full set-half" hint={t("Leave it empty if you don't have one yet.")}><input className="input" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" /></Field>
+            <Field label={t("New password")} hint={t("At least 8 characters.")}><input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required minLength={8} /></Field>
+            <Field label={t("Confirm new password")} error={confirmPw && password !== confirmPw ? t("The passwords don't match.") : null}><input className="input" type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} autoComplete="new-password" required /></Field>
+            <div className="set-full">
+              <FormError error={changePassword.error} />
+              <Button type="submit" loading={changePassword.isPending} done={changed} doneLabel={t("Password changed")}>{t("Change password")}</Button>
+            </div>
+          </form>
+        </Section>
+      )}
+    </>
   );
 }
 
@@ -131,9 +144,9 @@ const THEMES: Array<{ value: ThemeChoice; label: string; icon: IconName }> = [
 function Appearance() {
   const theme = useTheme();
   return (
-    <div className="card card-pad stack-sm">
-      <strong id="appearance-title">{t("Appearance")}</strong>
-      <div className="segmented" role="group" aria-labelledby="appearance-title" style={{ justifySelf: "start" }}>
+    <div className="set-item">
+      <span className="set-item-label" id="appearance-title">{t("Appearance")}</span>
+      <div className="segmented" role="group" aria-labelledby="appearance-title">
         {THEMES.map((choice) => (
           <button key={choice.value} type="button" aria-pressed={theme === choice.value} onClick={() => setTheme(choice.value)}>
             <Icon name={choice.icon} size={14} />
@@ -141,7 +154,7 @@ function Appearance() {
           </button>
         ))}
       </div>
-      <span className="muted small">{t("System follows your device's light or dark setting. Saved on this device.")}</span>
+      <span className="hint">{t("System follows your device's light or dark setting. Saved on this device.")}</span>
     </div>
   );
 }

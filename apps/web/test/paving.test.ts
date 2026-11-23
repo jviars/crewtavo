@@ -7,7 +7,7 @@ import { contours, guessPolygons, opened } from "../src/features/measure/maskOut
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
 import { combine, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
-import { currentStep, estimateSums, formulaValue, pavesAsphalt, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
+import { currentStep, estimateSums, formulaValue, groupProjects, pavesAsphalt, projectGroup, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
 import { lineDestination } from "../src/features/roofing/estimate/rows";
 
 /** A cells × cells grid with the given rectangles filled ([x0, y0, x1, y1], end exclusive). */
@@ -276,6 +276,27 @@ describe("the paving flow", () => {
     expect(currentStep({ status: "converted", lines: [{}], jobs: [{ id: "j", status: "completed" }] }, m, [{ status: "paid" }])).toBe("done");
     expect(stageLabel({ status: "sent", lines: [{}] }, true).label).toBe("Proposal sent");
     expect(stageLabel({ status: "draft", lines: [] }, true).label).toBe("Estimate");
+    // A lost proposal is quiet, as a lost quote is everywhere else.
+    expect(stageLabel({ status: "lost", lines: [{}] }, true).tone).toBe("muted");
+  });
+
+  it("groups the project list by what needs doing first, in the list's order, and skips empty groups", () => {
+    const project = (id: string, status: string, lines: unknown[] = [{}], jobs: Array<{ status: string }> = []) => ({ id, quote: { status, lines, jobs } });
+    expect(projectGroup({ status: "changes_requested", lines: [{}] })).toBe("changes");
+    expect(projectGroup({ status: "approved", lines: [{}], jobs: [] })).toBe("won");
+    expect(projectGroup({ status: "draft", lines: [] })).toBe("working");
+    expect(projectGroup({ status: "converted", lines: [{}], jobs: [{ status: "completed" }] })).toBe("done");
+    expect(projectGroup({ status: "converted", lines: [{}], jobs: [{ status: "active" }] })).toBe("job");
+    expect(projectGroup({ status: "archived", lines: [{}] })).toBe("closed");
+    const groups = groupProjects([project("a", "sent"), project("b", "draft"), project("c", "changes_requested"), project("d", "sent"), project("e", "approved")]);
+    expect(groups.map((g) => [g.key, g.rows.map((r) => r.id)])).toEqual([
+      ["changes", ["c"]],
+      ["won", ["e"]],
+      ["ready", ["b"]],
+      ["sent", ["a", "d"]],
+    ]);
+    // Only the ones someone must act on carry a tone.
+    expect(groups.map((g) => ("tone" in g ? g.tone : null))).toEqual(["warning", "good", null, null]);
   });
 });
 

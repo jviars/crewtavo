@@ -9,8 +9,8 @@ import { copyText } from "@/lib/clipboard";
 import { MAPS_LABELS, mapsApps, mapsUrl, placeText, rememberApp, rememberedApp, routeApp, routeApps, routeLegs, type MapsApp, type Place, type Route, type RouteApp } from "@/lib/maps";
 import { Dialog } from "./Dialog";
 import { Icon } from "./Icon";
-import { Select } from "./Select";
 import { t } from "@/lib/i18n";
+import { Select } from "./Select";
 
 export function MapsLink({ place, className = "address-link", title, children }: { place: Place; className?: string; title?: string; children: ReactNode }) {
   const [choosing, setChoosing] = useState(false);
@@ -151,8 +151,8 @@ function RouteChooser({ route, apps, onClose }: { route: Route; apps: RouteApp[]
 export function MapsAppSetting() {
   const [app, setApp] = useState<MapsApp | "">(() => rememberedApp() ?? "");
   return (
-    <div className="card card-pad stack-sm">
-      <strong id="maps-app-title">{t("Directions")}</strong>
+    <div className="set-item">
+      <span className="set-item-label" id="maps-app-title">{t("Directions")}</span>
       <Select
         className="select"
         aria-labelledby="maps-app-title"

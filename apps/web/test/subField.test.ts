@@ -43,8 +43,9 @@ describe("a sub's navigation", () => {
   it("gives them their own tab bar on the phone: My day, My jobs, Paperwork and Profile", () => {
     expect(mobileTabs(sub({ team_chat: { enabled: true } })).map((t) => t.to)).toEqual(["/field", "/field/jobs", "/field/paperwork", "/settings?tab=profile"]);
     expect(mobileTabs(sub())).toBe(SUB_TABS);
-    // The team's is as before: chat only while it's on.
+    // The team's: Home, My day, Schedule and Chat (More follows), with Clients in Chat's place while chat is off.
     expect(mobileTabs(staff("field_crew")).map((t) => t.to)).toEqual(MOBILE_TABS.map((t) => t.to));
+    expect(MOBILE_TABS.map((t) => t.to)).toEqual(["/", "/field", "/schedule", "/chat"]);
     expect(mobileTabs({ role: "office", company: { settings: {} } }).map((t) => t.to)).toEqual(["/", "/field", "/schedule", "/clients"]);
   });
 

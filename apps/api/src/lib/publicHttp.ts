@@ -74,8 +74,8 @@ export function privateHost(url: URL): boolean {
   return /^localhost$|\.localhost$|\.internal$|\.local$/i.test(host) || Boolean(isIP(host) && privateAddress(host));
 }
 
-/** Looks a link's name up for its connection, and refuses it if any address is private. */
-const publicLookup: LookupFunction = (hostname, options, callback) => {
+/** Looks a link's name up for its connection, and refuses it if any address is private (lib/smtp.ts uses it too). */
+export const publicLookup: LookupFunction = (hostname, options, callback) => {
   dns.lookup(hostname, { ...options, all: true }, (error, addresses) => {
     if (error) return callback(new NameNotFoundError(hostname), []);
     if (!addresses.length || addresses.some((a) => privateAddress(a.address))) return callback(new PrivateAddressError(hostname), []);

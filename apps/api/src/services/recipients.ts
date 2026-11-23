@@ -33,6 +33,37 @@ export async function stoppedNumbers(admin: Db, companyId: string, phones: Reado
   return (data ?? []).map((row) => row.phone_key);
 }
 
+/** How many clients addedByAssistant asks about at once. */
+const ADDED_BATCH = 200;
+
+/**
+ * Of a client's addresses, the ones an AI assistant put on file and nobody else has changed since
+ * (contact_from_assistant, 20261123100900_addresses_an_assistant_added.sql): the client's own, and
+ * their contacts' by id. An assistant's own sends (a quote, an invoice, a campaign) leave these out,
+ * so text it read can't have it add an address and send there what it read.
+ */
+export async function addedByAssistant(admin: Db, companyId: string, clientIds: readonly string[]): Promise<{ clients: Set<string>; contacts: Set<string> }> {
+  const found = { clients: new Set<string>(), contacts: new Set<string>() };
+  // A campaign's audience is thousands of clients: asked about a few hundred at a time, so the
+  // request's address stays short.
+  for (let i = 0; i < clientIds.length; i += ADDED_BATCH) {
+    const batch = clientIds.slice(i, i + ADDED_BATCH);
+    const [clients, contacts] = await Promise.all([
+      admin.from("clients").select("id").eq("company_id", companyId).in("id", batch).eq("contact_from_assistant", true),
+      admin.from("client_contacts").select("id").eq("company_id", companyId).in("client_id", batch).eq("contact_from_assistant", true),
+    ]);
+    if (clients.error || contacts.error) throw new Error(`Couldn't read which addresses an assistant added: ${(clients.error ?? contacts.error)!.message}`);
+    for (const c of clients.data ?? []) found.clients.add(c.id);
+    for (const c of contacts.data ?? []) found.contacts.add(c.id);
+  }
+  return found;
+}
+
+
+/** An assistant asked to send to an address it put on file itself (addedByAssistant). */
+export const addedByAssistantRefusal = (to: string | null) =>
+  `${to ? `${to} was` : "This client's email and phone were"} put on file by an AI assistant, so an assistant doesn't send to ${to ? "it" : "them"}. Send this from Crewtavo instead.`;
+
 /**
  * What clientRecipients needs beyond the client: their contacts, whether the company sends to
  * them, and which of their numbers texted STOP. `settings` is the company's, when the caller has

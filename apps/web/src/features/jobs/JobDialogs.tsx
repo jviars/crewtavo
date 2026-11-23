@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { choose, confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
-import { NumberInput } from "@/components/ui/NumberInput";
+import { Icon } from "@/components/ui/Icon";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -18,6 +17,9 @@ import { firstInvoiceKind, invoiceChoices, startingAmount, type InvoiceJob, type
 import { billsOutsideSchedule, dropPaymentsQuestion, INSTALLMENT_COLUMNS, type InstallmentRow } from "./JobPaymentSchedule";
 import { snowJobs } from "../snow/snowData";
 import { RecurrenceEditor, type Recurrence } from "./RecurrenceEditor";
+import styles from "./jobs.module.css";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 export function useCrews() {
   const session = useSession();
@@ -65,11 +67,10 @@ function BillingQuestions({ kind, value, kept, onChange }: { kind: string; value
       <span className="grow"><strong style={{ display: "block" }}>{label}</strong><span className="muted small">{hint}</span></span>
     </label>
   );
-  const legend = (text: string) => <legend className="strong" style={{ marginBottom: 6 }}>{text}</legend>;
-  const fieldset = { border: 0, padding: 0, margin: 0 };
+  const legend = (text: string) => <legend className={styles.legend}>{text}</legend>;
   if (kind !== "recurring") {
     return (
-      <fieldset className="stack-sm" style={fieldset}>
+      <fieldset className={styles.choices}>
         {legend("When do you invoice?")}
         {ONE_OFF_CHOICES.map((c) => choice("when", value.when === c.value, c.label, c.hint, () => onChange({ ...value, when: c.value })))}
         {kept === "after_visit" && choice("when", value.when === "after_visit", "After each visit", "Each finished visit is ready to invoice.", () => onChange({ ...value, when: "after_visit" }))}
@@ -79,7 +80,7 @@ function BillingQuestions({ kind, value, kept, onChange }: { kind: string; value
   const old = kept && !SCHEDULED(kept) ? ONE_OFF_CHOICES.find((c) => c.value === kept) : undefined;
   return (
     <>
-      <fieldset className="stack-sm" style={fieldset}>
+      <fieldset className={styles.choices}>
         {legend("How is it priced?")}
         {PRICING_CHOICES.map((c) =>
           choice("pricing", SCHEDULED(value.when) && value.pricing === c.value, c.label, c.hint, () =>
@@ -88,7 +89,7 @@ function BillingQuestions({ kind, value, kept, onChange }: { kind: string; value
           ),
         )}
       </fieldset>
-      <fieldset className="stack-sm" style={fieldset}>
+      <fieldset className={styles.choices}>
         {legend("When do you invoice?")}
         {SCHEDULE_CHOICES.filter((c) => !(c.value === "after_visit" && value.pricing === "fixed" && SCHEDULED(value.when))).map((c) =>
           choice("when", value.when === c.value, c.label, c.hint, () => onChange({ ...value, when: c.value })),
@@ -187,7 +188,7 @@ export function NewJobDialog({ open, onClose, onCreated }: { open: boolean; onCl
             </Select>
           </Field>
         </div>
-        <div className="segmented" role="group" aria-label="Job type">
+        <div className={`segmented ${styles.kindSwitch}`} role="group" aria-label="Job type">
           <button type="button" aria-pressed={kind === "one_off"} onClick={() => setKind("one_off")}>One-off job</button>
           <button type="button" aria-pressed={kind === "recurring"} onClick={() => setKind("recurring")}>Recurring job</button>
         </div>
@@ -356,7 +357,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
     <Dialog open onClose={onClose} title="Job details" size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="Title"><input className="input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value.trimStart() })} required maxLength={200} /></Field>
-        <div className="segmented" role="group" aria-label="Job type">
+        <div className={`segmented ${styles.kindSwitch}`} role="group" aria-label="Job type">
           <button type="button" aria-pressed={f.kind === "one_off"} onClick={() => { setF({ ...f, kind: "one_off" }); setBilling(job.kind === "one_off" ? billingOf(job) : { ...billing, when: "on_completion" }); }}>One-off job</button>
           <button type="button" aria-pressed={f.kind === "recurring"} onClick={() => { setF({ ...f, kind: "recurring" }); setBilling(job.kind === "recurring" ? billingOf(job) : { pricing: "per_visit", when: "after_visit", day: "" }); }}>Recurring job</button>
         </div>
@@ -439,7 +440,7 @@ export function PauseJobDialog({ jobId, canSchedule, onClose, onSaved }: { jobId
         <Field label="Resume on" optional hint="Leave it empty to resume it yourself.">
           <input className="input" type="date" value={resumeOn} min={tomorrow} onChange={(e) => setResumeOn(e.target.value)} />
         </Field>
-        {snow.data?.has(jobId) && <div className="callout callout-warning" role="status">{SNOW_PAUSED}</div>}
+        {snow.data?.has(jobId) && <div className="callout callout-warning" role="status"><Icon name="snow" size={16} /><div className="grow">{SNOW_PAUSED}</div></div>}
         <FormError error={pause.error} />
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
@@ -477,16 +478,16 @@ export function InvoiceJobDialog({ job, onClose, onCreated }: { job: InvoiceJob;
   return (
     <Dialog open onClose={onClose} title="Create invoice">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (!overLimit) create.mutate(); }}>
-        <div className="stack-sm" role="radiogroup" aria-label="Invoice type">
+        <div className={styles.choices} role="radiogroup" aria-label="Invoice type">
           {options.map((o) => (
-            <label key={o.kind} className="card card-pad" style={{ display: "flex", gap: 10, cursor: "pointer", padding: 14, borderColor: kind === o.kind ? "var(--green)" : undefined, boxShadow: kind === o.kind ? "var(--ring)" : undefined }}>
-              <input type="radio" name="kind" checked={kind === o.kind} onChange={() => setKind(o.kind)} style={{ marginTop: 3 }} />
-              <span><strong>{o.title}</strong><span className="muted small" style={{ display: "block" }}>{o.body}</span></span>
+            <label key={o.kind} className={`card-row choice-row${kind === o.kind ? " picked" : ""}`} style={{ cursor: "pointer" }}>
+              <input type="radio" name="kind" checked={kind === o.kind} onChange={() => setKind(o.kind)} />
+              <span className="grow"><strong style={{ display: "block" }}>{o.title}</strong><span className="muted small">{o.body}</span></span>
             </label>
           ))}
         </div>
         {kind === "progress" && (
-          <div className="row wrap">
+          <div className="row wrap" style={{ gap: 12 }}>
             <div className="segmented" role="group" aria-label="Bill by">
               <button type="button" aria-pressed={mode === "percent"} onClick={() => setMode("percent")}>Percent</button>
               <button type="button" aria-pressed={mode === "amount"} onClick={() => setMode("amount")}>Amount</button>

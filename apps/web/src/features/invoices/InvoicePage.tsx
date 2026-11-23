@@ -2,23 +2,24 @@ import { autopayDueText, autopaySettings, methodLabel } from "@crewtavo/core/aut
 import { lateFeeAmount, lateFeeCouldApply, lateFeeNotice, lateFeeOn, lateFeeSettings } from "@crewtavo/core/billing";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import type { TablesUpdate } from "@crewtavo/core/database";
-import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { lineTotal, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { givenBackWords, goneInvoiceWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
 import { ClientPreview } from "@/components/ui/ClientPreview";
+import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
-import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
+import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
+import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
+import { Fact, Facts, RelatedRow, Section } from "@/components/ui/Section";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
@@ -51,11 +52,12 @@ import { EditInvoiceDialog } from "./EditInvoiceDialog";
 import { editOffer } from "./editInvoice";
 import { lateFeeControls } from "./lateFees";
 import { CustomFieldsCard, useCustomFields } from "../customFields/CustomFields";
+import styles from "./invoices.module.css";
+import { Select } from "@/components/ui/Select";
 
 const METHODS: Record<string, string> = { check: "Check", cash: "Cash", card: "Card", ach: "Bank transfer", other: "Other" };
 /** A charge still going, or waiting on someone: the database lets an invoice have one at a time. */
 const LIVE_CHARGES = new Set(["waiting", "needs_approval", "charging", "processing", "failed", "needs_client"]);
-/** The totals roll to their new figures, cents and all, as lines, payments and the tax rate change. */
 
 export function InvoicePage() {
   const session = useSession();
@@ -193,7 +195,7 @@ function InvoicePageScreen() {
     mutationFn: async (paymentId: string) => unwrap(await supabase().from("payments").delete().eq("id", paymentId)),
     onSuccess: refresh,
   });
-  const paymentRows = useListAnimation<HTMLDivElement>();
+  const paymentRows = useListAnimation<HTMLUListElement>();
   const openClientView = useMutation({
     mutationFn: (print: boolean) => api.get<{ link: string }>(`/invoices/${id}/link`).then((r) => ({ ...r, print })),
     onSuccess: ({ link, print }) => window.open(print ? `${link}?print=1` : link, "_blank", "noopener"),
@@ -336,227 +338,343 @@ function InvoicePageScreen() {
     });
   };
 
+  // One green button: Send invoice on a draft (unless it waits for an OK to charge), Record payment on one still owed.
+  const sendFirst = draft && !asking;
+  const owes = !draft && !isVoid && balance > 0;
+  const sendTitle = !inv.lines.length ? "Add a line item first" : charging ? `Charging ${card} now` : undefined;
+  const recordTitle = paysInStripe ? "Made in Stripe: record its payments there" : charging ? `Charging ${card} now` : (clearingNote ?? bankNote ?? undefined);
+  // The past-due note shows (with its reminder): the phone's bar says "Send a reminder" for Resend too.
+  const lateShown = daysLate > 0 && !bank && !clearing;
+  // A phone keeps the main actions in a bar above the tab bar, when there's a green one to put in it.
+  const bar = sendFirst || owes;
+  const sendButton = (inBar: boolean) =>
+    !isVoid && !writtenOff && (
+      <Button className={inBar ? (sendFirst ? undefined : styles.barQuiet) : bar ? "hide-mobile" : undefined} icon="send" variant={sendFirst ? "primary" : "secondary"} disabled={!inv.lines.length || charging} title={sendTitle} onClick={() => setDialog("send")}>
+        {draft ? "Send invoice" : inBar && lateShown ? "Send a reminder" : "Resend"}
+      </Button>
+    );
+  const recordButton = (inBar: boolean) =>
+    owes && (
+      <Button className={inBar ? (manual && !isVoid && !writtenOff ? styles.barWide : undefined) : "hide-mobile"} variant="primary" icon="dollar" disabled={paysInStripe || charging || clearing} title={recordTitle} onClick={() => setDialog("payment")}>
+        Record payment
+      </Button>
+    );
+
   return (
     <>
-      <BackLink to="/invoices">Invoices</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: "/invoices", label: "Invoices" }}
         title={`Invoice #${inv.number}`}
+        status={<EntityStatus kind="invoice" status={inv.status} />}
+        meta={[
+          inv.client && <ClientPreview id={inv.client.id}><Link to={`/clients/${inv.client.id}`} className={styles.client}>{inv.client.display_name}</Link></ClientPreview>,
+          inv.job && <Link to={`/jobs/${inv.job.id}`} className={styles.job}>Job #{inv.job.number}: {inv.job.title}</Link>,
+          inv.kind === "progress" && <span className="tag">Pay application {inv.pay_app_number}</span>,
+          inv.kind === "deposit" && <span className="tag">Deposit</span>,
+          inv.kind === "retainage" && <span className="tag">Retainage</span>,
+          inv.kind === "visits" && <span className="tag">Completed visits</span>,
+          <SaveStatus status={save.status} />,
+        ]}
         actions={
           <>
-            {!isVoid && !writtenOff && (
-              <Button icon="send" variant={draft && !asking ? "primary" : "secondary"} disabled={!inv.lines.length || charging} title={!inv.lines.length ? "Add a line item first" : charging ? `Charging ${card} now` : undefined} onClick={() => setDialog("send")}>
-                {draft ? "Send invoice" : "Resend"}
-              </Button>
-            )}
-            {manual && <Button icon="card" loading={chargeCard.isPending} onClick={() => void chargeNow(manual.card)}>Charge card</Button>}
-            {!draft && !isVoid && balance > 0 && <Button variant="primary" icon="dollar" disabled={paysInStripe || charging || clearing} title={paysInStripe ? "Made in Stripe: record its payments there" : charging ? `Charging ${card} now` : (clearingNote ?? bankNote ?? undefined)} onClick={() => setDialog("payment")}>Record payment</Button>}
-            {/* While it's being charged, or its bank payment is on its way, the menu leaves out what the database refuses until it's done. */}
-            <Menu
-              items={[
-                { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate(false) },
-                { label: "Print or save PDF", icon: "printer", onSelect: () => openClientView.mutate(true) },
-                { separator: true },
-                { label: "Mark as sent", icon: "check", hidden: !draft || !inv.lines.length || charging, onSelect: () => update.mutate({ status: "sent" }) },
-                { label: "Record payment", icon: "dollar", hidden: !draft || !inv.lines.length || charging || clearing, onSelect: () => setDialog("payment") },
-                { label: "Edit invoice", icon: "edit", hidden: !editing.offered, disabled: Boolean(editing.waits), title: editing.waits ?? undefined, onSelect: () => setDialog("edit") },
-                { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || writtenOff || inv.payments.length > 0 || fromStripe || charging || clearing, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
-                {
-                  label: "Write off",
-                  icon: "archive",
-                  hidden: draft || isVoid || writtenOff || inv.status === "paid" || balance <= 0 || charging,
-                  // A bank payment on its way may still pay it.
-                  disabled: Boolean(bank) || clearing,
-                  onSelect: async () => {
-                    const ok = await confirm({
-                      title: `Write off invoice #${inv.number}?`,
-                      body: `${formatMoneyCents(balance)} stops counting as owed: it comes off your unpaid invoices and receivables, and no more reminders go out. The invoice still counts toward what you've invoiced. If ${inv.client?.display_name ?? "the client"} pays later, record the payment here. You can undo this.`,
-                      confirmLabel: "Write off",
-                    });
-                    if (ok) writeOff.mutate(true);
-                  },
-                },
-                { label: "Undo write-off", icon: "undo", hidden: !writtenOff, onSelect: () => writeOff.mutate(false) },
-                {
-                  label: "Remove late fee",
-                  icon: "x",
-                  hidden: !fees.remove || charging,
-                  // The client is paying the amount with the fee in it.
-                  disabled: Boolean(bank) || clearing,
-                  onSelect: async () => {
-                    const ok = await confirm({
-                      title: `Remove the ${formatMoneyCents(feeTotal)} late fee?`,
-                      body: `It comes off invoice #${inv.number}, and no late fee is added to this invoice again.`,
-                      confirmLabel: "Remove late fee",
-                    });
-                    if (ok) removeLateFee.mutate();
-                  },
-                },
-                {
-                  label: "Void invoice",
-                  icon: "x",
-                  danger: true,
-                  hidden: isVoid || paid !== 0 || charging || clearing,
-                  onSelect: async () => {
-                    const promo = await givenBack();
-                    if (await confirm({ title: `Void invoice #${inv.number}?`, body: `It stays on record but no longer counts as owed. Visits it covered can be invoiced again.${promo ? ` ${promo}` : ""}`, confirmLabel: "Void invoice", danger: true })) update.mutate({ status: "void" });
-                  },
-                },
-                {
-                  label: "Delete draft",
-                  icon: "trash",
-                  danger: true,
-                  hidden: !draft || paid !== 0 || charging || clearing,
-                  onSelect: async () => {
-                    const promo = await givenBack();
-                    if (await confirm({ title: `Delete draft invoice #${inv.number}?`, body: `This can't be undone.${promo ? ` ${promo}` : ""}`, confirmLabel: "Delete", danger: true })) remove.mutate();
-                  },
-                },
-              ]}
-            />
+            {sendButton(false)}
+            {manual && <Button className={bar ? "hide-mobile" : undefined} icon="card" loading={chargeCard.isPending} onClick={() => void chargeNow(manual.card)}>Charge card</Button>}
+            {recordButton(false)}
           </>
         }
-      />
-      <div className="page-meta">
-        <EntityStatus kind="invoice" status={inv.status} />
-        <SaveStatus status={save.status} />
-        {inv.client && <ClientPreview id={inv.client.id}><Link to={`/clients/${inv.client.id}`} className="strong">{inv.client.display_name}</Link></ClientPreview>}
-        {inv.job && <Link to={`/jobs/${inv.job.id}`} className="muted">Job #{inv.job.number}: {inv.job.title}</Link>}
-        {inv.kind === "progress" && <span className="chip">Pay application {inv.pay_app_number}</span>}
-        {inv.kind === "deposit" && <span className="chip">Deposit</span>}
-        {inv.kind === "retainage" && <span className="chip">Retainage</span>}
-        {inv.kind === "visits" && <span className="chip">Completed visits</span>}
-      </div>
+        // While it's being charged, or its bank payment is on its way, the menu leaves out what the database refuses until it's done.
+        more={[
+          { label: "Preview as client", icon: "eye", kbd: "V", onSelect: () => openClientView.mutate(false) },
+          { label: "Print or save PDF", icon: "printer", kbd: "P", onSelect: () => openClientView.mutate(true) },
+          { separator: true },
+          { label: "Mark as sent", icon: "check", hidden: !draft || !inv.lines.length || charging, onSelect: () => update.mutate({ status: "sent" }) },
+          { label: "Record payment", icon: "dollar", hidden: !draft || !inv.lines.length || charging || clearing, onSelect: () => setDialog("payment") },
+          { label: "Edit invoice", icon: "edit", hidden: !editing.offered, disabled: Boolean(editing.waits), title: editing.waits ?? undefined, onSelect: () => setDialog("edit") },
+          { label: "Move back to draft", icon: "undo", hidden: draft || isVoid || writtenOff || inv.payments.length > 0 || fromStripe || charging || clearing, onSelect: () => update.mutate({ status: "draft", sent_at: null }) },
+          {
+            label: "Remove late fee",
+            icon: "x",
+            hidden: !fees.remove || charging,
+            // The client is paying the amount with the fee in it.
+            disabled: Boolean(bank) || clearing,
+            onSelect: async () => {
+              const ok = await confirm({
+                title: `Remove the ${formatMoneyCents(feeTotal)} late fee?`,
+                body: `It comes off invoice #${inv.number}, and no late fee is added to this invoice again.`,
+                confirmLabel: "Remove late fee",
+              });
+              if (ok) removeLateFee.mutate();
+            },
+          },
+          {
+            label: "Write off",
+            icon: "archive",
+            hidden: draft || isVoid || writtenOff || inv.status === "paid" || balance <= 0 || charging,
+            // A bank payment on its way may still pay it.
+            disabled: Boolean(bank) || clearing,
+            onSelect: async () => {
+              const ok = await confirm({
+                title: `Write off invoice #${inv.number}?`,
+                body: `${formatMoneyCents(balance)} stops counting as owed: it comes off your unpaid invoices and receivables, and no more reminders go out. The invoice still counts toward what you've invoiced. If ${inv.client?.display_name ?? "the client"} pays later, record the payment here. You can undo this.`,
+                confirmLabel: "Write off",
+              });
+              if (ok) writeOff.mutate(true);
+            },
+          },
+          { label: "Undo write-off", icon: "undo", hidden: !writtenOff, onSelect: () => writeOff.mutate(false) },
+          { separator: true },
+          {
+            label: "Void invoice",
+            icon: "x",
+            danger: true,
+            hidden: isVoid || paid !== 0 || charging || clearing,
+            onSelect: async () => {
+              const promo = await givenBack();
+              if (await confirm({ title: `Void invoice #${inv.number}?`, body: `It stays on record but no longer counts as owed. Visits it covered can be invoiced again.${promo ? ` ${promo}` : ""}`, confirmLabel: "Void invoice", danger: true })) update.mutate({ status: "void" });
+            },
+          },
+          {
+            label: "Delete draft",
+            icon: "trash",
+            danger: true,
+            hidden: !draft || paid !== 0 || charging || clearing,
+            onSelect: async () => {
+              const promo = await givenBack();
+              if (await confirm({ title: `Delete draft invoice #${inv.number}?`, body: `This can't be undone.${promo ? ` ${promo}` : ""}`, confirmLabel: "Delete", danger: true })) remove.mutate();
+            },
+          },
+        ]}
+      >
+        {/* A phone opens on what's owed (Mobile-Sales.dc.html, Invoice), and Totals leaves it out there; a desktop has it in Totals. */}
+        {!isVoid && (
+          <div className={styles.hero}>
+            <span className={styles.heroLabel}>{writtenOff ? statusText("invoice", "written_off") : "Balance due"}</span>
+            <span className={styles.heroValue} data-tone={balance > 0 && daysLate > 0 ? "danger" : writtenOff ? "muted" : undefined}>{formatMoneyCents(balance)}</span>
+          </div>
+        )}
+      </DetailHeader>
 
-      {isVoid && <div className="callout"><Icon name="x" size={20} /><div className="grow">This invoice is void and isn't owed.</div></div>}
-      {writtenOff && (
-        <div className="callout">
-          <Icon name="archive" size={20} />
-          <div className="grow">
-            {refundedOff
-              ? `Refunded and taken off${inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: the ${formatMoneyCents(balance)} given back isn't counted as owed.`
-              : `Written off${inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: ${formatMoneyCents(balance)} isn't counted as owed. If the client pays after all, record it and the invoice is marked paid.`}
-          </div>
-          <Button size="sm" icon="undo" disabled={writeOff.isPending} onClick={() => writeOff.mutate(false)}>Undo write-off</Button>
-        </div>
-      )}
-      {inv.status === "paid" && (
-        <div className="callout callout-good">
-          <Icon name="check" size={20} />
-          <div className="grow">
-            {charge?.status === "paid" ? `Paid automatically with ${card} on ${formatDate(charge.charged_at ?? lastPayment?.received_at)}.` : paidWords(paid, Number(inv.credit_amount), lastPayment?.received_at ? formatDate(lastPayment.received_at) : null)}
-          </div>
-        </div>
-      )}
-      {charging && <div className="callout callout-info"><Icon name="card" size={20} /><div className="grow">Charging {card} now.</div></div>}
-      {/* Approved, or on its way back to the task after a moment's wait. */}
-      {(charge?.status === "waiting" || onNewCard) && charge && (
-        <div className="callout callout-info">
-          <Icon name="card" size={20} />
-          <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone)}.`}</div>
-        </div>
-      )}
-      {bankNote && <div className="callout callout-info"><Icon name="clock" size={20} /><div className="grow">{bankNote}</div></div>}
-      {/* The bank payment the charge started: why Record payment waits. */}
-      {clearingNote && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="clock" size={20} /><div className="grow">{clearingNote}</div></div>}
-      {asking && charge && (
-        <div className="callout callout-warning">
-          <Icon name="card" size={20} />
-          <div className="grow">{noOk ? bankLimitText(balance, cap!, card, clientName, charge.last_error ? "held" : "waiting", charge.last_error) : approvalText(charge, balance, cap)}</div>
-          <div className="row wrap" style={{ gap: 6 }}>
-            {!noOk && <Button size="sm" variant="primary" icon="check" loading={approveCharge.isPending} disabled={callOffCharge.isPending} onClick={() => approveCharge.mutate(charge.id)}>Approve charge</Button>}
-            <Button size="sm" icon="send" loading={callOffCharge.isPending} disabled={approveCharge.isPending || !inv.lines.length} onClick={() => callOffCharge.mutate(charge.id)}>{noOk ? "Send it now" : "Send it the usual way"}</Button>
-          </div>
-        </div>
-      )}
-      {/* Over the limit for a bank account: not charged, by anyone. It's an unpaid invoice like any other from here. */}
-      {toClient && (
-        <div className="callout callout-info">
-          <Icon name="card" size={20} />
-          <div className="grow">{bankLimitText(balance, Number(toClient.bank_limit), toClient.method ? methodLabel(toClient.method) : "their bank account", clientName, toClient.send_state, toClient.send_error)}</div>
-          {toClient.send_state !== "waiting" && toClient.send_state !== "sending" && (
-            <Button size="sm" icon="send" disabled={!inv.lines.length} onClick={() => setDialog("send")}>{toClient.send_state === "sent" ? "Send again" : draft ? "Send invoice" : "Send a reminder"}</Button>
-          )}
-        </div>
-      )}
-      {chargeFailed && charge && (
-        <div className="callout callout-danger">
-          <Icon name="card" size={20} />
-          <div className="grow">
-            {charge.status === "failed"
-              ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone)}.`
-              : `Autopay needs ${clientName}: ${needsClientReason(charge)}.`}
-          </div>
-          <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
-        </div>
-      )}
-      {/* Up front, rather than refused once someone has filled in a payment. */}
-      {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
-      {daysLate > 0 && !bank && !clearing && (
-        <div className="callout callout-danger">
-          <Icon name="alert" size={20} />
-          <div className="grow">{daysLate} {daysLate === 1 ? "day" : "days"} past due. {formatMoneyCents(balance)} is still owed.{lateFeeDay ? ` A ${formatMoneyCents(lateFeeAmount(balance, lateFee!))} late fee goes on ${formatDate(lateFeeDay)}.` : ""}{inv.past_due_notice_pending ? " It was paid and is owed again, so the client isn't reminded today." : ""}</div>
-          {/* A failed charge's callout above has the reminder already. */}
-          {!chargeFailed && <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>}
-        </div>
-      )}
-      {draft && !charge && !toClient && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">This invoice hasn't been sent yet.</div></div>}
-      {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={20} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
-
-      <div className="two-col">
-        <div className="wide stack-lg">
-          {draft && <SubjectCard value={inv.subject} onEdit={save.edited} onUnchanged={unchanged} onSave={(subject) => saveField({ subject })} />}
-          <LineItems
-            table="invoice_line_items"
-            parent="invoice_id"
-            parentId={inv.id}
-            lines={inv.lines}
-            editable={editable}
-            onChanged={refresh}
-            // Work that repeats has a next invoice for a once-per-job code to go on, which the toast can say.
-            promoJob={inv.job ? { id: inv.job.id, repeats: inv.job.kind === "recurring" || inv.job.billing_mode === "per_visit" } : null}
-          />
-          {editable && inv.job && ["standard", "visits"].includes(inv.kind) && (
-            <div><Button size="sm" icon="clock" onClick={() => setDialog("work")}>Add logged hours and materials</Button></div>
-          )}
-          {/* Sent: its lines change through Edit invoice, in one step, with its payments left as they are. */}
-          {editing.offered && (
-            <div className="row wrap" style={{ gap: 8, alignItems: "center" }}>
-              <Button size="sm" icon="edit" disabled={Boolean(editing.waits)} onClick={() => setDialog("edit")}>Edit invoice</Button>
-              {editing.waits && <span className="muted small">{editing.waits}</span>}
+      <DetailColumns
+        grouped
+        className={styles.cols}
+        side={
+          <>
+            <Section title="Totals">
+              <div className={`totals ${styles.totals}`}>
+                <div className="line"><span>Subtotal</span><AnimatedNumber value={Number(inv.subtotal)} format={MONEY_CENTS} /></div>
+                <DiscountRows
+                  kind="invoice"
+                  id={inv.id}
+                  promo={inv.promo}
+                  discount={Number(inv.discount_amount)}
+                  subtotal={Number(inv.subtotal)}
+                  canEditDiscount={editable}
+                  // Not while a bank payment clears or the card is being charged: the client is paying what Stripe asked for (the database says why).
+                  // One code to an invoice: one with its job's code on a line takes no other.
+                  canChangePromo={!isVoid && !fromStripe && !bank && !charging && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status) && (Boolean(inv.promo) || !promoJobId)}
+                  onSaveDiscount={(v) => saveField({ discount_amount: v })}
+                  onEditDiscount={save.edited}
+                  onUnchangedDiscount={unchanged}
+                  onChanged={refresh}
+                />
+                <ReferralCredits invoice={inv} onChanged={refresh} />
+                <div className="line">
+                  <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}`}</span>
+                  {/* A tax-exempt client is never charged tax: the database keeps the rate at 0. */}
+                  {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
+                </div>
+                {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
+                <div className="line" data-total=""><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
+                {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
+                {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
+              </div>
+              {/* A void or written-off invoice's figure is quiet, under its status: on record, not owed. */}
+              <div className={styles.due} data-repeated={!isVoid || undefined}>
+                <span className={styles.dueLabel}>{isVoid ? statusText("invoice", "void") : writtenOff ? statusText("invoice", "written_off") : "Balance due"}</span>
+                <span className={styles.dueValue} data-tone={balance > 0 && daysLate > 0 ? "danger" : writtenOff || isVoid ? "muted" : undefined}><AnimatedNumber value={balance} format={MONEY_CENTS} /></span>
+              </div>
+            </Section>
+            <Section title="Dates">
+              <Facts>
+                <Fact label="Issued">
+                  {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.issued_on} onChange={(e) => e.target.value && saveField({ issued_on: e.target.value })} aria-label="Issued on" /> : formatDate(inv.issued_on)}
+                </Fact>
+                <Fact label="Due" tone={daysLate > 0 ? "danger" : undefined}>
+                  {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.due_on ?? ""} min={inv.issued_on} onChange={(e) => saveField({ due_on: e.target.value || null })} aria-label="Due on" /> : inv.due_on ? formatDate(inv.due_on) : "On receipt"}
+                </Fact>
+                <Fact label="Sent">{inv.sent_at && formatDate(inv.sent_at)}</Fact>
+                <Fact label="PO">{inv.job?.po_number}</Fact>
+              </Facts>
+              {(draft || fees.tick || fees.note) && (
+                <div className={styles.after}>
+                  {draft && (
+                    <div className={styles.terms} role="group" aria-label="Payment terms">
+                      {[["On receipt", 0], ["Net 15", 15], ["Net 30", 30], ["Net 45", 45]].map(([l, d]) => (
+                        <button key={l} type="button" aria-pressed={inv.due_on === addDaysIso(inv.issued_on, Number(d))} onClick={() => saveField({ due_on: addDaysIso(inv.issued_on, Number(d)) })}>{l}</button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Late fees for this invoice: off with a tick before one goes on, and said once one was taken off. */}
+                  {fees.tick && (
+                    <label className="checkbox small">
+                      <input type="checkbox" checked={Boolean(inv.no_late_fee)} disabled={edit.isPending} onChange={(e) => saveField({ no_late_fee: e.target.checked })} /> No late fee on this invoice
+                    </label>
+                  )}
+                  {fees.note && <span className="muted small">{fees.note}</span>}
+                </div>
+              )}
+            </Section>
+            <CustomFieldsCard record="invoice" values={inv.custom_fields} editable={!isVoid} onSave={async (values) => { unwrap(await supabase().from("invoices").update({ custom_fields: values }).eq("id", inv.id)); refresh(); }} />
+            {stripe?.stripe_id && <StripeSection stripe={stripe} />}
+            <InvoiceDrawings invoiceId={inv.id} clientId={inv.client_id} jobId={inv.job?.id ?? null} editable={!isVoid} />
+          </>
+        }
+      >
+        {/* What someone must notice on this invoice: one line each, over its lines. */}
+        <div className={styles.notes}>
+          {isVoid && <div className="callout"><Icon name="x" size={16} /><div className="grow">This invoice is void and isn't owed.</div></div>}
+          {writtenOff && (
+            <div className="callout">
+              <Icon name="archive" size={16} />
+              <div className="grow">
+                {refundedOff
+                  ? `Refunded and taken off${inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: the ${formatMoneyCents(balance)} given back isn't counted as owed.`
+                  : `Written off${inv.written_off_at ? ` on ${formatDate(inv.written_off_at)}` : ""}: ${formatMoneyCents(balance)} isn't counted as owed. If the client pays after all, record it and the invoice is marked paid.`}
+              </div>
+              <Button size="sm" icon="undo" disabled={writeOff.isPending} onClick={() => writeOff.mutate(false)}>Undo write-off</Button>
             </div>
           )}
-          <NotesCard value={inv.notes} editable={!isVoid} onEdit={save.edited} onUnchanged={unchanged} onSave={(notes) => saveField({ notes })} />
-          <section className="stack">
-            <h2 className="section-title">Payments</h2>
-            <div className="card" ref={paymentRows}>
-              {inv.payments.length === 0 && <EmptyState inline title="No payments yet" />}
-              {inv.payments.map((p) => {
-                const shown = paymentAmount(p);
-                return (
-                  <div key={p.id} className="card-row">
-                    <span className="n-icon" style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", display: "grid", placeItems: "center", background: shown.back ? "var(--danger-tint)" : "var(--green-tint)", color: shown.back ? "var(--danger)" : "var(--green-dark)", flex: "none" }}><Icon name="dollar" size={16} /></span>
-                    <span className="grow">
-                      <strong className="tabular">{shown.amount}</strong>
-                      {shown.tip && <span className="muted"> {shown.tip}</span>}
-                      <span className="muted small" style={{ display: "block" }}>
-                        {METHODS[p.method] ?? p.method}{p.processor ? ` via ${p.processor === "stripe" ? "Stripe" : p.processor}` : ""}{p.notes ? ` · ${p.notes}` : ""}
-                        {Number(p.fee_amount) > 0 && ` · ${formatMoneyCents(p.fee_amount)} fee`}
-                        {p.payout && ` · ${p.payout.status === "paid" ? "deposited" : "arrives"} ${formatDate(p.payout.arrival_on)}`}
-                      </span>
-                    </span>
-                    <span className="muted small">{formatDate(p.received_at)}</span>
-                    {/*
+          {inv.status === "paid" && (
+            <div className="callout callout-good">
+              <Icon name="check" size={16} />
+              <div className="grow">
+                {charge?.status === "paid" ? `Paid automatically with ${card} on ${formatDate(charge.charged_at ?? lastPayment?.received_at)}.` : paidWords(paid, Number(inv.credit_amount), lastPayment?.received_at ? formatDate(lastPayment.received_at) : null)}
+              </div>
+            </div>
+          )}
+          {charging && <div className="callout callout-info"><Icon name="card" size={16} /><div className="grow">Charging {card} now.</div></div>}
+          {/* Approved, or on its way back to the task after a moment's wait. */}
+          {(charge?.status === "waiting" || onNewCard) && charge && (
+            <div className="callout callout-info">
+              <Icon name="card" size={16} />
+              <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone)}.`}</div>
+            </div>
+          )}
+          {bankNote && <div className="callout callout-info"><Icon name="clock" size={16} /><div className="grow">{bankNote}</div></div>}
+          {/* The bank payment the charge started: why Record payment waits. */}
+          {clearingNote && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="clock" size={16} /><div className="grow">{clearingNote}</div></div>}
+          {asking && charge && (
+            <div className="callout callout-warning">
+              <Icon name="card" size={16} />
+              <div className="grow">{noOk ? bankLimitText(balance, cap!, card, clientName, charge.last_error ? "held" : "waiting", charge.last_error) : approvalText(charge, balance, cap)}</div>
+              <div className="row wrap" style={{ gap: 6 }}>
+                {!noOk && <Button size="sm" variant="primary" icon="check" loading={approveCharge.isPending} disabled={callOffCharge.isPending} onClick={() => approveCharge.mutate(charge.id)}>Approve charge</Button>}
+                <Button size="sm" icon="send" loading={callOffCharge.isPending} disabled={approveCharge.isPending || !inv.lines.length} onClick={() => callOffCharge.mutate(charge.id)}>{noOk ? "Send it now" : "Send it the usual way"}</Button>
+              </div>
+            </div>
+          )}
+          {/* Over the limit for a bank account: not charged, by anyone. It's an unpaid invoice like any other from here. */}
+          {toClient && (
+            <div className="callout callout-info">
+              <Icon name="card" size={16} />
+              <div className="grow">{bankLimitText(balance, Number(toClient.bank_limit), toClient.method ? methodLabel(toClient.method) : "their bank account", clientName, toClient.send_state, toClient.send_error)}</div>
+              {toClient.send_state !== "waiting" && toClient.send_state !== "sending" && (
+                <Button size="sm" icon="send" disabled={!inv.lines.length} onClick={() => setDialog("send")}>{toClient.send_state === "sent" ? "Send again" : draft ? "Send invoice" : "Send a reminder"}</Button>
+              )}
+            </div>
+          )}
+          {chargeFailed && charge && (
+            <div className="callout callout-danger">
+              <Icon name="card" size={16} />
+              <div className="grow">
+                {charge.status === "failed"
+                  ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone)}.`
+                  : `Autopay needs ${clientName}: ${needsClientReason(charge)}.`}
+              </div>
+              <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
+            </div>
+          )}
+          {/* Up front, rather than refused once someone has filled in a payment. */}
+          {paysInStripe && !bank && !isVoid && balance > 0 && <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">{RECORD_IN_STRIPE}</div></div>}
+          {lateShown && (
+            <div className="callout callout-danger">
+              <Icon name="clock" size={16} />
+              <div className="grow"><strong>{daysLate} {daysLate === 1 ? "day" : "days"} past due.</strong> {formatMoneyCents(balance)} is still owed.{lateFeeDay ? ` A ${formatMoneyCents(lateFeeAmount(balance, lateFee!))} late fee goes on ${formatDate(lateFeeDay)}.` : ""}{inv.past_due_notice_pending ? " It was paid and is owed again, so the client isn't reminded today." : ""}</div>
+              {/* A failed charge's callout above has the reminder already. */}
+              {!chargeFailed && <Button size="sm" icon="send" className={bar ? "hide-mobile" : undefined} onClick={() => setDialog("send")}>Send a reminder</Button>}
+            </div>
+          )}
+          {!isVoid && balance < 0 && <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">The client paid {formatMoneyCents(-balance)} more than they owed. Record a refund, or keep it as a credit for their next invoice.</div></div>}
+        </div>
+        {draft && <SubjectField value={inv.subject} onEdit={save.edited} onUnchanged={unchanged} onSave={(subject) => saveField({ subject })} />}
+        <Section
+          title="Line items"
+          count={inv.lines.length || undefined}
+          // A draft's editor is its own box; a sent invoice's lines are a phone's inset card.
+          flush={editable}
+          action={
+            // Sent: its lines change through Edit invoice, in one step, with its payments left as they are.
+            editing.offered ? (
+              <Button size="sm" icon="edit" disabled={Boolean(editing.waits)} onClick={() => setDialog("edit")}>Edit invoice</Button>
+            ) : editable && inv.job && ["standard", "visits"].includes(inv.kind) ? (
+              <Button size="sm" icon="clock" onClick={() => setDialog("work")}>Add logged hours and materials</Button>
+            ) : undefined
+          }
+        >
+          <div className={editable ? undefined : "hide-mobile"}>
+            <LineItems
+              table="invoice_line_items"
+              parent="invoice_id"
+              parentId={inv.id}
+              lines={inv.lines}
+              editable={editable}
+              onChanged={refresh}
+              // Work that repeats has a next invoice for a once-per-job code to go on, which the toast can say.
+              promoJob={inv.job ? { id: inv.job.id, repeats: inv.job.kind === "recurring" || inv.job.billing_mode === "per_visit" } : null}
+            />
+          </div>
+          {/* A phone reads a sent invoice's lines as the kit's rows: the item, how many at what, its total (Mobile-Sales.dc.html). */}
+          {!editable && (
+            <ul className={`rel ${styles.phoneOnly}`} role="list" aria-label="Line items">
+              {inv.lines.map((l) => (
+                <RelatedRow key={l.id} title={l.name} sub={[`${formatQuantity(Number(l.quantity))} ${l.unit} × ${formatMoneyCents(Number(l.unit_price))}`, l.description]} end={<b>{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</b>} />
+              ))}
+            </ul>
+          )}
+          {editing.waits && <p className={styles.quiet}>{editing.waits}</p>}
+        </Section>
+        <NotesSection value={inv.notes} editable={!isVoid} onEdit={save.edited} onUnchanged={unchanged} onSave={(notes) => saveField({ notes })} />
+        <Section title="Payments" count={inv.payments.length || undefined}>
+          <ul className="rel" role="list" aria-label="Payments" ref={paymentRows}>
+            {inv.payments.map((p) => {
+              const shown = paymentAmount(p);
+              return (
+                <RelatedRow
+                  key={p.id}
+                  lead={<span className="rel-icon" data-tone={shown.back ? "danger" : "good"}><Icon name={shown.back ? "undo" : "dollar"} size={15} /></span>}
+                  title={<>{shown.amount}{shown.tip && <span className={styles.tip}> {shown.tip}</span>}</>}
+                  sub={[
+                    `${METHODS[p.method] ?? p.method}${p.processor ? ` via ${p.processor === "stripe" ? "Stripe" : p.processor}` : ""}`,
+                    p.notes,
+                    Number(p.fee_amount) > 0 && `${formatMoneyCents(p.fee_amount)} fee`,
+                    p.payout && `${p.payout.status === "paid" ? "Deposited" : "Arrives"} ${formatDate(p.payout.arrival_on)}`,
+                  ]}
+                  end={formatDate(p.received_at)}
+                  actions={
+                    /*
                       Payments recorded here are refunded and removed here. One Stripe took is refunded
                       through Stripe (Refund here, or in Stripe's dashboard), and either way the refund
                       is booked from Stripe, so it shows up here as a negative payment on its own.
-                    */}
-                    {!p.processor ? (
+                    */
+                    !p.processor ? (
                       <Menu
                         triggerClassName="btn btn-sm btn-ghost btn-icon"
                         label="Payment actions"
+                        title={shown.amount}
                         items={[
                           // Hidden once it's all been refunded.
                           { label: "Record a refund", icon: "undo", hidden: refundable(p, inv.payments) <= 0, onSelect: () => setRefunding({ id: p.id, amount: Number(p.amount), method: p.method }) },
+                          { separator: true },
                           { label: "Remove payment", icon: "trash", danger: true, onSelect: () => takeOff(p) },
                         ]}
                       />
@@ -565,6 +683,7 @@ function InvoicePageScreen() {
                         <Menu
                           triggerClassName="btn btn-sm btn-ghost btn-icon"
                           label="Payment actions"
+                          title={shown.amount}
                           items={[
                             // The menu can't explain a turned-off item itself, so it says why above it.
                             { heading: "Needs a new Stripe key", hidden: canRefund },
@@ -573,79 +692,25 @@ function InvoicePageScreen() {
                           ]}
                         />
                       )
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-          {/* What the client's copy says about a late fee, where one could still go on this invoice. */}
-          <InvoicePaper invoice={inv} lateFeeNote={lateFeeCouldApply(inv, lateFee, fromStripe) ? lateFeeNotice(lateFee, formatMoneyCents) : null} />
-        </div>
-        <aside className="narrow stack">
-          <div className="card card-pad totals">
-            <div className="line"><span>Subtotal</span><AnimatedNumber value={Number(inv.subtotal)} format={MONEY_CENTS} /></div>
-            <DiscountRows
-              kind="invoice"
-              id={inv.id}
-              promo={inv.promo}
-              discount={Number(inv.discount_amount)}
-              subtotal={Number(inv.subtotal)}
-              canEditDiscount={editable}
-              // Not while a bank payment clears or the card is being charged: the client is paying what Stripe asked for (the database says why).
-              // One code to an invoice: one with its job's code on a line takes no other.
-              canChangePromo={!isVoid && !fromStripe && !bank && !charging && inv.payments.length === 0 && ["draft", "sent", "overdue"].includes(inv.status) && (Boolean(inv.promo) || !promoJobId)}
-              onSaveDiscount={(v) => saveField({ discount_amount: v })}
-              onEditDiscount={save.edited}
-              onUnchangedDiscount={unchanged}
-              onChanged={refresh}
-            />
-            <ReferralCredits invoice={inv} onChanged={refresh} />
-            <div className="line">
-              <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}`}</span>
-              {/* A tax-exempt client is never charged tax: the database keeps the rate at 0. */}
-              {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
-            </div>
-            {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
-            <div className="line grand"><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
-            {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
-            {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
-            <div className="line grand" style={{ fontSize: 20, color: balance > 0 && daysLate > 0 ? "var(--danger)" : writtenOff ? "var(--text-2)" : undefined }}><span>{writtenOff ? statusText("invoice", "written_off") : "Balance due"}</span><AnimatedNumber value={balance} format={MONEY_CENTS} /></div>
-          </div>
-          <div className="card card-pad stack-sm">
-            <strong>Dates</strong>
-            <div className="totals">
-              <div className="line">
-                <span>Issued</span>
-                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.issued_on} onChange={(e) => e.target.value && saveField({ issued_on: e.target.value })} aria-label="Issued on" /> : <span>{formatDate(inv.issued_on)}</span>}
-              </div>
-              <div className="line">
-                <span>Due</span>
-                {draft ? <input className="input input-sm" type="date" style={{ width: 150 }} value={inv.due_on ?? ""} min={inv.issued_on} onChange={(e) => saveField({ due_on: e.target.value || null })} aria-label="Due on" /> : <span>{inv.due_on ? formatDate(inv.due_on) : "On receipt"}</span>}
-              </div>
-            </div>
-            {draft && (
-              <div className="row wrap" style={{ gap: 6 }}>
-                {[["On receipt", 0], ["Net 15", 15], ["Net 30", 30], ["Net 45", 45]].map(([l, d]) => (
-                  <button key={l} type="button" className="tab" aria-pressed={inv.due_on === addDaysIso(inv.issued_on, Number(d))} onClick={() => saveField({ due_on: addDaysIso(inv.issued_on, Number(d)) })}>{l}</button>
-                ))}
-              </div>
-            )}
-            {/* Late fees for this invoice: off with a tick before one goes on, and said once one was taken off. */}
-            {fees.tick && (
-              <label className="checkbox small">
-                <input type="checkbox" checked={Boolean(inv.no_late_fee)} disabled={edit.isPending} onChange={(e) => saveField({ no_late_fee: e.target.checked })} /> No late fee on this invoice
-              </label>
-            )}
-            {fees.note && <span className="muted small">{fees.note}</span>}
-            {inv.sent_at && <span className="muted small">Sent {formatDate(inv.sent_at)}</span>}
-            {inv.job?.po_number && <span className="muted small">PO {inv.job.po_number}</span>}
-          </div>
-          <CustomFieldsCard record="invoice" values={inv.custom_fields} editable={!isVoid} onSave={async (values) => { unwrap(await supabase().from("invoices").update({ custom_fields: values }).eq("id", inv.id)); refresh(); }} />
-          {stripe?.stripe_id && <StripeCard stripe={stripe} />}
-          <InvoiceDrawings invoiceId={inv.id} clientId={inv.client_id} jobId={inv.job?.id ?? null} editable={!isVoid} />
-        </aside>
-      </div>
+                    )
+                  }
+                />
+              );
+            })}
+          </ul>
+          {inv.payments.length === 0 && <EmptyState inline title="No payments yet" />}
+        </Section>
+        {/* What the client's copy says about a late fee, where one could still go on this invoice. */}
+        <InvoicePaper invoice={inv} lateFeeNote={lateFeeCouldApply(inv, lateFee, fromStripe) ? lateFeeNotice(lateFee, formatMoneyCents) : null} />
+      </DetailColumns>
+
+      {bar && (
+        <ActionBar>
+          {owes && sendButton(true)}
+          {manual && <Button className={styles.barQuiet} icon="card" loading={chargeCard.isPending} onClick={() => void chargeNow(manual.card)}>Charge card</Button>}
+          {owes ? recordButton(true) : sendButton(true)}
+        </ActionBar>
+      )}
 
       {dialog === "send" && <SendDialog kind="invoice" id={inv.id} number={inv.number} email={inv.client?.email ?? null} phone={inv.client?.phone ?? null} textsOffSince={inv.client?.sms_opt_out_at} onClose={() => setDialog(null)} onSent={refresh} />}
       {dialog === "edit" && <EditInvoiceDialog invoice={{ id: inv.id, number: inv.number, updated_at: inv.updated_at, lines: inv.lines }} onClose={() => setDialog(null)} onSaved={refresh} />}
@@ -656,6 +721,9 @@ function InvoicePageScreen() {
     </>
   );
 }
+
+/** A line's quantity as people write it: "4", "1.5", "1,600". */
+const formatQuantity = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(n);
 
 /** A message from Stripe or the database as part of a sentence: without its full stop. */
 const clause = (text: string) => text.trim().replace(/[.\s]+$/, "");
@@ -685,7 +753,6 @@ function needsClientReason(charge: { source: string; failures: number; last_erro
  */
 function InvoicePaper({ invoice, lateFeeNote }: { invoice: DocumentInvoice & { custom_fields: unknown } & { client: { display_name: string; billing_address: unknown } | null; job: { property: unknown; quote?: InvoiceQuote | null } | null }; lateFeeNote: string | null }) {
   const session = useSession();
-  const id = useId();
   const { template, isPending } = useDocumentTemplate(null);
   const letterhead = useLetterhead();
   const fields = useCustomFields("invoice");
@@ -699,14 +766,13 @@ function InvoicePaper({ invoice, lateFeeNote }: { invoice: DocumentInvoice & { c
   // Without the contract, the terms are left off too: the template's own would print with their fill-ins unfilled.
   const contract = terms.contract ?? (terms.error ? NO_CONTRACT : null);
   return (
-    <section className="stack" aria-labelledby={id}>
-      <h2 id={id} className="section-title">As it prints</h2>
+    <Section title="As it prints" flush className={styles.paperLast}>
       {ready ? (
-        <>
+        <div className={styles.paper}>
           {terms.error && (
-            <p className="muted small" style={{ margin: 0 }}>
+            <p className={styles.quiet}>
               The terms didn't load, so they're not on the pages below. The client's copy has them.{" "}
-              <button type="button" className="btn btn-sm btn-ghost" onClick={terms.refetch}>Try again</button>
+              <button type="button" className="link-btn" onClick={terms.refetch}>Try again</button>
             </p>
           )}
           <DocumentSheet
@@ -714,11 +780,11 @@ function InvoicePaper({ invoice, lateFeeNote }: { invoice: DocumentInvoice & { c
             company={letterhead.data ?? documentCompany(session.company)}
             data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf") }, { timeZone: session.company.timezone, contract, lateFeeNote })}
           />
-        </>
+        </div>
       ) : (
         <Skeleton height="auto" radius={4} style={{ aspectRatio: "8.5 / 11" }} />
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -731,47 +797,47 @@ const STRIPE_STATUS: Record<string, string> = {
   uncollectible: "Written off in Stripe",
 };
 
-/** Where this invoice is in Stripe, with a way to open it there or share its payment page. Autopay's are charged to the saved card or bank account. */
-function StripeCard({ stripe }: { stripe: { stripe_id: string | null; origin: string; status: string; number: string | null; hosted_url: string | null; livemode: boolean; collection: string } }) {
+/** Where this invoice is in Stripe, with a way to open it there or copy its payment page. Autopay's are charged to the saved card or bank account. */
+function StripeSection({ stripe }: { stripe: { stripe_id: string | null; origin: string; status: string; number: string | null; hosted_url: string | null; livemode: boolean; collection: string } }) {
   const dashboard = `https://dashboard.stripe.com/${stripe.livemode ? "" : "test/"}invoices/${stripe.stripe_id}`;
   return (
-    <div className="card card-pad stack-sm">
-      <strong>Stripe</strong>
-      <div className="totals">
-        <div className="line"><span>{stripe.origin === "stripe" ? "Made in Stripe" : "Invoice"}</span><span>{stripe.number ?? "—"}</span></div>
-        <div className="line"><span>Status</span><span>{STRIPE_STATUS[stripe.status] ?? stripe.status}</span></div>
-        {stripe.collection === "charge_automatically" && <div className="line"><span>Charged</span><span>Automatically</span></div>}
-      </div>
-      <div className="row wrap" style={{ gap: 6 }}>
-        <a className="btn btn-sm" href={dashboard} target="_blank" rel="noreferrer">Open in Stripe <Icon name="external" size={14} /></a>
-        {stripe.hosted_url && stripe.status === "open" && <Button size="sm" icon="copy" onClick={() => copyText(stripe.hosted_url!, "Payment link copied")}>Copy payment link</Button>}
-      </div>
-      {!stripe.livemode && <span className="muted small">Test mode: no real money moves.</span>}
-    </div>
+    <Section title="Stripe" action={<a href={dashboard} target="_blank" rel="noreferrer">Open in Stripe <Icon name="external" size={14} /></a>}>
+      <Facts>
+        <Fact label={stripe.origin === "stripe" ? "Made in Stripe" : "Invoice"}>{stripe.number}</Fact>
+        <Fact label="Status">{STRIPE_STATUS[stripe.status] ?? stripe.status}</Fact>
+        {stripe.collection === "charge_automatically" && <Fact label="Charged">Automatically</Fact>}
+        {stripe.hosted_url && stripe.status === "open" && (
+          <Fact label="Payment link">
+            <button type="button" className="link-btn" aria-label="Copy payment link" onClick={() => copyText(stripe.hosted_url!, "Payment link copied")}>Copy</button>
+          </Fact>
+        )}
+      </Facts>
+      {!stripe.livemode && <p className={styles.quiet}>Test mode: no real money moves.</p>}
+    </Section>
   );
 }
 
-/** `onEdit` on every keystroke (the header says "Edited"), `onSave` when the field is left changed, `onUnchanged` when it's left as it was. */
-function SubjectCard({ value, onEdit, onUnchanged, onSave }: { value: string | null; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
+/** A draft's subject, over its lines. `onEdit` on every keystroke (the header says "Edited"), `onSave` when the field is left changed, `onUnchanged` when it's left as it was. */
+function SubjectField({ value, onEdit, onUnchanged, onSave }: { value: string | null; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
   return (
-    <label className="card card-pad field">
+    <label className={`field ${styles.subject}`}>
       <span>Subject <span className="optional">(shown at the top of the invoice)</span></span>
       <input className="input" value={draft} maxLength={200} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Spring cleanup, May services…" />
     </label>
   );
 }
 
-function NotesCard({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
+/** The note on the client's copy: a thank-you, how to pay. Read-only, and left out when empty, on a void invoice. */
+function NotesSection({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [draft, setDraft] = useState(value ?? "");
   useEffect(() => setDraft(value ?? ""), [value]);
-  if (!editable) return value ? <div className="card card-pad"><strong>Note to client</strong><p className="pre-wrap" style={{ margin: "6px 0 0" }}>{value}</p></div> : null;
+  if (!editable) return value ? <Section title="Note to client"><p className={`pre-wrap ${styles.note}`}>{value}</p></Section> : null;
   return (
-    <label className="card card-pad field">
-      <span>Note to client <span className="optional">(thank-you, payment instructions)</span></span>
-      <textarea className="textarea" value={draft} maxLength={4000} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Thank you for your business. Checks payable to…" />
-    </label>
+    <Section title="Note to client" flush>
+      <textarea className={`textarea ${styles.noteInput}`} aria-label="Note to client" value={draft} maxLength={4000} onChange={(e) => { setDraft(e.target.value); onEdit(); }} onBlur={() => (draft.trim() !== (value ?? "") ? onSave(draft.trim() || null) : onUnchanged())} placeholder="Thank you for your business. Checks payable to…" />
+    </Section>
   );
 }
 

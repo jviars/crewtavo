@@ -27,13 +27,15 @@ import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
-import { NumberInput } from "@/components/ui/NumberInput";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SaveStatus, useSaveStatus, type SaveStatusHandle } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { packagePicture } from "@/lib/files";
@@ -89,6 +91,9 @@ import {
   type RoofPackageItem,
 } from "./packages";
 import styles from "./RoofPackagesPage.module.css";
+import { loadSettings } from "@/lib/companySettings";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 const FORMAT = { whole: formatMoney, cents: formatMoneyCents };
 const money = (n: number) => moneyText(n, FORMAT);
@@ -160,15 +165,19 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
   );
   const header = roofing ? (
     <>
-      <PageHeader title="Roofing" actions={newPackage} />
-      <p className="page-subtitle">What goes on each kind of roof. Pick a package when you start an estimate, and the roof's measurements fill in the amounts.</p>
+      <PageHeader
+        title="Roofing"
+        actions={newPackage}
+        lede={<span className="hide-mobile">What goes on each kind of roof. Pick a package when you start an estimate, and the roof's measurements fill in the amounts.</span>}
+      />
       <RoofingTabs />
     </>
   ) : (
-    <>
-      <PageHeader title="Packages" actions={newPackage} />
-      <p className="page-subtitle">Services you sell together, each with a picture so it's easy to pick. Put one on an estimate, or offer two or three side by side.</p>
-    </>
+    <PageHeader
+      title="Packages"
+      actions={newPackage}
+      lede="Services you sell together, each with a picture so it's easy to pick. Put one on an estimate, or offer two or three side by side."
+    />
   );
   const side = roofing || list.length > 0;
   const examples = exampleWarrantyNote(list);
@@ -181,11 +190,23 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
         {header}
         <Loading className={styles.layout} label="Loading packages">
           <div className={styles.side}>
-            <CardSkeleton lines={2} title={false} />
-            <CardSkeleton lines={2} title={false} />
-            {roofing && <CardSkeleton lines={3} />}
+            <div className={styles.listBlock}>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className={styles.skRow}>
+                  <Skeleton width={36} height={36} radius={8} />
+                  <span className={styles.skLines}><Skeleton width="60%" height={11} /><Skeleton width="85%" height={9} /></span>
+                </div>
+              ))}
+            </div>
+            {roofing && <div className={styles.settings}><SectionSkeleton rows={2} /></div>}
           </div>
-          <div className={styles.main}><CardSkeleton lines={10} /></div>
+          <div className={styles.main}>
+            <div className={styles.editor}>
+              <SectionSkeleton rows={2} />
+              <SectionSkeleton rows={3} />
+              <SectionSkeleton rows={5} />
+            </div>
+          </div>
         </Loading>
       </>
     );
@@ -194,7 +215,7 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
     return (
       <>
         {header}
-        <div className="card"><ErrorState error={packages.error ?? services.error} onRetry={() => { packages.refetch(); services.refetch(); }} /></div>
+        <ErrorState error={packages.error ?? services.error} onRetry={() => { packages.refetch(); services.refetch(); }} />
       </>
     );
   }
@@ -202,54 +223,60 @@ function PackagesScreen({ roofing }: { roofing: boolean }) {
   return (
     <>
       {header}
-      <div className={styles.layout}>
+      <div className={styles.layout} data-single={side ? undefined : ""}>
         {side && (
           <div className={styles.side}>
-            {/* Setup's example warranties, until each package has the business's own. */}
-            {examples && (
-              <div className="callout callout-info">
-                <Icon name="info" size={20} />
-                <span className="grow" style={{ fontWeight: 400 }}>{examples}</span>
+            {(examples || list.length > 0) && (
+              <div className={styles.listBlock}>
+                {/* Setup's example warranties, until each package has the business's own. */}
+                {examples && (
+                  <div className={`callout ${styles.examples}`}>
+                    <Icon name="info" size={16} />
+                    <div className="grow">{examples}</div>
+                  </div>
+                )}
+                {list.length > 0 && (
+                  <ul ref={listRef} className={styles.list} aria-label="Packages">
+                    {list.map((p) => {
+                      const main = services.data.find((s) => s.id === p.roof_service_id);
+                      // A roof's are the whole package's on the typical roof (what's always on it too), not just the roof line's.
+                      const figures = roofing ? typicalFigures(p, byId, typical) : null;
+                      const margin = roofing ? (figures?.margin ?? null) : main ? marginPct(main.unit_price, main.unit_cost) : null;
+                      const price = roofing ? (figures?.perUnit ? `${money(figures.perUnit)} a square` : (squarePrice(main, FORMAT) ?? "Pick the roof")) : main ? unitPrice(main.unit_price, main.unit, FORMAT) : packagePriceLine(p, false, FORMAT);
+                      return (
+                        <li key={p.id}>
+                          <button type="button" className={styles.pkg} aria-current={p.id === selected?.id ? "true" : undefined} onClick={() => select(p.id)}>
+                            <PackagePicture path={p.picture} style={p.style} className={styles.tile} />
+                            <span className={styles.pkgText}>
+                              <span className={styles.pkgName}>
+                                <span>{p.name}</span>
+                                {roofing && p.is_default && <span className="tag">Default</span>}
+                              </span>
+                              <span className={styles.pkgSub}>{[p.tier, price, margin !== null ? `${margin}% margin` : null].filter(Boolean).join(" · ")}</span>
+                              {isExampleWarranty(p.warranty) && (
+                                <span className={styles.flag}>
+                                  <Icon name="alert" size={12} />
+                                  Example warranty
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                    {editable && (
+                      <li>
+                        <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
+                          <Icon name="plus" size={16} />Add a package
+                        </button>
+                      </li>
+                    )}
+                  </ul>
+                )}
               </div>
             )}
-            {list.length > 0 && (
-              <ul ref={listRef} className={styles.list} aria-label="Packages">
-                {list.map((p) => {
-                  const main = services.data.find((s) => s.id === p.roof_service_id);
-                  // A roof's are the whole package's on the typical roof (what's always on it too), not just the roof line's.
-                  const figures = roofing ? typicalFigures(p, byId, typical) : null;
-                  const margin = roofing ? (figures?.margin ?? null) : main ? marginPct(main.unit_price, main.unit_cost) : null;
-                  const price = roofing ? (figures?.perUnit ? `${money(figures.perUnit)} a square` : (squarePrice(main, FORMAT) ?? "Pick the roof")) : main ? unitPrice(main.unit_price, main.unit, FORMAT) : packagePriceLine(p, false, FORMAT);
-                  return (
-                    <li key={p.id}>
-                      <button type="button" className={styles.pkg} aria-current={p.id === selected?.id ? "true" : undefined} onClick={() => select(p.id)}>
-                        <PackagePicture path={p.picture} style={p.style} className={styles.tile} />
-                        <span className={styles.pkgText}>
-                          <strong>{p.name}</strong>
-                          <span>{[p.tier, price, margin !== null ? `${margin}% margin` : null].filter(Boolean).join(" · ")}</span>
-                          {isExampleWarranty(p.warranty) && (
-                            <span className={styles.flag}>
-                              <Icon name="alert" size={14} />
-                              Example warranty
-                            </span>
-                          )}
-                        </span>
-                        {roofing && p.is_default && <span className="chip chip-green">Default</span>}
-                      </button>
-                    </li>
-                  );
-                })}
-                {editable && (
-                  <li>
-                    <button type="button" className={styles.addPkg} onClick={() => create.mutate()} disabled={create.isPending}>
-                      <Icon name="plus" size={16} />Add a package
-                    </button>
-                  </li>
-                )}
-              </ul>
-            )}
             {roofing && (
-              <div className={styles.sideCards}>
+              <div className={styles.settings}>
                 <RangeCard save={save} />
                 <SupplierCard packages={list} />
                 {list.length > 0 && <MissingServices services={services.data} />}
@@ -288,32 +315,28 @@ function NoPackages({ roofing, onCreate, creating }: { roofing: boolean; onCreat
   const editable = canEditPackages(session);
   if (!roofing) {
     return (
-      <div className="card">
-        <EmptyState icon="package" title="No packages yet" action={editable && <Button variant="primary" icon="plus" loading={creating} onClick={onCreate}>New package</Button>}>
-          A package is a set of services you sell together, with a picture so it's easy to pick.
-          {!editable && " Ask the office to set them up."}
-        </EmptyState>
-      </div>
+      <EmptyState icon="package" title="No packages yet" action={editable && <Button variant="primary" icon="plus" loading={creating} onClick={onCreate}>New package</Button>}>
+        A package is a set of services you sell together, with a picture so it's easy to pick.
+        {!editable && " Ask the office to set them up."}
+      </EmptyState>
     );
   }
   return (
-    <div className="card">
-      <EmptyState
+    <EmptyState
         icon="package"
         title="No roof packages yet"
         action={
           (canSetUp || editable) && (
-            <div className="row wrap" style={{ justifyContent: "center" }}>
+            <>
               {canSetUp && <Button variant="primary" icon="package" loading={setup.isPending} onClick={() => setup.mutate()}>Set up the standard packages</Button>}
-              {editable && <Button icon="plus" loading={creating} onClick={onCreate}>Start from scratch</Button>}
-            </div>
+              {editable && <Button variant="ghost" icon="plus" loading={creating} onClick={onCreate}>Start from scratch</Button>}
+            </>
           )
         }
       >
         A package is what goes on a kind of roof: the shingles or metal by the square, what's always on it, and one-tap extras. The standard three are Architectural shingle, Designer shingle and Standing-seam metal.
         {!canSetUp && !editable && " Ask the office to set them up."}
       </EmptyState>
-    </div>
   );
 }
 
@@ -335,7 +358,7 @@ function useSaveRoofingSettings() {
     meta: { inline: true },
     mutationFn: async (patch: RoofingSettingsPatch) => {
       // Read the settings fresh, so a change someone made meanwhile isn't undone.
-      const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
+      const current = await loadSettings(company.id);
       const roofing = { ...((current.roofing ?? {}) as Record<string, unknown>), ...patch };
       unwrap(await supabase().from("companies").update({ settings: { ...current, roofing } as never }).eq("id", company.id));
     },
@@ -356,11 +379,8 @@ function RangeCard({ save }: { save: SaveStatusHandle }) {
   const change = (patch: { range_pct?: number; range_round?: number }) => void save.track(saveRange.mutateAsync(patch));
   const example = priceRange(EXAMPLE_ESTIMATE, shown);
   return (
-    <section className={`card card-pad ${styles.sideCard}`} aria-labelledby="roof-ranges">
-      <div className={styles.sideHead}>
-        <h2 id="roof-ranges">Price ranges</h2>
-        <p>For every package. The low end is the estimate; the high end leaves room for what only shows up on site, like rotten decking.</p>
-      </div>
+    <Section title="Price ranges">
+      <p className={styles.sideText} style={{ marginBottom: 12 }}>For every package. The low end is the estimate; the high end leaves room for what only shows up on site, like rotten decking.</p>
       {editable ? (
         <div className={styles.rangeFields}>
           <Field label="Room on top">
@@ -373,14 +393,14 @@ function RangeCard({ save }: { save: SaveStatusHandle }) {
           </Field>
         </div>
       ) : (
-        <p className="small" style={{ margin: 0 }}>
+        <p className={styles.sideText}>
           {shown.pct}% on top, rounded to {formatMoney(shown.round)}. <span className="muted">An owner or admin can change this.</span>
         </p>
       )}
-      <p className="small muted" style={{ margin: 0 }}>
+      <p className={styles.example}>
         An {formatMoney(EXAMPLE_ESTIMATE)} estimate goes out as <strong className={styles.ink}>{formatMoney(example.low)} to {formatMoney(example.high)}</strong>.
       </p>
-    </section>
+    </Section>
   );
 }
 
@@ -415,44 +435,43 @@ function SupplierCard({ packages }: { packages: RoofPackage[] }) {
   });
   const canOpenApps = hasRole(session, "admin") && can(session, "apps");
 
-  if (supplier.isPending) return <div className={`card card-pad ${styles.sideCard}`}><Skeleton width="60%" height={16} /><Skeleton width="90%" /></div>;
-  if (supplier.error) return <div className="card"><ErrorState compact error={supplier.error} onRetry={() => supplier.refetch()} /></div>;
+  if (supplier.isPending) return <SectionSkeleton rows={1} />;
+  if (supplier.error) return <Section title="ABC Supply"><ErrorState compact error={supplier.error} onRetry={() => supplier.refetch()} /></Section>;
   const s = supplier.data;
   return (
-    <section className={`card card-pad ${styles.sideCard}`} aria-labelledby="roof-abc">
-      <div className="row" style={{ gap: 8 }}>
-        <span className={styles.abc} aria-hidden="true">ABC</span>
-        <h2 id="roof-abc" className="grow">ABC Supply</h2>
-        {s?.status === "connected" && <span className="chip chip-green">Connected</span>}
-        {s?.status === "error" && <span className="chip chip-red">Needs attention</span>}
-      </div>
+    <Section
+      title="ABC Supply"
+      action={s?.status === "connected" ? <StatusPill label="Connected" tone="good" /> : s?.status === "error" ? <StatusPill label="Needs attention" tone="danger" /> : undefined}
+    >
       {!s ? (
         <>
           <p className={styles.sideText}>Price your roofs from your own ABC Supply account, at your branch's prices, and let a package follow them.</p>
-          {canOpenApps ? <Link className="btn btn-sm" style={{ justifySelf: "start" }} to="/apps/abc_supply">Connect ABC Supply</Link> : <span className="muted small">An owner or admin can connect it in Apps.</span>}
+          <div className={styles.sideActions}>
+            {canOpenApps ? <Link className="btn btn-sm" to="/apps/abc_supply">Connect ABC Supply</Link> : <span className="muted small">An owner or admin can connect it in Apps.</span>}
+          </div>
         </>
       ) : s.status === "error" ? (
         <>
           <p className={styles.sideText}>{s.last_error ?? "ABC Supply stopped answering."} Packages keep the last prices until it's fixed.</p>
-          {canOpenApps && <Link className="link-btn small" to="/apps/abc_supply">Open in Apps</Link>}
+          {canOpenApps && <div className={styles.sideActions}><Link className="link-btn small" to="/apps/abc_supply">Open in Apps</Link></div>}
         </>
       ) : (
         <>
-          <p className={styles.sideText}>
-            Your prices at {s.branch_name}.{" "}
-            {links.isPending && ids.length ? null : pricedAt ? `Priced ${timeAgo(pricedAt)}.` : "None of your packages' services have ABC materials yet."}
-          </p>
-          <div className="row wrap" style={{ gap: 14 }}>
+          <div className={styles.line}>
+            <span className="grow">
+              Your prices at {s.branch_name}.{" "}
+              {links.isPending && ids.length ? null : pricedAt ? `Priced ${timeAgo(pricedAt)}.` : "None of your packages' services have ABC materials yet."}
+            </span>
             {canEditPackages(session) && pricedAt !== undefined && (
-              <button type="button" className="link-btn small" onClick={() => update.mutate()} disabled={update.isPending}>
-                {update.isPending ? "Updating prices…" : "Update prices"}
-              </button>
+              <Button size="sm" icon="refresh" loading={update.isPending} slowHint={false} onClick={() => update.mutate()}>
+                Update prices
+              </Button>
             )}
-            {canOpenApps && <Link className="link-btn small" to="/apps/abc_supply">Open in Apps</Link>}
           </div>
+          {canOpenApps && <div className={styles.sideActions}><Link className="link-btn small" to="/apps/abc_supply">Open in Apps</Link></div>}
         </>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -481,19 +500,21 @@ function MissingServices({ services }: { services: PriceListService[] }) {
   const missingFields = fields.data ? missingRoofingFields(fields.data) : [];
   if (!missing.length && !missingFields.length) return null;
   return (
-    <div className={`card card-pad ${styles.sideCard}`}>
+    <Section title="Standard roofing setup">
       {missing.length > 0 && (
         <p className={styles.sideText}>
           {missing.length} standard roofing {missing.length === 1 ? "service isn't" : "services aren't"} in your price list yet, like {missing.slice(0, 2).map((s) => s.name).join(" and ")}.
         </p>
       )}
       {missingFields.length > 0 && (
-        <p className={styles.sideText}>
+        <p className={styles.sideText} style={missing.length > 0 ? { marginTop: 8 } : undefined}>
           Your quotes and jobs can keep an insurance claim's details: {missingFields.join(", ").toLowerCase()}. They carry from the quote to its job, and you can change them in Settings → Custom fields.
         </p>
       )}
-      <Button size="sm" icon="plus" style={{ justifySelf: "start" }} loading={add.isPending} onClick={() => add.mutate()}>Add {missing.length + missingFields.length === 1 ? "it" : "them"}</Button>
-    </div>
+      <div className={styles.sideActions}>
+        <Button size="sm" icon="plus" loading={add.isPending} onClick={() => add.mutate()}>Add {missing.length + missingFields.length === 1 ? "it" : "them"}</Button>
+      </div>
+    </Section>
   );
 }
 
@@ -757,10 +778,32 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
     }),
   ];
 
+  // "Add from your price list": a menu of what isn't on it yet, by category, with a search over it.
+  const [addTerm, setAddTerm] = useState("");
+  const term = addTerm.trim().toLowerCase();
+  const addItems: MenuEntry[] = categories.flatMap((c): MenuEntry[] => {
+    const inCategory = addable.filter((s) => (s.category?.trim() || "Other") === c && (!term || s.name.toLowerCase().includes(term)));
+    if (!inCategory.length) return [];
+    return [
+      ...(categories.length > 1 ? [{ heading: c }] : []),
+      ...inCategory.map((s) => ({ label: s.name, end: unitPrice(s.unit_price, s.unit, FORMAT, true), onSelect: () => run(addItem, { serviceId: s.id, kind: "included" }) })),
+    ];
+  });
+  // The package's own actions past Copy: the default for new roof estimates, then delete.
+  const deletePackage = async () => (await confirm({ title: `Delete the ${pkg.name} package?`, body: "Estimates already made with it keep their lines.", confirmLabel: "Delete", danger: true })) && remove.mutate();
+  const moreItems: MenuEntry[] = [
+    { label: "Make it the default", description: "New roof estimates start with it", icon: "star", hidden: !roofing || pkg.is_default, disabled: makeDefault.isPending, onSelect: () => makeDefault.mutate() },
+    { separator: true },
+    { label: "Delete package", icon: "trash", danger: true, disabled: remove.isPending, onSelect: () => void deletePackage() },
+  ];
+
+  const roofHint = roof ? `Priced by the square from the roof's measurements${roof.formula ? ` (${formulaWords(roof.formula)?.toLowerCase()})` : ""}.` : "Pick the service in your price list that prices this roof by the square.";
+  const mainHint = roof ? `Its price shows on the package's card${roof.formula ? `, measured: ${formulaWords(roof.formula)?.toLowerCase()}` : ""}.` : "What this package is mostly about, if there's one service. Its price shows on the package's card.";
+
   return (
-    <section className={`card ${styles.editor}`} aria-label={pkg.name}>
-      {/* Name, tier, picture and the package's own actions */}
-      <div className={styles.part}>
+    <section className={styles.editor} aria-label={pkg.name}>
+      {/* Name, tier and the package's own actions; its picture and style; the roof */}
+      <div className={styles.look}>
         {editable ? (
           <div className={styles.head}>
             <Field label="Package name" className={styles.nameField}>
@@ -769,7 +812,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
                   save.edited();
                 }} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
             </Field>
-            <Field label="Tier" optional className={styles.tierField}>
+            <Field label="Tier" optional>
               <input className="input" list={tiersId} value={tier} maxLength={PACKAGE_LIMITS.tier} placeholder="Good, Better…" onChange={(e) => {
                   setTier(e.target.value);
                   save.edited();
@@ -777,32 +820,25 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
               <TierWords id={tiersId} />
             </Field>
             <div className={styles.headActions}>
-              {roofing && !pkg.is_default && <Button variant="ghost" icon="star" loading={makeDefault.isPending} onClick={() => makeDefault.mutate()}>Make default</Button>}
-              <Button variant="ghost" icon="copy" loading={copy.isPending} onClick={() => copy.mutate()}>Copy</Button>
-              <Button
-                variant="ghost"
-                icon="trash"
-                aria-label="Delete this package"
-                loading={remove.isPending}
-                onClick={async () => (await confirm({ title: `Delete the ${pkg.name} package?`, body: "Estimates already made with it keep their lines.", confirmLabel: "Delete", danger: true })) && remove.mutate()}
-              />
+              <Button variant="ghost" size="sm" icon="copy" loading={copy.isPending} onClick={() => copy.mutate()}>Copy</Button>
+              <Menu items={moreItems} label="More package actions" title={pkg.name} triggerClassName="btn btn-sm btn-ghost btn-icon" />
             </div>
           </div>
         ) : (
-          <div className="row wrap" style={{ gap: 10 }}>
+          <div className={styles.readHead}>
             <PackagePicture path={pkg.picture} style={pkg.style} className={styles.tile} />
             <h2 className={styles.title}>{pkg.name}</h2>
-            {pkg.tier && <span className="chip">{pkg.tier}</span>}
-            {roofing && pkg.is_default && <span className="chip chip-green">Default</span>}
+            {pkg.tier && <span className="tag">{pkg.tier}</span>}
+            {roofing && pkg.is_default && <span className="tag">Default</span>}
           </div>
         )}
         {editable && (
           <PictureControl pkg={pkg} customer={customer}>
             {roofing && (
-              <div className={styles.styleRow} role="group" aria-label="Drawing on its card, without a picture">
+              <div className={`segmented ${styles.styleRow}`} role="group" aria-label="Drawing on its card, without a picture">
                 {PACKAGE_STYLES.map((s) => (
-                  <button key={s.id} type="button" className={styles.styleBtn} aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && run(savePackage, { patch: { style: s.id } })}>
-                    <PackageArt style={s.id} size={26} />
+                  <button key={s.id} type="button" aria-pressed={pkg.style === s.id} onClick={() => pkg.style !== s.id && run(savePackage, { patch: { style: s.id } })}>
+                    <PackageArt style={s.id} size={14} />
                     {s.label}
                   </button>
                 ))}
@@ -811,18 +847,14 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
           </PictureControl>
         )}
         {editable && roofing ? (
-          <Field label="The roof" hint={roof ? `Priced by the square from the roof's measurements${roof.formula ? ` (${formulaWords(roof.formula)?.toLowerCase()})` : ""}.` : "Pick the service in your price list that prices this roof by the square."}>
+          <Field label="The roof" hint={roofHint}>
             <Select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => e.target.value && run(savePackage, { patch: { roof_service_id: e.target.value } })}>
               {!pkg.roof_service_id && <option value="">Pick the roof…</option>}
               {(roofChoices.length ? roofChoices : services.filter((s) => s.active)).map((s) => <option key={s.id} value={s.id}>{s.name}{s.active ? "" : " (turned off)"}</option>)}
             </Select>
           </Field>
         ) : editable ? (
-          <Field
-            label="Main service"
-            optional
-            hint={roof ? `Its price shows on the package's card${roof.formula ? `, measured: ${formulaWords(roof.formula)?.toLowerCase()}` : ""}.` : "What this package is mostly about, if there's one service. Its price shows on the package's card."}
-          >
+          <Field label="Main service" optional hint={mainHint}>
             <Select className="select" value={pkg.roof_service_id ?? ""} onChange={(e) => run(savePackage, { patch: { roof_service_id: e.target.value || null } })}>
               <option value="">None</option>
               {[...new Set(mainChoices.map((s) => s.category?.trim() || "Other"))].map((c) => (
@@ -835,17 +867,13 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
         ) : null}
       </div>
 
-      {roofing && roof && <TypicalRoofPart pkg={pkg} byId={byId} prices={follows} save={save} />}
-
       {/* The price a square (a roof), or the main service's price */}
       {(roofing || roof) && (
-        <div className={styles.part}>
-          <div className={styles.partHead}>
-            <div>
-              <h2>{roofing ? "Price a square" : "Price"}</h2>
-              <p>{roofing ? "What the homeowner pays a square for the whole package, installed: the roof, and what's always on it." : `What the customer pays for ${roof?.name}.`}</p>
-            </div>
-            {editable && roof && roofing && (
+        <Section
+          className={styles.priceSection}
+          title={roofing ? "Price a square" : "Price"}
+          action={
+            editable && roof && roofing ? (
               <div className="segmented" role="group" aria-label="How the price is set">
                 <button type="button" aria-pressed={!following} onClick={() => following && run(savePackage, { patch: { price_mode: "manual" } })}>Set it yourself</button>
                 <button
@@ -858,149 +886,153 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
                   Follow ABC prices
                 </button>
               </div>
-            )}
-          </div>
-
+            ) : undefined
+          }
+        >
           {!roof ? (
-            <p className="callout callout-info" style={{ margin: 0 }}>Pick the roof above, and its price a square shows here.</p>
+            <p className={styles.note}>{roofing ? "Pick the roof above, and its price a square shows here." : "Pick the main service above, and its price shows here."}</p>
           ) : loadingMaterials ? (
-            <Skeleton height={64} radius={8} />
-          ) : following && canFollow ? (
-            <div className="stack-sm">
-              <div className={styles.sum}>
-                <span className={styles.term}>
-                  <span><span className={styles.abc}>ABC</span>Materials</span>
-                  <strong>{formatMoneyCents(perSquare)}</strong>
-                </span>
-                <span className={styles.op} aria-hidden="true">+</span>
-                <span className={styles.term}>
-                  <span>Labor and the rest</span>
-                  {editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => run(saveLabor, v)} /> : <strong>{formatMoneyCents(roof.labor_cost ?? 0)}</strong>}
-                </span>
-                <span className={styles.op} aria-hidden="true">+</span>
-                <span className={styles.term}>
-                  {editable ? (
-                    <span className={`segmented ${styles.markupSwitch}`} role="group" aria-label="Set the price by">
-                      <button type="button" aria-pressed={!byMargin} onClick={() => chooseMargin(false)}>Markup</button>
-                      <button type="button" aria-pressed={byMargin} onClick={() => chooseMargin(true)}>Margin</button>
-                    </span>
-                  ) : (
-                    <span>Markup</span>
-                  )}
-                  {!editable ? (
-                    <strong>{pkg.markup_pct}%</strong>
-                  ) : byMargin ? (
-                    <MoneyInput key="margin" percent max={90} width={96} label="Margin percent" value={marginForMarkup(pkg.markup_pct)} onSave={(v) => setMarkup(markupForMargin(v))} />
-                  ) : (
-                    <MoneyInput key="markup" percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={setMarkup} />
-                  )}
-                  <span className={styles.conv}>{byMargin && editable ? `= ${pkg.markup_pct}% markup` : `= ${Math.round(marginForMarkup(pkg.markup_pct))}% margin`}</span>
-                </span>
-                <span className={styles.op} aria-hidden="true">=</span>
-                <span className={styles.term}>
-                  <span>{unpriced.length ? "The roof, a square, held" : "The roof, a square"}</span>
-                  <strong>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct) ?? roof.unit_price)}</strong>
-                </span>
-              </div>
-              {unpriced.length ? (
-                <p className="callout callout-warning" style={{ margin: 0 }}>
-                  <span className="grow">
-                    ABC has no price for {unpriced.map((l) => l.name).join(" or ")} at your branch, so this roof stays at {formatMoneyCents(roof.unit_price)} a square instead of leaving it out.
-                    Call the branch for a price, or <Link to={CATALOG_MATERIALS}>replace it in the Catalog</Link>.
-                  </span>
-                </p>
-              ) : (
-                <p className={styles.note}>
-                  Moves with ABC's prices, and so does everything on this package with ABC materials (marked Follows ABC below), at this markup. That's also true of one added to an estimate later, in the office or on site. Every new estimate is priced at today's materials; estimates already sent and signed keep their price.
-                </p>
-              )}
-              {stale.length > 0 && (
-                <p className={styles.note}>
-                  ABC didn't price {stale.map((l) => l.name).join(" or ")} last time ({stale[0]!.price_note!.replace(/\.$/, "")}), so {stale.length === 1 ? "it keeps its" : "they keep their"} last price. <Link to={CATALOG_MATERIALS}>Check it in the Catalog</Link>.
-                </p>
-              )}
-            </div>
+            <Skeleton height={84} radius={8} />
           ) : (
-            <div className="stack-sm">
-              {following && <p className="callout callout-warning" style={{ margin: 0 }}>This roof has no ABC materials any more, so its price stays where it was. Set it yourself, or pick its materials again.</p>}
-              <div className={styles.priceRow}>
-                {editable ? (
-                  <span className={styles.bigMoney}><MoneyInput width={160} label={roofing ? "Price a square" : "Price"} value={roof.unit_price} onSave={(v) => run(saveService, { id: roof.id, patch: { unit_price: v } })} /></span>
+            <>
+              <dl className={styles.ledger}>
+                {following && canFollow ? (
+                  <>
+                    <div className={styles.lrow}>
+                      <dt><span><span className={styles.abc}>ABC</span>Materials, a square</span></dt>
+                      <dd>{formatMoneyCents(perSquare)}</dd>
+                    </div>
+                    <div className={styles.lrow}>
+                      <dt>Labor and the rest, a square</dt>
+                      <dd>{editable ? <MoneyInput width={110} label="Labor and the rest, a square" value={roof.labor_cost ?? 0} onSave={(v) => run(saveLabor, v)} /> : formatMoneyCents(roof.labor_cost ?? 0)}</dd>
+                    </div>
+                    <div className={styles.lrow}>
+                      <dt>
+                        {editable ? (
+                          <span className={`segmented ${styles.markupSwitch}`} role="group" aria-label="Set the price by">
+                            <button type="button" aria-pressed={!byMargin} onClick={() => chooseMargin(false)}>Markup</button>
+                            <button type="button" aria-pressed={byMargin} onClick={() => chooseMargin(true)}>Margin</button>
+                          </span>
+                        ) : (
+                          "Markup"
+                        )}
+                      </dt>
+                      <dd>
+                        <span className={styles.conv}>{byMargin && editable ? `${pkg.markup_pct}% markup` : `${Math.round(marginForMarkup(pkg.markup_pct))}% margin`}</span>
+                        {!editable ? (
+                          `${pkg.markup_pct}%`
+                        ) : byMargin ? (
+                          <MoneyInput key="margin" percent max={90} width={96} label="Margin percent" value={marginForMarkup(pkg.markup_pct)} onSave={(v) => setMarkup(markupForMargin(v))} />
+                        ) : (
+                          <MoneyInput key="markup" percent max={1000} width={96} label="Markup percent" value={pkg.markup_pct} onSave={setMarkup} />
+                        )}
+                      </dd>
+                    </div>
+                    <div className={styles.lrow} data-total={whole?.perUnit ? undefined : ""}>
+                      <dt>{unpriced.length ? "The roof, a square, held" : "The roof, a square"}</dt>
+                      <dd>{formatMoneyCents(followed(roof.labor_cost, pkg.markup_pct) ?? roof.unit_price)}</dd>
+                    </div>
+                  </>
                 ) : (
-                  <strong className={styles.bigPrice}>{squarePrice(roof, FORMAT)}</strong>
+                  <div className={styles.lrow} data-total={whole?.perUnit ? undefined : ""}>
+                    <dt>
+                      {roofing ? "The roof, a square" : `${roof.name}`}
+                      <small>
+                        {roof.unit_cost !== null ? (
+                          <>
+                            Your cost today: {formatMoneyCents(roof.unit_cost)} {isSquareUnit(roof.unit) ? "a square" : `a ${roof.unit}`}
+                            {marginPct(roof.unit_price, roof.unit_cost) !== null && <> · {marginPct(roof.unit_price, roof.unit_cost)}% margin</>}
+                          </>
+                        ) : (
+                          <>Add your cost in the <Link to="/settings?tab=prices">price list</Link> to see the margin.</>
+                        )}
+                      </small>
+                    </dt>
+                    <dd>
+                      {editable ? (
+                        <MoneyInput width={130} label={roofing ? "Price a square" : "Price"} value={roof.unit_price} onSave={(v) => run(saveService, { id: roof.id, patch: { unit_price: v } })} />
+                      ) : (
+                        squarePrice(roof, FORMAT)
+                      )}
+                    </dd>
+                  </div>
                 )}
-                <span className={styles.costLine}>
-                  {roof.unit_cost !== null ? (
-                    <span>
-                      Your cost today: <strong>{formatMoneyCents(roof.unit_cost)}</strong> {isSquareUnit(roof.unit) ? "a square" : `a ${roof.unit}`}
-                      {marginPct(roof.unit_price, roof.unit_cost) !== null && <> · <strong>{marginPct(roof.unit_price, roof.unit_cost)}% margin</strong></>}
-                    </span>
-                  ) : (
-                    <span>Add your cost in the <Link to="/settings?tab=prices">price list</Link> to see the margin.</span>
-                  )}
-                  {canFollow && <span className="small">Stays put when ABC's prices change. The margin moves instead.</span>}
-                </span>
+                {whole?.perUnit ? (
+                  <>
+                    <div className={styles.lrow}>
+                      <dt>What's always on it, a square</dt>
+                      <dd>{formatMoneyCents(round2(whole.perUnit - roofSquare))}</dd>
+                    </div>
+                    <div className={styles.lrow} data-total="">
+                      <dt>The package, a square</dt>
+                      <dd>{formatMoneyCents(whole.perUnit)}</dd>
+                    </div>
+                  </>
+                ) : null}
+              </dl>
+              <div className={styles.notes}>
+                {following && canFollow && unpriced.length > 0 && (
+                  <div className="callout callout-warning">
+                    <Icon name="alert" size={16} />
+                    <div className="grow">
+                      ABC has no price for {unpriced.map((l) => l.name).join(" or ")} at your branch, so this roof stays at {formatMoneyCents(roof.unit_price)} a square instead of leaving it out.
+                      Call the branch for a price, or <Link to={CATALOG_MATERIALS}>replace it in the Catalog</Link>.
+                    </div>
+                  </div>
+                )}
+                {following && !canFollow && (
+                  <div className="callout callout-warning">
+                    <Icon name="alert" size={16} />
+                    <div className="grow">This roof has no ABC materials any more, so its price stays where it was. Set it yourself, or pick its materials again.</div>
+                  </div>
+                )}
+                {following && canFollow && !unpriced.length && (
+                  <p className={styles.note}>
+                    Moves with ABC's prices, and so does everything on this package with ABC materials (marked Follows ABC below), at this markup. That's also true of one added to an estimate later, in the office or on site. Every new estimate is priced at today's materials; estimates already sent and signed keep their price.
+                  </p>
+                )}
+                {following && canFollow && stale.length > 0 && (
+                  <p className={styles.note}>
+                    ABC didn't price {stale.map((l) => l.name).join(" or ")} last time ({stale[0]!.price_note!.replace(/\.$/, "")}), so {stale.length === 1 ? "it keeps its" : "they keep their"} last price. <Link to={CATALOG_MATERIALS}>Check it in the Catalog</Link>.
+                  </p>
+                )}
+                {!following && canFollow && <p className={styles.note}>Stays put when ABC's prices change. The margin moves instead.</p>}
+                {!canFollow && editable && roofing && (
+                  <p className={styles.note}>
+                    To follow ABC prices, pick what goes into a square from ABC Supply's catalog.{" "}
+                    {connected ? (
+                      <button type="button" className="link-btn" onClick={() => setPicking(roof)}>Pick its materials</button>
+                    ) : (
+                      "Connect ABC Supply first (Apps)."
+                    )}
+                  </p>
+                )}
+                {whole?.perUnit ? <p className={styles.note}>What's always on this roof, on a typical {squares}-square roof, split across its squares. On an estimate each is still its own line, measured from the roof, and the total comes out the same.</p> : null}
+                {shared.length > 0 && <p className={styles.note}>The {shared.map((p) => p.name).join(" and ")} {shared.length === 1 ? "package uses" : "packages use"} this {roofing ? "roof" : "service"} too, so its price changes there as well.</p>}
               </div>
-              {!canFollow && editable && roofing && (
-                <p className={styles.note}>
-                  To follow ABC prices, pick what goes into a square from ABC Supply's catalog.{" "}
-                  {connected ? (
-                    <button type="button" className="link-btn" onClick={() => setPicking(roof)}>Pick its materials</button>
-                  ) : (
-                    "Connect ABC Supply first (Apps)."
-                  )}
-                </p>
-              )}
-            </div>
+            </>
           )}
-          {roof && whole?.perUnit && (
-            <div className="stack-sm">
-              <div className={styles.sum}>
-                <span className={styles.term}>
-                  <span>The roof, a square</span>
-                  <strong>{formatMoneyCents(roofSquare)}</strong>
-                </span>
-                <span className={styles.op} aria-hidden="true">+</span>
-                <span className={styles.term}>
-                  <span>What's always on it, a square</span>
-                  <strong>{formatMoneyCents(round2(whole.perUnit - roofSquare))}</strong>
-                </span>
-                <span className={styles.op} aria-hidden="true">=</span>
-                <span className={`${styles.term} ${styles.total}`}>
-                  <span>The package, a square</span>
-                  <strong>{formatMoneyCents(whole.perUnit)}</strong>
-                </span>
-              </div>
-              <p className={styles.note}>What's always on this roof, on a typical {squares}-square roof, split across its squares. On an estimate each is still its own line, measured from the roof, and the total comes out the same.</p>
-            </div>
-          )}
-          {shared.length > 0 && <p className={styles.note}>The {shared.map((p) => p.name).join(" and ")} {shared.length === 1 ? "package uses" : "packages use"} this {roofing ? "roof" : "service"} too, so its price changes there as well.</p>}
-        </div>
+        </Section>
       )}
 
       {/* Always on this roof (always included) */}
-      <div className={styles.part}>
-        <div className={styles.partHead}>
-          <div>
-            <h2>{roofing ? "Always on this roof" : "Always included"}</h2>
-            <p>{roofing ? "Priced from the measurements. Nobody has to type a number." : "On the estimate every time: measured ones fill in from the measurements, the rest start at the count you set."}</p>
-          </div>
-          {editable && addable.length > 0 && (
-            <Select
-              className={`select ${styles.addSelect}`}
-              aria-label="Add from your price list"
-              value=""
-              onChange={(e) => e.target.value && run(addItem, { serviceId: e.target.value, kind: "included" })}
-            >
-              <option value="">Add from your price list…</option>
-              {categories.map((c) => (
-                <optgroup key={c} label={c}>
-                  {addable.filter((s) => (s.category?.trim() || "Other") === c).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </optgroup>
-              ))}
-            </Select>
-          )}
-        </div>
+      <Section
+        title={roofing ? "Always on this roof" : "Always included"}
+        count={rows.length || undefined}
+        action={
+          editable && addable.length > 0 ? (
+            <Menu
+              items={addItems}
+              label="Add from your price list"
+              title="Add from your price list"
+              triggerClassName="btn"
+              trigger={<><Icon name="plus" size={14} />Add from your price list</>}
+              search={{ value: addTerm, onChange: setAddTerm, placeholder: "Find a service", label: "Find a service in your price list" }}
+            />
+          ) : undefined
+        }
+      >
+        <p className={styles.note} style={{ marginBottom: rows.length ? 12 : 0 }}>{roofing ? "Priced from the measurements. Nobody has to type a number." : "On the estimate every time: measured ones fill in from the measurements, the rest start at the count you set."}</p>
         {rows.length === 0 ? (
           <EmptyState inline title={roofing ? "Nothing on this roof yet" : "Nothing included yet"}>
             {roofing ? "Pick the roof above, then add what always goes on it." : "Add what always goes in this package from your price list."}
@@ -1008,7 +1040,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
         ) : (
           <div className={styles.rows}>
             <div className={`${styles.row} ${styles.rowHead}`} aria-hidden="true">
-              <span>On the estimate</span><span>How much</span><span className={styles.num}>Price</span><span>Your cost</span><span className={styles.num}>Margin</span><span />
+              <span>On the estimate</span><span>How much</span><span className={styles.num}>Price</span><span className={styles.num}>Your cost</span><span className={styles.num}>Margin</span><span />
             </div>
             <ul ref={rowsRef} className={styles.rowList} aria-label={roofing ? "Always on this roof" : "Always included"}>
               {rows.map(({ service, item }) => (
@@ -1030,19 +1062,16 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
           </div>
         )}
         {roofing && (materials.data ?? []).length > 0 && (
-          <p className={styles.note}><span className={styles.abc}>ABC</span> Materials come from what you picked for each service in ABC's catalog. Change them on any roof estimate's Materials card.</p>
+          <p className={styles.note} style={{ marginTop: 10 }}><span className={styles.abc}>ABC</span> Materials come from what you picked for each service in ABC's catalog. Change them on any roof estimate's Materials card.</p>
         )}
-      </div>
+      </Section>
+
+      {roofing && roof && <TypicalRoofPart pkg={pkg} byId={byId} prices={follows} save={save} />}
 
       {/* Quick adds: only a roofer's estimate and iPad visit show them */}
       {roofing && (
-        <div className={styles.part}>
-          <div className={styles.partHead}>
-            <div>
-              <h2>Quick adds</h2>
-              <p>One tap to add to an estimate, in the office or on the iPad. Anything else in your price list can still be searched.</p>
-            </div>
-          </div>
+        <Section title="Quick adds" count={chips.filter((c) => c.on).length || undefined}>
+          <p className={styles.note} style={{ marginBottom: 12 }}>One tap to add to an estimate, in the office or on the iPad. Anything else in your price list can still be searched.</p>
           {chips.length === 0 ? (
             <EmptyState inline title="Everything in your price list is already on this roof" />
           ) : editable ? (
@@ -1066,7 +1095,7 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
                   </button>
                 ))}
               </div>
-              <p className={styles.note}>Green ones show as buttons on the estimate. Tap one to turn it off or on.</p>
+              <p className={styles.note} style={{ marginTop: 10 }}>Checked ones show as buttons on the estimate. Tap one to turn it off or on.</p>
             </>
           ) : chips.some((c) => c.on) ? (
             <div className={styles.chips}>
@@ -1081,19 +1110,14 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
           ) : (
             <EmptyState inline title="No quick adds on this package" />
           )}
-        </div>
+        </Section>
       )}
 
       {/* What the customer reads on its card */}
-      <div className={styles.part}>
-        <div className={styles.partHead}>
-          <div>
-            <h2>On its card</h2>
-            <p>What the {customer} reads when you offer it as one of two or three options.</p>
-          </div>
-        </div>
+      <Section title="On its card">
+        <p className={styles.note} style={{ marginBottom: 12 }}>What the {customer} reads when you offer it as one of two or three options.</p>
         {editable ? (
-          <>
+          <div className={styles.cardPart}>
             <HighlightsField
               value={highlights}
               onChange={(lines) => {
@@ -1108,22 +1132,32 @@ function PackageEditor({ pkg, packages, services, editable, roofing, onSelect, s
                 save.edited();
               }} onBlur={saveWarranty} />
             </Field>
-            {isExampleWarranty(warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
-          </>
+            {isExampleWarranty(warranty) && (
+              <div className="callout">
+                <Icon name="info" size={16} />
+                <div className="grow">{STARTER_NOTE}</div>
+              </div>
+            )}
+          </div>
         ) : pkg.highlights.length || pkg.warranty ? (
-          <div className="stack-sm">
+          <div className={styles.cardPart}>
             {pkg.highlights.length > 0 && (
               <ul className={styles.cardLines}>
                 {pkg.highlights.map((line, i) => <li key={i}>{line}</li>)}
               </ul>
             )}
-            {pkg.warranty && <p className={styles.note}><strong className={styles.ink}>Warranty:</strong> {pkg.warranty}</p>}
-            {isExampleWarranty(pkg.warranty) && <p className="callout callout-info" style={{ margin: 0 }}>{STARTER_NOTE}</p>}
+            {pkg.warranty && <p className={styles.sideText}><strong className={styles.ink}>Warranty:</strong> {pkg.warranty}</p>}
+            {isExampleWarranty(pkg.warranty) && (
+              <div className="callout">
+                <Icon name="info" size={16} />
+                <div className="grow">{STARTER_NOTE}</div>
+              </div>
+            )}
           </div>
         ) : (
           <EmptyState inline title="No highlights or warranty yet" />
         )}
-      </div>
+      </Section>
 
       {/* Contract sections */}
       <ContractPart pkg={pkg} editable={editable} onChange={(section_ids) => run(savePackage, { patch: { section_ids } })} />
@@ -1185,38 +1219,40 @@ function TypicalRoofPart({ pkg, byId, prices, save }: { pkg: RoofPackage; byId: 
   const low = figures?.margin !== null && figures?.margin !== undefined && figures.margin < LOW_MARGIN;
   const noCost = figures?.noCost ?? [];
   return (
-    <div className={styles.part}>
-      <div className={styles.partHead}>
-        <div>
-          <h2>On a typical roof</h2>
-          <p>
-            Every line on this package, on a {squares}-square roof with {roof.eave_ft + roof.rake_ft} ft of eaves and rakes and {roof.ridge_ft + roof.hip_ft} ft of ridges and hips.
-          </p>
-        </div>
-        {editable && (
+    <Section
+      className={styles.typicalSection}
+      title={`On a typical ${squares}-square roof`}
+      action={
+        editable ? (
           <label className={styles.squares}>
             Typical roof
             <NumberInput className="input input-sm" inputMode="numeric" min={1} max={TYPICAL_SQUARES_MAX} step={1} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={saveDraft} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
             squares
           </label>
-        )}
-      </div>
+        ) : undefined
+      }
+    >
       {figures ? (
-        <dl className={styles.figures}>
-          <div><dt>Homeowner pays</dt><dd>{formatMoney(figures.price)}</dd></div>
-          <div><dt>Your cost</dt><dd>{formatMoney(figures.cost)}</dd></div>
-          <div><dt>Profit</dt><dd>{formatMoney(figures.profit)}</dd></div>
-          <div className={styles.marginFigure} data-low={low || undefined}><dt>Margin</dt><dd>{figures.margin === null ? "—" : `${figures.margin}%`}</dd></div>
-        </dl>
+        <StatStrip label={`This package on a ${squares}-square roof`} className={styles.strip}>
+          <Stat label="Homeowner pays" value={formatMoney(figures.price)} />
+          <Stat label="Your cost" value={formatMoney(figures.cost)} />
+          <Stat label="Profit" value={formatMoney(figures.profit)} tone={figures.profit < 0 ? "danger" : undefined} />
+          {figures.margin !== null && <Stat label="Margin" value={`${figures.margin}%`} tone={low ? "warning" : undefined} note={low ? `Under ${LOW_MARGIN}%` : undefined} />}
+        </StatStrip>
       ) : (
         <p className={styles.note}>Nothing on this package comes to a price on this roof yet.</p>
       )}
-      {noCost.length > 0 && (
+      <div className={styles.notes}>
         <p className={styles.note}>
-          {noCost.join(", ")} {noCost.length === 1 ? "has" : "have"} no cost in your <Link to="/settings?tab=prices">price list</Link>, so the real margin is lower.
+          Every line on this package, on a {squares}-square roof with {roof.eave_ft + roof.rake_ft} ft of eaves and rakes and {roof.ridge_ft + roof.hip_ft} ft of ridges and hips.
         </p>
-      )}
-    </div>
+        {noCost.length > 0 && (
+          <p className={styles.note}>
+            {noCost.join(", ")} {noCost.length === 1 ? "has" : "have"} no cost in your <Link to="/settings?tab=prices">price list</Link>, so the real margin is lower.
+          </p>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -1248,26 +1284,24 @@ function PictureControl({ pkg, customer, children }: { pkg: RoofPackage; custome
   });
   const setDone = useJustDone(set);
   return (
-    <div className="stack-sm">
-      <div className={styles.pictureRow}>
-        <PackagePicture path={pkg.picture} style={pkg.style} className={styles.editorPicture} />
-        <div className={styles.pictureSide}>
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Button size="sm" icon="image" loading={set.isPending} done={setDone} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
-              {pkg.picture ? "Change picture" : "Add a picture"}
-            </Button>
-            {pkg.picture && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove picture</Button>}
-          </div>
-          <span className="muted small">A photo of the finished work or what goes in, so it's easy to pick. The {customer} sees it when it's one of the options.</span>
-          {children && (
-            <>
-              <span className="muted small">{pkg.picture ? "Without a picture, its card shows:" : "Until it has one, its card shows:"}</span>
-              {children}
-            </>
-          )}
+    <div className={styles.pictureRow}>
+      <PackagePicture path={pkg.picture} style={pkg.style} className={styles.editorPicture} />
+      <div className={styles.pictureSide}>
+        {children && (
+          <>
+            <span className={styles.styleLabel}>{pkg.picture ? "Without a picture, its card shows:" : "Until it has a picture, its card shows:"}</span>
+            {children}
+          </>
+        )}
+        <div className={styles.pictureButtons}>
+          <Button size="sm" variant="ghost" icon="image" loading={set.isPending} done={setDone} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
+            {pkg.picture ? "Change picture" : "Add a picture"}
+          </Button>
+          {pkg.picture && <Button size="sm" variant="ghost" icon="x" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove picture</Button>}
         </div>
+        <span className={styles.pictureHint}>A photo of the finished work or what goes in, so it's easy to pick. The {customer} sees it when it's one of the options.</span>
+        <FormError error={set.error ?? remove.error} />
       </div>
-      <FormError error={set.error ?? remove.error} />
       <input
         ref={input}
         type="file"
@@ -1299,16 +1333,10 @@ function ContractPart({ pkg, editable, onChange }: { pkg: RoofPackage; editable:
   const full = pkg.section_ids.length >= PACKAGE_LIMITS.sections;
   const writes = canEditContracts(session);
   return (
-    <div className={styles.part}>
-      <div className={styles.partHead}>
-        <div>
-          <h2>Contract</h2>
-          <p>Sections that print on every estimate this package is on, after the ones every estimate has.</p>
-        </div>
-        {writes && sections.length > 0 && <Link className="link-btn small" to="/settings?tab=contracts">Contract terms</Link>}
-      </div>
+    <Section title="Contract" count={pkg.section_ids.length || undefined} action={writes && sections.length > 0 ? <Link to="/settings?tab=contracts">Contract terms</Link> : undefined}>
+      <p className={styles.note} style={{ marginBottom: sections.length && !library.isPending ? 4 : 0 }}>Sections that print on every estimate this package is on, after the ones every estimate has.</p>
       {library.isPending ? (
-        <Skeleton height={44} radius={8} />
+        <Skeleton height={40} radius={8} style={{ marginTop: 12 }} />
       ) : library.error ? (
         <ErrorState compact error={library.error} onRetry={() => library.refetch()} />
       ) : !sections.length ? (
@@ -1333,7 +1361,7 @@ function ContractPart({ pkg, editable, onChange }: { pkg: RoofPackage; editable:
           })}
         </ul>
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -1400,8 +1428,8 @@ function AlwaysRow({
         {unitPrice(price, service.unit, FORMAT)}
         {followedPrice !== undefined && <span className={`${styles.sub} ${styles.follows}`}>Follows ABC</span>}
       </span>
-      <span className={styles.cellCost} data-label="Your cost">
-        {service.unit_cost !== null ? unitPrice(service.unit_cost, service.unit, FORMAT) : <span className="muted">—</span>}
+      <span className={styles.cellCost} data-label={service.unit_cost !== null ? "Your cost" : undefined}>
+        {service.unit_cost !== null ? unitPrice(service.unit_cost, service.unit, FORMAT) : <span className="muted">No cost</span>}
         {links.length > 0 ? (
           <span className={styles.sub}>ABC {money(perUnit)} + labor {money(service.labor_cost ?? 0)}</span>
         ) : canPick && !item ? (
@@ -1410,7 +1438,7 @@ function AlwaysRow({
       </span>
       <span className={`${styles.cellMargin} ${styles.num}`} data-label="Margin">
         {low && <Icon name="alert" size={14} label={`Under ${LOW_MARGIN}%, a low margin`} />}
-        {margin !== null ? `${margin}%` : "—"}
+        {margin !== null ? `${margin}%` : null}
       </span>
       <span className={styles.cellRemove}>
         {item && editable && <Button size="sm" variant="ghost" icon="x" aria-label={`Take ${service.name} off this package`} onClick={onRemove} />}

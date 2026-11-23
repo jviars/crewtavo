@@ -1,11 +1,10 @@
 /**
  * The range step: whether the homeowner has their price range yet, and what's next. Not sent: send
  * it (the card beside the estimate), or mark the yes they gave when the office told them on the phone. Out: when, for how much, send it again or copy their link, or
- * mark a yes they gave on the phone or in person. A yes: book the visit and start it on the iPad. After that, what happened, in a line.
+ * mark a yes they gave on the phone or in person. A yes: book the visit (the site visit step under it starts it on the iPad). After that, what happened, in a line.
  */
 import { rangeSettings } from "@crewtavo/core/estimates";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
@@ -33,7 +32,6 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
   onSend: (mode: SendMode, startWith?: SendChannel) => void;
 }) {
   const { company } = useSession();
-  const navigate = useNavigate();
   const tz = company.timezone;
   const settings = rangeSettings(company.settings);
   const who = homeownerName(quote.client?.display_name);
@@ -49,7 +47,7 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
     },
   });
 
-  if (!quote.lines.length) return <span className="muted small">Price the estimate first; the range comes from it.</span>;
+  if (!quote.lines.length) return <p className={styles.note}>Price the estimate first; the range comes from it.</p>;
   // With options, the range runs from the lowest option to the highest, and says so.
   const across = rangeAcrossOptions(quote);
   const sent = hasRange(quote) ? `${quote.range_sent_at ? `Sent ${dayText(quote.range_sent_at, tz)}: ` : ""}${rangeWordsFor({ low: quote.range_low, high: quote.range_high }, quote)}.` : null;
@@ -79,10 +77,13 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
           {across && `, ${ACROSS_OPTIONS}`}. Waiting for their answer.
         </p>
         {outdated && (
-          <p className={styles.changedNote}>
+          <div className="callout callout-warning" role="note">
             <Icon name="alert" size={16} />
-            <span>The estimate changed since you sent it. Send it again and {who} sees {rangeWordsFor(rangeNow(quote, settings), quote)}.</span>
-          </p>
+            <div className="grow">
+              <div>The estimate changed since you sent it.</div>
+              Send it again and {who} sees {rangeWordsFor(rangeNow(quote, settings), quote)}.
+            </div>
+          </div>
         )}
         {canSell && (
           <div className={styles.actions}>
@@ -92,38 +93,32 @@ export function RangeStep({ quote, salesperson, canSell, refresh, onSend }: {
             <SaidYesButton quote={quote} />
           </div>
         )}
-        <p className={`muted small ${styles.note}`}>When {who} says yes, you get a note to book {rep || "the visit"}.</p>
+        <p className={styles.note}>When {who} says yes, you get a note to book {rep || "the visit"}.</p>
       </div>
     );
   }
 
+  // Their yes; starting the visit (or sending the exact price instead) is the site visit step's, just under it.
   if (state === "accepted") {
     return (
-      <div className={styles.stepBody}>
-        <div className={styles.yes} role="status">
-          <span className={styles.yesIcon} aria-hidden="true"><Icon name="check" size={16} bold /></span>
-          <p>
-            <strong>{Who} said yes{quote.range_accepted_at ? ` on ${dayText(quote.range_accepted_at, tz)}` : ""}.</strong> Book {rep ? `${rep}'s` : "the site"} visit.
-          </p>
+      <div className="callout callout-good" role="status">
+        <Icon name="check" size={16} />
+        <div className="grow">
+          <div>{Who} said yes{quote.range_accepted_at ? ` on ${dayText(quote.range_accepted_at, tz)}` : ""}.</div>
+          Book {rep ? `${rep}'s` : "the site"} visit.
         </div>
-        {canSell && (
-          <div className={styles.actions}>
-            <Button icon="tablet" onClick={() => navigate(`/roofing/${quote.id}/visit`)}>Start the site visit</Button>
-            <button type="button" className={styles.linkBtn} onClick={() => onSend("exact")}>Send the exact price instead</button>
-          </div>
-        )}
       </div>
     );
   }
 
-  if (state === "closed") return <span className="muted small">{sent ? `${sent} ${yes ?? ""}` : `This estimate was marked ${quote.status === "lost" ? "lost" : "archived"}.`}</span>;
+  if (state === "closed") return <p className={styles.note}>{sent ? `${sent} ${yes ?? ""}` : `This estimate was marked ${quote.status === "lost" ? "lost" : "archived"}.`}</p>;
 
   // The exact price is out, or it's signed: what happened with the range, if there was one.
   if (!hasRange(quote)) {
     return (
-      <span className="muted small">
+      <p className={styles.note}>
         {quote.priced_on_site_at ? "Priced on site, so no range went out." : state === "exact" ? `You sent ${who} the exact price instead, so no range went out.` : "No range went out for this one."}
-      </span>
+      </p>
     );
   }
   return (

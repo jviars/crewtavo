@@ -10,9 +10,10 @@
 import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button, Spinner } from "@/components/ui/Button";
-import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { initials } from "@/components/ui/Avatar";
 import { supabase, unwrap } from "@/lib/api";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -21,6 +22,7 @@ import { toast } from "@/lib/toast";
 import { useMyCrews } from "../schedule/myCrews";
 import { useDispatchOptions } from "../schedule/VisitDialog";
 import { clockChange, clockSaved, crewAfter, showClockTap, waitingClockTaps, type ClockChange, type ClockTarget, type CrewClockRow } from "./clockTaps";
+import { CATEGORY_ICONS } from "./ClockCard";
 import { CATEGORY_LABELS, clockPlace, formatDuration, type TimerCategory } from "./fieldData";
 import { msg, t } from "@/lib/i18n";
 
@@ -86,59 +88,76 @@ export function CrewClockCard({ visits }: { visits: VisitTarget[] }) {
   const going = locating ?? (act.isPending && !act.isPaused && act.variables ? { who: act.variables.who, target: act.variables.target } : null);
 
   if (!leads.length) return null;
-  if (options.isPending || crews.isPending || running.isPending) return <div className="card card-pad"><Skeleton height={80} /></div>;
+  if (options.isPending || crews.isPending || running.isPending) return <SectionSkeleton rows={2} />;
   if (people.length < 2) return null;
 
   const entryOf = (id: string) => running.data?.find((r) => r.user_id === id);
   const off = people.filter((p) => !entryOf(p));
   const on = people.filter((p) => entryOf(p));
-  const targets: Array<{ label: string; target: ClockTarget }> = [
-    ...visits.filter((v) => !["completed", "cancelled"].includes(v.status)).map((v) => ({ label: v.title, target: { category: "visit" as const, visit: { id: v.id, jobId: v.job?.id ?? null, title: v.title } } })),
-    { label: t(CATEGORY_LABELS.drive), target: { category: "drive" } },
-    { label: t(CATEGORY_LABELS.shop), target: { category: "shop" } },
+  const targets: Array<{ label: string; icon: IconName; target: ClockTarget }> = [
+    ...visits.filter((v) => !["completed", "cancelled"].includes(v.status)).map((v) => ({ label: v.title, icon: "job" as const, target: { category: "visit" as const, visit: { id: v.id, jobId: v.job?.id ?? null, title: v.title } } })),
+    { label: t(CATEGORY_LABELS.drive), icon: CATEGORY_ICONS.drive, target: { category: "drive" } },
+    { label: t(CATEGORY_LABELS.shop), icon: CATEGORY_ICONS.shop, target: { category: "shop" } },
     // Lunch for the whole crew; clock them back onto the visit after.
-    { label: t(CATEGORY_LABELS.break), target: { category: "break" } },
-    { label: t(CATEGORY_LABELS.other), target: { category: "other" } },
+    { label: t(CATEGORY_LABELS.break), icon: CATEGORY_ICONS.break, target: { category: "break" } },
+    { label: t(CATEGORY_LABELS.other), icon: CATEGORY_ICONS.other, target: { category: "other" } },
   ];
-  const clockIn = (who: string[], label: string, text = label) => (
-    <Menu
-      label={label}
-      triggerClassName="btn btn-sm"
-      trigger={<>{going?.target && going.who.join() === who.join() ? <Spinner size={14} /> : <Icon name="play" size={14} />}{text}</>}
-      items={targets.map((x) => ({ label: x.label, disabled: going !== null, onSelect: () => void tap(who, x.target) }))}
-    />
-  );
+  const onto = (who: string[]): MenuEntry[] => targets.map((x) => ({ label: x.label, icon: x.icon, disabled: going !== null, onSelect: () => void tap(who, x.target) }));
+  const busy = (who: string[]) => going?.target && going.who.join() === who.join();
+
+  // The whole crew at once: clock in whoever's off, switch whoever's on (to lunch and back), clock everyone out.
+  const crewWide: MenuEntry[] = [
+    ...(off.length ? [{ label: off.length === people.length ? t("Clock everyone in") : t("Clock in {count} more", { count: off.length }), icon: "play" as const, items: onto(off) }] : []),
+    ...(on.length ? [{ label: on.length === people.length ? t("Switch everyone") : t("Switch the {count} on the clock", { count: on.length }), icon: "refresh" as const, items: onto(on) }] : []),
+    ...(on.length ? [{ separator: true as const }, { label: t("Clock everyone out"), icon: "pause" as const, disabled: going !== null, onSelect: () => void tap(on, null) }] : []),
+  ];
+  // Everyone off: the menu is where they go, straight away.
+  const only = off.length === people.length;
+  const working = busy(off) || busy(on) || (going?.target === null && going.who.length > 1);
 
   return (
-    <section className="card">
-      <div className="card-head" style={{ flexWrap: "wrap", gap: 8 }}>
-        <strong className="grow">{t("Crew clock")}</strong>
-        {off.length > 0 && clockIn(off, off.length === people.length ? t("Clock everyone in") : t("Clock in {count} more", { count: off.length }))}
-        {/* Everyone on the clock onto something else at once: lunch, and back onto the visit after. */}
-        {on.length > 0 && clockIn(on, on.length === people.length ? t("Switch everyone") : t("Switch the {count} on the clock", { count: on.length }), t("Switch"))}
-        {on.length > 0 && <Button size="sm" variant="dark" icon="pause" loading={going?.target === null && going.who.length > 1} onClick={() => void tap(on, null)}>{t("Clock everyone out")}</Button>}
-      </div>
-      {people.map((id) => {
-        const entry = entryOf(id);
-        const visit = entry?.visit;
-        const name = nameOf(id);
-        return (
-          <div key={id} className="card-row">
-            <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: entry ? "var(--green-solid)" : "var(--fill-3)", color: entry ? "#fff" : "var(--text-2)" }}>{initials(name)}</span>
-            <span className="grow" style={{ minWidth: 0 }}>
-              <strong>{name}{id === session.userId ? t(" (you)") : ""}</strong>
-              <span className="muted small" style={{ display: "block" }}>
-                {entry ? `${visit?.title ?? t(CATEGORY_LABELS[entry.category as TimerCategory] ?? msg("Working"))} · ${formatDuration(Date.now() - Date.parse(entry.started_at))}` : t("Clock is off")}
-              </span>
-            </span>
-            {entry ? (
-              <Button size="sm" variant="ghost" icon="pause" aria-label={t("Clock out {name}", { name })} loading={going?.target === null && going.who.length === 1 && going.who[0] === id} onClick={() => void tap([id], null)} />
-            ) : (
-              clockIn([id], t("Clock in {name}", { name }), t("Clock in"))
-            )}
-          </div>
-        );
-      })}
-    </section>
+    <Section
+      title={t("Crew clock")}
+      count={t("{on} of {count} on the clock", { on: on.length, count: people.length })}
+      className="crew-clock"
+      action={
+        <Menu
+          label={only ? t("Clock everyone in") : t("Everyone")}
+          title={only ? t("Clock everyone in") : t("Crew clock")}
+          triggerClassName="crew-clock-all"
+          trigger={<>{working ? <Spinner size={14} /> : <Icon name={only ? "play" : "users"} size={14} />}{only ? t("Clock everyone in") : t("Everyone")}<Icon name="chevronDown" size={14} /></>}
+          items={only ? onto(off) : crewWide}
+        />
+      }
+    >
+      <RelatedList label={t("Crew clock")}>
+        {people.map((id) => {
+          const entry = entryOf(id);
+          const visit = entry?.visit;
+          const name = nameOf(id);
+          return (
+            <RelatedRow
+              key={id}
+              lead={<span className="crew-face" data-on={entry ? true : undefined}>{initials(name)}</span>}
+              title={<>{name}{id === session.userId ? t(" (you)") : ""}</>}
+              sub={entry ? [visit?.title ?? t(CATEGORY_LABELS[entry.category as TimerCategory] ?? msg("Working")), formatDuration(Date.now() - Date.parse(entry.started_at))] : t("Clock is off")}
+              actions={
+                entry ? (
+                  <Button icon="pause" className="crew-clock-out" aria-label={t("Clock out {name}", { name })} title={t("Clock out {name}", { name })} loading={going?.target === null && going.who.length === 1 && going.who[0] === id} onClick={() => void tap([id], null)} />
+                ) : (
+                  <Menu
+                    label={t("Clock in {name}", { name })}
+                    title={t("Clock in {name}", { name })}
+                    triggerClassName="btn"
+                    trigger={<>{busy([id]) ? <Spinner size={14} /> : <Icon name="play" size={14} />}{t("Clock in")}</>}
+                    items={onto([id])}
+                  />
+                )
+              }
+            />
+          );
+        })}
+      </RelatedList>
+    </Section>
   );
 }

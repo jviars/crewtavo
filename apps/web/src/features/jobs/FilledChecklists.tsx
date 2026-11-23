@@ -6,14 +6,16 @@
  */
 import { checklistAnswers, type ChecklistAnswer } from "@crewtavo/core/forms";
 import { useQuery } from "@tanstack/react-query";
-import { Fragment } from "react";
 import { OriginalLink } from "@/components/DrawOnPhoto";
+import { MetaLine } from "@/components/ui/InboxList";
+import { Fact, Facts, Section } from "@/components/ui/Section";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { photoPaths, shownPath } from "@/lib/photoMarkup";
 import { formatDate } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./jobs.module.css";
 
 /** A visit's photo: what it shows (its drawing, if it has one: lib/photoMarkup.ts) and the photo as taken. */
 interface Photo { id: string; file_name: string; url: string | null; marked: boolean; originalUrl: string | null }
@@ -61,16 +63,9 @@ export function JobChecklists({ jobId }: { jobId: string }) {
   const filled = useFilledChecklists({ jobId });
   if (!filled.data?.length) return null;
   return (
-    <section className="stack">
-      <h2 className="section-title">Checklists</h2>
-      <div className="card">
-        {filled.data.map((c) => (
-          <div key={c.id} className="card-row" style={{ alignItems: "flex-start" }}>
-            <ChecklistCard checklist={c} withVisit />
-          </div>
-        ))}
-      </div>
-    </section>
+    <Section title="Checklists" count={filled.data.length} className={styles.stacked}>
+      {filled.data.map((c) => <ChecklistCard key={c.id} checklist={c} withVisit />)}
+    </Section>
   );
 }
 
@@ -86,24 +81,25 @@ export function VisitChecklists({ visitId }: { visitId: string }) {
   );
 }
 
+/** One filled-in checklist: its name and whether it's done, its visit and who filled it in, then its answers as hairline rows. */
 function ChecklistCard({ checklist: c, withVisit = false }: { checklist: Filled; withVisit?: boolean }) {
   const visitLine = withVisit && c.visit ? `${c.visit.title}${c.visit.scheduled_on ? ` · ${formatDate(c.visit.scheduled_on)}` : ""}` : null;
-  const meta = [visitLine, c.by && `Filled in by ${c.by}`].filter(Boolean).join(" · ");
+  // An item nobody had to answer and nobody did leaves no row; a required one says it's missing.
+  const answers = c.answers.filter((a) => a.type === "photo" || a.text !== null || a.missing);
   return (
-    <div className="grow stack-sm" style={{ minWidth: 0 }}>
-      <div className="row-between">
-        <strong>{c.name}</strong>
+    <div className={styles.checklist}>
+      <div className={styles.checklistHead}>
+        <span className={styles.checklistName}>{c.name}</span>
         <StatusPill label={c.done ? "Done" : "Unfinished"} tone={c.done ? "good" : "warning"} />
       </div>
-      {meta && <span className="muted small">{meta}</span>}
-      <dl className="kv">
-        {c.answers.map((a) => (
-          <Fragment key={a.key}>
-            <dt>{a.label}</dt>
-            <dd><Answer answer={a} photos={c.photos} /></dd>
-          </Fragment>
-        ))}
-      </dl>
+      <MetaLine className={styles.checklistMeta} parts={[visitLine, c.by && `Filled in by ${c.by}`]} />
+      {answers.length > 0 && (
+        <Facts label={c.name}>
+          {answers.map((a) => (
+            <Fact key={a.key} label={a.label} wide={a.type === "photo" || Boolean(a.image)}><Answer answer={a} photos={c.photos} /></Fact>
+          ))}
+        </Facts>
+      )}
     </div>
   );
 }
@@ -123,7 +119,7 @@ function Answer({ answer: a, photos }: { answer: ChecklistAnswer; photos: Photo[
       </div>
     );
   }
-  if (a.text === null) return a.missing ? <span className="text-danger">Not answered</span> : <span className="muted">—</span>;
+  if (a.text === null) return <span className="text-danger">Not answered</span>;
   if (a.image) {
     return (
       <span className="stack-xs">

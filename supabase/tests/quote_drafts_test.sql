@@ -39,7 +39,7 @@ reset role;
 set local role authenticated;
 select tqd.as_user(:'val');
 select public.merge_company_settings(:'co', '{"quote_ai": {"on": false}, "quotes": {"alert_over": 5000}}');
-update public.companies set settings = settings - 'quote_ai' where id = :'co';
+update public.companies set settings = public.company_settings(id) - 'quote_ai' where id = :'co';
 reset role;
 select tqd.check((select settings -> 'quote_ai' ->> 'on' = 'true' and settings -> 'quote_ai' ->> 'checked_by' = :'val'
                          and settings -> 'quotes' = '{"alert_over": 5000, "draft_requests": true}' from public.companies where id = :'co'),

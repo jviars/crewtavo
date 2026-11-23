@@ -7,13 +7,13 @@ import { breakPay, isUnpaidBreak, SHORT_BREAK_MINUTES } from "@crewtavo/core/bre
 import { localDate, localTime } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
@@ -37,9 +37,13 @@ import { editNote, sortEdits, spanLabel, type TimeChange } from "./timeChanges";
 import { loadWeek, type Entry, type TeamMember, type WeekData } from "./weekData";
 import { memberName } from "../subs/memberName";
 import { inEnglish, intlLocale, t } from "@/lib/i18n";
+import styles from "./Timesheets.module.css";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
+/** A week as short as a phone's header needs it: "Nov 17 – 23", "Nov 30 – Dec 6" (each language's own way). */
+const shortRange = (monday: string) =>
+  new Intl.DateTimeFormat(intlLocale(), { month: "short", day: "numeric", timeZone: "UTC" }).formatRange(new Date(`${monday}T12:00:00Z`), new Date(`${addDaysIso(monday, 6)}T12:00:00Z`));
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -49,7 +53,8 @@ export function TimesheetsPage() {
   // Crew leads see their crew's time (the database limits the rows) and approve it with the area.
   const isLead = session.role === "crew_lead";
   const canApprove = isOffice || (isLead && can(session, "timesheets"));
-  const approvable = (userId: string) => canApprove && !(isLead && userId === session.userId);
+  // Nobody but an owner approves their own time (the database holds to it): it's what they're paid for.
+  const approvable = (userId: string) => canApprove && (userId !== session.userId || session.role === "owner");
   // Where people clocked in and out: the office's to see, and a crew lead's for their crew (the
   // database decides which, and never shows someone their own).
   const seesPlaces = isOffice || isLead;
@@ -158,116 +163,147 @@ export function TimesheetsPage() {
   );
   if (view === "pay") {
     return (
-      <>
-        <PageHeader title={t("Timesheets")} />
-        {tabs}
-        <PayPeriods />
-      </>
+      <PayPeriods
+        header={(actions) => (
+          <>
+            <PageHeader title={t("Timesheets")} actions={actions} />
+            {tabs}
+          </>
+        )}
+      />
     );
   }
 
+  const today = todayIn(tz);
+  const weekday = (d: string) => dayLabel(d).split(",")[0];
   return (
     <>
       <PageHeader
         title={t("Timesheets")}
         actions={
           <>
-            {isOffice && <Menu items={[{ label: t("Download as spreadsheet"), icon: "download", onSelect: exportCsv, disabled: !rows.length }]} />}
+            {isOffice && <Menu title={t("Timesheets")} items={[{ label: t("Download as spreadsheet"), icon: "download", onSelect: exportCsv, disabled: !rows.length }]} />}
             <Button icon="plus" onClick={() => setEditing("new")}>{t("Add time")}</Button>
             {canApprove && pendingAll > 0 && <Button variant="primary" icon="check" loading={approve.isPending} onClick={() => approve.mutate(people.filter(approvable))}>{t("Approve all ({count})", { count: pendingAll })}</Button>}
           </>
         }
       />
       {tabs}
-      {isThisWeek && <ClockCard />}
+      <div className={cx(styles.list, "m-grouped")}>
+        {isThisWeek && <div className={styles.clock}><ClockCard /></div>}
 
-      <div className="toolbar">
-        <div className="btn-group">
-          <Button size="sm" icon="chevronLeft" aria-label={t("Previous week")} onClick={() => setWeek(addDaysIso(week, -7))} />
-          <Button size="sm" onClick={() => setWeek(mondayOf(todayIn(tz)))}>{t("This week")}</Button>
-          <Button size="sm" icon="chevronRight" aria-label={t("Next week")} onClick={() => setWeek(addDaysIso(week, 7))} />
+        <div className={styles.week} role="group" aria-label={t("Week")}>
+          <Button size="sm" className={styles.prev} icon="chevronLeft" aria-label={t("Previous week")} onClick={() => setWeek(addDaysIso(week, -7))} />
+          <Button size="sm" className={cx(styles.thisWeek, isThisWeek && "hide-mobile")} onClick={() => setWeek(mondayOf(todayIn(tz)))}>{t("This week")}</Button>
+          <Button size="sm" className={styles.next} icon="chevronRight" aria-label={t("Next week")} onClick={() => setWeek(addDaysIso(week, 7))} />
+          <span className={styles.range} aria-live="polite">
+            <span className="hide-mobile">{dayLabel(week)} – {dayLabel(addDaysIso(week, 6))}</span>
+            {/* A phone has room for "Nov 17 – 23" between the arrows (Mobile-Business, Timesheets). */}
+            <span className={styles.rangeShort}>{shortRange(week)}</span>
+          </span>
         </div>
-        <strong style={{ fontSize: 16 }}>{dayLabel(week)} – {dayLabel(addDaysIso(week, 6))}</strong>
+
+        {data.isPending && <Loading><div className={styles.list}>{[0, 1].map((i) => <SectionSkeleton key={i} rows={3} />)}</div></Loading>}
+        {data.error && <ErrorState error={data.error} onRetry={() => data.refetch()} />}
+        {data.data && people.length === 0 && <div className={styles.empty}><EmptyState icon="clock" title={t("No time recorded this week")} action={<Button icon="plus" onClick={() => setEditing("new")}>{t("Add time")}</Button>} /></div>}
+
+        {people.map((userId) => {
+          const mine = rows.filter((r) => r.user_id === userId);
+          const total = mine.reduce((s, r) => s + paidHours(r), 0);
+          const unpaid = mine.filter((r) => isUnpaidBreak(r, pay)).reduce((s, r) => s + hours(r.started_at, r.ended_at), 0);
+          const pending = mine.filter((r) => r.ended_at && !r.approved_at).length;
+          const rate = data.data?.team.find((m) => m.user_id === userId)?.labor_rate;
+          return (
+            <section key={userId} className={styles.person} aria-labelledby={`ts-${userId}`}>
+              <div className={styles.head}>
+                <span className={cx("avatar", styles.face)} style={{ background: color(userId) }}><Face name={name(userId)} photo={photo(userId)} /></span>
+                <h2 className={styles.name} id={`ts-${userId}`}>{name(userId)}</h2>
+                <span className={styles.hours}><b>{total.toFixed(2)}</b> h{isOffice && rate ? ` · ${formatMoney(total * Number(rate))}` : null}</span>
+                {unpaid > 0 && <span className={styles.quiet}>{t("+ {hours} h unpaid breaks", { hours: unpaid.toFixed(2) })}</span>}
+                {total > 40 && <span className={styles.over}>{t("{hours} h over 40", { hours: (total - 40).toFixed(1) })}</span>}
+                {approvable(userId) && pending > 0 && <Button size="sm" className={styles.approve} icon="check" loading={approve.isPending && approve.variables?.length === 1 && approve.variables[0] === userId} onClick={() => approve.mutate([userId])}>{t("Approve {count}", { count: pending })}</Button>}
+              </div>
+              <div className={styles.days}>
+                {days.map((d) => {
+                  const h = mine.filter((r) => dayOf(r.started_at) === d).reduce((s, r) => s + paidHours(r), 0);
+                  return (
+                    <div key={d} className={styles.day} data-off={h ? undefined : ""} data-today={d === today ? "" : undefined} title={dayLabel(d)}>
+                      {weekday(d)}
+                      <b>{h ? h.toFixed(1) : "—"}</b>
+                    </div>
+                  );
+                })}
+              </div>
+              <EntryRows>
+                {mine.map((r) => {
+                  const canEdit = isOffice || (!r.approved_at && (r.user_id === session.userId || isLead));
+                  const lastEdit = edits.byEntry.get(r.id)?.at(-1);
+                  const openHistory = () => setHistory({ id: r.id, what: whatOf(r.user_id, r.started_at, r.ended_at) });
+                  const unpaidBreak = isUnpaidBreak(r, pay);
+                  const length = hours(r.started_at, r.ended_at).toFixed(2);
+                  const what = r.visit?.title ?? r.job?.title ?? t(CATEGORY_LABELS[r.category]);
+                  return (
+                    <div key={r.id} className={styles.entry}>
+                      <span className={styles.when}>
+                        <span className={styles.entryDay} title={dayLabel(dayOf(r.started_at))}>{weekday(dayOf(r.started_at))}</span>
+                        <span className={styles.time}>{formatTime(r.started_at, tz)} – {r.ended_at ? formatTime(r.ended_at, tz) : t("now")}</span>
+                      </span>
+                      <span className={styles.what}>
+                        <span className={styles.whatTitle}>{what}</span>
+                        {(r.notes || placeOf(r.id) || atPropertyNote(r) || unpaidBreak) && (
+                          <span className={styles.sub}>
+                            {r.notes && <span>{r.notes}</span>}
+                            {placeOf(r.id) && <ClockPlaces places={placeOf(r.id)!} userId={r.user_id} name={name} />}
+                            {atPropertyNote(r) && (
+                              <span className={styles.place} title={t("The phone did this by itself as they got to or left a visit's property, not a tap (Settings → Company → Time clock).")}>
+                                <Icon name="clock" size={12} />
+                                {atPropertyNote(r)}
+                              </span>
+                            )}
+                            {unpaidBreak && <span title={pay === "unpaid" ? t("Breaks aren't paid time") : t("Breaks over {minutes} minutes aren't paid time", { minutes: SHORT_BREAK_MINUTES })}>{t("{hours} h unpaid", { hours: length })}</span>}
+                          </span>
+                        )}
+                        {lastEdit && (
+                          <button type="button" className={styles.edited} onClick={openHistory}>
+                            {editNote(lastEdit, session.userId, name)} · {dayLabel(dayOf(lastEdit.changed_at))}
+                          </button>
+                        )}
+                      </span>
+                      <span className={styles.entryHours} data-unpaid={unpaidBreak ? "" : undefined}>{length}<span className="sr-only"> h</span></span>
+                      <span className={styles.status}>
+                        {r.auto_stopped_at && !r.approved_at ? (
+                          <span title={t("The clock was left running, so Crewtavo stopped it. Check the end time.")}><StatusPill label={t("Check end time")} tone="danger" /></span>
+                        ) : r.approved_at ? (
+                          <StatusPill label={t("Approved")} tone="good" />
+                        ) : r.ended_at ? (
+                          <StatusPill label={t("Pending")} tone="muted" />
+                        ) : (
+                          <StatusPill label={t("Running")} tone="info" />
+                        )}
+                      </span>
+                      <span className={styles.more}>
+                        <Menu
+                          triggerClassName="btn btn-sm btn-ghost btn-icon"
+                          title={`${weekday(dayOf(r.started_at))} · ${what}`}
+                          items={[
+                            { label: t("Edit"), icon: "edit", hidden: !canEdit || !r.ended_at, onSelect: () => setEditing(r) },
+                            { label: t("History"), icon: "clock", onSelect: openHistory },
+                            { label: t("Remove approval"), icon: "undo", hidden: !canEdit || !approvable(r.user_id) || !r.approved_at, onSelect: () => unapprove.mutate(r.id) },
+                            { separator: true, hidden: !canEdit },
+                            // Their own goes at once, with Undo. Someone else's asks why first, and they're told.
+                            { label: t("Delete"), icon: "trash", danger: true, hidden: !canEdit, onSelect: () => (r.user_id === session.userId ? removeLater(r) : setDeleting(r)) },
+                          ]}
+                        />
+                      </span>
+                    </div>
+                  );
+                })}
+              </EntryRows>
+              {edits.deleted.filter((c) => c.user_id === userId).map((c) => <DeletedRow key={c.entry_id} change={c} what={whatOf(c.user_id, c.old_started_at!, c.old_ended_at)} note={`${editNote(c, session.userId, name)} · ${dayLabel(dayOf(c.changed_at))}`} onHistory={setHistory} />)}
+            </section>
+          );
+        })}
       </div>
-
-      {data.isPending && <Loading><div className="stack">{[0, 1].map((i) => <CardSkeleton key={i} lines={4} />)}</div></Loading>}
-      {data.error && <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>}
-      {data.data && people.length === 0 && <div className="card"><EmptyState icon="clock" title={t("No time recorded this week")} action={<Button icon="plus" onClick={() => setEditing("new")}>{t("Add time")}</Button>} /></div>}
-
-      {people.map((userId) => {
-        const mine = rows.filter((r) => r.user_id === userId);
-        const total = mine.reduce((s, r) => s + paidHours(r), 0);
-        const unpaid = mine.filter((r) => isUnpaidBreak(r, pay)).reduce((s, r) => s + hours(r.started_at, r.ended_at), 0);
-        const pending = mine.filter((r) => r.ended_at && !r.approved_at).length;
-        const rate = data.data?.team.find((m) => m.user_id === userId)?.labor_rate;
-        return (
-          <section key={userId} className="card">
-            <div className="card-head" style={{ flexWrap: "wrap" }}>
-              <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: color(userId) }}><Face name={name(userId)} photo={photo(userId)} /></span>
-              <strong>{name(userId)}</strong>
-              <span className="tabular"><strong>{total.toFixed(2)}</strong> h{isOffice && rate ? <span className="muted"> · {formatMoney(total * Number(rate))}</span> : null}</span>
-              {unpaid > 0 && <span className="muted small tabular">{t("+ {hours} h unpaid breaks", { hours: unpaid.toFixed(2) })}</span>}
-              {total > 40 && <span className="chip chip-amber">{t("{hours} h over 40", { hours: (total - 40).toFixed(1) })}</span>}
-              {approvable(userId) && pending > 0 && <Button size="sm" icon="check" loading={approve.isPending && approve.variables?.length === 1 && approve.variables[0] === userId} onClick={() => approve.mutate([userId])}>{t("Approve {count}", { count: pending })}</Button>}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", borderBottom: "1px solid var(--divider)" }} className="hide-mobile">
-              {days.map((d) => {
-                const h = mine.filter((r) => dayOf(r.started_at) === d).reduce((s, r) => s + paidHours(r), 0);
-                return (
-                  <div key={d} style={{ padding: "10px 12px", borderRight: "1px solid var(--row-divider)", background: d === todayIn(tz) ? "var(--green-tint)" : undefined }}>
-                    <div className="muted small">{dayLabel(d).split(",")[0]}</div>
-                    <div className="tabular strong" style={{ color: h ? "var(--ink)" : "var(--text-4)" }}>{h ? h.toFixed(1) : "—"}</div>
-                  </div>
-                );
-              })}
-            </div>
-            <EntryRows>
-              {mine.map((r) => {
-                const canEdit = isOffice || (!r.approved_at && (r.user_id === session.userId || isLead));
-                const lastEdit = edits.byEntry.get(r.id)?.at(-1);
-                const openHistory = () => setHistory({ id: r.id, what: whatOf(r.user_id, r.started_at, r.ended_at) });
-                return (
-                  <div key={r.id} className="card-row">
-                    <span className="small strong" style={{ width: 92 }}>{dayLabel(dayOf(r.started_at))}</span>
-                    <span className="grow">
-                      <span className="tabular">{formatTime(r.started_at, tz)} – {r.ended_at ? formatTime(r.ended_at, tz) : t("now")}</span>
-                      <span className="muted small" style={{ display: "block" }}>{r.visit?.title ?? r.job?.title ?? t(CATEGORY_LABELS[r.category])}{r.notes ? ` · ${r.notes}` : ""}</span>
-                      {placeOf(r.id) && <ClockPlaces places={placeOf(r.id)!} userId={r.user_id} name={name} />}
-                      {atPropertyNote(r) && (
-                        <span className="small muted row" style={{ gap: 4 }} title={t("The phone did this by itself as they got to or left a visit's property, not a tap (Settings → Company → Time clock).")}>
-                          <Icon name="clock" size={12} />
-                          {atPropertyNote(r)}
-                        </span>
-                      )}
-                      {lastEdit && (
-                        <button type="button" className="link-btn small" style={{ display: "block", textAlign: "left", fontWeight: 400 }} onClick={openHistory}>
-                          {editNote(lastEdit, session.userId, name)} · {dayLabel(dayOf(lastEdit.changed_at))}
-                        </button>
-                      )}
-                    </span>
-                    {isUnpaidBreak(r, pay)
-                      ? <span className="tabular muted" title={pay === "unpaid" ? t("Breaks aren't paid time") : t("Breaks over {minutes} minutes aren't paid time", { minutes: SHORT_BREAK_MINUTES })}>{t("{hours} h unpaid", { hours: hours(r.started_at, r.ended_at).toFixed(2) })}</span>
-                      : <span className="tabular strong">{hours(r.started_at, r.ended_at).toFixed(2)} h</span>}
-                    {r.auto_stopped_at && !r.approved_at && <span title={t("The clock was left running, so Crewtavo stopped it. Check the end time.")}><StatusPill label={t("Check end time")} tone="danger" /></span>}
-                    {r.approved_at ? <StatusPill label={t("Approved")} tone="good" /> : r.ended_at ? <StatusPill label={t("Pending")} tone="warning" /> : <StatusPill label={t("Running")} tone="info" />}
-                    <Menu
-                      triggerClassName="btn btn-sm btn-ghost btn-icon"
-                      items={[
-                        { label: t("Edit"), icon: "edit", hidden: !canEdit || !r.ended_at, onSelect: () => setEditing(r) },
-                        { label: t("History"), icon: "clock", onSelect: openHistory },
-                        { label: t("Remove approval"), icon: "undo", hidden: !canEdit || !approvable(r.user_id) || !r.approved_at, onSelect: () => unapprove.mutate(r.id) },
-                        // Their own goes at once, with Undo. Someone else's asks why first, and they're told.
-                        { label: t("Delete"), icon: "trash", danger: true, hidden: !canEdit, onSelect: () => (r.user_id === session.userId ? removeLater(r) : setDeleting(r)) },
-                      ]}
-                    />
-                  </div>
-                );
-              })}
-            </EntryRows>
-            {edits.deleted.filter((c) => c.user_id === userId).map((c) => <DeletedRow key={c.entry_id} change={c} what={whatOf(c.user_id, c.old_started_at!, c.old_ended_at)} note={`${editNote(c, session.userId, name)} · ${dayLabel(dayOf(c.changed_at))}`} onHistory={setHistory} />)}
-          </section>
-        );
-      })}
 
       {editing && <TimeEntryDialog entry={editing === "new" ? null : editing} team={data.data?.team ?? []} defaultDate={isThisWeek ? todayIn(tz) : week} onClose={() => setEditing(null)} onSaved={refresh} />}
       {history && <TimeHistoryDialog entryId={history.id} what={history.what} name={name} onClose={() => setHistory(null)} />}
@@ -285,15 +321,20 @@ function EntryRows({ children }: { children: ReactNode }) {
 /** Time that was deleted: still listed under the person, struck through, with who deleted it and why. It counts for no hours. */
 function DeletedRow({ change, what, note, onHistory }: { change: TimeChange; what: string; note: string; onHistory: (entry: { id: string; what: string }) => void }) {
   const tz = useSession().company.timezone;
+  const day = what.split(" · ")[0]!;
   return (
-    <div className="card-row">
-      <span className="small strong" style={{ width: 92 }}>{what.split(" · ")[0]}</span>
-      <span className="grow">
-        <s className="tabular muted">{spanLabel(change.old_started_at!, change.old_ended_at, tz)}</s>
-        <span className="muted small" style={{ display: "block" }}>{note}{change.reason ? ` · ${t("Why: {reason}", { reason: change.reason })}` : ""}</span>
+    <div className={cx(styles.entry, styles.gone)}>
+      <span className={styles.when}>
+        <span className={styles.entryDay} title={day}>{day.split(",")[0]}</span>
+        <s className={styles.time}>{spanLabel(change.old_started_at!, change.old_ended_at, tz)}</s>
       </span>
-      <StatusPill label={t("Deleted")} tone="muted" />
-      <Button size="sm" variant="ghost" icon="clock" onClick={() => onHistory({ id: change.entry_id, what })}>{t("History")}</Button>
+      <span className={styles.what}>
+        <span className={styles.sub}>{note}{change.reason ? ` · ${t("Why: {reason}", { reason: change.reason })}` : ""}</span>
+      </span>
+      <span className={styles.status}><StatusPill label={t("Deleted")} tone="muted" /></span>
+      <span className={styles.more}>
+        <Button size="sm" variant="ghost" icon="clock" aria-label={t("History")} title={t("History")} onClick={() => onHistory({ id: change.entry_id, what })} />
+      </span>
     </div>
   );
 }
@@ -302,20 +343,20 @@ function DeletedRow({ change, what, note, onHistory }: { change: TimeChange; wha
 function ClockPlaces({ places, userId, name }: { places: EntryPlaces; userId: string; name: (id: string) => string }) {
   const ends = [["In", places.in_place], ["Out", places.out_place]] as const;
   return (
-    <span className="small row wrap" style={{ gap: "0 12px" }}>
+    <>
       {ends.map(([label, place]) => {
         if (!place) return null;
         const d = describePlace(place, places.site);
         // A crew lead clocking in the crew sends where their own phone is.
         const text = `${label}: ${d.text}${place.by && place.by !== userId ? ` (${name(place.by)}'s phone)` : ""}`;
         return (
-          <span key={label} className="row" style={{ gap: 4, color: d.tone === "good" ? "var(--green-dark)" : d.tone === "warning" ? "var(--warning)" : "var(--text-2)" }}>
+          <span key={label} className={styles.place} data-tone={d.tone === "warning" ? "warning" : undefined}>
             <Icon name="pin" size={12} />
-            {d.mapUrl ? <a href={d.mapUrl} target="_blank" rel="noreferrer" title={d.title} style={{ color: "inherit" }}>{text}</a> : text}
+            {d.mapUrl ? <a href={d.mapUrl} target="_blank" rel="noreferrer" title={d.title}>{text}</a> : text}
           </span>
         );
       })}
-    </span>
+    </>
   );
 }
 
@@ -367,8 +408,8 @@ function TimeEntryDialog({ entry, team, defaultDate, onClose, onSaved }: { entry
             </Select>
           </Field>
         )}
+        <Field label={t("Date")}><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
         <div className="form-grid">
-          <Field label={t("Date")}><input className="input" type="date" value={date} max={todayIn(tz)} onChange={(e) => setDate(e.target.value)} required /></Field>
           <Field label={t("Start")} error={future ? t("Pick a start time that has passed.") : null}><input className="input" type="time" value={start} onChange={(e) => setStart(e.target.value)} required /></Field>
           <Field label={t("End")} hint={length > 0 ? (end <= start ? t("{hours} hours (ends the next day)", { hours: length.toFixed(2) }) : t("{hours} hours", { hours: length.toFixed(2) })) : undefined}><input className="input" type="time" value={end} onChange={(e) => setEnd(e.target.value)} required /></Field>
         </div>

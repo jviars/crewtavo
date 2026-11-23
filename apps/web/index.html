@@ -22,10 +22,11 @@
       html.embedded .boot { display: none; }
     </style>
     <script>
-      // Light or dark before first paint (src/lib/theme.ts keeps it up to date). Client pages stay light.
+      // Light or dark before first paint (src/lib/theme.ts keeps it up to date). Client pages stay light, and so do the
+      // roofing visit's screens a homeowner reads and signs (theme.ts's HOMEOWNER), so reloading one doesn't flash dark.
       try {
         var theme = localStorage.getItem("crewtavo.theme");
-        if (!/^\/(hub|book|u|refer|s|g)\//.test(location.pathname) && (theme === "dark" || (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches))) {
+        if (!/^\/(hub|book|u|refer|s|g)\//.test(location.pathname) && (theme === "dark" || (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) && !/^\/roofing\/[^/]+\/(visit|sign|signed)$/.test(location.pathname)) {
           document.documentElement.classList.add("dark");
           document.querySelector('meta[name="theme-color"]').setAttribute("content", "#191918");
         }

@@ -15,6 +15,7 @@ import { fileSize } from "../plans/plans";
 import { asksForEndDate, documentTitle, isInsurance, needsEndDate, type PaperworkRow } from "./paperwork";
 import { SUB_PHONE_HINT, signInPhoneNote } from "./signInCountries";
 import { addSubDocument, blankToNull, refreshSubs, type Sub, type SubDocument } from "./subsData";
+import styles from "./Subs.module.css";
 
 // ---------------------------------------------------------------------------------------------
 // The sub
@@ -330,7 +331,7 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
     <Dialog open onClose={onClose} title="Send upload link" description={`${sub.name} opens it on their phone or computer and sends in their paperwork. No account needed.`}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (chosen.length) send.mutate(); else setTried(true); }}>
         <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="strong small" style={{ marginBottom: 6 }}>Send it by</legend>
+          <legend className={styles.dlgLabel} style={{ marginBottom: 6 }}>Send it by</legend>
           <label className="checkbox">
             <input type="checkbox" checked={channels.sms} disabled={!canText} onChange={(e) => setChannels({ ...channels, sms: e.target.checked })} />
             <span>Text{sub.phone ? ` to ${sub.phone}` : ""}{!sub.phone ? <span className="muted"> · Add their phone number first</span> : !config.features.sms ? <span className="muted"> · Texting isn't set up. Copy the link instead.</span> : null}</span>
@@ -345,11 +346,11 @@ export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwor
         </Field>
         {previews.length > 0 && (
           <div className="stack-sm">
-            <span className="strong small">What they'll get</span>
+            <span className={styles.dlgLabel}>What they'll get</span>
             {previews.map((p) => (
               <div key={p.key} className="stack-sm" style={{ gap: 4 }}>
                 <span className="muted small">{p.label}</span>
-                <div className="small pre-wrap" style={{ padding: 12, borderRadius: "var(--radius-control)", background: "var(--fill)", border: "1px solid var(--border)", overflowWrap: "anywhere" }}>{p.body}</div>
+                <div className={`small pre-wrap ${styles.preview}`}>{p.body}</div>
               </div>
             ))}
           </div>

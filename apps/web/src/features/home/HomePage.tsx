@@ -1,26 +1,38 @@
+/**
+ * Home (Page-Home.dc.html, Mobile-Work.dc.html): the date over a greeting, the workflow as a flat strip
+ * of figures, then what needs someone as inbox rows and today's visits, with setup and the money in
+ * the side column. A business's first visit, before there's any work (Setup-Flow.dc.html, Home, first
+ * visit), is the setup checklist instead.
+ */
 import { useQuery } from "@tanstack/react-query";
-import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Link } from "react-router-dom";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
+import { Button } from "@/components/ui/Button";
+import { DetailColumns } from "@/components/ui/DetailPage";
+import { InboxList, InboxRow } from "@/components/ui/InboxList";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { useDocumentTitle } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton, Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
+import { openHelp } from "@/components/shell/Help";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
+import { installApp, useInstallHint } from "@/lib/install";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { groupByEquipment, managesEquipment, nextUp, useEquipmentDue, usePaperwork } from "../equipment/equipmentData";
-import { Change } from "../finance/change";
 import { seesWebsite } from "../marketing/website";
 import { InstallAppCard } from "../field/InstallAppCard";
 import { askedFor, changeLink, usePendingChanges } from "../schedule/changeRequests";
+import { ChangeLine } from "./ChangeLine";
 import { collectedHistory, collectedSince } from "./collected";
 import styles from "./Home.module.css";
-import { SetupCard } from "./SetupCard";
+import { SetupChecklist, useSetup, type Setup } from "./SetupCard";
 import type { Dashboard } from "./types";
-import { WebsiteCard } from "./WebsiteCard";
+import { WebsiteSection } from "./WebsiteCard";
 import type { Week } from "./weeks";
 import { WorkflowStrip } from "./WorkflowStrip";
 
@@ -29,22 +41,30 @@ function greeting(timeZone: string) {
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 
+type Attention = Dashboard["attention"][number];
+
 const ATTENTION_ICON: Record<string, IconName> = { quote: "quote", visit: "cloud", invoice: "invoice", equipment: "truck", autopay_failed: "card", autopay_approval: "card", visit_change: "calendar", request: "requests", roof: "roofing" };
 
 /**
- * Each kind's tint in Needs attention: money that didn't come in (a late invoice, an automatic charge
- * that failed) in red; things to see to soon (machines coming due, a charge waiting for your OK) in amber.
+ * What each item's icon says, in its color only (the circle stays quiet): money that didn't come in
+ * (a late invoice, an automatic charge that failed) red; things to see to soon (machines coming due, a
+ * lead nobody has picked up, a charge waiting for your OK, changes asked for) amber; an approved quote
+ * ready to become a job green. The rest, like a weather hold, stay grey.
  */
-const ATTENTION_TINT: Record<string, { background: string; color: string }> = {
-  invoice: { background: "var(--danger-tint)", color: "var(--danger)" },
-  autopay_failed: { background: "var(--danger-tint)", color: "var(--danger)" },
-  equipment: { background: "var(--warning-tint)", color: "var(--warning)" },
-  // A lead nobody has picked up, and a homeowner waiting on the site visit they said yes to.
-  request: { background: "var(--warning-tint)", color: "var(--warning)" },
-  roof: { background: "var(--warning-tint)", color: "var(--warning)" },
-  autopay_approval: { background: "var(--warning-tint)", color: "var(--warning)" },
-};
-const ATTENTION_PLAIN = { background: "var(--fill-2)", color: "var(--text-2)" };
+export function attentionLook(item: Pick<Attention, "kind" | "title">): { icon: IconName; tone?: "danger" | "warning" | "good" } {
+  if (item.kind === "invoice" || item.kind === "autopay_failed") return { icon: ATTENTION_ICON[item.kind]!, tone: "danger" };
+  if (item.kind === "quote" && /approved/i.test(item.title)) return { icon: "check", tone: "good" };
+  if (item.kind === "quote" && /changes requested|not signed/i.test(item.title)) return { icon: "quote", tone: "warning" };
+  if (["equipment", "request", "roof", "autopay_approval", "visit_change"].includes(item.kind)) return { icon: ATTENTION_ICON[item.kind]!, tone: "warning" };
+  return { icon: ATTENTION_ICON[item.kind] ?? "alert" };
+}
+
+/** Nothing going on yet: no requests, quotes, jobs or invoices, no visits today and nothing to see to. */
+export function nothingYet(data: Pick<Dashboard, "workflow" | "today">, attention: number): boolean {
+  const { requests, quotes, jobs, invoices } = data.workflow;
+  const counts = [requests.new, requests.assessment_complete, quotes.awaiting, quotes.approved ?? 0, quotes.draft, jobs.active, jobs.to_invoice, invoices.awaiting, invoices.draft];
+  return counts.every((n) => !n) && data.today.total === 0 && attention === 0;
+}
 
 /** Weeks of bars under the collected figure; fewer weeks of money than this and it's the figure alone. */
 const WEEKS = 6;
@@ -52,21 +72,17 @@ const MIN_WEEKS = 4;
 
 export function HomePage() {
   const session = useSession();
-  const navigate = useNavigate();
   const tz = session.company.timezone;
   const isOffice = hasRole(session, "admin", "office", "estimator");
   const seesMoney = hasRole(session, "admin", "office") && can(session, "invoices");
-  useDocumentTitle("Home");
   const { data, isPending, error, refetch } = useQuery({
     queryKey: ["dashboard", session.company.id],
     queryFn: () => api.get<Dashboard>("/dashboard"),
     refetchInterval: 60_000,
   });
   const collected = useCollectedHistory(seesMoney);
+  const setup = useSetup();
   const page = useRef<HTMLDivElement>(null);
-  useFirstArrival(page, Boolean(data));
-  // Things handled elsewhere leave the list as it refreshes.
-  const attentionRows = useListAnimation<HTMLDivElement>();
   // Equipment overdue or coming due (maintenance, tags, inspection) joins the list for the people who look after it.
   const gear = useEquipmentDue(session.company.id, { enabled: managesEquipment(session) });
   const gearPapers = usePaperwork(session.company.id, { enabled: managesEquipment(session) });
@@ -96,158 +112,269 @@ export function HomePage() {
   }, [data?.attention, gear.data, gearPapers.data, changes.data, tz, session.company.settings]);
   const firstName = session.profile.full_name.split(" ")[0] || "there";
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz });
-  const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
+
+  // A first visit: setup is still to do and there's nothing else to show yet. While setup's own read
+  // is under way on such a quiet Home, the page waits for it rather than changing under the person.
+  const quiet = Boolean(data) && nothingYet(data!, attention.length);
+  const fresh = quiet && setup.state === "ready";
+  const waiting = isPending || (quiet && setup.state === "loading");
+  useFirstArrival(page, Boolean(data) && !waiting);
 
   return (
     <>
-      <div className="row-between wrap" style={{ alignItems: "flex-end" }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{today}</div>
-          <h1 style={{ marginTop: 6, fontSize: 32, fontWeight: 700, letterSpacing: "var(--tracking-display)", lineHeight: 1.1 }}>
-            {greeting(tz)}, {firstName}
-          </h1>
-        </div>
-        {isOffice && (
-          <div className="page-actions">
-            <Link className="btn" to="/requests?new=1"><Icon name="requests" size={16} />New request</Link>
-            <Link className="btn btn-primary" to="/quotes?new=1"><Icon name="plus" size={16} />New quote</Link>
-          </div>
-        )}
-      </div>
+      {fresh && setup.state === "ready" ? (
+        <PageHeader
+          title={`Welcome, ${firstName}`}
+          documentTitle="Home"
+          lede="A few things make Crewtavo yours. Most take a couple of minutes."
+          actions={<Button icon="x" onClick={setup.hide}>Hide checklist</Button>}
+        />
+      ) : (
+        <PageHeader
+          title={`${greeting(tz)}, ${firstName}`}
+          documentTitle="Home"
+          actions={
+            isOffice && (
+              <>
+                <Link className="btn" to="/requests?new=1"><Icon name="requests" size={16} />New request</Link>
+                <Link className="btn btn-primary" to="/quotes?new=1"><Icon name="plus" size={16} />New quote</Link>
+              </>
+            )
+          }
+        >
+          <p className={styles.date}>{today}</p>
+        </PageHeader>
+      )}
 
       {/* The crew's phones: Crewtavo as an app. The office isn't asked here (Settings has it). */}
       {!isOffice && <InstallAppCard />}
 
-      {isPending && <HomeSkeleton office={isOffice} />}
-      {error && <div className="card"><ErrorState error={error} onRetry={() => refetch()} title="Couldn't load your dashboard" /></div>}
+      {waiting && <HomeSkeleton office={isOffice} figures={seesMoney ? 4 : 3} />}
+      {error && <ErrorState error={error} onRetry={() => refetch()} title="Couldn't load your dashboard" />}
 
-      {data && (
-        <div ref={page} className="stack" style={{ gap: 28 }}>
-          {isOffice && <WorkflowStrip workflow={data.workflow} showInvoices={seesMoney} />}
-
-          <div className="two-col">
-            {/* The day's work: appointments, then what needs someone, both in view before the numbers. */}
-            <div className="wide stack" style={{ gap: 28 }}>
-              <section className="stack" aria-labelledby="today-title">
-                <div className="section-head">
-                  <h2 id="today-title" className="section-title">Today's appointments</h2>
-                  <Link className="btn btn-sm" to={isOffice ? "/schedule" : "/field"}>{isOffice ? "View schedule" : "My day"}</Link>
-                </div>
-                <div className="card">
-                  {data.today.total > 0 && (
-                    <div className="card-pad stack-sm" style={{ paddingBottom: 14 }}>
-                      <div className="row-between">
-                        <span className="muted text-sm">
-                          <strong style={{ color: "var(--ink)" }}>{data.today.by_status.completed ?? 0}</strong> of {data.today.total} complete
-                          {data.today.by_status.in_progress ? ` · ${data.today.by_status.in_progress} ${statusText("visit", "in_progress").toLowerCase()}` : ""}
-                        </span>
-                      </div>
-                      <div className="progress" aria-hidden="true"><span style={{ width: `${((data.today.by_status.completed ?? 0) / data.today.total) * 100}%` }} /></div>
-                    </div>
-                  )}
-                  {data.today.visits.length === 0 ? (
-                    <EmptyState inline title="Nothing on the schedule today" action={isOffice ? <Link className="btn" to="/schedule?new=1">Schedule a visit</Link> : undefined} />
-                  ) : (
-                    data.today.visits.map((v) => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        className="card-row"
-                        onClick={() => navigate(isOffice && v.job_id ? `/jobs/${v.job_id}` : `/field/visits/${v.id}`)}
-                      >
-                        <span style={{ width: 4, alignSelf: "stretch", borderRadius: "var(--radius-sm)", background: v.crew_color || "var(--fill-3)" }} aria-hidden="true" />
-                        <span className="tabular" style={{ width: 76, fontWeight: 700, fontSize: 13 }}>{v.starts_at ? time(v.starts_at) : "Anytime"}</span>
-                        <span className="grow">
-                          <span className="strong ellipsis" style={{ display: "block" }}>{v.title}</span>
-                          <span className="muted small ellipsis" style={{ display: "block" }}>
-                            {[v.client, v.address, v.crew].filter(Boolean).join(" · ") || statusLabel(v.kind)}
-                          </span>
-                          {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>Weather: {v.hold_reason.split(";")[0]}</span>}
-                        </span>
-                        <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
-                      </button>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              <section className="stack" aria-labelledby="attention-title">
-                <h2 id="attention-title" className="section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  Needs attention{attention.length > 0 && <span className="badge">{attention.length}</span>}
-                </h2>
-                <div className="card" ref={attentionRows}>
-                  {attention.length === 0 ? (
-                    <EmptyState inline title="All clear" />
-                  ) : (
-                    attention.map((item, i) => (
-                      <Link key={`${item.link}-${i}`} to={item.link} className="card-row">
-                        <span className="n-icon" style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", display: "grid", placeItems: "center", ...(ATTENTION_TINT[item.kind] ?? ATTENTION_PLAIN), flex: "none" }}>
-                          <Icon name={ATTENTION_ICON[item.kind] ?? "alert"} size={16} />
-                        </span>
-                        <span className="grow">
-                          <span className="strong text-sm" style={{ display: "block" }}>{item.title}</span>
-                          {item.detail && <span className="muted small ellipsis" style={{ display: "block" }}>{item.detail}</span>}
-                        </span>
-                        <Icon name="chevronRight" size={16} />
-                      </Link>
-                    ))
-                  )}
-                </div>
-              </section>
-            </div>
-
-            {/* The rail: setup while there's any left (it pushes down only the numbers), then the numbers. Empty for a crew, so it takes no room (base.css). */}
-            <div className="narrow stack" style={{ gap: 28 }}>
-              <SetupCard />
-              {(seesMoney || seesWebsite(session)) && (
-                <section className="stack" aria-labelledby="perf-title">
-                  <h2 id="perf-title" className="section-title">Business performance</h2>
-                  {seesMoney && (
-                    <div className="card card-pad stack-sm">
-                      <div className="muted small strong">Collected this month</div>
-                      <div className="row" style={{ alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                        <AnimatedNumber value={data.month.collected} format={MONEY} className="hero-number" />
-                        {collected.data && <Change now={data.month.collected} before={collected.data.sameDaysLastMonth} compared="the same days last month" same="Same as last month" />}
-                      </div>
-                      {collected.data && collected.data.weeks.length >= MIN_WEEKS && <WeekBars weeks={collected.data.weeks} />}
-                      <div className="row-between small muted"><span>Invoiced this month</span><AnimatedNumber value={data.month.invoiced} format={MONEY} className="strong ink" /></div>
-                      <div className="row-between small muted"><span>Quotes won ({data.month.won_count})</span><AnimatedNumber value={data.month.won} format={MONEY} className="strong ink" /></div>
-                    </div>
-                  )}
-                  {seesMoney && (
-                    <div className="card">
-                      <div className="card-pad" style={{ paddingBottom: 8 }}>
-                        <div className="row-between">
-                          <strong>Receivables</strong>
-                          <Link to="/invoices" className="small strong">All invoices</Link>
-                        </div>
-                        <div className="muted small" style={{ marginTop: 10 }}>{data.receivables.clients_owing} {data.receivables.clients_owing === 1 ? "client owes" : "clients owe"} you</div>
-                        <AnimatedNumber value={data.receivables.total} format={MONEY} className="hero-number" />
-                      </div>
-                      {data.receivables.top.map((row) => (
-                        <Link key={row.client_id} to={`/clients/${row.client_id}`} className="card-row" style={{ padding: "10px 20px", fontSize: 13 }}>
-                          <span className="grow ellipsis">{row.client}</span>
-                          <span className="tabular strong">{formatMoneyCompact(row.owed)}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                  {seesWebsite(session) && <WebsiteCard />}
-                </section>
-              )}
-            </div>
-          </div>
+      {data && !waiting && (
+        <div ref={page} className={styles.contents}>
+          {fresh && setup.state === "ready" ? (
+            <FirstVisit setup={setup} />
+          ) : (
+            <>
+              {isOffice && <WorkflowStrip workflow={data.workflow} showInvoices={seesMoney} />}
+              <DetailColumns
+                grouped
+                className={isOffice ? undefined : styles.narrow}
+                side={
+                  (setup.state === "ready" || seesMoney || seesWebsite(session)) && (
+                    <>
+                      {setup.state === "ready" && <SetupSection setup={setup} />}
+                      {seesMoney && <CollectedSection month={data.month} history={collected.data} />}
+                      {seesMoney && <ReceivablesSection receivables={data.receivables} />}
+                      {seesWebsite(session) && <WebsiteSection />}
+                    </>
+                  )
+                }
+              >
+                {/* The office sees what needs someone first; a crew, their day. */}
+                {isOffice && <AttentionSection items={attention} />}
+                <TodaySection today={data.today} office={isOffice} />
+                {!isOffice && attention.length > 0 && <AttentionSection items={attention} />}
+              </DetailColumns>
+            </>
+          )}
         </div>
       )}
     </>
   );
 }
 
-/** Home's tiles and cards have risen into place once this session, so later visits and refreshes don't repeat it. */
+/** How many things Needs attention shows before Show all, so today's visits stay near the top (Page-Home.dc.html shows four). */
+const ATTENTION_SHOWN = 6;
+
+/** The first six things to see to, or every one once Show all is pressed (or when one more isn't worth a click). */
+export function shownAttention<T>(items: readonly T[], all: boolean): { shown: readonly T[]; folds: boolean } {
+  const folds = items.length > ATTENTION_SHOWN + 1;
+  return { shown: folds && !all ? items.slice(0, ATTENTION_SHOWN) : items, folds };
+}
+
+/** Needs attention: one row each, the whole row opening the thing to see to; past six, Show all opens the rest. */
+function AttentionSection({ items }: { items: Attention[] }) {
+  const rows = useListAnimation<HTMLUListElement>();
+  const [all, setAll] = useState(false);
+  const { shown, folds } = shownAttention(items, all);
+  return (
+    <Section
+      title="Needs attention"
+      count={items.length || undefined}
+      flush={items.length > 0}
+      action={folds && <button type="button" aria-expanded={all} onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${items.length}`}</button>}
+    >
+      {items.length === 0 ? (
+        <EmptyState inline title="All clear" />
+      ) : (
+        // Things handled elsewhere leave the list as it refreshes.
+        <InboxList label="Needs attention" inset className={styles.attention}>
+          <ul className="il-rows" role="list" aria-label="Needs attention" ref={rows}>
+            {shown.map((item, i) => {
+              const look = attentionLook(item);
+              return (
+                <InboxRow
+                  key={`${item.link}-${i}`}
+                  to={item.link}
+                  title={item.title}
+                  meta={item.detail ? [item.detail] : undefined}
+                  avatar={<span className="rel-icon" data-tone={look.tone}><Icon name={look.icon} size={16} /></span>}
+                  aside={<span className={styles.go} aria-hidden="true"><Icon name="chevronRight" size={16} /></span>}
+                />
+              );
+            })}
+          </ul>
+        </InboxList>
+      )}
+    </Section>
+  );
+}
+
+/** Today's visits: the time and crew, the visit and where, its status. */
+function TodaySection({ today, office }: { today: Dashboard["today"]; office: boolean }) {
+  const { company } = useSession();
+  const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: company.timezone });
+  const done = today.by_status.completed ?? 0;
+  const going = today.by_status.in_progress ?? 0;
+  const count = today.total > 0 ? `${done} of ${today.total} done${going ? ` · ${going} ${statusText("visit", "in_progress").toLowerCase()}` : ""}` : undefined;
+  return (
+    <Section
+      title={<>Today<span className="hide-mobile">'s appointments</span></>}
+      count={count}
+      action={<Link to={office ? "/schedule" : "/field"}>{office ? "View schedule" : "My day"}</Link>}
+      className={styles.today}
+    >
+      {today.visits.length === 0 ? (
+        <EmptyState inline title="Nothing on the schedule today" action={office ? <Link className="btn" to="/schedule?new=1">Schedule a visit</Link> : undefined} />
+      ) : (
+        <RelatedList label="Today's appointments">
+          {today.visits.map((v) => {
+            const where = [v.client, v.address, v.crew].filter(Boolean);
+            return (
+              <RelatedRow
+                key={v.id}
+                to={office && v.job_id ? `/jobs/${v.job_id}` : `/field/visits/${v.id}`}
+                lead={
+                  <>
+                    <span className="tabular">{v.starts_at ? time(v.starts_at) : "Anytime"}</span>
+                    <span className={styles.crew} style={v.crew_color ? { background: v.crew_color } : undefined} aria-hidden="true" />
+                  </>
+                }
+                title={v.title}
+                sub={[
+                  v.hold_reason && <span className={styles.hold}><Icon name="cloud" size={13} />Weather: {v.hold_reason.split(";")[0]}</span>,
+                  ...(where.length ? where : [statusLabel(v.kind)]),
+                ]}
+                end={<StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />}
+              />
+            );
+          })}
+        </RelatedList>
+      )}
+    </Section>
+  );
+}
+
+/** The checklist at the top of the side column, once there's work to show beside it. */
+function SetupSection({ setup }: { setup: Extract<Setup, { state: "ready" }> }) {
+  return (
+    // Its check usually lands after the rest of Home, so it fades in rather than popping in.
+    <Section
+      title="Set up Crewtavo"
+      count={`${setup.done} of ${setup.steps.length} done`}
+      action={<button type="button" onClick={setup.hide}>Hide</button>}
+      className={styles.fadeIn}
+      flush
+    >
+      <SetupChecklist steps={setup.steps} done={setup.done} />
+    </Section>
+  );
+}
+
+/** A business's first visit (Setup-Flow.dc.html, Setup-Phone.dc.html): the checklist, and ways to bring work over. */
+function FirstVisit({ setup }: { setup: Extract<Setup, { state: "ready" }> }) {
+  const session = useSession();
+  const install = useInstallHint();
+  return (
+    <DetailColumns
+      grouped
+      side={
+        <Section title="Bring your work over">
+          <RelatedList>
+            <RelatedRow to="/clients" title="Import clients" sub="From a spreadsheet, or add them one at a time" />
+            {session.role === "owner" && <RelatedRow to="/settings?tab=data" title="Bring your open work from Jobber" sub="Clients, quotes, jobs and invoices" />}
+            {install === "prompt" && <RelatedRow onClick={() => void installApp().catch(() => undefined)} title="Get the app" sub="Crewtavo on this device, opened like any other app" />}
+            <RelatedRow onClick={openHelp} title="Ask about Crewtavo" sub="Claude or ChatGPT, from Help" />
+          </RelatedList>
+        </Section>
+      }
+    >
+      <SetupChecklist steps={setup.steps} done={setup.done} full />
+    </DetailColumns>
+  );
+}
+
+/** Collected this month against the same days of last month, a bar a week, and what was invoiced and won. */
+function CollectedSection({ month, history }: { month: Dashboard["month"]; history?: { sameDaysLastMonth: number; weeks: Week[] } }) {
+  const session = useSession();
+  const seesFinance = hasRole(session, "admin", "office") && can(session, "reports") && can(session, "invoices");
+  return (
+    <Section title="Collected this month" action={seesFinance ? <Link to="/finance">Finance</Link> : undefined}>
+      <div className={styles.panel}>
+        <div className={styles.figure}><AnimatedNumber value={month.collected} format={MONEY} className={styles.big} /></div>
+        {history && (
+          <ChangeLine now={month.collected} before={history.sameDaysLastMonth} compared="the same days last month" same="Same as last month" vs={sameDaysLastMonth(todayIn(session.company.timezone))} />
+        )}
+        {history && history.weeks.length >= MIN_WEEKS && <WeekBars weeks={history.weeks} />}
+        <dl className={styles.lines}>
+          <div><dt>Invoiced this month</dt><dd><AnimatedNumber value={month.invoiced} format={MONEY} /></dd></div>
+          <div><dt>Quotes won, {month.won_count}</dt><dd><AnimatedNumber value={month.won} format={MONEY} /></dd></div>
+        </dl>
+      </div>
+    </Section>
+  );
+}
+
+/** The days of last month this month so far is compared with: "Oct 1–21", "Feb 1–28" on the 31st, "Oct 1" on the 1st. */
+export function sameDaysLastMonth(today: string): string {
+  const [y, m, d] = today.split("-").map(Number) as [number, number, number];
+  const last = new Date(Date.UTC(y, m - 2, 1));
+  const days = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
+  const name = last.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const end = Math.min(d, days);
+  return end === 1 ? `${name} 1` : `${name} 1–${end}`;
+}
+
+/** Who owes money, most first, and how much in all. */
+function ReceivablesSection({ receivables }: { receivables: Dashboard["receivables"] }) {
+  const owing = receivables.clients_owing;
+  return (
+    <Section
+      title="Receivables"
+      count={owing > 0 ? `${owing} ${owing === 1 ? "client owes" : "clients owe"} you ${formatMoney(receivables.total)}` : undefined}
+      action={<Link to="/invoices">All invoices</Link>}
+    >
+      {receivables.top.length === 0 ? (
+        <EmptyState inline title="Nobody owes you anything" />
+      ) : (
+        <RelatedList label="Clients who owe you" className={styles.owing}>
+          {receivables.top.map((row) => (
+            <RelatedRow key={row.client_id} to={`/clients/${row.client_id}`} title={row.client} end={<b>{formatMoney(row.owed)}</b>} />
+          ))}
+        </RelatedList>
+      )}
+    </Section>
+  );
+}
+
+/** Home's sections have risen into place once this session, so later visits and refreshes don't repeat it. */
 let arrived = false;
 
 /**
- * The first time Home loads in a session, its workflow tiles and cards fade and rise 6px into place,
+ * The first time Home loads in a session, its figures and sections fade and rise 6px into place,
  * 30ms apart, in page order (only fade with Reduce Motion). Never on a refresh or on coming back.
  */
 function useFirstArrival(ref: RefObject<HTMLElement | null>, ready: boolean) {
@@ -257,8 +384,8 @@ function useFirstArrival(ref: RefObject<HTMLElement | null>, ready: boolean) {
     arrived = true;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const frames = still ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }];
-    // A card inside another card (or a tile's own parts) moves with it.
-    const items = [...root.querySelectorAll<HTMLElement>("[data-rise], .card")].filter((el) => !el.parentElement?.closest("[data-rise], .card"));
+    // A section inside another moves with it.
+    const items = [...root.querySelectorAll<HTMLElement>("[data-rise], .strip-item, .sec")].filter((el) => !el.parentElement?.closest("[data-rise], .sec"));
     // --dur-enter and --ease-enter.
     items.forEach((el, i) => el.animate?.(frames, { duration: 300, delay: i * 30, easing: "cubic-bezier(0.23, 1, 0.32, 1)", fill: "backwards" }));
   }, [ref, ready]);
@@ -283,7 +410,7 @@ function useCollectedHistory(enabled: boolean) {
   });
 }
 
-/** A bar a week, its date under it; the latest week's amount over its bar, another week's on hover. */
+/** A bar a week, its date under it; the latest week's amount over its green bar, another week's on hover. */
 function WeekBars({ weeks }: { weeks: Week[] }) {
   const max = Math.max(0, ...weeks.map((w) => w.total));
   const said = weeks.map((w, i) => `${i === weeks.length - 1 ? "this week so far" : `week of ${w.label}`} ${formatMoney(w.total)}`).join(", ");
@@ -302,44 +429,25 @@ function WeekBars({ weeks }: { weeks: Week[] }) {
   );
 }
 
-function HomeSkeleton({ office }: { office: boolean }) {
+/** The page's shape while the dashboard loads: the figures, then the sections, flat like the page. */
+function HomeSkeleton({ office, figures }: { office: boolean; figures: number }) {
   return (
-    <Loading label="Loading your day">
-      <div className="stack-lg">
+    <Loading label="Loading your day" className={styles.skeleton}>
+      {office && <StatsSkeleton count={figures} />}
+      <div className={office ? "detail-cols m-grouped" : `detail-cols detail-cols-one m-grouped ${styles.narrow}`}>
+        <div className="detail-main">
+          <SectionSkeleton rows={4} />
+          <SectionSkeleton rows={3} />
+        </div>
         {office && (
-          <div className="stack">
-            <Skeleton width={120} height={20} />
-            <div className="card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24, padding: 24 }}>
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="stack-sm">
-                  <Skeleton width={90} height={12} />
-                  <Skeleton width={60} height={30} />
-                  <Skeleton width="70%" height={12} />
-                  <Skeleton width="85%" height={10} />
-                </div>
-              ))}
+          <div className="detail-side">
+            <SectionSkeleton rows={4} />
+            <div className="sec" aria-hidden="true">
+              <div className="sec-head"><Skeleton width="48%" height={13} /></div>
+              <div className="sec-body"><Skeleton width={120} height={28} /></div>
             </div>
           </div>
         )}
-        <div className="two-col">
-          <div className="wide stack">
-            <Skeleton width={220} height={20} />
-            <div className="card">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="card-row">
-                  <Skeleton width={60} height={12} />
-                  <span className="grow stack-sm"><Skeleton width="55%" height={13} /><Skeleton width="35%" height={10} /></span>
-                  <Skeleton width={84} height={22} radius={999} />
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="narrow stack">
-            <Skeleton width={200} height={20} />
-            <CardSkeleton lines={3} />
-            <CardSkeleton lines={4} />
-          </div>
-        </div>
       </div>
     </Loading>
   );

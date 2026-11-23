@@ -18,6 +18,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -27,6 +28,7 @@ import { useSession } from "@/lib/session";
 import { newPhoneWay } from "./newPhone";
 import { signInPhoneNote } from "./signInCountries";
 import { refreshSubs, useSubAccess, type SignInLinkResult, type Sub } from "./subsData";
+import styles from "./Subs.module.css";
 
 type Send = "text" | "email" | "none";
 
@@ -92,75 +94,78 @@ export function SubAccessCard({ sub }: { sub: Sub }) {
     if (ok) removeAccess.mutate();
   };
 
-  return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>Sign-in</strong>
-        {a && <StatusPill label={subAccessText(a, session.company.timezone)} tone={a.state === "none" ? "muted" : a.state === "invited" || a.shared ? "info" : "good"} />}
-        {access.isPending && <Skeleton width={90} height={20} radius={10} />}
-      </div>
-      {access.error && !a ? (
-        <ErrorState compact title="Couldn't load their sign-in" error={access.error} onRetry={() => access.refetch()} />
-      ) : !sub.active ? null : a?.shared ? (
-        <span className="muted small">They already have their own Crewtavo sign-in, so there's no link to send. They sign in as they usually do, and {session.company.name} is there.</span>
-      ) : (
-        <span className="muted small">
-          {has
-            ? "They see only the visits you put them on and their own paperwork. No password: they stay signed in on their phone."
-            : "Text them a link to see the visits you put them on and send their paperwork from their phone. No password: they tap the link once and stay signed in."}
-        </span>
-      )}
+  const more = a && sub.active && (
+    <Menu
+      triggerClassName="btn btn-sm btn-ghost btn-icon"
+      label="More sign-in actions"
+      title="Sign-in"
+      items={[
+        { label: has ? "New sign-in link" : "Copy sign-in link", icon: "copy", hidden: a.shared, disabled: sendLink.isPending, onSelect: () => void newLink() },
+        { separator: true, hidden: !has || a.shared },
+        { label: "Remove sign-in", icon: "trash", danger: true, hidden: !has, onSelect: askRemove },
+      ]}
+    />
+  );
 
-      {!sub.active ? (
-        <span className="muted small">Turned off: they can't sign in. Turn them back on to give them a sign-in.</span>
-      ) : (
-        a && (
-          <div className="row wrap" style={{ gap: 8 }}>
-            {!a.shared && (
+  return (
+    <Section title="Sign-in" action={more}>
+      <div className={styles.access}>
+        <div className={styles.accessState}>
+          {a && <StatusPill label={subAccessText(a, session.company.timezone)} tone={a.state === "none" ? "muted" : a.state === "invited" || a.shared ? "info" : "good"} />}
+          {access.isPending && <Skeleton width={90} height={12} />}
+        </div>
+        {access.error && !a ? (
+          <ErrorState compact title="Couldn't load their sign-in" error={access.error} onRetry={() => access.refetch()} />
+        ) : !sub.active ? null : a?.shared ? (
+          <span className={styles.hint}>They already have their own Crewtavo sign-in, so there's no link to send. They sign in as they usually do, and {session.company.name} is there.</span>
+        ) : (
+          <span className={styles.hint}>
+            {has
+              ? "They see only the visits you put them on and their own paperwork. No password: they stay signed in on their phone."
+              : "Text them a link to see the visits you put them on and send their paperwork from their phone. No password: they tap the link once and stay signed in."}
+          </span>
+        )}
+
+        {!sub.active ? (
+          <span className={styles.hint}>Turned off: they can't sign in. Turn them back on to give them a sign-in.</span>
+        ) : (
+          a && !a.shared && (
+            <div className={styles.accessButtons}>
               <Button size="sm" icon="messages" loading={sending("text")} disabled={!sub.phone || sendLink.isPending} title={sub.phone ? undefined : "Add their phone number first"} onClick={() => sendLink.mutate("text")}>
                 Text sign-in link
               </Button>
-            )}
-            {!a.shared && email && (
-              <Button size="sm" icon="mail" loading={sending("email")} disabled={sendLink.isPending} onClick={() => sendLink.mutate("email")}>
-                Email sign-in link
-              </Button>
-            )}
-            <Menu
-              triggerClassName="btn btn-sm btn-ghost btn-icon"
-              label="More sign-in actions"
-              items={[
-                { label: has ? "New sign-in link" : "Copy sign-in link", icon: "copy", hidden: a.shared, disabled: sendLink.isPending, onSelect: () => void newLink() },
-                { separator: true, hidden: !has || a.shared },
-                { label: "Remove sign-in", icon: "trash", danger: true, hidden: !has, onSelect: askRemove },
-              ]}
-            />
-          </div>
-        )
-      )}
-      {/* With a sign-in, the new-phone line says to add a number to text them a link too: one line, not two. */}
-      {!sub.phone && sub.active && a && !a.shared && !newPhone && <span className="muted small">Add their mobile number under Details to text them a link.</span>}
-      {newPhone && <span className="muted small">{newPhone.text}</span>}
-      {[phoneNote && !phoneNote.ok && phoneNote.text, newPhone?.warning].filter(Boolean).map((text) => (
-        <div key={text as string} className="callout callout-warning" style={{ padding: "10px 12px" }}><Icon name="alert" size={16} /><span className="grow small">{text}</span></div>
-      ))}
-      <FormError error={sendLink.error ?? removeAccess.error} />
+              {email && (
+                <Button size="sm" icon="mail" loading={sending("email")} disabled={sendLink.isPending} onClick={() => sendLink.mutate("email")}>
+                  Email sign-in link
+                </Button>
+              )}
+            </div>
+          )
+        )}
+        {/* With a sign-in, the new-phone line says to add a number to text them a link too: one line, not two. */}
+        {!sub.phone && sub.active && a && !a.shared && !newPhone && <span className={styles.hint}>Add their mobile number under Details to text them a link.</span>}
+        {newPhone && <span className={styles.hint}>{newPhone.text}</span>}
+        {[phoneNote && !phoneNote.ok && phoneNote.text, newPhone?.warning].filter(Boolean).map((text) => (
+          <div key={text as string} className="callout callout-warning"><Icon name="alert" size={16} /><span className="grow">{text}</span></div>
+        ))}
+        <FormError error={sendLink.error ?? removeAccess.error} />
 
-      <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 10, marginTop: 4 }}>
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={sub.can_contact_clients} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ can_contact_clients: e.target.checked })} />
-          Can contact clients
-        </label>
-        <span className="muted small">{sub.can_contact_clients ? "They see the client's phone and email on their visits, to call or text them." : "They see the client's name but not their phone or email."}</span>
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={sub.uses_clock} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ uses_clock: e.target.checked })} />
-          Uses the clock
-        </label>
-        <span className="muted small">{sub.uses_clock ? "They clock in and out on their visits, like your crew, and their hours show on Timesheets for your records. They're still paid by the job, not with a pay period." : "They're paid by the job. Turn this on if you also want their hours."}</span>
+        <div className={styles.switches}>
+          <label className="switch-row">
+            <input type="checkbox" className="switch" checked={sub.can_contact_clients} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ can_contact_clients: e.target.checked })} />
+            Can contact clients
+          </label>
+          <span className={styles.hint}>{sub.can_contact_clients ? "They see the client's phone and email on their visits, to call or text them." : "They see the client's name but not their phone or email."}</span>
+          <label className="switch-row">
+            <input type="checkbox" className="switch" checked={sub.uses_clock} disabled={setOption.isPending} onChange={(e) => setOption.mutate({ uses_clock: e.target.checked })} />
+            Uses the clock
+          </label>
+          <span className={styles.hint}>{sub.uses_clock ? "They clock in and out on their visits, like your crew, and their hours show on Timesheets for your records. They're still paid by the job, not with a pay period." : "They're paid by the job. Turn this on if you also want their hours."}</span>
+        </div>
       </div>
 
       {result && <SignInLinkDialog result={result} who={who} phone={sub.phone} email={email} onClose={() => setResult(null)} />}
-    </div>
+    </Section>
   );
 }
 

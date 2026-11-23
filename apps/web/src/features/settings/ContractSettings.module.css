@@ -1,43 +1,41 @@
-/* Settings → Contract terms: the sections in the order they print, and the dialog that writes one. */
-.intro { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }
-.introText { flex: 1 1 320px; display: grid; gap: 6px; min-width: 0; }
-.introText h2 { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
-.introText p { margin: 0; color: var(--text-2); font-size: var(--fs-14); line-height: 1.5; }
-.introText a { font-weight: 600; }
+/* Settings → Contract terms: the sections in the order they print, on hairlines, and the dialog that writes one. */
+.intro { display: grid; gap: 6px; max-width: 640px; }
+.intro p { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
+.intro a { font-weight: 600; }
 
 /* ---- The list ------------------------------------------------------------------------------ */
-.list { margin: 0; padding: 0; list-style: none; }
-.row { display: flex; align-items: flex-start; gap: 4px 12px; padding: 12px 12px 12px 20px; border-top: 1px solid var(--row-divider); }
-.row:first-child { border-top: 0; }
-.number {
-  flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin-top: 2px; border-radius: 50%;
-  background: var(--fill-2); color: var(--text-2); font-size: var(--fs-12); font-weight: 700; font-variant-numeric: tabular-nums;
-}
+.list { margin: -14px 0 0; padding: 0; list-style: none; }
+.row { display: flex; align-items: flex-start; gap: 4px 12px; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
+.number { flex: none; min-width: 20px; padding-top: 1px; font-size: var(--fs-13); font-weight: 600; color: var(--quiet); font-variant-numeric: tabular-nums; }
 .open {
   flex: 1; display: grid; gap: 3px; min-width: 0; margin: -6px 0; padding: 6px 8px; border: 0; border-radius: var(--radius-control);
   background: none; color: inherit; font: inherit; text-align: left;
 }
 button.open { cursor: pointer; transition: background var(--dur-fast); }
 button.open:hover { background: var(--fill); }
-button.open:focus-visible { outline: none; box-shadow: var(--ring); }
-.title { font-size: var(--fs-14); overflow-wrap: anywhere; }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-13); color: var(--text-3); }
-.initials { display: inline-flex; align-items: center; gap: 4px; color: var(--green-dark); font-weight: 600; }
+button.open:focus-visible { outline: 2px solid var(--green); outline-offset: 0; }
+.title { font-size: var(--fs-13); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+/* Each part has its "·" before it, and the first 16px of every line is clipped: a line that wraps never starts with a dot. */
+.meta { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; margin-left: -16px; clip-path: inset(0 0 0 16px); font-size: var(--fs-12); color: var(--text-3); }
+.meta > ::before { content: "·"; display: inline-block; width: 16px; text-align: center; color: var(--quiet); }
+.initials { display: inline-flex; align-items: center; gap: 4px; }
+.initials > svg { color: var(--quiet); }
+/* Words still an example's: said plainly; the note above says to have them read. */
+.example { font-weight: 600; color: var(--text-2); }
 .snippet {
   display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-  font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere;
+  font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); overflow-wrap: anywhere;
 }
-.actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.actions { flex: none; display: flex; align-items: center; gap: 0; }
+.actions :global(.btn) { color: var(--text-3); }
+.actions :global(.btn:hover) { color: var(--ink); }
 /* While a move saves, the arrows keep focus but ignore presses. */
 .actions :global(.btn[aria-disabled="true"]) { opacity: 0.55; cursor: progress; }
 
-/* Under the empty list's line, before any sections are added. */
-.starterNote {
-  display: flex; align-items: flex-start; gap: 6px; margin: -4px 20px 16px;
-  font-size: var(--fs-13); line-height: 1.5; color: var(--text-3);
-}
-
-.starterNote svg { flex: none; margin-top: 3px; }
+/* No sections yet: the empty line, then what the examples are. */
+.empty { display: grid; gap: 6px; }
+.starterNote { display: flex; align-items: flex-start; gap: 6px; margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.starterNote svg { flex: none; margin-top: 2px; color: var(--quiet); }
 
 /* ---- The dialog ---------------------------------------------------------------------------- */
 .group { display: grid; gap: 8px; }
@@ -49,9 +47,16 @@ button.open:focus-visible { outline: none; box-shadow: var(--ring); }
 .editor :global(.prose ol:not(li ol) > li) { min-height: 0; margin: 0.2em 0; padding-left: 0; }
 .editor :global(.prose ol:not(li ol) > li::before) { content: none; }
 
-/* Phones: the move and more buttons go under the words. */
-@media (max-width: 560px) {
-  .row { flex-wrap: wrap; padding-left: 12px; }
-  .open { flex-basis: calc(100% - 38px); }
-  .actions { width: 100%; justify-content: flex-end; margin-top: 4px; }
+/* Phones: an inset card of sections, each with its More button at the top right. Moving up and
+   down is in that menu, so the arrows step aside. */
+@media (max-width: 900px) {
+  .intro p, .starterNote { font-size: var(--fs-14); }
+  .list { margin: 0; padding: 0 16px; border-radius: 14px; background: var(--m-card); }
+  .row { padding: 14px 0; }
+  .row:last-child { border-bottom: 0; }
+  .title { font-size: var(--fs-15); }
+  .meta, .snippet { font-size: var(--fs-13); }
+  .actions { margin: -10px -12px -10px 0; }
+  .actions .arrow { display: none; }
+  .actions :global(.btn) { width: 44px; height: 44px; }
 }

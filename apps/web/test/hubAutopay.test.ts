@@ -107,7 +107,7 @@ describe("tips on an invoice page", () => {
     const invoiceHub = source.slice(source.indexOf("function InvoiceHub("), source.indexOf("function HubDiscount("));
     // Pay's tip block, and the tip after an automatic charge.
     expect(invoiceHub.match(/<TipChoices/g)).toHaveLength(2);
-    expect(invoiceHub).toMatch(/\{data\.tips && \(\s*<section className="card card-pad stack-sm">\s*<strong>Add a tip for the crew\?<\/strong>\s*<TipChoices/);
+    expect(invoiceHub).toMatch(/\{data\.tips && \(\s*<section className="hub-card hub-pad hub-tip-card no-print"[^>]*>\s*<h2[^>]*>Add a tip for the crew\?<\/h2>\s*<TipChoices/);
     expect(invoiceHub).toContain("const tipAfter = balance <= 0 && data.tips && Boolean(data.tip_after)");
     expect(invoiceHub).toMatch(/\{tipAfter && \(\s*<section ref=\{tipSection\}/);
     expect(invoiceHub.match(/hubTip\(\{ tips: data\.tips,/g)).toHaveLength(2);
@@ -301,12 +301,14 @@ describe("autopay on the client's home", () => {
   it("leaves an invoice being charged out of what's waiting on them, and keeps one that couldn't be", () => {
     const charging = text(page(clientView({ autopay: active, invoices: [owed("i3", 3, "charging"), owed("i5", 5, "processing")] })));
     expect(charging).toContain("All caught up");
-    expect(charging).not.toContain("Pay $45.00");
+    expect(charging).not.toContain("Pay now");
 
     const failed = text(page(clientView({ autopay: active, invoices: [owed("i4", 4, "failed")] })));
     expect(failed).toContain("Waiting on you");
     expect(failed).toContain("We couldn't charge your card for this one.");
-    expect(failed).toContain("Pay $45.00");
+    // The amount once, over the button (Mercury's bill), and the button says what it does.
+    expect(failed).toContain("$45.00");
+    expect(failed).toContain("Pay now");
     expect(failed).toContain("Update your card");
   });
 

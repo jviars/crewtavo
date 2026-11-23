@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -11,6 +12,7 @@ import { formatDateTime, timeAgo } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import styles from "./clients.module.css";
 import { MessageBody } from "./MessageBody";
 import { messageFrom, messagePeople } from "./messagePeople";
 
@@ -23,6 +25,19 @@ function label(m: { channel: string; direction: string; subject: string | null; 
   if (m.direction === "in") return `${what} from ${messageFrom(m) ?? "client"}`;
   const { to } = messagePeople(m);
   return to ? `${what} sent to ${to}` : `${what} sent`;
+}
+
+/** A message's words, cut to three quiet lines when it's long (an email with its links), its blank lines closed up until Show all. */
+function EntryBody({ m }: { m: { body: string | null } }) {
+  const [open, setOpen] = useState(false);
+  const text = m.body ?? "";
+  const long = text.length > 320 || text.split("\n").length > 5;
+  return (
+    <div className={styles.body}>
+      <div className={long && !open ? styles.clamped : undefined}><MessageBody body={m.body} /></div>
+      {long && <button type="button" className={`link-btn ${styles.showAll} ${styles.tap}`} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>}
+    </div>
+  );
 }
 
 const newestFirst = (a: { created_at: string }, b: { created_at: string }) => b.created_at.localeCompare(a.created_at);
@@ -93,13 +108,13 @@ export function Timeline({ clientId }: { clientId: string }) {
   const canDelete = hasRole(session, "admin", "office");
 
   return (
-    <section className="stack" aria-labelledby="timeline-title">
-      <h2 id="timeline-title" className="section-title">Notes and messages</h2>
-      <form className="card card-pad stack-sm" onSubmit={submit}>
+    <Section title="Notes and messages">
+      <form className={styles.compose} onSubmit={submit}>
         <label className="sr-only" htmlFor="note">Add a note</label>
         <textarea
           id="note"
           className="textarea"
+          rows={1}
           placeholder="Add an internal note: gate quirks, preferences, history…"
           value={note}
           maxLength={4000}
@@ -108,48 +123,50 @@ export function Timeline({ clientId }: { clientId: string }) {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
-        <div className="row-between">
-          <span />
-          {/* Like a message's send button: nothing to add until there's text. */}
-          <Button size="sm" type="submit" loading={add.isPending} done={added} doneLabel="Added" disabled={!note.trim()}>Add note</Button>
-        </div>
+        {/* Like a message's send button: nothing to add until there's text. */}
+        <Button type="submit" loading={add.isPending} done={added} doneLabel="Added" disabled={!note.trim()}>Add note</Button>
       </form>
-      {/* With nothing in it yet, "No notes or messages yet" stands alone under the note box, not in a box of its own. */}
-      <div className={messages.data?.length === 0 ? undefined : "card"}>
-        {messages.isPending &&
-          [0, 1, 2].map((i) => (
+      {messages.isPending && (
+        <div className="timeline" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
             <div key={i} className="timeline-item">
-              <Skeleton width={32} height={32} radius={8} />
+              <Skeleton width={28} height={28} radius={999} />
               <span className="stack-sm"><Skeleton width={140} height={10} /><Skeleton width="80%" height={12} /></span>
             </div>
           ))}
-        {messages.error && <ErrorState compact error={messages.error} onRetry={() => messages.refetch()} />}
-        {messages.data?.length === 0 && <EmptyState inline title="No notes or messages yet" />}
-        <div ref={listRef} className="timeline">
-          {rows.map((m) => (
-            <div key={m.id} className="timeline-item" data-kind={m.channel}>
-              <span className="t-icon"><Icon name={ICON[m.channel] ?? "note"} size={16} /></span>
-              <div style={{ minWidth: 0 }}>
-                <div className="row-between">
-                  <span className="t-meta">
-                    <strong style={{ color: "var(--ink)" }} title={messagePeople(m).toFull ?? undefined}>{label(m)}</strong>
-                    {m.subject ? ` · ${m.subject}` : ""} · <span title={formatDateTime(m.created_at)}>{timeAgo(m.created_at)}</span>
-                    {m.status === "failed" && <span style={{ marginLeft: 6 }}><StatusPill label="Failed" tone="danger" /></span>}
-                    {messagePeople(m).missed && <span className="text-danger"> · Didn't reach {messagePeople(m).missed}</span>}
-                  </span>
-                  {m.channel === "note" && m.direction === "internal" && (canDelete || m.sent_by === session.userId) && (
-                    <Button size="sm" variant="ghost" icon="trash" aria-label="Delete note" onClick={() => removeLater(m)} />
-                  )}
-                </div>
-                <div className="pre-wrap" style={{ marginTop: 2 }}><MessageBody body={m.body} /></div>
-              </div>
-            </div>
-          ))}
         </div>
-        {(messages.data?.length ?? 0) > limit && (
-          <div className="list-foot"><span /><Button size="sm" onClick={() => setLimit((l) => l + 25)}>Show older</Button></div>
-        )}
+      )}
+      {messages.error && <ErrorState compact error={messages.error} onRetry={() => messages.refetch()} />}
+      {messages.data?.length === 0 && <EmptyState inline title="No notes or messages yet" />}
+      <div ref={listRef} className="timeline">
+        {rows.map((m) => {
+          const people = messagePeople(m);
+          return (
+            <div key={m.id} className={`timeline-item ${styles.entry}`} data-kind={m.channel}>
+              <span className="t-icon"><Icon name={ICON[m.channel] ?? "note"} size={14} /></span>
+              <div className={styles.entryText}>
+                <div>
+                  <span className={styles.who} title={people.toFull ?? undefined}>{label(m)}</span>
+                  {m.status === "failed" && <span className={styles.failed}><StatusPill label="Failed" tone="danger" /></span>}
+                  {people.missed && <span className={styles.missed}> · Didn't reach {people.missed}</span>}
+                </div>
+                {/* An email's subject on its own line under who it went to (Page-Client.dc.html). */}
+                {m.subject && <div className={styles.subjectLine}>{m.subject}</div>}
+                <EntryBody m={m} />
+              </div>
+              <span className={styles.when}>
+                <time dateTime={m.created_at} title={formatDateTime(m.created_at)}>{timeAgo(m.created_at)}</time>
+                {m.channel === "note" && m.direction === "internal" && (canDelete || m.sent_by === session.userId) && (
+                  <Button size="sm" variant="ghost" icon="trash" aria-label="Delete note" title="Delete note" onClick={() => removeLater(m)} />
+                )}
+              </span>
+            </div>
+          );
+        })}
       </div>
-    </section>
+      {(messages.data?.length ?? 0) > limit && (
+        <div className={styles.older}><Button size="sm" variant="ghost" onClick={() => setLimit((l) => l + 25)}>Show older</Button></div>
+      )}
+    </Section>
   );
 }

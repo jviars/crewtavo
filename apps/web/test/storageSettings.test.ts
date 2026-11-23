@@ -233,7 +233,8 @@ describe("Settings → Storage", () => {
       client.setQueryData(["company-roles", COMPANY], []);
       client.setQueryData(["company", COMPANY, "settings"], { files: { shrink_photos: false, videos: "office", video_max_bytes: 50e6 } });
     });
-    expect(html).toMatch(/<input type="checkbox" class="switch"\/>/);
+    // Off, and not busy: no checked or disabled on the switch (SettingsKit's SwitchRow gives it an id and its hint).
+    expect(html).toMatch(/<input id="[^"]+" type="checkbox" class="switch" aria-describedby="[^"]+"\/>/);
     expect(html).toMatch(/<option value="50000000" selected="">50 MB<\/option>/);
     expect(html).toMatch(/name="video-uploaders" checked=""\/>.{0,120}Only the office/);
   });
@@ -243,7 +244,7 @@ describe("Settings → Storage", () => {
     const html = settingsPage(REPORT);
     const page = text(html);
     expect(page).toContain("Who's using it");
-    // "in use" and "Limit:" show only where the table stacks, on a phone.
+    // Each person's row says what they use and their limit in words.
     expect(page).toContain("Pat Owner Owner 20 GB in use Not limited Owners never are");
     expect(page).toContain("Sam Crew Foreman 9 GB in use");
     expect(page).toContain("Limit: 10 GB From their role");
@@ -254,7 +255,8 @@ describe("Settings → Storage", () => {
     expect(html).not.toContain('aria-label="Set a storage limit for Pat Owner"');
     expect(html).not.toContain('aria-label="Set a storage limit for Uploaded by Crewtavo"');
     // Someone who left still has files here, but no limit to set.
-    expect(page).toContain("Lee Former 1 GB in use — No longer on the team");
+    // No dash for a limit they can't have: only why.
+    expect(page).toContain("Lee Former 1 GB in use No longer on the team");
     expect(html).not.toContain('aria-label="Set a storage limit for Lee Former"');
     // Most first, with what no one in particular added at the end.
     expect(page.indexOf("Pat Owner")).toBeLessThan(page.indexOf("Sam Crew"));
@@ -311,12 +313,15 @@ describe("Settings → People and Roles", () => {
   it("lets the owner give anyone but an owner a storage limit, from their row on People", () => {
     as("owner", []);
     const html = render(createElement(TeamSettings), seed);
-    expect(html).toContain('aria-label="Storage limit for Ana Office"');
+    // In each person's More menu, the limit shown beside it; and their own limit (or their role's) on their row.
+    const menuOf = (name: string) => html.split(`aria-label="More for ${name}" popover`)[1]?.split("</li>")[0] ?? "";
+    expect(menuOf("Ana Office")).toContain("Storage limit");
+    expect(menuOf("Ana Office")).toContain('<span class="menu-end">20 GB</span>');
     expect(text(html)).toContain("Storage: 20 GB");
     expect(text(html)).toContain("Storage: 10 GB (role)");
-    expect(html).not.toContain('aria-label="Storage limit for Pat Owner"');
+    expect(menuOf("Pat Owner")).not.toContain("Storage limit");
     as("admin", ["team", "settings"]);
-    expect(render(createElement(TeamSettings), seed)).not.toContain("Storage limit for");
+    expect(render(createElement(TeamSettings), seed)).not.toContain("Storage limit");
   });
 
   it("lets the owner give a role, or a built-in level other than the owner's, a storage limit", () => {

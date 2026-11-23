@@ -39,26 +39,21 @@
  */
 import { msg, t } from "@/lib/i18n";
 
-const TONES = {
-  good: { bg: "var(--green-tint)", fg: "var(--green-dark)", dot: "var(--job)" },
-  info: { bg: "var(--invoice-tint)", fg: "var(--invoice-text)", dot: "var(--invoice)" },
-  warning: { bg: "var(--warning-tint)", fg: "var(--warning)", dot: "var(--req)" },
-  danger: { bg: "var(--danger-tint)", fg: "var(--danger)", dot: "var(--danger)" },
-  muted: { bg: "var(--fill-2)", fg: "var(--text-2)", dot: "#9aa39d" },
-} as const;
-
-export type Tone = keyof typeof TONES;
+/**
+ * "pending" is a state on its way somewhere that nobody has to act on yet (a lead, a partly paid
+ * invoice): an amber dot and plain words. "warning" is amber words too, for one someone must see to.
+ */
+export type Tone = "good" | "info" | "pending" | "warning" | "danger" | "muted";
 
 /**
- * Status is always shown as text, never color alone. A state that needs someone (warning, danger)
- * is a tinted pill; a steady one is its dot and plain words, so the ones to act on stand out in a list.
+ * Status is always shown as words, never color alone: a small dot in the state's color and plain
+ * words. The words take a color only for a state that needs someone (warning amber, danger red), so
+ * the ones to act on stand out in a list. The colors are components.css's .pill[data-tone].
  */
 export function StatusPill({ label, tone = "muted" }: { label: string; tone?: Tone }) {
-  const colors = TONES[tone];
-  const quiet = tone !== "warning" && tone !== "danger";
   return (
-    <span className={quiet ? "pill pill-quiet" : "pill"} style={quiet ? undefined : { background: colors.bg, color: colors.fg }}>
-      <span className="pill-dot" style={{ background: colors.dot }} />
+    <span className="pill" data-tone={tone}>
+      <span className="pill-dot" aria-hidden="true" />
       {label}
     </span>
   );
@@ -111,15 +106,18 @@ const VISIT_TONES: Record<string, Tone> = {
 export const visitTone = (status: string): Tone => VISIT_TONES[status] ?? "muted";
 
 const ENTITY_TONES: Record<StatusKind, Record<string, Tone>> = {
-  client: { lead: "warning", active: "good", archived: "muted" },
-  request: { new: "warning", assessment_scheduled: "info", assessment_complete: "info", quoted: "good", converted: "good", archived: "muted" },
-  quote: { draft: "muted", sent: "info", changes_requested: "warning", approved: "good", converted: "good", lost: "danger", archived: "muted" },
+  // Only what someone has to act on is amber or red words: a lead, a partly paid invoice, a referral's new lead and a credit earned are on their way, a dot of their own color.
+  client: { lead: "pending", active: "good", archived: "muted" },
+  request: { new: "pending", assessment_scheduled: "info", assessment_complete: "info", quoted: "good", converted: "good", archived: "muted" },
+  // A quote the client asked to change is on its way too: the office answers it, but nothing is late (Page-Quote.dc.html: an amber dot, plain words).
+  quote: { draft: "muted", sent: "info", changes_requested: "pending", approved: "good", converted: "good", lost: "muted", archived: "muted" },
   // An active job's states read like its visits': late in red, today under way, upcoming waiting, unscheduled to see to, paused at rest.
-  job: { active: "info", requires_invoicing: "warning", completed: "good", archived: "muted", late: "danger", today: "info", upcoming: "muted", unscheduled: "warning", paused: "muted" },
-  invoice: { draft: "muted", sent: "info", partially_paid: "warning", paid: "good", overdue: "danger", void: "muted", written_off: "muted" },
+  // Requires invoicing is work done and ready to bill: green, as the jobs list groups it ("ready", like an approved quote), not an amber warning.
+  job: { active: "info", requires_invoicing: "good", completed: "good", archived: "muted", late: "danger", today: "info", upcoming: "muted", unscheduled: "warning", paused: "muted" },
+  invoice: { draft: "muted", sent: "info", partially_paid: "pending", paid: "good", overdue: "danger", void: "muted", written_off: "muted" },
   visit: VISIT_TONES,
-  referral: { new: "warning", quoted: "info", won: "good", lost: "danger" },
-  credit: { pending: "muted", earned: "warning", applied: "good", issued: "good", none: "muted" },
+  referral: { new: "pending", quoted: "info", won: "good", lost: "danger" },
+  credit: { pending: "muted", earned: "pending", applied: "good", issued: "good", none: "muted" },
   campaign: { draft: "muted", scheduled: "info", sending: "info", sent: "good", cancelled: "danger", automated: "info" },
   // Each step further reads stronger: sent, then opened, then clicked.
   recipient: { pending: "muted", sending: "info", sent: "muted", failed: "danger", skipped: "muted", opened: "info", clicked: "good" },

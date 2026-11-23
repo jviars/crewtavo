@@ -100,11 +100,11 @@ begin;
 set local role authenticated;
 select tmk.as_user(:'mia');
 -- A page saving settings from a copy read before Marketing was uninstalled, or without it at all.
-update public.companies set settings = (settings - 'marketing') || '{"review_message": "Thanks! {{link}}"}' where id = :'co';
-select tmk.check((select settings -> 'marketing' = '{"enabled": true}' and settings ->> 'review_message' = 'Thanks! {{link}}' from public.companies where id = :'co'),
+update public.companies set settings = (public.company_settings(id) - 'marketing') || '{"review_message": "Thanks! {{link}}"}' where id = :'co';
+select tmk.check((select public.company_settings(id) -> 'marketing' = '{"enabled": true}' and public.company_settings(id) ->> 'review_message' = 'Thanks! {{link}}' from public.companies where id = :'co'),
   'a settings save that leaves Marketing out keeps it as it was, and saves the rest');
-update public.companies set settings = jsonb_set(settings, '{marketing}', '{"enabled": false}') where id = :'co';
-select tmk.check((select settings #>> '{marketing,enabled}' = 'true' from public.companies where id = :'co'),
+update public.companies set settings = jsonb_set(public.company_settings(id), '{marketing}', '{"enabled": false}') where id = :'co';
+select tmk.check((select public.company_settings(id) #>> '{marketing,enabled}' = 'true' from public.companies where id = :'co'),
   'nor does one that flips it: even the owner goes through Install and Uninstall');
 commit;
 
@@ -142,10 +142,10 @@ select tmk.as_user(:'oz');
 select tmk.check(tmk.error_of(format('select public.marketing_set_enabled(%L, false)', :'co')) like '42501:%', 'nor another business''s owner');
 select tmk.as_user(:'mia');
 select tmk.check(public.marketing_set_enabled(:'co', false) = false, 'the owner uninstalls it');
-select tmk.check((select settings #>> '{marketing,enabled}' = 'false' and settings #> '{marketing,changed_at}' is not null from public.companies where id = :'co'),
+select tmk.check((select public.company_settings(id) #>> '{marketing,enabled}' = 'false' and public.company_settings(id) #> '{marketing,changed_at}' is not null from public.companies where id = :'co'),
   'which turns it off and says when');
-update public.companies set settings = jsonb_set(settings, '{marketing}', '{"enabled": true}') where id = :'co';
-select tmk.check((select settings #>> '{marketing,enabled}' = 'false' from public.companies where id = :'co'), 'and a stale settings save can''t put it back on');
+update public.companies set settings = jsonb_set(public.company_settings(id), '{marketing}', '{"enabled": true}') where id = :'co';
+select tmk.check((select public.company_settings(id) #>> '{marketing,enabled}' = 'false' from public.companies where id = :'co'), 'and a stale settings save can''t put it back on');
 commit;
 select tmk.check((select next_reminder_at is null and reminder_note = 'Marketing was uninstalled' from public.review_requests where company_id = :'co'),
   'uninstalling stops its reminders for good, saying why');

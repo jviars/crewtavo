@@ -32,6 +32,7 @@ import { runInBackground } from "../lib/background";
 import { decryptJson, encryptJson, randomId } from "../lib/crypto";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, uuid } from "../lib/http";
 import { buildCalendar, type IcsEvent } from "../lib/ics";
+import { noAssistants } from "../lib/noAssistants";
 import { adminClient } from "../lib/supabase";
 import {
   CalendarError,
@@ -95,7 +96,9 @@ async function pages<T>(page: (from: number, to: number) => PromiseLike<{ data: 
   return rows.slice(0, max);
 }
 
-calendar.get("/calendar-feed", requireUser, requireCompany(), async (c) => {
+// The feed's address is its key and keeps working until it's replaced, so an AI assistant, which
+// may read here otherwise, never gets it: it would outlast the assistant (lib/noAssistants.ts).
+calendar.get("/calendar-feed", requireUser, noAssistants, requireCompany(), async (c) => {
   const admin = adminClient(c.env);
   const { data, error } = await admin.from("calendar_feeds").select("scope, token_sealed, created_at, last_used_at").eq("company_id", c.var.companyId).eq("user_id", c.var.userId).maybeSingle();
   if (error) throw dbError(error);
@@ -104,7 +107,7 @@ calendar.get("/calendar-feed", requireUser, requireCompany(), async (c) => {
   return c.json({ feed: { url: feedUrl(appUrl(c), token), scope: data.scope, created_at: data.created_at, last_used_at: data.last_used_at }, can_see_all: canSeeAll(c.var.role) });
 });
 
-calendar.post("/calendar-feed", requireUser, requireCompany(), async (c) => {
+calendar.post("/calendar-feed", requireUser, noAssistants, requireCompany(), async (c) => {
   const { scope } = await readJson(c, z.object({ scope: z.enum(["mine", "all"]).default("mine") }));
   if (scope === "all" && !canSeeAll(c.var.role)) throw new HttpError(403, "Your role shows your own visits only.");
   const token = randomId(32);

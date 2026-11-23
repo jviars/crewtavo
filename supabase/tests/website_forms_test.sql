@@ -58,7 +58,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "aa220000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select wft.check(public.website_forms_set_enabled(:'co', true), 'the owner installs it');
-select wft.check((select (settings -> 'website_forms' ->> 'enabled')::boolean from public.companies where id = :'co'), 'installed in the company''s settings');
+select wft.check((select (public.company_settings(id) -> 'website_forms' ->> 'enabled')::boolean from public.companies where id = :'co'), 'installed in the company''s settings');
 select wft.check((select count(*) = 1 from public.website_forms where company_id = :'co'), 'the first install makes a form');
 select wft.check((select name = 'Contact form' and key ~ '^[a-f0-9]{10}$' from public.website_forms where company_id = :'co'), 'called Contact form, at a random address');
 select wft.check((select email_to = '{ana@pine.test}' from public.website_forms where company_id = :'co'), 'emailing whoever installed it, when the business has no email of its own');

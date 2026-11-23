@@ -13,11 +13,14 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { RowPerson } from "@/components/ui/InboxList";
+import { RelatedList, RelatedRow } from "@/components/ui/Section";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { everyRow } from "@/lib/paging";
 import { hasRole, useSession } from "@/lib/session";
+import { SwitchRow } from "../settings/SettingsKit";
 
 /** A contact ticked for emails with an address, or for texts with a number: someone who'd get messages. */
 const TICKED = "and(notify_email.eq.true,email.not.is.null),and(notify_sms.eq.true,phone.not.is.null)";
@@ -58,17 +61,18 @@ export function ContactMessagesNotice() {
   return (
     <>
       <div className="callout callout-info" role="note">
-        <Icon name="info" size={20} />
+        <Icon name="info" size={16} />
         <div className="grow stack-sm" style={{ gap: 8 }}>
           <div>
-            Contacts ticked to get reminders will start receiving them
-            <div style={{ fontWeight: 400 }}>
+            <div style={{ fontWeight: 600 }}>Contacts ticked to get reminders will start receiving them</div>
+            <div>
               {plural(ticked)} ticked. Until now only the client got reminders, quotes, invoices and receipts. Turn this on and their ticked contacts get them too.
             </div>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
             <Button size="sm" onClick={() => setReviewing(true)}>Review</Button>
-            <Button size="sm" variant="primary" loading={save.isPending && save.variables === true} disabled={save.isPending} onClick={() => save.mutate(true)}>Turn on</Button>
+            {/* New client in the page header stays the page's one green button. */}
+            <Button size="sm" loading={save.isPending && save.variables === true} disabled={save.isPending} onClick={() => save.mutate(true)}>Turn on</Button>
             <Button size="sm" variant="ghost" loading={save.isPending && save.variables === false} disabled={save.isPending} onClick={() => save.mutate(false)}>Keep it off</Button>
           </div>
           <FormError error={save.error} />
@@ -85,26 +89,27 @@ export function ContactMessagesSwitch() {
   const [reviewing, setReviewing] = useState(false);
   const on = save.isPending ? save.variables : setting.enabled;
   return (
-    <div className="card card-pad stack-sm">
-      <label className="switch-row">
-        <input type="checkbox" className="switch" checked={on} disabled={!canChange || save.isPending} onChange={(e) => save.mutate(e.target.checked)} />
-        <span>
-          Send to a client's other contacts too
-          <span className="muted small" style={{ display: "block", fontWeight: 400 }}>
-            A contact ticked for emails or texts on the client's page gets what the client gets about their visits (booked, moved, cancelled, reminders, on-my-way texts), and their quotes, invoices, follow-ups and receipts. Marketing emails,
-            review requests and referral asks only ever go to the client.
-          </span>
-        </span>
-      </label>
-      {ticked !== null && ticked > 0 && (
-        <span className="muted small">
-          {plural(ticked)} ticked now. <button type="button" className="link-btn small" onClick={() => setReviewing(true)}>See who</button>
-        </span>
-      )}
-      {!canChange && <span className="muted small">An owner or admin can change this.</span>}
+    <>
+      {/* A plain switch row on the section's hairlines, as the other client messages are. */}
+      <div className="set-rows">
+        <SwitchRow
+          label="Send to a client's other contacts too"
+          hint={<>
+            A contact ticked for emails or texts on the client's page gets what the client gets about their visits (booked, moved, cancelled, reminders, on-my-way texts), and their quotes, invoices,
+            follow-ups and receipts. Marketing emails, review requests and referral asks only ever go to the client.
+            {!canChange && <span className="set-row-more">An owner or admin can change this.</span>}
+          </>}
+          checked={on}
+          disabled={!canChange || save.isPending}
+          onChange={(next) => save.mutate(next)}
+        >
+          {/* Outside the hint, so on a phone (where the whole row turns the switch) it's still its own tap. */}
+          {ticked !== null && ticked > 0 && <span className="muted small">{plural(ticked)} ticked now. <button type="button" className="link-btn" onClick={() => setReviewing(true)}>See who</button></span>}
+        </SwitchRow>
+      </div>
       <FormError error={save.error} />
       {reviewing && <TickedContactsDialog onClose={() => setReviewing(false)} />}
-    </div>
+    </>
   );
 }
 
@@ -132,23 +137,25 @@ function TickedContactsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onClose={onClose} title="Contacts ticked to get messages" description="Open a client to untick anyone who shouldn't get their reminders, quotes, invoices and receipts.">
       <div className="dialog-body">
-        {contacts.isPending && <Loading label="Loading contacts">{[0, 1, 2].map((i) => <div key={i} className="card-row"><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="70%" height={10} /></span></div>)}</Loading>}
+        {contacts.isPending && <Loading label="Loading contacts"><div className="rel">{[0, 1, 2].map((i) => <div key={i} className="rel-row"><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="70%" height={10} /></span></div>)}</div></Loading>}
         {contacts.error && <ErrorState compact error={contacts.error} onRetry={() => contacts.refetch()} />}
         {contacts.data?.length === 0 && <EmptyState compact icon="users" title="No contacts are ticked" />}
         {contacts.data && contacts.data.length > 0 && (
           <div style={{ maxHeight: "50vh", overflowY: "auto" }}>
-            {contacts.data.map((c) => {
-              const gets = [c.notify_email && c.email ? `emails to ${c.email}` : null, c.notify_sms && c.phone ? `texts to ${c.phone}` : null].filter(Boolean).join(" and ");
-              return (
-                <div key={c.id} className="card-row" style={{ alignItems: "flex-start" }}>
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    <strong>{c.name}</strong>
-                    <span className="muted small" style={{ display: "block" }}>Would get {gets}</span>
-                  </span>
-                  {c.client && <Link className="small nowrap" to={`/clients/${c.client.id}`} onClick={onClose}>{c.client.display_name}</Link>}
-                </div>
-              );
-            })}
+            <RelatedList label="Contacts ticked to get messages">
+              {contacts.data.map((c) => {
+                const gets = [c.notify_email && c.email ? `emails to ${c.email}` : null, c.notify_sms && c.phone ? `texts to ${c.phone}` : null].filter(Boolean).join(" and ");
+                return (
+                  <RelatedRow
+                    key={c.id}
+                    lead={<RowPerson name={c.name} />}
+                    title={c.name}
+                    sub={`Would get ${gets}`}
+                    actions={c.client && <Link className="btn btn-sm" to={`/clients/${c.client.id}`} onClick={onClose}>{c.client.display_name}</Link>}
+                  />
+                );
+              })}
+            </RelatedList>
           </div>
         )}
         <div className="form-actions">

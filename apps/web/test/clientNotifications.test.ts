@@ -108,6 +108,7 @@ describe("Client notifications in Settings", () => {
     expect(group("office", ["automations"], "Client communication")).toContain("Client notifications");
     expect(group("office", ["settings"], "Client communication")).not.toContain("Client notifications");
     expect(group("estimator", ["automations"], "Client communication")).not.toContain("Client notifications");
-    expect(group("owner", [], "Self-hosting")).toEqual(["Web address", "Hosting", "Storage"]);
+    expect(group("owner", [], "About")).toEqual(["Storage", "Web address", "Hosting", "Terms and license"]);
+    expect(group("crew_lead", [], "About")).toEqual(["Terms and license"]);
   });
 });

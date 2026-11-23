@@ -1,0 +1,6 @@
+/* The quotes list (QuotesPage.tsx): what a client asked to change, and a quote past its date, in
+   amber words in the row's quiet line: someone has to act on them. */
+.said { color: var(--warning); font-weight: 500; }
+@media (max-width: 900px) {
+  :global(.il-meta) > :is(.when, :global(.meta-dot):has(+ .when)) { display: none; }
+}

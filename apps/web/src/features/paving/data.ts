@@ -150,9 +150,9 @@ export function currentStep(q: QuoteForFlow | null, takeoff: TakeoffRow | null, 
   return "done";
 }
 
-/** A short word for the project list. */
+/** A short word for the project list. A lost proposal is quiet, as a lost quote is everywhere else. */
 export function stageLabel(q: { status: string; lines?: unknown[]; jobs?: Array<{ status: string }> }, hasTakeoff: boolean): { label: string; tone: "muted" | "info" | "warning" | "good" | "danger" } {
-  if (q.status === "lost") return { label: statusText("quote", q.status), tone: "danger" };
+  if (q.status === "lost") return { label: statusText("quote", q.status), tone: "muted" };
   if (q.status === "archived") return { label: statusText("quote", q.status), tone: "muted" };
   if (!hasTakeoff) return { label: "Takeoff", tone: "muted" };
   if (!q.lines?.length) return { label: "Estimate", tone: "muted" };
@@ -163,6 +163,35 @@ export function stageLabel(q: { status: string; lines?: unknown[]; jobs?: Array<
   const job = q.jobs?.[0];
   if (job?.status === "completed") return { label: "Done", tone: "good" };
   return { label: "Job", tone: "good" };
+}
+
+/** The project list's groups, in the order they're shown: what someone must act on first. */
+export const PROJECT_GROUPS = [
+  { key: "changes", label: "Changes requested", tone: "warning", icon: "alert" },
+  { key: "won", label: "Signed: ready to schedule", tone: "good", icon: "check" },
+  { key: "ready", label: "Ready to send" },
+  { key: "sent", label: "Proposal sent" },
+  { key: "working", label: "Takeoff and estimate" },
+  { key: "job", label: "In progress" },
+  { key: "done", label: "Done" },
+  { key: "closed", label: "Lost or archived" },
+] as const satisfies ReadonlyArray<{ key: string; label: string; tone?: "warning" | "danger" | "good"; icon?: IconName }>;
+export type ProjectGroupKey = (typeof PROJECT_GROUPS)[number]["key"];
+
+/** Which group a project is in: the same reading as stageLabel, so a row's group and its words agree. */
+export function projectGroup(q: { status: string; lines?: unknown[]; jobs?: Array<{ status: string }> }): ProjectGroupKey {
+  if (q.status === "lost" || q.status === "archived") return "closed";
+  if (!q.lines?.length) return "working";
+  if (q.status === "changes_requested") return "changes";
+  if (q.status === "draft") return "ready";
+  if (q.status === "sent") return "sent";
+  if (q.status === "approved") return "won";
+  return q.jobs?.[0]?.status === "completed" ? "done" : "job";
+}
+
+/** Projects in their groups (PROJECT_GROUPS' order, each in the list's order), without the empty ones. */
+export function groupProjects<R extends { quote: { status: string; lines?: unknown[]; jobs?: Array<{ status: string }> } }>(rows: readonly R[]) {
+  return PROJECT_GROUPS.map((g) => ({ ...g, rows: rows.filter((r) => projectGroup(r.quote) === g.key) })).filter((g) => g.rows.length > 0);
 }
 
 // ---------------------------------------------------------------------------------------------

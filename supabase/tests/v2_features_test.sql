@@ -38,7 +38,7 @@ select set_config('request.jwt.claims', '{"sub": "c0000000-0000-0000-0000-000000
 
 select public.create_company('Gamma Exteriors', 'general') as co \gset
 select t2.check((select count(*) from public.automation_rules where company_id = :'co') > 0, 'new companies get starter automations');
-update public.companies set settings = settings || '{"default_tax_rate": 0.1, "payment_terms_days": 15}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"default_tax_rate": 0.1, "payment_terms_days": 15}' where id = :'co';
 insert into public.memberships (company_id, user_id, role, labor_rate) values (:'co', 'c0000000-0000-0000-0000-000000000002', 'field_crew', 28);
 
 insert into public.clients (company_id, display_name, email, status, tags) values

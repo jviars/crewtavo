@@ -223,7 +223,7 @@ set local role authenticated;
 select t1100.as_user(:'opal');
 select t1100.check(public.set_sub_sign_in_countries(:'co', array['44', '+52', '44', '1', ' 61 ']) = '{44,52,61}',
   'Opal, in the office with the subs area, adds the UK, Mexico and Australia: each once, in order, without the US and Canada (always on)');
-select t1100.check((select settings -> 'subs' from public.companies where id = :'co') = '{"remind_subs": false, "sign_in_countries": ["44", "52", "61"]}',
+select t1100.check((select public.company_settings(id) -> 'subs' from public.companies where id = :'co') = '{"remind_subs": false, "sign_in_countries": ["44", "52", "61"]}',
   'kept as calling codes next to remind_subs, which stays as it was');
 select t1100.expect_error(format('select public.set_sub_sign_in_countries(%L, %L)', :'co', '{UK}'), 'a calling code is digits');
 select t1100.expect_error(format('select public.set_sub_sign_in_countries(%L, %L)', :'co', '{0044}'), 'without the dialing prefix');

@@ -88,7 +88,7 @@ select tsn.as_user(:'otto');
 select tsn.expect_error(format($q$select public.trade_app_set_enabled(%L, 'snow', true)$q$, :'co'), 'the office can''t install Snow');
 select tsn.as_user(:'sky');
 select public.trade_app_set_enabled(:'co', 'snow', true);
-select tsn.check((select settings #>> '{snow_app,enabled}' = 'true' from public.companies where id = :'co'), 'the owner installs Snow');
+select tsn.check((select public.company_settings(id) #>> '{snow_app,enabled}' = 'true' from public.companies where id = :'co'), 'the owner installs Snow');
 update public.automation_rules set name = 'We''re coming' where company_id = :'co' and template_key = 'snow_scheduled';
 select public.trade_app_set_enabled(:'co', 'snow', false);
 select public.trade_app_set_enabled(:'co', 'snow', true);
@@ -239,7 +239,7 @@ select tsn.as_user(:'gail');
 select tsn.expect_error(format($q$select public.set_weather_source(%L, 'nws')$q$, :'co'), 'nor office staff without the settings area');
 select tsn.as_user(:'otto');
 select public.set_weather_source(:'co', 'nws');
-select tsn.check((select settings ->> 'weather_source' = 'nws' and settings #>> '{snow_app,enabled}' = 'true' from public.companies where id = :'co'),
+select tsn.check((select public.company_settings(id) ->> 'weather_source' = 'nws' and public.company_settings(id) #>> '{snow_app,enabled}' = 'true' from public.companies where id = :'co'),
   'the office picks the National Weather Service, and the other settings stay');
 select tsn.expect_error(format($q$select public.set_weather_source(%L, 'accuweather')$q$, :'co'), 'a source that isn''t one is refused');
 select tsn.expect_error(format($q$select public.set_weather_source(%L, 'open_meteo_commercial')$q$, :'co'), 'and Open-Meteo''s paid service, until its key is on the Apps page');
@@ -262,7 +262,7 @@ select tsn.expect_error(format($q$select public.set_snow_storm_prices(%L, '[{"up
 select tsn.expect_error(format($q$select public.set_snow_storm_prices(%L, '[{"up_to_in": "deep", "times": 1}]')$q$, :'co'), 'and inches that are a number');
 select tsn.expect_error(format($q$select public.set_snow_storm_prices(%L, '[{"times": 1}, {"up_to_in": null, "times": 2}]')$q$, :'co'), 'only one depth can be left open');
 select public.set_snow_storm_prices(:'co', '[{"up_to_in": 3, "times": 1}, {"up_to_in": 6, "times": 1.5}, {"up_to_in": null, "times": 2}]');
-select tsn.check((select jsonb_array_length(settings -> 'snow_storm_prices') = 3 and settings #>> '{snow_storm_prices,1,times}' = '1.5' and settings ->> 'weather_source' is not null
+select tsn.check((select jsonb_array_length(public.company_settings(id) -> 'snow_storm_prices') = 3 and public.company_settings(id) #>> '{snow_storm_prices,1,times}' = '1.5' and public.company_settings(id) ->> 'weather_source' is not null
   from public.companies where id = :'co'), 'the office sets them, and the other settings stay');
 commit;
 

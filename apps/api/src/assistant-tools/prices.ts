@@ -1,4 +1,8 @@
-/** The price list (Settings → Price list): services and products with their prices, costs and formulas. */
+/**
+ * The price list (Settings → Price list): services and products with their prices, costs and formulas.
+ * It's what clients pay (its "Add to every job" items go on every new job by themselves), so it's
+ * money: the Prices area, which "Full access, no money" leaves out.
+ */
 import { FORMULA_VARIABLES, validateFormula } from "@crewtavo/core";
 import { z } from "zod";
 import { changed, companyArg, rows, tool } from "./tool";

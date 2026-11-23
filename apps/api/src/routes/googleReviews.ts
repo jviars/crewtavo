@@ -40,7 +40,7 @@ type Ctx = Parameters<typeof param>[0];
 const MARKETING_OFF_REPLIES = "Marketing is off, so replies can't be posted. An owner or admin can install it again in Apps.";
 
 async function companySettings(c: Ctx) {
-  const company = must(await c.var.db.from("companies").select("name, phone, email, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, settings").eq("id", c.var.companyId).maybeSingle());
   return { ...company, settings: (company.settings ?? {}) as Record<string, unknown> };
 }
 

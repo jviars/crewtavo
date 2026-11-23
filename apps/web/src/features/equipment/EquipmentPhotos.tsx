@@ -5,9 +5,11 @@
  * others. Mirrors a visit's photos (FieldVisitPage useVisitPhotos).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ChangeEvent } from "react";
+import { forwardRef, useRef, useState, type ChangeEvent } from "react";
 import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { signedUrls, storedType, uploadFile } from "@/lib/files";
@@ -107,13 +109,14 @@ export function useEquipmentPhotos(equipmentId: string) {
 }
 
 /** Take or choose photos: several at once, from the camera or the library. */
-function PhotoInput({ photos }: { photos: EquipmentPhotoList }) {
+const PhotoInput = forwardRef<HTMLInputElement, { photos: EquipmentPhotoList }>(function PhotoInput({ photos }, ref) {
   return (
     <input
+      ref={ref}
       type="file"
       accept="image/*"
       multiple
-      className="sr-only"
+      hidden
       onChange={(e: ChangeEvent<HTMLInputElement>) => {
         const files = [...(e.target.files ?? [])];
         e.target.value = "";
@@ -121,48 +124,42 @@ function PhotoInput({ photos }: { photos: EquipmentPhotoList }) {
       }}
     />
   );
-}
+});
 
 export function EquipmentPhotos({ photos, name }: { photos: EquipmentPhotoList; name: string }) {
   const grid = useListAnimation<HTMLDivElement>();
   const gallery = usePhotoGallery();
   const empty = !photos.loading && !photos.photos.length && !photos.uploading;
+  const input = useRef<HTMLInputElement>(null);
   const alt = (p: { file_name: string | null }) => (p.file_name ? `${name}: ${p.file_name}` : name);
   const shown = galleryOf(photos.photos, alt);
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">Photos</h2>
-        {!empty && (
-          <label className="btn btn-sm">
-            <Icon name="camera" size={16} />
-            {photos.uploading ? "Uploading…" : "Add photos"}
-            <PhotoInput photos={photos} />
-          </label>
-        )}
-      </div>
-      <div className="card card-pad">
-        {empty ? (
-          <label className="dropzone">
-            <Icon name="camera" size={22} />
-            <span className="small strong">Add photos</span>
-            <span className="muted small">The machine, its VIN plate, the registration card, damage: anything worth a picture.</span>
-            <PhotoInput photos={photos} />
-          </label>
-        ) : (
-          <div ref={grid} className="thumbs">
-            {photos.loading && [0, 1, 2].map((i) => <Skeleton key={i} height={96} radius={8} />)}
-            {photos.photos.map((p) => (
-              <div key={p.id} className="thumb">
-                {p.url ? <a href={p.url} target="_blank" rel="noreferrer" onClick={gallery.opener(shown, p.id, name)}><img src={p.url} alt={alt(p)} loading="lazy" /></a> : <span className="muted small">Unavailable</span>}
-                {photos.canRemove(p) && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={() => photos.remove(p)}><Icon name="x" size={12} bold /></button>}
-              </div>
-            ))}
-            {Array.from({ length: photos.uploading }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}
-          </div>
-        )}
-      </div>
+    <Section
+      title="Photos"
+      count={photos.photos.length || undefined}
+      action={
+        <button type="button" onClick={() => input.current?.click()}>
+          <Icon name="camera" size={16} />
+          {photos.uploading ? "Uploading…" : "Add photos"}
+        </button>
+      }
+    >
+      {empty ? (
+        <EmptyState inline title="No photos yet">The machine, its VIN plate, the registration card, damage: anything worth a picture.</EmptyState>
+      ) : (
+        <div ref={grid} className="thumbs">
+          {photos.loading && [0, 1, 2].map((i) => <Skeleton key={i} height={96} radius={8} />)}
+          {photos.photos.map((p) => (
+            <div key={p.id} className="thumb">
+              {p.url ? <a href={p.url} target="_blank" rel="noreferrer" onClick={gallery.opener(shown, p.id, name)}><img src={p.url} alt={alt(p)} loading="lazy" /></a> : <span className="muted small">Unavailable</span>}
+              {photos.canRemove(p) && <button type="button" className="thumb-x" aria-label="Remove photo" onClick={() => photos.remove(p)}><Icon name="x" size={12} bold /></button>}
+            </div>
+          ))}
+          {Array.from({ length: photos.uploading }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}
+        </div>
+      )}
+      <PhotoInput ref={input} photos={photos} />
       {gallery.dialog}
-    </section>
+    </Section>
   );
 }

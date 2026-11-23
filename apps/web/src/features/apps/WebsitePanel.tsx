@@ -6,14 +6,14 @@
 import { CMS_NAMES, repoUrl, siteName, type WebsiteSite } from "@crewtavo/core/website";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { Fact, Facts, Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { ApiError } from "@/lib/errors";
 import { timeAgo } from "@/lib/format";
 import type { AppRow } from "./catalog";
+import { CodeBlock, kit } from "./PanelKit";
 
 /** Where an editor saves, as its sign-in screen names it. */
 const BACKENDS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", gitea: "Gitea or Forgejo", "test-repo": "A test repository (nothing is saved)" };
@@ -29,26 +29,20 @@ export function WebsitePanel({ app, onSaved }: { app: AppRow; onSaved: () => voi
   const [editing, setEditing] = useState(false);
   if (!site) return <AddressCard onSaved={onSaved} />;
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="website-title" style={{ gap: 12 }}>
-      <h2 id="website-title" className="section-title" style={{ fontSize: 16 }}>{siteName(site)}</h2>
-      <span className="muted">
+    <Section className={kit.panel} title={siteName(site)} action={!editing && <button type="button" onClick={() => setEditing(true)}><Icon name="edit" size={14} />Change address</button>}>
+      <p className={kit.text}>
         <strong>Website</strong> is in the menu for owners, admins and anyone whose role has Marketing. It opens {site.cms ? CMS_NAMES[site.cms] : "your editor"} right there, and
         everyone signs in to it the way they do on your site.
-      </span>
-      <dl className="card app-info">
-        <div><dt>Editor</dt><dd><a href={site.admin_url} target="_blank" rel="noreferrer">{bare(site.admin_url)} <Icon name="external" size={12} /></a></dd></div>
-        {site.repo && <div><dt>Saves to</dt><dd><RepoLink site={site} />{site.branch ? <span className="muted"> · {site.branch}</span> : null}</dd></div>}
-        {site.backend && <div><dt>Signs in with</dt><dd>{BACKENDS[site.backend] ?? site.backend}</dd></div>}
-        <div><dt>Checked</dt><dd>{timeAgo(site.checked_at)}</dd></div>
-      </dl>
-      {site.framing === "blocked" && <FramingBlocked site={site} />}
-      <div className="row wrap" style={{ gap: 8 }}>
-        <Link className="btn btn-primary" to="/website"><Icon name="globe" size={16} />Open Website</Link>
-        <CheckAgain site={site} onSaved={onSaved} />
-        {!editing && <Button icon="edit" onClick={() => setEditing(true)}>Change address</Button>}
-      </div>
+      </p>
       {editing && <AddressForm initial={bare(site.admin_url)} onSaved={() => { setEditing(false); onSaved(); }} onCancel={() => setEditing(false)} />}
-    </section>
+      <Facts label="Your website">
+        <Fact label="Editor"><a href={site.admin_url} target="_blank" rel="noreferrer">{bare(site.admin_url)} <Icon name="external" size={12} /></a></Fact>
+        <Fact label="Saves to">{site.repo && <><RepoLink site={site} />{site.branch ? <span className="muted"> · {site.branch}</span> : null}</>}</Fact>
+        <Fact label="Signs in with">{site.backend && (BACKENDS[site.backend] ?? site.backend)}</Fact>
+        <Fact label="Checked"><span className="app-fact-line">{timeAgo(site.checked_at)}<CheckAgain site={site} onSaved={onSaved} /></span></Fact>
+      </Facts>
+      {site.framing === "blocked" && <FramingBlocked site={site} />}
+    </Section>
   );
 }
 
@@ -61,14 +55,11 @@ function RepoLink({ site }: { site: WebsiteSite }) {
 function FramingBlocked({ site }: { site: WebsiteSite }) {
   return (
     <div className="callout callout-warning" role="note">
-      <Icon name="info" size={20} />
-      <div className="grow stack-sm" style={{ gap: 8 }}>
-        <span>{siteName(site)} doesn't let other sites show it, so Website opens your editor in its own tab.</span>
-        <span style={{ fontWeight: 400 }}>To see it inside Crewtavo, whoever looks after your website adds this header to the editor's page, then press <strong>Check again</strong>:</span>
-        <div className="row" style={{ gap: 8 }}>
-          <code className="code-pill grow">{frameHeader()}</code>
-          <Button icon="copy" onClick={() => copyText(frameHeader(), "Header copied")}>Copy</Button>
-        </div>
+      <Icon name="info" size={16} />
+      <div className="grow">
+        <div>{siteName(site)} doesn't let other sites show it, so Website opens your editor in its own tab.</div>
+        To see it inside Crewtavo, whoever looks after your website adds this header to the editor's page, then press <strong>Check again</strong>:
+        <div className="app-callout-row"><CodeBlock code={frameHeader()} what="Header" done="Header copied" /></div>
       </div>
     </div>
   );
@@ -80,19 +71,23 @@ function CheckAgain({ site, onSaved }: { site: WebsiteSite; onSaved: () => void 
     mutationFn: () => api.put<{ website: WebsiteSite }>("/apps/sveltia/site", { address: site.admin_url, anyway: true }),
     onSuccess: onSaved,
   });
-  return <Button icon="refresh" loading={check.isPending} onClick={() => check.mutate()}>Check again</Button>;
+  return (
+    <button type="button" className="link-btn" disabled={check.isPending} aria-busy={check.isPending || undefined} onClick={() => check.mutate()}>
+      {check.isPending && <span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />}
+      Check again
+    </button>
+  );
 }
 
 /** Installing: the address, then the API's check. */
 function AddressCard({ onSaved }: { onSaved: () => void }) {
   return (
-    <section id="app-setup" className="card card-pad stack-sm" aria-labelledby="website-setup" style={{ gap: 10 }}>
-      <h2 id="website-setup" className="section-title" style={{ fontSize: 16 }}>Your website's address</h2>
-      <span className="muted small">
+    <Section className={kit.panel} id="app-setup" title="Your website's address">
+      <p className={kit.note}>
         Where you sign in to Sveltia: usually your website with <strong>/admin</strong> at the end. Crewtavo checks the editor is there, then puts <strong>Website</strong> in the menu.
-      </span>
+      </p>
       <AddressForm onSaved={onSaved} />
-    </section>
+    </Section>
   );
 }
 

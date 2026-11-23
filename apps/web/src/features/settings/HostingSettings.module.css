@@ -1,38 +1,78 @@
-.page { max-width: 860px; }
-.title { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
+/* Settings → Hosting: what Railway charges, what each part uses, storage and the plan, as flat groups on hairlines. */
+.body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.gap { margin-top: 12px; }
+.line { display: block; margin-top: 10px; }
+.lead { font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+.minor { font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.where { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.divided { padding-top: 14px; border-top: 1px solid var(--divider); }
 
-/* The month so far, the forecast behind it, and a mark for what the plan includes. */
-.meter { position: relative; height: 12px; border-radius: var(--radius-pill); background: var(--fill-2); }
+/* The month so far: the figure, then the meter with the forecast behind it and a mark for what the plan includes. */
+.figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 12px; }
+.big { font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.of { font-size: var(--fs-13); color: var(--text-3); }
+.meter { position: relative; height: 8px; margin-top: 10px; border-radius: var(--radius-pill); background: var(--fill-2); }
 .meter > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; transition: width var(--dur-slow) var(--ease-out); }
 .spent { background: var(--green); }
 .forecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
 .over { background: color-mix(in srgb, var(--warning) 45%, transparent); }
 .mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
 
-.legend { gap: 6px 16px; color: var(--text-3); }
+.legend { gap: 6px 16px; margin-top: 8px; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: var(--radius-sm); }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-pill); }
 .keySpent { background: var(--green); }
 .keyForecast { background: color-mix(in srgb, var(--green) 30%, transparent); }
 .keyOver { background: color-mix(in srgb, var(--warning) 45%, transparent); }
-.keyMark { width: 3px !important; height: 12px !important; border-radius: 1px !important; background: var(--ink); }
+.keyMark { width: 2px !important; height: 10px !important; border-radius: 1px !important; background: var(--ink); }
+.trial { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--row-divider); }
+.trial :global(.progress) { height: 6px; }
 
-.services { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
-.services li { display: grid; grid-template-columns: minmax(110px, 160px) 1fr auto; align-items: center; gap: 12px; }
-.bar { height: 8px; border-radius: var(--radius-pill); background: var(--fill-2); overflow: hidden; }
+/* What each part uses: a bar each. */
+.services { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.services li { display: grid; grid-template-columns: minmax(110px, 170px) 1fr 72px; align-items: center; gap: 12px; }
+.service { display: grid; gap: 0; min-width: 0; font-size: var(--fs-13); }
+.service strong { font-weight: 600; color: var(--ink); }
+.service span { font-size: var(--fs-12); color: var(--text-3); }
+.bar { height: 6px; border-radius: var(--radius-pill); background: var(--fill-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
-.amount { font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-14); }
+.amount { font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-13); text-align: right; color: var(--ink); }
 
-.divided { padding-top: 14px; border-top: 1px solid var(--divider); }
+/* The last 7 days: two figures side by side, a hairline between them. */
+.figures { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 2px; }
+.figureBlock { display: grid; gap: 2px; min-width: 0; padding: 4px 20px 0 0; }
+.figureBlock + .figureBlock { padding-left: 20px; border-left: 1px solid var(--row-divider); }
+.label { font-size: var(--fs-12); color: var(--text-3); }
+.value { font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.note { font-size: var(--fs-12); color: var(--text-3); }
+
+/* Storage on Railway: a row each, with how full a volume is. */
+.disks { list-style: none; margin: -14px 0 0; padding: 0; display: grid; }
+.disk { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; padding: 11px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.disk strong { font-weight: 600; }
+.diskSize { color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
+.diskBar { grid-column: 1 / -1; height: 6px; }
 
 /* Files storage: a move's progress, and steps to do in Railway. */
-.panel { padding: 14px; border-radius: 10px; background: var(--fill); }
-.steps, .problems { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
-.problems { font-size: 13px; color: var(--text-3); gap: 2px; }
-.code { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; line-height: 1.5; overflow-x: auto; white-space: pre; color: var(--ink); }
-.footer { gap: 8px 12px; align-items: center; }
+.panel { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--row-divider); }
+.panel :global(.progress) { height: 6px; }
+.steps, .problems { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; line-height: 1.5; overflow-wrap: anywhere; }
+.problems { font-size: var(--fs-12); color: var(--text-3); gap: 2px; }
+.code { margin: 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--page) 70%, transparent); font-size: var(--fs-12); line-height: 1.5; overflow-x: auto; white-space: pre; color: var(--ink); }
 
-@media (max-width: 520px) {
+.footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.footerText { flex: 1 1 320px; min-width: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+
+@media (max-width: 900px) {
+  .big, .value { font-size: var(--fs-30); }
+  .lead, .of, .service, .disk, .amount { font-size: var(--fs-15); }
+  .legend, .note, .label, .service span, .footerText { font-size: var(--fs-13); }
   .services li { grid-template-columns: 1fr auto; }
   .services li .bar { grid-column: 1 / -1; grid-row: 2; }
+  .figures { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .figureBlock, .figureBlock + .figureBlock { padding: 0; border-left: 0; }
+  .figureBlock + .figureBlock { padding-top: 14px; border-top: 1px solid var(--row-divider); }
+  .disks { margin: 0; }
+  :global(.m-grouped) .disks > :last-child { border-bottom: 0; }
 }

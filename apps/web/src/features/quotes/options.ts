@@ -41,6 +41,9 @@ export const QUOTE_OPTIONS_EMBED = `options:quote_options!quote_options_quote_fk
 
 export const quoteOptionsKey = (quoteId: string) => ["quote-options", quoteId];
 
+/** An option with a picture worth its room: its own photo, or a roof style's drawing. A plain option's drawing is only a pattern. */
+export const hasOptionArt = (option: Pick<QuoteOptionRow, "picture" | "style">) => Boolean(option.picture) || option.style !== "other";
+
 /** A quote's options, in the order they're offered (none for a quote that doesn't offer options). */
 export function useQuoteOptions(quoteId: string, { enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({

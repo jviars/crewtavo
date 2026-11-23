@@ -71,18 +71,23 @@ export function CalendarEventDialog({ event, tz, onClose, onAddVisit }: { event:
       }
     >
       <div className="dialog-body">
-        <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+        <div className="visit-facts">
           <Icon name="clock" size={16} />
-          <span>{eventWhen(event, tz)}</span>
+          <div>{eventWhen(event, tz)}</div>
+          {event.location && (
+            <>
+              <Icon name="pin" size={16} />
+              <div><MapsLink className="address-link" place={{ text: event.location }}><span style={{ whiteSpace: "pre-line", textAlign: "left" }}>{event.location}</span></MapsLink></div>
+            </>
+          )}
+          {event.description && (
+            <>
+              <Icon name="note" size={16} />
+              <p className="cal-event-notes">{event.description}</p>
+            </>
+          )}
         </div>
-        {event.location && (
-          <div className="row" style={{ gap: 10, alignItems: "flex-start" }}>
-            <Icon name="pin" size={16} />
-            <MapsLink className="address-link" place={{ text: event.location }}><span style={{ whiteSpace: "pre-line", textAlign: "left" }}>{event.location}</span></MapsLink>
-          </div>
-        )}
-        {event.description && <p style={{ margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{event.description}</p>}
-        <span className="muted small">
+        <span className="visit-sub">
           {event.busy ? "" : "Marked free in its calendar, so it doesn't count as busy. "}
           {multiDay ? "Spans several days. " : ""}
           From {calendar}: change it there, and the schedule catches up within 15 minutes.

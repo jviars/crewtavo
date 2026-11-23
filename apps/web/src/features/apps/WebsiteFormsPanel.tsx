@@ -18,11 +18,13 @@ import { botCheckLines, exampleForm, type BotCheck } from "@crewtavo/core/websit
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button, useJustDone } from "@/components/ui/Button";
+import { Button, cx, Spinner, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
@@ -30,6 +32,7 @@ import { copyText } from "@/lib/clipboard";
 import { formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { CodeBlock, CodeRow, Fold, kit, Step, Steps } from "./PanelKit";
 import styles from "./WebsiteFormsPanel.module.css";
 
 export interface WebsiteForm {
@@ -128,14 +131,8 @@ export function WebsiteFormsPanel({ kind = "contact" }: { kind?: FormKind }) {
     meta: { success: "Form added" },
   });
 
-  if (setup.error) return <div className="card"><ErrorState error={setup.error} onRetry={() => setup.refetch()} /></div>;
-  if (!setup.data) {
-    return (
-      <section className="card card-pad stack-sm" aria-busy="true" aria-label="Loading">
-        <Skeleton width={260} height={20} /><Skeleton height={38} /><Skeleton width="70%" height={14} />
-      </section>
-    );
-  }
+  if (setup.error) return <ErrorState error={setup.error} onRetry={() => setup.refetch()} />;
+  if (!setup.data) return <div aria-busy="true" aria-label="Loading"><SectionSkeleton rows={3} /></div>;
   const { forms, email_ready, promo_codes = false, turnstile_site_key: siteKey = null, turnstile_keys_unreadable: keysUnreadable = false } = setup.data;
   const submitAdd = (e: FormEvent) => {
     e.preventDefault();
@@ -146,35 +143,38 @@ export function WebsiteFormsPanel({ kind = "contact" }: { kind?: FormKind }) {
     <>
       {!email_ready && (
         <div className="callout callout-warning" role="status">
-          <Icon name="mail" size={20} />
+          <Icon name="mail" size={16} />
           <div className="grow">
             Email isn't set up in Crewtavo yet, so {careers ? "applications only show in Applicants" : "messages only show in Requests"}. <Link to="/settings?tab=email" className="strong">Connect your email</Link> to get each one in your inbox too.
           </div>
         </div>
       )}
       {forms.map((form, i) => <FormCard key={form.id} form={form} first={i === 0} kind={kind} promoBox={promo_codes} siteKey={siteKey} keysUnreadable={keysUnreadable} />)}
-      <section className="card card-pad stack-sm" aria-labelledby="website-forms-add" style={{ gap: 10 }}>
-        <h2 id="website-forms-add" className="section-title" style={{ fontSize: 16 }}>{forms.length ? "Another form" : "Add a form"}</h2>
-        <span className="muted small">
+      <Section id="website-forms-add" title={forms.length ? "Another form" : "Add a form"} className={kit.panel}>
+        <p className={kit.note}>
           {careers
             ? "One for each website, or a separate one for seasonal hiring: each gets its own address and its own people to email."
             : "A quote form and a contact form, or one for each website: each gets its own address, and its name on each request."}
-        </span>
+        </p>
         {adding === null ? (
-          <Button icon="plus" style={{ justifySelf: "start" }} onClick={() => setAdding("")}>Add a form</Button>
+          <div className={kit.actions}><Button icon="plus" onClick={() => setAdding("")}>Add a form</Button></div>
         ) : (
-          <form className="row wrap" style={{ gap: 8 }} onSubmit={submitAdd}>
-            <input className="input grow" style={{ minWidth: 0, flexBasis: 220 }} autoFocus maxLength={80} placeholder={careers ? "Seasonal crew" : "Quote form"} aria-label="The new form's name" value={adding} onChange={(e) => setAdding(e.target.value)} />
+          <form className={styles.addForm} onSubmit={submitAdd}>
+            <input className="input" autoFocus maxLength={80} placeholder={careers ? "Seasonal crew" : "Quote form"} aria-label="The new form's name" value={adding} onChange={(e) => setAdding(e.target.value)} />
             <Button type="submit" variant="primary" loading={add.isPending} disabled={!adding.trim()}>Add</Button>
             <Button variant="ghost" onClick={() => setAdding(null)}>Cancel</Button>
           </form>
         )}
-      </section>
+      </Section>
     </>
   );
 }
 
-/** One form: its address and how to use it, then who gets its email, then the rest. */
+/**
+ * One form, as a section of its own: whether messages are coming, how to point a website's form at
+ * it (in steps, each value with Copy), a form to paste, who gets its email, keeping bots out and the
+ * rest of its settings. Copying, a new address and deleting it are in its menu.
+ */
 function FormCard({ form, first, kind, promoBox, siteKey, keysUnreadable }: { form: WebsiteForm; first: boolean; kind: FormKind; promoBox: boolean; siteKey: string | null; keysUnreadable: boolean }) {
   const careers = kind === "careers";
   const queryClient = useQueryClient();
@@ -231,65 +231,82 @@ function FormCard({ form, first, kind, promoBox, siteKey, keysUnreadable }: { fo
   // The form to paste comes with the check that's chosen, once it can be used.
   const exampleCheck = { botCheck: checkReady ? check : "off", siteKey } as const;
   const example = careers ? exampleApplicationForm(form.url, exampleCheck) : exampleForm(form.url, { promo: promoBox, ...exampleCheck });
-  const heading = `website-form-${form.id}`;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (dirty) save.mutate();
   };
+  const askNewAddress = async () => {
+    const ok = await confirm({
+      title: `Get a new address for ${form.name}?`,
+      body: "The address on your website stops taking messages right away. Put the new one in your form's action straight after. Use this when bots have found your form."
+        + (savedCheck === "script" ? " The check's line on your website has the address in it too, so swap that for the new line. Until a test comes through with it and you say so again, nothing is refused." : savedCheck === "turnstile" ? " The check starts over with it: nothing is refused until a test comes through and you say so again." : ""),
+      confirmLabel: "Get a new address",
+    });
+    if (ok) newAddress.mutate();
+  };
+  const askDelete = async () => {
+    const ok = await confirm({
+      title: `Delete ${form.name}?`,
+      body: careers ? "Its address stops taking applications right away. The applicants it brought in stay in Applicants." : "Its address stops taking messages right away. The messages it already sent stay in Requests.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (ok) remove.mutate();
+  };
+  const more: MenuEntry[] = [
+    { label: "Copy the address", icon: "copy", kbd: "C", onSelect: () => copyText(form.url, "Address copied") },
+    { label: "Copy a form to paste", icon: "code", onSelect: () => copyText(example, "Form copied") },
+    { separator: true },
+    { label: "Get a new address", icon: "refresh", description: "When bots have found your form", disabled: newAddress.isPending, onSelect: askNewAddress },
+    { separator: true },
+    { label: "Delete form", icon: "trash", danger: true, disabled: remove.isPending, onSelect: askDelete },
+  ];
 
   return (
-    <section id={first ? "app-setup" : undefined} className="card card-pad stack" aria-labelledby={heading} style={{ gap: 14 }}>
-      <div className="stack-sm" style={{ gap: 6 }}>
-        <div className="row-between wrap" style={{ gap: 8 }}>
-          <h2 id={heading} className="section-title" style={{ fontSize: 16 }}>{form.name}</h2>
-          <StatusPill label={form.last_message_at ? (careers ? "Taking applications" : "Taking messages") : careers ? "Waiting for an application" : "Waiting for a message"} tone={form.last_message_at ? "good" : "muted"} />
-        </div>
-        <span className="muted small" role="status">
+    <Section id={first ? "app-setup" : undefined} title={form.name} className={kit.panel} action={<Menu items={more} label={`More for ${form.name}`} title={form.name} />}>
+      <div className={styles.status} role="status">
+        <StatusPill label={form.last_message_at ? (careers ? "Taking applications" : "Taking messages") : careers ? "Waiting for an application" : "Waiting for a message"} tone={form.last_message_at ? "good" : "pending"} />
+        <span className={kit.note}>
           {form.last_message_at
             ? careers
-              ? <>Last application {timeAgo(form.last_message_at)}. <Link to="/applicants" className="strong">See them in Applicants</Link></>
-              : <>Last message {timeAgo(form.last_message_at)}. <Link to="/requests?from=website" className="strong">See them in Requests</Link></>
+              ? <>Last application {timeAgo(form.last_message_at)}. <Link to="/applicants">See them in Applicants</Link></>
+              : <>Last message {timeAgo(form.last_message_at)}. <Link to="/requests?from=website">See them in Requests</Link></>
             : <>Send a test from your website once the address is in your form. It shows up here and in {careers ? "Applicants" : "Requests"} within seconds.</>}
         </span>
+        {(newAddress.isPending || remove.isPending) && <Spinner size={14} label={remove.isPending ? "Deleting" : "Making a new address"} />}
       </div>
 
-      <div className="stack-sm">
-        <strong>Point your form at this address</strong>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <code className="code-pill grow" aria-label="The form's address">{form.url}</code>
-          <Button icon="copy" onClick={() => copyText(form.url, "Address copied")}>Copy</Button>
-        </div>
-        <span className="muted small">
-          In your website's form, set the <code className={styles.inline}>action</code> to it and the <code className={styles.inline}>method</code> to POST{careers && <>, with <code className={styles.inline}>enctype="multipart/form-data"</code> so résumés come along</>}:
-        </span>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <code className="code-pill grow" aria-label="Your form's first line">{opening}</code>
-          <Button icon="copy" onClick={() => copyText(opening, "Copied")}>Copy</Button>
-        </div>
-        {careers ? (
-          <span className="muted small">
-            Fields named <strong>name</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>position</strong>, <strong>start_date</strong>, <strong>availability</strong>, <strong>pay</strong>, <strong>experience</strong>, <strong>drivers_license</strong>, <strong>location</strong> and <strong>message</strong> fill in the applicant, in the usual spellings of each.
-            Anything else your form asks comes along too. A file field named <strong>resume</strong> is their résumé: up to 3 files of 10 MB each, PDF, Word or a photo. <code className={styles.inline}>_gotcha</code>, <code className={styles.inline}>_subject</code> and <code className={styles.inline}>_next</code> work as they do with Formspree.
+      <Steps label="Point your website's form here">
+        <Step>
+          <span>Point your form at this address.</span>
+          <CodeRow label="Address" value={form.url} name="The form's address" done="Address copied" />
+        </Step>
+        <Step>
+          <span>
+            In your website's form, set the <code className={kit.code}>action</code> to it and the <code className={kit.code}>method</code> to POST{careers && <>, with <code className={kit.code}>enctype="multipart/form-data"</code> so résumés come along</>}:
           </span>
-        ) : (
-          <span className="muted small">
-            Fields named <strong>name</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>address</strong> and <strong>message</strong> fill in the client and the request.
-            A field named <strong>promo</strong>, <strong>promo_code</strong>, <strong>promocode</strong>, <strong>coupon</strong>, <strong>coupon_code</strong> or <strong>discount_code</strong> (in any case, with spaces or dashes too) is checked as a promo code. A valid one is ready to apply on the quote.
-            Anything else your form asks comes along with the message. Moving from Formspree? Change the action to this address: <code className={styles.inline}>_gotcha</code>, <code className={styles.inline}>_subject</code>, <code className={styles.inline}>_next</code> and <code className={styles.inline}>_replyto</code> work the same.
-          </span>
-        )}
-      </div>
+          <CodeRow label="First line" value={opening} name="Your form's first line" />
+          {careers ? (
+            <p className={kit.note}>
+              Fields named <strong>name</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>position</strong>, <strong>start_date</strong>, <strong>availability</strong>, <strong>pay</strong>, <strong>experience</strong>, <strong>drivers_license</strong>, <strong>location</strong> and <strong>message</strong> fill in the applicant, in the usual spellings of each.
+              Anything else your form asks comes along too. A file field named <strong>resume</strong> is their résumé: up to 3 files of 10 MB each, PDF, Word or a photo. <code className={kit.code}>_gotcha</code>, <code className={kit.code}>_subject</code> and <code className={kit.code}>_next</code> work as they do with Formspree. <code className={kit.code}>_next</code> only goes to your own website: the one in Settings → Company, your thank-you page's, or one you only take messages from.
+            </p>
+          ) : (
+            <p className={kit.note}>
+              Fields named <strong>name</strong>, <strong>email</strong>, <strong>phone</strong>, <strong>address</strong> and <strong>message</strong> fill in the client and the request.
+              A field named <strong>promo</strong>, <strong>promo_code</strong>, <strong>promocode</strong>, <strong>coupon</strong>, <strong>coupon_code</strong> or <strong>discount_code</strong> (in any case, with spaces or dashes too) is checked as a promo code. A valid one is ready to apply on the quote.
+              Anything else your form asks comes along with the message. Moving from Formspree? Change the action to this address: <code className={kit.code}>_gotcha</code>, <code className={kit.code}>_subject</code>, <code className={kit.code}>_next</code> and <code className={kit.code}>_replyto</code> work the same. <code className={kit.code}>_next</code> only goes to your own website: the one in Settings → Company, your thank-you page's, or one you only take messages from.
+            </p>
+          )}
+        </Step>
+      </Steps>
 
-      <details className="app-details">
-        <summary>Need a form? Copy one that's ready to paste</summary>
-        <div className="stack-sm" style={{ marginTop: 10 }}>
-          <pre className={styles.code}>{example}</pre>
-          <Button icon="copy" style={{ justifySelf: "start" }} onClick={() => copyText(example, "Form copied")}>Copy the form</Button>
-          <span className="muted small">Paste it where the form should go, in your site builder's HTML or Code block. It takes your website's own fonts and colors.</span>
-        </div>
-      </details>
+      <Fold summary="Need a form? Copy one that's ready to paste">
+        <CodeBlock code={example} what="A form to paste" done="Form copied" />
+        <p className={kit.note}>Paste it where the form should go, in your site builder's HTML or Code block. It takes your website's own fonts and colors.</p>
+      </Fold>
 
-      <form className="stack" style={{ gap: 14 }} onSubmit={submit}>
+      <form className={kit.form} onSubmit={submit}>
         <Field
           label={careers ? "Email each application to" : "Email each message to"}
           hint={careers
@@ -299,17 +316,16 @@ function FormCard({ form, first, kind, promoBox, siteKey, keysUnreadable }: { fo
           <input className="input" type="text" inputMode="email" autoComplete="off" spellCheck={false} placeholder="office@greenlawn.com" value={emails} onChange={(e) => setEmails(e.target.value)} />
         </Field>
 
-        <BotCheckSettings form={form} careers={careers} check={check} onCheck={setCheck} siteKey={siteKey} keysUnreadable={keysUnreadable} />
+        <div className={styles.folds}>
+          <BotCheckSettings form={form} careers={careers} check={check} onCheck={setCheck} siteKey={siteKey} keysUnreadable={keysUnreadable} />
 
-        <details className="app-details">
-          <summary>More settings</summary>
-          <div className="stack" style={{ gap: 14, marginTop: 12 }}>
+          <Fold summary="More settings">
             <Field label="Form name" hint={careers ? "Shown on each applicant it brings in, for the people who set up apps." : "Each request from it is called this, unless the form sends a _subject."}>
               <input className="input" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
             <Field label="After someone sends it">
-              <div className="stack-sm">
-                <div className="segmented" role="group" aria-label="After someone sends it" style={{ justifySelf: "start" }}>
+              <div className={styles.after}>
+                <div className="segmented" role="group" aria-label="After someone sends it">
                   <button type="button" aria-pressed={!ownPage} onClick={() => setOwnPage(false)}>A thank-you page from Crewtavo</button>
                   <button type="button" aria-pressed={ownPage} onClick={() => setOwnPage(true)}>My own page</button>
                 </div>
@@ -321,45 +337,15 @@ function FormCard({ form, first, kind, promoBox, siteKey, keysUnreadable }: { fo
             <Field label="Only take messages from" optional hint="Your website, like greenlawn.com, so a copy of your form somewhere else can't send to Crewtavo. Leave it empty to take messages from any website.">
               <input className="input" type="text" inputMode="url" autoComplete="off" spellCheck={false} placeholder="greenlawn.com" value={sites} onChange={(e) => setSites(e.target.value)} />
             </Field>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <Button
-                icon="refresh"
-                loading={newAddress.isPending}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: `Get a new address for ${form.name}?`,
-                    body: "The address on your website stops taking messages right away. Put the new one in your form's action straight after. Use this when bots have found your form."
-                      + (savedCheck === "script" ? " The check's line on your website has the address in it too, so swap that for the new line. Until a test comes through with it and you say so again, nothing is refused." : savedCheck === "turnstile" ? " The check starts over with it: nothing is refused until a test comes through and you say so again." : ""),
-                    confirmLabel: "Get a new address",
-                  });
-                  if (ok) newAddress.mutate();
-                }}
-              >
-                Get a new address
-              </Button>
-              <Button
-                variant="danger"
-                icon="trash"
-                loading={remove.isPending}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: `Delete ${form.name}?`,
-                    body: careers ? "Its address stops taking applications right away. The applicants it brought in stay in Applicants." : "Its address stops taking messages right away. The messages it already sent stay in Requests.",
-                    confirmLabel: "Delete",
-                    danger: true,
-                  });
-                  if (ok) remove.mutate();
-                }}
-              >
-                Delete form
-              </Button>
-            </div>
-          </div>
-        </details>
+          </Fold>
+        </div>
 
-        <Button type="submit" style={{ justifySelf: "start" }} loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved}>Save changes</Button>
+        <div className={kit.save}>
+          <Button type="submit" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved}>Save changes</Button>
+          {dirty && !save.isPending && <span className={kit.saveNote}>Unsaved changes</span>}
+        </div>
       </form>
-    </section>
+    </Section>
   );
 }
 
@@ -413,79 +399,75 @@ function BotCheckSettings({ form, careers, check, onCheck, siteKey, keysUnreadab
   };
 
   return (
-    <details className="app-details">
-      <summary>Keep bots out<span className="muted"> · {state}</span></summary>
-      <div className="stack" style={{ gap: 14, marginTop: 12 }}>
-        <span className="muted small">
-          Every form already has a hidden field that only bots fill in (the <code className={styles.inline}>_gotcha</code> line in the form to paste), and a limit on how many {many} one visitor, or everyone together, can send in an hour.
-          {blocked > 0 && <> <strong>{count(blocked)} turned away{form.last_blocked_at ? `, the last one ${timeAgo(form.last_blocked_at)}` : ""}.</strong></>}
-        </span>
-        <div className="stack-sm">
-          <div className="segmented" role="group" aria-label="What else keeps bots out" style={{ justifySelf: "start", flexWrap: "wrap" }}>
-            {(["off", "script", "turnstile"] as const).map((choice) => (
-              <button key={choice} type="button" aria-pressed={check === choice} onClick={() => onCheck(choice)}>{CHECK_NAMES[choice]}</button>
-            ))}
-          </div>
-          <span className="muted small">{CHECK_NOTES[check]}</span>
+    <Fold summary="Keep bots out" note={state}>
+      <p className={kit.note}>
+        Every form already has a hidden field that only bots fill in (the <code className={kit.code}>_gotcha</code> line in the form to paste), and a limit on how many {many} one visitor, or everyone together, can send in an hour.
+        {blocked > 0 && <> <strong>{count(blocked)} turned away{form.last_blocked_at ? `, the last one ${timeAgo(form.last_blocked_at)}` : ""}.</strong></>}
+      </p>
+      <div className={styles.choice}>
+        <div className="segmented" role="group" aria-label="What else keeps bots out">
+          {(["off", "script", "turnstile"] as const).map((choice) => (
+            <button key={choice} type="button" aria-pressed={check === choice} onClick={() => onCheck(choice)}>{CHECK_NAMES[choice]}</button>
+          ))}
         </div>
-
-        {check === "turnstile" && <TurnstileKeys siteKey={siteKey} unreadable={keysUnreadable} formId={form.id} choosing={saved !== "turnstile"} />}
-
-        {lines.length > 0 && (
-          <div className="stack-sm">
-            <strong>{lines.length === 1 ? "Add this line to your website" : "Add these lines to your website"}</strong>
-            {lines.map(({ where, line }) => (
-              <div key={line} className="stack-sm" style={{ gap: 4 }}>
-                <span className="muted small">{where === "Inside the form, above its Send button" && careers ? "Inside the form, above its Apply button" : where}:</span>
-                <div className="row wrap" style={{ gap: 8 }}>
-                  <code className="code-pill grow" style={{ overflowWrap: "anywhere" }}>{line}</code>
-                  <Button icon="copy" onClick={() => copyText(line, "Copied")}>Copy</Button>
-                </div>
-              </div>
-            ))}
-            <span className="muted small">The form to paste, above, has {lines.length === 1 ? "it" : "them"} already.</span>
-          </div>
-        )}
-
-        {check !== "off" && (check !== "turnstile" || keysReady) && (
-          check !== saved ? (
-            <span className="muted small" role="status">Save changes to turn it on. It only watches at first: nothing is refused until a test has come through with it and you say so here.</span>
-          ) : armedAt ? (
-            <div className="stack-sm">
-              <div className="callout callout-good" role="status">
-                <Icon name="check" size={20} />
-                <div className="grow">
-                  Refusing {many} without the check since {formatDate(armedAt)}. Whoever sends one is told it wasn't sent, how to send it again, and to call you instead.
-                  {passedAt && <> The last one with the check came through {timeAgo(passedAt)}.</>}
-                </div>
-              </div>
-              <Button style={{ justifySelf: "start" }} loading={refuses.isPending} onClick={() => refuses.mutate(false)}>Stop refusing</Button>
-            </div>
-          ) : passedAt ? (
-            <div className="stack-sm">
-              <div className="callout" role="status">
-                <Icon name="check" size={20} />
-                <div className="grow">
-                  The check is on your website: {careers ? "an application" : "a message"} last came through with it {timeAgo(passedAt)}. Nothing is refused yet.{" "}
-                  {missed > 0
-                    ? <>{count(missed)} came without it since it was turned on{form.bot_check_missed_at ? `, the last one ${timeAgo(form.bot_check_missed_at)}` : ""}. A page that has this form may be missing {theLine}, or {missed === 1 ? "that was a bot" : "those were bots"}: Crewtavo can't tell which.</>
-                    : <>None has come without it since it was turned on.</>}
-                </div>
-              </div>
-              <Button style={{ justifySelf: "start" }} loading={refuses.isPending} onClick={startRefusing}>Start refusing {many} without it</Button>
-            </div>
-          ) : (
-            <div className="callout" role="status">
-              <Icon name="clock" size={20} />
-              <div className="grow">
-                Waiting for a test. Send {careers ? "an application" : "a message"} from your website with {theLine} added. Nothing is refused: {many} come in as before
-                {missed > 0 ? `, and ${count(missed)} ${missed === 1 ? "has" : "have"} come without the check so far` : ""}.
-              </div>
-            </div>
-          )
-        )}
+        <p className={kit.note}>{CHECK_NOTES[check]}</p>
       </div>
-    </details>
+
+      {check === "turnstile" && <TurnstileKeys siteKey={siteKey} unreadable={keysUnreadable} formId={form.id} choosing={saved !== "turnstile"} />}
+
+      {lines.length > 0 && (
+        <div className={styles.group}>
+          <p className={kit.label}>{lines.length === 1 ? "Add this line to your website" : "Add these lines to your website"}</p>
+          {lines.map(({ where, line }) => (
+            <div key={line} className={styles.line}>
+              <span className={kit.hint}>{where === "Inside the form, above its Send button" && careers ? "Inside the form, above its Apply button" : where}:</span>
+              <CodeRow value={line} name={where} />
+            </div>
+          ))}
+          <p className={cx(kit.note, kit.small)}>The form to paste, above, has {lines.length === 1 ? "it" : "them"} already.</p>
+        </div>
+      )}
+
+      {check !== "off" && (check !== "turnstile" || keysReady) && (
+        check !== saved ? (
+          <p className={kit.note} role="status">Save changes to turn it on. It only watches at first: nothing is refused until a test has come through with it and you say so here.</p>
+        ) : armedAt ? (
+          <div className={styles.group}>
+            <div className="callout callout-good" role="status">
+              <Icon name="check" size={16} />
+              <div className="grow">
+                <div>Refusing {many} without the check since {formatDate(armedAt)}.</div>
+                Whoever sends one is told it wasn't sent, how to send it again, and to call you instead.
+                {passedAt && <> The last one with the check came through {timeAgo(passedAt)}.</>}
+              </div>
+            </div>
+            <div className={kit.actions}><Button size="sm" loading={refuses.isPending} onClick={() => refuses.mutate(false)}>Stop refusing</Button></div>
+          </div>
+        ) : passedAt ? (
+          <div className={styles.group}>
+            <div className="callout callout-info" role="status">
+              <Icon name="check" size={16} />
+              <div className="grow">
+                <div>The check is on your website: {careers ? "an application" : "a message"} last came through with it {timeAgo(passedAt)}. Nothing is refused yet.</div>
+                {missed > 0
+                  ? <>{count(missed)} came without it since it was turned on{form.bot_check_missed_at ? `, the last one ${timeAgo(form.bot_check_missed_at)}` : ""}. A page that has this form may be missing {theLine}, or {missed === 1 ? "that was a bot" : "those were bots"}: Crewtavo can't tell which.</>
+                  : <>None has come without it since it was turned on.</>}
+              </div>
+            </div>
+            <div className={kit.actions}><Button size="sm" loading={refuses.isPending} onClick={startRefusing}>Start refusing {many} without it</Button></div>
+          </div>
+        ) : (
+          <div className="callout" role="status">
+            <Icon name="clock" size={16} />
+            <div className="grow">
+              <div>Waiting for a test.</div>
+              Send {careers ? "an application" : "a message"} from your website with {theLine} added. Nothing is refused: {many} come in as before
+              {missed > 0 ? `, and ${count(missed)} ${missed === 1 ? "has" : "have"} come without the check so far` : ""}.
+            </div>
+          </div>
+        )
+      )}
+    </Fold>
   );
 }
 
@@ -531,11 +513,13 @@ function TurnstileKeys({ siteKey, unreadable, formId, choosing }: { siteKey: str
 
   if (siteKey && !unreadable && !editing) {
     return (
-      <div className="stack-sm">
-        <span className="small">Your Turnstile keys are saved, for all your forms. Site key <code className={styles.inline}>{siteKey}</code></span>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button onClick={() => setEditing(true)}>Change keys</Button>
+      <div className={styles.group}>
+        <CodeRow label="Turnstile site key" value={siteKey} />
+        <p className={cx(kit.note, kit.small)}>Your Turnstile keys are saved, for all your forms. The secret key is kept encrypted and never shown.</p>
+        <div className={kit.actions}>
+          <Button size="sm" onClick={() => setEditing(true)}>Change keys</Button>
           <Button
+            size="sm"
             variant="ghost"
             loading={remove.isPending}
             onClick={async () => {
@@ -555,30 +539,33 @@ function TurnstileKeys({ siteKey, unreadable, formId, choosing }: { siteKey: str
     );
   }
   return (
-    <div className="stack-sm">
+    <div className={styles.group}>
       {unreadable && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <div className="grow">
-            Nothing is being checked. Turnstile keys were saved, but this Crewtavo can't read the secret key any more (its encryption key changed, or it was restored somewhere new). Enter both keys again.
+            <div>Nothing is being checked.</div>
+            Turnstile keys were saved, but this Crewtavo can't read the secret key any more (its encryption key changed, or it was restored somewhere new). Enter both keys again.
           </div>
         </div>
       )}
-      <strong>{siteKey && !unreadable ? "New Turnstile keys" : "Your Turnstile keys"}</strong>
-      <span className="muted small">
+      <p className={kit.label}>{siteKey && !unreadable ? "New Turnstile keys" : "Your Turnstile keys"}</p>
+      <p className={kit.note}>
         In <a href="https://dash.cloudflare.com/?to=/:account/turnstile" target="_blank" rel="noopener noreferrer">Cloudflare</a>, open Turnstile, add a widget for your website's address, and copy its two keys here. They're used for all your forms.
         The secret key is tested with Cloudflare before anything is saved. The site key can't be tested, so copy it carefully: a wrong one shows an error on your website where the check should be.
         {siteKey && !unreadable && " With new keys, your forms on Turnstile stop refusing and wait for a test again, since your website still has the old site key."}
-      </span>
-      {choosing && <span className="small" role="status">This form isn't using Turnstile yet. Save your keys and it will.</span>}
-      <Field label="Site key">
-        <input className="input" type="text" autoComplete="off" spellCheck={false} placeholder="0x4AAAAAAA..." maxLength={200} value={site} onChange={(e) => { setSite(e.target.value); save.reset(); }} onKeyDown={onEnter} />
-      </Field>
-      <Field label="Secret key" hint="Kept encrypted, and never shown again.">
-        <input className="input" type="password" autoComplete="off" spellCheck={false} maxLength={200} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} onKeyDown={onEnter} />
-      </Field>
-      {save.error && <span className="small" role="alert" style={{ color: "var(--danger)" }}>{(save.error as Error).message}</span>}
-      <div className="row wrap" style={{ gap: 8 }}>
+      </p>
+      {choosing && <p className={kit.note} role="status">This form isn't using Turnstile yet. Save your keys and it will.</p>}
+      <div className={kit.fields}>
+        <Field label="Site key">
+          <input className="input" type="text" autoComplete="off" spellCheck={false} placeholder="0x4AAAAAAA..." maxLength={200} value={site} onChange={(e) => { setSite(e.target.value); save.reset(); }} onKeyDown={onEnter} />
+        </Field>
+        <Field label="Secret key" hint="Kept encrypted, and never shown again.">
+          <input className="input" type="password" autoComplete="off" spellCheck={false} maxLength={200} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} onKeyDown={onEnter} />
+        </Field>
+      </div>
+      {save.error && <span className="field-error" role="alert">{(save.error as Error).message}</span>}
+      <div className={kit.actions}>
         <Button variant="primary" loading={save.isPending} disabled={!ready} onClick={() => save.mutate()}>Test and save keys</Button>
         {siteKey && !unreadable && <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>}
       </div>

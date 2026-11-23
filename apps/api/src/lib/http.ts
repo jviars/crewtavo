@@ -93,9 +93,25 @@ export function param(c: Context<AppEnv>, name: string): string {
   return value;
 }
 
-/** Public base URL for links in emails and OAuth redirects. */
+/**
+ * Public base URL for links in emails and OAuth redirects. Without APP_URL it's the address the
+ * request came to, which is whatever the request's sender wrote: never used for a way into an
+ * account (signInHome).
+ */
 export function appUrl(c: Context<AppEnv>): string {
   return (c.env.APP_URL ?? new URL(c.req.url).origin).replace(/\/$/, "");
+}
+
+export const NO_APP_URL = "Crewtavo doesn't know its own web address yet, so it can't make sign-in links. Whoever set it up needs to set APP_URL to that address.";
+
+/**
+ * Where sign-in, reset, invitation and welcome links open: APP_URL, never the address a request
+ * came to, which a stranger asking for someone else's reset link would choose. Railway and docker
+ * compose always set it; without it these links aren't made.
+ */
+export function signInHome(env: Env): string {
+  if (!env.APP_URL) throw new HttpError(503, NO_APP_URL);
+  return env.APP_URL.replace(/\/$/, "");
 }
 
 export function requireEnv<K extends keyof Env>(env: Env, key: K, feature: string): NonNullable<Env[K]> {

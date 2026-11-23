@@ -10,9 +10,12 @@ import { QUOTE_REVIEWS, reviewerDisplayName, type QuoteReviewRow } from "@crewta
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./Presence.module.css";
+import { loadSettings } from "@/lib/companySettings";
 
 type Picked = QuoteReviewRow & { id: string };
 
@@ -30,10 +33,10 @@ export function useQuoteReviews() {
     queryKey: ["quote-reviews", session.company.id],
     queryFn: async (): Promise<QuoteReviewState> => {
       const [company, picked] = await Promise.all([
-        supabase().from("companies").select("settings").eq("id", session.company.id).single(),
+        loadSettings(session.company.id),
         supabase().from("reviews").select("id, reviewer_name, reviewer_anonymous, rating, comment, posted_at, quote_pick, deleted_at").eq("company_id", session.company.id).not("quote_pick", "is", null).order("quote_pick"),
       ]);
-      const s = ((unwrap(company).settings ?? {}) as { quote_reviews?: { show?: boolean; pdf?: boolean } }).quote_reviews;
+      const s = (company as { quote_reviews?: { show?: boolean; pdf?: boolean } }).quote_reviews;
       return { show: s?.show === true, pdf: s?.show === true && s?.pdf === true, picked: unwrap(picked) as Picked[] };
     },
   });
@@ -56,17 +59,22 @@ export function useSetQuoteReviews() {
 }
 
 /**
- * The review menu's item for picking it to show on quotes, or taking it off: three at most, so the
- * fourth says to take one off first.
+ * The review menu's item for picking it to show on quotes, or taking it off: a tick that says
+ * whether it's one of them. Three at most, so with three picked another can't be ticked, and says
+ * why under its name.
  */
 export function quotePickItem(reviewId: string, state: QuoteReviewState | undefined, save: (ids: string[]) => void) {
   const ids = livePicks(state).map((r) => r.id);
   const on = ids.includes(reviewId);
+  const full = !on && ids.length >= QUOTE_REVIEWS;
+  // No icon: the tick box sits where an icon would, so its words line up with the items above (Menus.dc.html).
   return {
-    label: on ? "Stop showing on quotes" : ids.length >= QUOTE_REVIEWS ? `Show on quotes (${QUOTE_REVIEWS} picked already)` : "Show on quotes",
-    icon: "quote" as const,
+    label: "Show on quotes",
+    checkbox: true,
+    checked: on,
+    description: full ? `${QUOTE_REVIEWS} picked already. Take one off first.` : undefined,
     hidden: !state,
-    disabled: !on && ids.length >= QUOTE_REVIEWS,
+    disabled: full,
     onSelect: () => save(on ? ids.filter((id) => id !== reviewId) : [...ids, reviewId]),
   };
 }
@@ -80,34 +88,39 @@ export function QuoteReviewsCard({ hasReviews }: { hasReviews: boolean }) {
   const ids = picked.map((r) => r.id);
   const set = (next: Partial<{ show: boolean; pdf: boolean; ids: string[] }>) => save.mutate({ show: s.show, pdf: s.pdf, ids, ...next });
   return (
-    <div className="card card-pad stack-sm">
-      <strong>Reviews on quotes</strong>
-      <label className="switch-row" style={{ fontWeight: 400 }}>
-        <input type="checkbox" className="switch" checked={s.show} disabled={save.isPending} onChange={(e) => set({ show: e.target.checked, pdf: e.target.checked && s.pdf })} />
-        Show reviews on quotes
-      </label>
-      {s.show && (
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" checked={s.pdf} disabled={save.isPending} onChange={(e) => set({ pdf: e.target.checked })} />
-          On the quote's PDF too
-        </label>
-      )}
-      <span className="muted small">
-        Clients see your Google rating and up to three reviews on the quote as they are on Google: the reviewer's name and their words, with a link to Google to read the rest of a long one. {hasReviews ? "" : "Nothing shows until Google reviews come in."}
-      </span>
-      {picked.length ? (
-        <div className="stack-sm" style={{ gap: 4 }}>
-          {picked.map((r) => (
-            <div key={r.id} className="row-between small">
-              <span>{reviewerDisplayName(r)} · {"★".repeat(r.rating ?? 0)} · {formatDate(r.posted_at)}</span>
-              <Button size="sm" variant="ghost" aria-label={`Stop showing ${reviewerDisplayName(r)}'s review on quotes`} onClick={() => set({ ids: ids.filter((id) => id !== r.id) })}>Take off</Button>
-            </div>
-          ))}
+    <Section title="Reviews on quotes" count={picked.length ? `${picked.length} of ${QUOTE_REVIEWS}` : undefined}>
+      <div className={styles.copy}>
+        <div className={styles.switches}>
+          <label className={styles.switchLine}>
+            <span>Show reviews on quotes</span>
+            <input type="checkbox" role="switch" className="switch" checked={s.show} disabled={save.isPending} onChange={(e) => set({ show: e.target.checked, pdf: e.target.checked && s.pdf })} />
+          </label>
+          {s.show && (
+            <label className={styles.switchLine}>
+              <span>On the quote's PDF too</span>
+              <input type="checkbox" role="switch" className="switch" checked={s.pdf} disabled={save.isPending} onChange={(e) => set({ pdf: e.target.checked })} />
+            </label>
+          )}
         </div>
-      ) : (
-        <span className="muted small">None picked, so quotes show your most recent reviews with 5 stars and words. Pick your own with Show on quotes in a review's menu.</span>
-      )}
-      <FormError error={save.error} />
-    </div>
+        <p className={styles.note}>
+          Clients see your Google rating and up to three reviews on the quote as they are on Google: the reviewer's name and their words, with a link to Google to read the rest of a long one. {hasReviews ? "" : "Nothing shows until Google reviews come in."}
+        </p>
+        {picked.length ? (
+          <RelatedList label="Picked for quotes">
+            {picked.map((r) => (
+              <RelatedRow
+                key={r.id}
+                title={reviewerDisplayName(r)}
+                sub={[<span className={styles.starsOn} role="img" aria-label={`${r.rating ?? 0} stars`}>{"★".repeat(r.rating ?? 0)}</span>, formatDate(r.posted_at)]}
+                actions={<Button size="sm" variant="ghost" aria-label={`Stop showing ${reviewerDisplayName(r)}'s review on quotes`} onClick={() => set({ ids: ids.filter((id) => id !== r.id) })}>Take off</Button>}
+              />
+            ))}
+          </RelatedList>
+        ) : (
+          <p className={styles.note}>None picked, so quotes show your most recent reviews with 5 stars and words. Pick your own with Show on quotes in a review's menu.</p>
+        )}
+        <FormError error={save.error} />
+      </div>
+    </Section>
   );
 }

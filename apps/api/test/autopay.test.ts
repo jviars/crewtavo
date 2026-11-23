@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { autopayCoversMonthly, starterAutopayTerms } from "@crewtavo/core/autopay";
 import { PRESETS } from "@crewtavo/core/presets";
 import type { Env } from "../src/env";
-import { readClientLink } from "../src/lib/links";
+import { KEPT_LINK, readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 
 const current = vi.hoisted(() => ({ db: null as unknown }));
@@ -553,20 +553,17 @@ describe("the receipt", () => {
     ]);
   });
 
-  it("keeps the office's copies of its links on the timeline, so nobody there can tip on the card for the client", async () => {
+  it("keeps no working link in the copy on the timeline, so nobody who reads it can open the client's page or tip on their card", async () => {
     const db = world();
     await sendAutopayReceipt(env, db.db, CHARGE);
     const sent = hubLinks(emails()[0]!.text);
-    const kept = hubLinks(db.tables.messages![0]!.body);
+    const body = db.tables.messages![0]!.body as string;
     expect(sent).toHaveLength(2);
-    expect(kept).toHaveLength(2);
     for (const url of sent) { const link = await payloadOf(url); expect(link).toMatchObject({ own: 1 }); expect(link).not.toHaveProperty("via"); }
-    expect(await payloadOf(kept[0]!)).toMatchObject({ c: CO, t: "invoice", id: INVOICE, via: "office" });
-    expect(kept[0]).toMatch(/\?tip=1$/);
-    expect(await payloadOf(kept[1]!)).toMatchObject({ c: CO, t: "client", id: PAT, via: "office" });
-    expect(kept[1]).toMatch(/\?view=autopay$/);
+    expect(hubLinks(body)).toEqual([]);
+    expect(body.split(KEPT_LINK)).toHaveLength(3);
     // The words are the same (the email adds the company's footer); only the links differ.
-    expect(emails()[0]!.text.replace(/https:\/\/\S+/g, "")).toContain(db.tables.messages![0]!.body.replace(/https:\/\/\S+/g, ""));
+    expect(emails()[0]!.text.replace(/https:\/\/\S+/g, "")).toContain(body.split(KEPT_LINK).join(""));
   });
 
   it("leaves the tip out when tips are off, when the invoice came from Stripe, and for a bank account", async () => {
@@ -693,12 +690,10 @@ describe("the notice of a charge that didn't go through", () => {
     expect(await readClientLink(env, links[0]!.split("/hub/")[1]!)).toMatchObject({ t: "invoice", id: INVOICE });
     expect(links[1]).toMatch(/\?view=autopay$/);
     expect(db.tables.messages![0]).toMatchObject({ related_type: "invoice", related_id: INVOICE, external_id: `autopay:notice:${CHARGE}:${CARD}:failed:1` });
-    // The client's email has their own links; the timeline's copy has the office's.
+    // The client's email has their own links; the timeline's copy none.
     for (const url of links) { const link = await payloadOf(url); expect(link).toMatchObject({ own: 1 }); expect(link).not.toHaveProperty("via"); }
-    const kept = hubLinks(db.tables.messages![0]!.body);
-    expect(kept).toHaveLength(2);
-    expect(await payloadOf(kept[0]!)).toMatchObject({ t: "invoice", id: INVOICE, via: "office" });
-    expect(await payloadOf(kept[1]!)).toMatchObject({ t: "client", id: PAT, via: "office" });
+    expect(hubLinks(db.tables.messages![0]!.body)).toEqual([]);
+    expect(db.tables.messages![0]!.body).toContain(KEPT_LINK);
     expect(await sendAutopayNotice(env, db.db, CHARGE, "failed", 1)).toBe("skipped: already sent");
     // A decline on another card the client agreed to since (its count starts again) is told.
     db.tables.client_payment_methods!.push(card(NEW_CARD, PAT, { brand: "mastercard", last4: "5555" }));
@@ -743,7 +738,8 @@ describe("the notice of a charge that didn't go through", () => {
     expect(await payloadOf(hubLinks(text!.body)[0]!)).toMatchObject({ own: 1 });
     expect(await payloadOf(hubLinks(text!.body)[0]!)).not.toHaveProperty("via");
     expect(db.tables.messages![0]).toMatchObject({ channel: "sms" });
-    expect(await payloadOf(hubLinks(db.tables.messages![0]!.body)[0]!)).toMatchObject({ t: "invoice", id: INVOICE, via: "office" });
+    expect(hubLinks(db.tables.messages![0]!.body)).toEqual([]);
+    expect(db.tables.messages![0]!.body).toContain(KEPT_LINK);
 
     const quiet = failing();
     quiet.tables.clients![0]!.email = null;
@@ -768,10 +764,11 @@ describe("the client's copy of their agreement", () => {
     expect(mail!.text).toContain(`${TERMS} We charge at the end of the day of each visit.`);
     expect(mail!.text).toMatch(/Not you, or changed your mind\? Turn it off here:\n\nhttps:\/\/ops\.example\.com\/hub\/\S+\?view=autopay/);
     expect(db.tables.messages![0]).toMatchObject({ related_type: "autopay", related_id: PAT, external_id: `autopay:agreed:${AGREEMENT}` });
-    // Their "Turn it off" link is their own; the timeline's copy is the office's.
+    // Their "Turn it off" link is their own; the timeline's copy has none.
     expect(await payloadOf(hubLinks(mail!.text)[0]!)).toMatchObject({ own: 1 });
     expect(await payloadOf(hubLinks(mail!.text)[0]!)).not.toHaveProperty("via");
-    expect(await payloadOf(hubLinks(db.tables.messages![0]!.body)[0]!)).toMatchObject({ t: "client", id: PAT, via: "office" });
+    expect(hubLinks(db.tables.messages![0]!.body)).toEqual([]);
+    expect(db.tables.messages![0]!.body).toContain(`Turn it off here:\n\n${KEPT_LINK}`);
     expect(await sendAutopayAgreed(env, db.db, AGREEMENT)).toBe("skipped: already sent");
     expect(m.sendEmail).toHaveBeenCalledTimes(1);
   });
@@ -791,7 +788,7 @@ describe("autopay invites", () => {
   const invite = (db: ReturnType<typeof world>, values: Partial<Parameters<typeof sendAutopayInvite>[2]> = {}) =>
     sendAutopayInvite(env, db.db, { companyId: CO, clientId: ROBIN, channel: "email", baseUrl: "https://ops.example.com/", createdBy: "office-1", ...values });
 
-  it("sends the setup link, and keeps the office's copy of it on the client's timeline", async () => {
+  it("sends the setup link, and keeps no link in the copy on the client's timeline", async () => {
     const db = world();
     expect(await invite(db)).toEqual({ sent: true, detail: "Sent by email." });
     const [mail] = emails();
@@ -811,11 +808,9 @@ describe("autopay invites", () => {
     expect(own!.via).toBeUndefined();
     const [row] = db.tables.messages!;
     expect(row).toMatchObject({ client_id: ROBIN, channel: "email", related_type: "autopay", related_id: ROBIN, sent_by: "office-1" });
-    // It opens their page, but not as the client: it can't confirm a card for them.
-    const kept = hubLinks(row!.body);
-    expect(kept).toHaveLength(1);
-    expect(kept[0]).toMatch(/\?view=autopay$/);
-    expect(await payloadOf(kept[0]!)).toMatchObject({ c: CO, t: "client", id: ROBIN, via: "office" });
+    // Whoever reads the timeline holds no link to their page.
+    expect(hubLinks(row!.body)).toEqual([]);
+    expect(row!.body).toContain(`here (takes a minute):\n\n${KEPT_LINK}\n\n`);
   });
 
   it("asks a client with a card brought in from Stripe to confirm it", async () => {
@@ -901,7 +896,8 @@ describe("autopay invites", () => {
     const db = world();
     expect(await invite(db, { clientId: SAM, channel: "sms" })).toEqual({ sent: true, detail: "Sent by text." });
     expect(texts()[0]!.body).toMatch(/^Radford Lawn Care: thanks for choosing us\. We keep a card on file and charge it after each visit\. Save yours securely with Stripe: https:\/\/ops\.example\.com\/hub\/\S+\?view=autopay\n\nReply STOP to opt out\.$/);
-    expect(await payloadOf(hubLinks(db.tables.messages![0]!.body)[0]!)).toMatchObject({ t: "client", id: SAM, via: "office" });
+    expect(hubLinks(db.tables.messages![0]!.body)).toEqual([]);
+    expect(db.tables.messages![0]!.body).toContain(KEPT_LINK);
     expect(await invite(db, { clientId: STRANGER })).toEqual({ sent: false, detail: "Client not found." });
     expect(m.sendSms).toHaveBeenCalledTimes(1);
   });
@@ -1616,7 +1612,10 @@ describe("the office's autopay routes", () => {
     world();
     const res = await request("estimator-1", "GET", `/clients/${PAT}/hub-link`);
     const { link } = await res.json();
-    expect(await readClientLink(env, link.split("/hub/")[1])).toMatchObject({ c: CO, t: "client", id: PAT, via: "office" });
+    // An estimator doesn't see invoices, so their copy leaves the client's money out (lib/links `nm`); the office's doesn't.
+    expect(await readClientLink(env, link.split("/hub/")[1])).toMatchObject({ c: CO, t: "client", id: PAT, via: "office", nm: 1 });
+    const office = (await (await request("office-1", "GET", `/clients/${PAT}/hub-link`)).json()).link;
+    expect((await readClientLink(env, office.split("/hub/")[1]))?.nm).toBeUndefined();
   });
 });
 

@@ -1,0 +1,185 @@
+/*
+ * The money parts of a job (direction B): sub and crew pay, expenses and the receipts waiting to be
+ * checked, materials used, the payment schedule and promo discounts, and their dialogs. Flat hairline
+ * rows, quiet labels and tabular money; the sections themselves are the shared Section, RelatedList
+ * and ListFoot (components.css), so only what those don't draw lives here.
+ */
+
+/* A receipt or ticket photo as a row's lead: a small rounded square, its own link above the row's. */
+:global(.rel-icon).thumb { position: relative; z-index: 1; overflow: hidden; border-radius: 8px; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+:global(.rel-icon).square { border-radius: 8px; }
+
+/* Words someone must act on (to reimburse, paperwork, a payment that couldn't be invoiced). */
+.warn { color: var(--warning); font-weight: 600; }
+.danger { color: var(--danger); font-weight: 600; }
+
+/* The right of a row as two lines: the figure, then a quiet note under it. */
+.endStack { display: grid; justify-items: end; gap: 1px; text-align: right; }
+.endStack > :not(:first-child) { color: var(--text-3); font-size: var(--fs-12); font-weight: 400; }
+
+/* A money row under a list (Total, Agreed): quiet label, the figure in ink. */
+.total { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; color: var(--text-3); font-size: var(--fs-13); }
+.total :is(b, strong) { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; }
+.total .grand { color: var(--ink); font-size: var(--fs-15); font-weight: 700; }
+
+/* A group's heading inside a section (receipts to check, then what's saved): 12px on a hairline. */
+.subhead { display: flex; align-items: center; gap: 8px; min-height: 36px; border-bottom: 1px solid var(--divider); color: var(--text-2); font-size: var(--fs-12); font-weight: 600; }
+.subhead .count { color: var(--quiet); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* A section's parts, stacked: a list, its foot, a drop zone. */
+.parts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.parts > :global(.rel) + :global(.il-foot) { margin-top: -14px; }
+/* A list's foot (Totals) lines up with its rows, not with an inbox list's inset. */
+.parts > :global(.il-foot) { padding-inline: 0; }
+/* Rows start on the section's hairline, as they would straight under it. */
+:global(.sec-body) > .parts:first-child > :first-child:is(:global(.rel), :global(.empty-inline), div:has(> :first-child:is(.subhead, :global(.rel)))) { margin-top: -12px; }
+.parts > .rule { margin: 0; }
+
+/* A payment's two quiet lines: when it's due, then where it stands ("Invoice #1 ● Past due", "To come · Invoice now"). */
+.subLine { flex-basis: 100%; min-width: 0; }
+.subLine + .subLine { margin-top: 2px; }
+.subLine :global(.link-btn) { font-size: inherit; }
+.inline { display: inline-flex; align-items: center; gap: 6px; }
+.inline :global(.pill) { font-size: inherit; }
+
+/* The rule under the figures it explains: 12px, quiet. */
+.rule { max-width: 80ch; color: var(--text-3); font-size: var(--fs-12); line-height: 1.5; }
+
+/* ---------- Dialogs ---------- */
+
+/* A list inside a dialog under a small label, its action at the end (KB-Extras .fl). */
+.group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.label { display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-2); font-size: var(--fs-12); font-weight: 600; }
+.label > :first-child { flex: 1; min-width: 0; }
+.label :is(a, :global(.link-btn)) { font-size: var(--fs-12); font-weight: 600; }
+.label .count { color: var(--quiet); font-weight: 500; font-variant-numeric: tabular-nums; }
+.hint { margin: 0; color: var(--text-3); font-size: var(--fs-12); line-height: 1.45; }
+
+/* Hairline rows in a dialog: visits to tick, an invoice's lines. */
+.rows { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--divider); }
+.check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); font-weight: 400; cursor: pointer; }
+.check[aria-disabled="true"] { cursor: default; }
+.check input { flex: none; margin: 2px 0 0; }
+.what { display: grid; gap: 1px; min-width: 0; }
+.what strong, .what b { overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; }
+.what small { color: var(--text-3); font-size: var(--fs-12); }
+.note { display: block; color: var(--text-3); font-size: var(--fs-12); }
+.note[data-check] { color: var(--warning); }
+.note svg { vertical-align: -2px; margin-right: 3px; }
+
+/* A pay's lines: description, quantity, rate and amount on hairlines, a header over editable ones. */
+.lines { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.lineHead, .line { display: grid; grid-template-columns: minmax(0, 1fr) 132px 104px 92px 32px; gap: 10px; align-items: center; }
+.lineHead { min-height: 30px; border-bottom: 1px solid var(--divider); color: var(--quiet); font-size: var(--fs-12); font-weight: 500; }
+.line { padding: 8px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.line .desc { display: grid; gap: 4px; min-width: 0; }
+.qty { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.qty :global(.input) { flex: 1 1 0; min-width: 0; text-align: right; }
+.qty span { flex: none; color: var(--text-3); font-size: var(--fs-12); }
+.rate :global(.input) { text-align: right; }
+.amount, .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.amount { color: var(--ink); font-weight: 600; }
+.remove { justify-self: end; }
+:global(.btn).remove { color: var(--quiet); }
+:global(.btn).remove:hover { color: var(--danger); }
+.lineRead { display: grid; grid-template-columns: minmax(0, 1fr) auto 96px; gap: 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.lineRead .desc { display: grid; gap: 1px; min-width: 0; }
+.lineRead .desc > :first-child { color: var(--ink); font-weight: 600; }
+.lineRead .how { color: var(--text-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.linesFoot { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.linesFoot .total { flex: 1; min-height: 0; justify-content: flex-end; }
+.linesFoot .total b { min-width: 92px; text-align: right; }
+.lines > :is(.lineRead, .empty):first-child { border-top: 1px solid var(--divider); }
+.empty { padding: 10px 0; border-bottom: 1px solid var(--row-divider); color: var(--text-3); font-size: var(--fs-13); }
+
+/* A supplier invoice's line in Add expense: what it is and its amount, what to log it as, and whether it's logged already. */
+.invLine { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(150px, 210px); gap: 6px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.invLine:not(:has(.match)) { grid-template-columns: minmax(0, 1fr) auto; }
+.invLine .amount { grid-column: 2; }
+.match { grid-column: 3; width: 100%; height: var(--control-sm); font-size: var(--fs-13); }
+.logged { display: grid; gap: 6px; grid-column: 1 / -1; font-size: var(--fs-13); }
+.logged :global(.checkbox) { font-size: var(--fs-13); }
+
+/* The pay's state across the top: status, who it's for, where it stands, saved, their page. */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: var(--fs-13); color: var(--text-2); }
+.top > :global(.meta-line) { flex: 1 1 260px; }
+.top a { font-size: var(--fs-13); font-weight: 600; }
+
+/* The dialog's More menu in its foot: an icon button that stays small on a phone sheet too. */
+:global(.dialog) :global(.form-actions) :global(.btn).footMore { flex: none; }
+
+/* A drop zone in a section or form: one quiet dashed line, not a big box. */
+:global(.dropzone).drop { display: flex; align-items: center; justify-content: flex-start; gap: 12px; padding: 12px 14px; border-width: 1px; border-color: var(--border-strong); border-radius: 10px; background: none; color: var(--text-2); text-align: left; }
+:global(.dropzone).drop:hover, :global(.dropzone).drop[data-over] { border-color: var(--green); background: var(--green-tint); color: var(--green-dark); }
+.drop > svg { flex: none; color: var(--quiet); }
+.drop:hover > svg, .drop[data-over] > svg { color: currentColor; }
+.dropText { display: grid; gap: 2px; min-width: 0; font-size: var(--fs-13); font-weight: 600; }
+.dropText small { max-width: 80ch; color: var(--text-3); font-size: var(--fs-12); font-weight: 400; line-height: 1.45; }
+
+/* Promo code discounts under a job's line items: a quiet tag, the rule in words, the switch on the right. */
+.discounts { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.discount { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); color: var(--text-2); font-size: var(--fs-13); line-height: 1.45; }
+.discount > svg { flex: none; margin-top: 2px; color: var(--quiet); }
+.discount strong { color: var(--ink); font-weight: 600; }
+.discountText { flex: 1 1 240px; min-width: 0; }
+.discount :global(.btn) { margin: -4px 0 -4px auto; }
+
+/* Change prices: a form's parts (which jobs, the change, the preview, earlier changes) and the preview's figures. */
+.parts2 { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; }
+.formHead { margin: 0; color: var(--ink); font-size: var(--fs-14); font-weight: 650; letter-spacing: -0.005em; }
+.parts2 > .formHead + :global(.rel) { border-top: 1px solid var(--divider); }
+.fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.fields > :global(.field) { flex: 1 1 180px; min-width: 0; }
+.amountField { flex: none; width: 130px; }
+.arrow { color: var(--quiet); }
+.was { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.now { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.scroll { max-height: 360px; overflow-y: auto; border-bottom: 1px solid var(--divider); }
+.scroll :global(.table) td { vertical-align: top; }
+.previewRow[data-left] > td { opacity: 0.5; }
+.previewRow[data-left] > td:first-child { opacity: 1; }
+.cellSub { margin-top: 2px; color: var(--text-3); font-size: var(--fs-12); }
+.cellLine { font-size: var(--fs-13); line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .check { min-height: 48px; font-size: var(--fs-15); }
+  .what small, .note { font-size: var(--fs-13); }
+  .label { font-size: var(--fs-13); }
+  .total { min-height: 48px; font-size: var(--fs-15); }
+  .total .grand { font-size: var(--fs-16); }
+  .dropText { font-size: var(--fs-14); }
+  .discount { font-size: var(--fs-15); }
+  /* Its words line up with the rule's above (past the button's own 11px), on a 44px target. */
+  .discount :global(.btn) { min-height: 44px; margin: -6px 0 -10px 15px; }
+  .formHead { font-size: var(--fs-16); }
+  .cellLine { font-size: var(--fs-14); }
+  /* "Invoice now" in a payment's quiet line: a 44px tap, without moving the line. */
+  .subLine :global(.link-btn) { padding-block: 12px; margin-block: -12px; }
+  /* The sheet scrolls; a box that scrolls inside it would be a second scroll. */
+  .scroll { max-height: none; overflow: visible; }
+  .parts2 > .total { flex-wrap: wrap; row-gap: 2px; }
+  /* Raise or lower, percent or amount, and the figure: each the sheet's width, its choices sharing it. */
+  .fields > :global(.segmented) { display: flex; flex: 1 1 100%; }
+  .fields > :global(.segmented) > button { flex: 1 1 auto; }
+  .fields > .amountField { flex: 1 1 100%; width: auto; }
+  /* In a grouped page's inset card, the card's edge ends the list: no hairline under its last row, and rows start at its top. */
+  :global(.m-grouped) .parts > :last-child:is(:global(.rel)) > :last-child,
+  :global(.m-grouped) .parts > div:last-child > :global(.rel):last-child > :last-child { border-bottom: 0; }
+  :global(.m-grouped) :global(.sec-body) > .parts:first-child > :first-child:is(:global(.rel), :global(.empty-inline), div:has(> :first-child:is(.subhead, :global(.rel)))) { margin-top: -14px; }
+}
+
+@media (max-width: 640px) {
+  .lineHead { display: none; }
+  .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "desc desc remove" "qty rate amount"; row-gap: 8px; padding: 12px 0; }
+  .line .desc { grid-area: desc; }
+  .line .qty { grid-area: qty; }
+  .line .rate { grid-area: rate; }
+  .line .amount { grid-area: amount; min-width: 76px; }
+  .line .remove { grid-area: remove; }
+  .lineRead { grid-template-columns: minmax(0, 1fr) auto; }
+  .lineRead .how { grid-column: 1; grid-row: 2; }
+  .lineRead .amount { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .invLine { grid-template-columns: minmax(0, 1fr) auto; }
+  .match { grid-column: 1 / -1; height: var(--control); }
+}

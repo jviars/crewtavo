@@ -1,18 +1,21 @@
 /**
- * Marketing → Campaigns' postcards (PostcardPage): New postcard, and each campaign with where it's
- * at, test campaigns marked as such.
+ * Marketing → Campaigns' postcards (PostcardPage): New postcard, and each campaign as a row on the
+ * section's hairline with where it's at, test campaigns tagged as such (App-Marketing.dc.html).
  */
 import { POSTCARD_SIZE_INFO, type PostcardSize } from "@crewtavo/core/postcards";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { InboxGroup, InboxList, InboxRow } from "@/components/ui/InboxList";
+import { Section } from "@/components/ui/Section";
+import { InboxSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./Marketing.module.css";
 
 /** A new postcard's message, to change. */
 export const POSTCARD_STARTER = "Hi {{client.first_name}},\n\nOur schedule fills up fast this time of year. Book your visit today and we'll get you on the calendar.\n\n{{link}}\n\n{{company.name}}\n{{company.phone}}";
@@ -48,37 +51,38 @@ export function PostcardCampaigns() {
   type Row = NonNullable<typeof list.data>[number];
   const when = (c: Row) => {
     const made = c.mode === "live" ? "mailed" : "made in test mode";
-    if (c.status === "draft") return `Draft · ${POSTCARD_SIZE_INFO[c.size as PostcardSize]?.label ?? c.size}`;
+    // Its status says Draft beside it: the line says what size, and when it was started.
+    if (c.status === "draft") return `${POSTCARD_SIZE_INFO[c.size as PostcardSize]?.label ?? c.size} · Edited ${timeAgo(c.created_at)}`;
     if (c.status === "sending") return `${c.made_count.toLocaleString("en-US")} of ${c.recipients_count.toLocaleString("en-US")} ${made}…`;
     return `${c.made_count.toLocaleString("en-US")} ${made}${c.failed_count ? `, ${c.failed_count} failed` : ""}${c.finished_at ? ` · ${formatDate(c.finished_at)}` : ""}`;
   };
   return (
-    <section className="stack" aria-labelledby="postcard-campaigns">
-      <div className="row-between">
-        <h2 id="postcard-campaigns" className="section-title">Postcards</h2>
-        <Button icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New postcard</Button>
-      </div>
+    <Section title="Postcards" count={list.data?.length || undefined} flush action={<Button loading={create.isPending} onClick={() => create.mutate()}>New postcard</Button>}>
       <FormError error={create.error} />
       {list.isPending ? (
-        <Skeleton height={64} />
+        <InboxSkeleton rows={1} />
       ) : list.error ? (
-        <div className="card"><ErrorState compact error={list.error} onRetry={() => list.refetch()} /></div>
+        <ErrorState compact error={list.error} onRetry={() => list.refetch()} />
       ) : !list.data.length ? (
-        <div className="card"><EmptyState icon="mail" title="No postcards yet">Mail a postcard with one of your job photos to the clients you pick, printed and mailed by Lob.</EmptyState></div>
+        <EmptyState inline title="No postcards yet">Mail a postcard with one of your job photos to the clients you pick, printed and mailed by Lob</EmptyState>
       ) : (
-        <div className="card">
-          {list.data.map((c) => (
-            <Link key={c.id} to={`/marketing/postcards/${c.id}`} className="card-row" style={{ color: "inherit" }}>
-              <div className="grow" style={{ minWidth: 0 }}>
-                <strong className="ellipsis" style={{ display: "block" }}>{c.name}</strong>
-                <span className="muted small ellipsis" style={{ display: "block" }}>{when(c)}</span>
-              </div>
-              {c.mode === "test" && c.status !== "draft" && <span className="chip">Test</span>}
-              <EntityStatus kind="campaign" status={c.status} />
-            </Link>
-          ))}
-        </div>
+        <InboxList label="Postcards" inset className={styles.flat}>
+          <InboxGroup>
+            {list.data.map((c) => (
+              <InboxRow
+                key={c.id}
+                to={`/marketing/postcards/${c.id}`}
+                title={c.name}
+                avatar={false}
+                badge={c.mode === "test" && c.status !== "draft" ? <span className="tag">Test</span> : null}
+                // Quiet under the name, as a one-off campaign's when is.
+                meta={when(c)}
+                aside={<EntityStatus kind="campaign" status={c.status} />}
+              />
+            ))}
+          </InboxGroup>
+        </InboxList>
       )}
-    </section>
+    </Section>
   );
 }

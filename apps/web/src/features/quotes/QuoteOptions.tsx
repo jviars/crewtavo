@@ -32,6 +32,7 @@ import {
   addAction,
   addedMessage,
   addOptions,
+  hasOptionArt,
   optionsOpen,
   optionsPlan,
   optionTabs,
@@ -152,16 +153,16 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
     if (!open || !invite) return null;
     return (
       <div className={styles.offer}>
-        <Icon name="package" size={20} />
+        <Icon name="package" size={16} />
         {lines.length ? (
           <>
             <span className="grow">Offer two or three packages side by side, like Good, Better and Best.</span>
-            <Button size="sm" icon="plus" onClick={() => setAdding("add")}>Offer options</Button>
+            <Button size="sm" variant="ghost" icon="plus" onClick={() => setAdding("add")}>Offer options</Button>
           </>
         ) : (
           <>
             <span className="grow">Price it from a package, or offer two or three side by side, like Good, Better and Best.</span>
-            <Button size="sm" icon="plus" onClick={() => setAdding("add")}>Pick packages</Button>
+            <Button size="sm" variant="ghost" icon="plus" onClick={() => setAdding("add")}>Pick packages</Button>
           </>
         )}
         {addDialog}
@@ -171,7 +172,8 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
 
   const words = shownWords(mode, signed);
   return (
-    <section className={styles.bar} aria-label="Options">
+    <section className={styles.bar} aria-label="Options" data-mode={mode}>
+      <div className={styles.strip}>
       <div className={styles.tabs} role="tablist" aria-label="Options on this estimate" onKeyDown={onKeys}>
         {tabs.map(({ option, tier, total, shown }) => {
           const on = option.id === viewed;
@@ -187,12 +189,12 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
               data-shown={shown || undefined}
               onClick={() => onView(option.id)}
             >
-              <PackagePicture path={option.picture} style={option.style} className={styles.tabPicture} />
+              {hasOptionArt(option) && <PackagePicture path={option.picture} style={option.style} className={styles.tabPicture} />}
               <span className={styles.tabText}>
                 {(tier || shown) && (
                   <span className={styles.tabChips}>
-                    {tier && <span className="chip">{tier}</span>}
-                    {shown && <span className="chip chip-green">{words.chip}</span>}
+                    {shown && <span className={styles.tabShown}>{words.chip}</span>}
+                    {tier && <span className={styles.tabTier}>{tier}</span>}
                   </span>
                 )}
                 <strong className={styles.tabName}>{option.name}</strong>
@@ -200,7 +202,7 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
                 {/* Only in the office: the homeowner looks on at the iPad. */}
                 {mode === "office" && isExampleWarranty(option.warranty) && (
                   <span className={styles.tabFlag}>
-                    <Icon name="alert" size={14} />
+                    <Icon name="alert" size={12} />
                     Example warranty
                   </span>
                 )}
@@ -209,6 +211,13 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
           );
         })}
       </div>
+      {open && options.length < MAX_OPTIONS && (
+        <button type="button" className={styles.addTile} onClick={() => setAdding("add")}>
+          <Icon name="plus" size={14} />
+          Add an option
+        </button>
+      )}
+      </div>
 
       {open && current ? (
         <div className={styles.actions}>
@@ -216,18 +225,19 @@ export function QuoteOptions({ quote, options, lines, viewing, onView, mode, onC
             <span className={styles.note}>{words.note}</span>
           ) : (
             // In the office the page's own next step is the solid button; on the iPad, the homeowner's choice is the step.
-            <Button size="sm" variant={mode === "visit" ? "primary" : "secondary"} icon="check" loading={show.isPending} onClick={() => choose(current.option)}>
+            <Button size="sm" variant={mode === "visit" ? "primary" : "ghost"} icon="check" loading={show.isPending} onClick={() => choose(current.option)}>
               {mode === "visit" ? "They chose this one" : "Show this one first"}
             </Button>
           )}
           <span className="grow" />
-          {options.length < MAX_OPTIONS && <Button size="sm" icon="plus" onClick={() => setAdding("add")}>Add an option</Button>}
           <Menu
             label={`More for ${current.option.name}`}
-            triggerClassName="btn btn-sm btn-icon"
+            title={current.option.name}
+            triggerClassName="btn btn-sm btn-ghost btn-icon"
             items={[
-              { label: "Edit this option", icon: "edit", onSelect: () => setEditing(current.option) },
+              { label: "Edit this option", icon: "edit", kbd: "E", onSelect: () => setEditing(current.option) },
               { label: "Start over from packages", icon: "refresh", onSelect: () => setAdding("startOver") },
+              { separator: true },
               { label: "Take this option off", icon: "trash", danger: true, disabled: remove.isPending, onSelect: () => void takeOff(current.option) },
             ]}
           />

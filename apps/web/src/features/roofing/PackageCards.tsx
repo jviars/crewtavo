@@ -229,7 +229,7 @@ export function HighlightsField({ value, onChange, onCommit, disabled }: { value
         </ol>
       )}
       {canAdd ? (
-        <button type="button" className="link-btn small" style={{ justifySelf: "start" }} disabled={disabled} onClick={add}>Add a highlight</button>
+        <button type="button" className={`link-btn small ${styles.addLine}`} disabled={disabled} onClick={add}>Add a highlight</button>
       ) : (
         <span className="hint">That's as many as fit on its card.</span>
       )}

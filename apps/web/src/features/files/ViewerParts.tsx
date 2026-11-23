@@ -50,7 +50,7 @@ export function StageLoading({ progress, label = "Opening the file" }: { progres
 export function StageMessage({ icon = "file", title, children, action }: { icon?: IconName; title: string; children?: ReactNode; action?: ReactNode }) {
   return (
     <div className={styles.center}>
-      <div className={`card ${styles.message}`}><EmptyState icon={icon} title={title} action={action}>{children}</EmptyState></div>
+      <div className={styles.message}><EmptyState icon={icon} title={title} action={action}>{children}</EmptyState></div>
     </div>
   );
 }
@@ -58,7 +58,7 @@ export function StageMessage({ icon = "file", title, children, action }: { icon?
 export function StageError({ error, onRetry, title }: { error: unknown; onRetry?: () => void; title?: string }) {
   return (
     <div className={styles.center}>
-      <div className={`card ${styles.message}`}><ErrorState error={error} onRetry={onRetry} title={title ?? "Couldn't open this file"} /></div>
+      <div className={styles.message}><ErrorState error={error} onRetry={onRetry} title={title ?? "Couldn't open this file"} /></div>
     </div>
   );
 }

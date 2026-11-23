@@ -13,7 +13,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { MAX_BYTES } from "@/lib/files";
@@ -22,6 +23,7 @@ import { isSub, useSession, type SubLogin } from "@/lib/session";
 import { ItemCard, type Item } from "../public/PaperworkPage";
 import { asksForEndDate, documentTitle, endDateProblem, kindsFor, myPaperwork, myPaperworkSummary, myUploadProblem, withType, type MyPaperworkItem, type MyPaperworkState } from "../subs/paperwork";
 import { addSubDocument, refreshSubs, useSubDocuments, useSubPaperwork } from "../subs/subsData";
+import { FieldHeader } from "./fieldUi";
 import { msg, t } from "@/lib/i18n";
 
 type Sending = Pick<Item, "key" | "label" | "kinds">;
@@ -29,7 +31,7 @@ type Sending = Pick<Item, "key" | "label" | "kinds">;
 const SECTIONS: Array<{ state: MyPaperworkState; title: string }> = [
   { state: "needed", title: msg("Needed") },
   { state: "waiting", title: msg("Waiting for the office to check") },
-  { state: "ok", title: "OK" },
+  { state: "ok", title: msg("OK") },
 ];
 
 export function MyPaperworkPage() {
@@ -50,78 +52,65 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
   const sendFor = (item: MyPaperworkItem) => setSending({ key: item.requirement, label: item.label, kinds: kindsFor(item.requirement) });
 
   return (
-    <div className="field-app">
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{sub.name}</div>
-        <h1 className="page-title" style={{ marginTop: 4 }}>{t("My paperwork")}</h1>
-      </div>
-      <p className="muted" style={{ margin: 0 }}>{t("What {company} needs on file from you: your W-9, and your liability and workers' comp insurance.", { company: company.name })}</p>
+    <div className="field-app m-grouped field-narrow">
+      <FieldHeader kicker={sub.name} title={t("My paperwork")}>
+        <p className="page-lede">{t("What {company} needs on file from you: your W-9, and your liability and workers' comp insurance.", { company: company.name })}</p>
+      </FieldHeader>
 
-      {paperwork.isPending && <Loading label={t("Loading your paperwork")}><div className="stack">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={2} />)}</div></Loading>}
-      {paperwork.error && !paperwork.data && <div className="card"><ErrorState error={paperwork.error} onRetry={() => paperwork.refetch()} /></div>}
+      {paperwork.isPending && <Loading label={t("Loading your paperwork")}><SectionSkeleton rows={3} /></Loading>}
+      {paperwork.error && !paperwork.data && <ErrorState error={paperwork.error} onRetry={() => paperwork.refetch()} />}
 
       {paperwork.data && (
         <>
           <div className={`callout ${items.some((i) => i.state === "needed") ? "callout-warning" : "callout-good"}`} role="status">
-            <Icon name={items.some((i) => i.state === "needed") ? "alert" : "check"} size={20} />
+            <Icon name={items.some((i) => i.state === "needed") ? "alert" : "check"} size={16} />
             <div className="grow">{myPaperworkSummary(items)}</div>
           </div>
           {SECTIONS.map((section) => {
             const mine = items.filter((i) => i.state === section.state);
             if (!mine.length) return null;
             return (
-              <section key={section.state} className="stack-sm">
-                <h2 className="section-title">{section.title}</h2>
-                <div className="card">
+              <Section key={section.state} title={t(section.title)} count={mine.length} icon={section.state === "needed" ? "alert" : undefined} className={section.state === "needed" ? "paper-needed" : undefined}>
+                <RelatedList>
                   {mine.map((item) => (
-                    <div key={item.requirement} className="card-row wrap" style={{ alignItems: "flex-start" }}>
-                      <span className="grow stack-sm" style={{ minWidth: 200, gap: 4 }}>
-                        <span className="row wrap" style={{ gap: 8 }}>
-                          <strong>{t(item.label)}</strong>
-                          <StatusPill label={item.status} tone={item.tone} />
-                        </span>
-                        <span className="muted small">{item.detail}</span>
-                      </span>
-                      <Button icon="upload" onClick={() => sendFor(item)}>
-                        {item.state === "needed" ? t("Send it") : t("Send another")}
-                      </Button>
-                    </div>
+                    <RelatedRow
+                      key={item.requirement}
+                      title={t(item.label)}
+                      sub={[<StatusPill key="status" label={item.status} tone={item.tone} />, <span key="detail" className="meta-break">{item.detail}</span>]}
+                      actions={
+                        <Button variant={item.state === "needed" ? "primary" : "secondary"} icon="upload" onClick={() => sendFor(item)}>
+                          {item.state === "needed" ? t("Send it") : t("Send another")}
+                        </Button>
+                      }
+                    />
                   ))}
-                </div>
-              </section>
+                </RelatedList>
+              </Section>
             );
           })}
         </>
       )}
 
-      <section className="stack-sm">
-        <div className="section-head">
-          <h2 className="section-title">{t("What you've sent")}</h2>
-          <Button variant="ghost" icon="plus" onClick={() => setSending({ key: "other", label: t("Something else"), kinds: ["license", "other"] })}>{t("Send something else")}</Button>
-        </div>
-        <div className="card">
-          {documents.isPending ? (
-            <div className="card-row"><CardSkeleton lines={1} /></div>
-          ) : documents.error && !documents.data ? (
-            <div className="card-row"><ErrorState compact error={documents.error} onRetry={() => documents.refetch()} /></div>
-          ) : sent.length === 0 ? (
-            <EmptyState compact icon="file" title={t("Nothing on file yet")}>{t("What you send shows here, and the office checks it.")}</EmptyState>
-          ) : (
-            sent.map((d) => (
-              <div key={d.id} className="card-row" style={{ alignItems: "flex-start" }}>
-                <Icon name={d.content_type?.startsWith("image/") ? "image" : "file"} size={16} />
-                <span className="grow" style={{ minWidth: 0 }}>
-                  {d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="strong" style={{ overflowWrap: "anywhere" }}>{t(documentTitle(d))}</a> : <strong>{t(documentTitle(d))}</strong>}
-                  <span className="muted small" style={{ display: "block" }}>
-                    {[d.uploaded_via === "office" ? t("Added by the office") : t("Sent {date}", { date: formatDate(d.created_at) }), d.expires_on && t("Ends {date}", { date: formatDate(d.expires_on) })].filter(Boolean).join(" · ")}
-                  </span>
-                </span>
-                {d.verified_at ? <StatusPill label={t("Checked")} tone="good" /> : <StatusPill label={t("Waiting to be checked")} tone="info" />}
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+      <Section title={t("What you've sent")} count={sent.length || undefined} action={<button type="button" onClick={() => setSending({ key: "other", label: t("Something else"), kinds: ["license", "other"] })}><Icon name="plus" size={14} />{t("Send something else")}</button>}>
+        {documents.isPending ? (
+          <SectionSkeleton rows={2} />
+        ) : documents.error && !documents.data ? (
+          <ErrorState compact error={documents.error} onRetry={() => documents.refetch()} />
+        ) : sent.length === 0 ? (
+          <EmptyState inline title={t("Nothing on file yet")}>{t("What you send shows here, and the office checks it.")}</EmptyState>
+        ) : (
+          <RelatedList>
+            {sent.map((d) => (
+              <RelatedRow
+                key={d.id}
+                lead={<span className="rel-icon"><Icon name={d.content_type?.startsWith("image/") ? "image" : "file"} size={15} /></span>}
+                title={d.url ? <a href={d.url} target="_blank" rel="noreferrer" className="paper-link">{t(documentTitle(d))}</a> : t(documentTitle(d))}
+                sub={[d.verified_at ? <StatusPill key="status" label={t("Checked")} tone="good" /> : <StatusPill key="status" label={t("Waiting to be checked")} tone="pending" />, d.uploaded_via === "office" ? t("Added by the office") : t("Sent {date}", { date: formatDate(d.created_at) }), d.expires_on && t("Ends {date}", { date: formatDate(d.expires_on) })]}
+              />
+            ))}
+          </RelatedList>
+        )}
+      </Section>
 
       {sending && <SendDialog sub={sub} sending={sending} today={today} onClose={() => setSending(null)} />}
     </div>

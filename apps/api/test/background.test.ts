@@ -5,7 +5,7 @@ import type { Env } from "../src/env";
 import { runAccountingJob, SentButUnrecorded } from "../src/integrations/accounting";
 import { accessToken } from "../src/integrations/tokens";
 import { decryptJson, encryptJson, signToken } from "../src/lib/crypto";
-import { readClientLink } from "../src/lib/links";
+import { KEPT_LINK, readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 import { processAutomations, visitTime } from "../src/services/automations";
 import { arrivalTime, planDay } from "../src/services/routes";
@@ -1295,9 +1295,8 @@ describe("automation runs", () => {
     const notices = call(queries.find((q) => q.table === "notifications" && verb(q) === "insert")!, "insert")![1] as Array<{ user_id: string; title: string; body: string }>;
     expect(notices.map((n) => n.user_id).sort()).toEqual(["office-1", "owner-1"]);
     expect(notices[0]!.title).toBe("Autopay failed on Visa ending 4242");
-    expect(notices[0]!.body).toMatch(/^Your card was declined\. https:\/\/app\.test\/hub\/\S+\?view=autopay$/);
-    // The office's notice carries the office's copy of the link, which can't confirm a card or add a tip.
-    expect(await readClientLink(env, tokenOf(notices[0]!.body))).toMatchObject({ c: COMPANY, t: "client", id: "client-1", via: "office" });
+    // The office's notice carries no link to the client's page: whoever reads it would hold one.
+    expect(notices[0]!.body).toBe(`Your card was declined. ${KEPT_LINK}`);
 
     // The client's email has their own link, and is kept as an autopay message (only the money office reads those).
     expect(sent).toHaveLength(1);
@@ -1308,16 +1307,15 @@ describe("automation runs", () => {
     expect(own!.via).toBeUndefined();
     const message = call(queries.find((q) => q.table === "messages" && verb(q) === "insert")!, "insert")![1];
     expect(message).toMatchObject({ channel: "email", related_type: "autopay", related_id: "client-1", client_id: "client-1" });
-    // The copy kept on the timeline has the office's copy of the link, in the same words.
-    expect(message.body).toContain("Hi Pat, Your card was declined. Update it here:");
-    expect(await readClientLink(env, tokenOf(message.body))).toMatchObject({ c: COMPANY, t: "client", id: "client-1", via: "office" });
+    // The copy kept on the timeline has the same words, and no link.
+    expect(message.body).toBe(`Hi Pat, Your card was declined. Update it here:\n\n${KEPT_LINK}`);
 
     // The task is on the schedule, where the crew sees it: no card, reason or link.
     const task = call(queries.find((q) => q.table === "visits" && verb(q) === "insert")!, "insert")![1] as { title: string };
     expect(task.title).toBe("Call Pat Lee about  ()");
   });
 
-  it("text the client their own links, and keep the office's copies of them on the timeline", async () => {
+  it("text the client their own links, and keep no link in the copy on the timeline", async () => {
     const texts: string[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("twilio")) texts.push(new URLSearchParams(String(init!.body)).get("Body")!);
@@ -1337,9 +1335,7 @@ describe("automation runs", () => {
 
     const message = call(queries.find((q) => q.table === "messages" && verb(q) === "insert")!, "insert")![1] as { channel: string; body: string };
     expect(message.channel).toBe("sms");
-    expect(message.body).toMatch(/^Pay invoice #2: https:\/\/app\.test\/hub\/\S+ Or update your card: https:\/\/app\.test\/hub\/\S+\?view=autopay$/);
-    const kept = await Promise.all(links(message.body).map((token) => readClientLink(env, token)));
-    expect(kept).toMatchObject([{ t: "invoice", id: "invoice-1", via: "office" }, { t: "client", id: "client-1", via: "office" }]);
+    expect(message.body).toBe(`Pay invoice #2: ${KEPT_LINK} Or update your card: ${KEPT_LINK}`);
   });
 
   /** A quote.sent or invoice.sent rule's run, as the database would queue it: quote #7 or invoice #2, for Pat. */
@@ -1365,35 +1361,25 @@ describe("automation runs", () => {
     );
   };
 
-  it("put the office's copy of the client's link in the notes and tasks they add, where the team reads them", async () => {
+  it("put no link to the client's page in the notes and tasks they add, where the team reads them", async () => {
     // A note on a sent quote: estimators and crews who see the client read it.
     const note = sentRun("quote", [{ type: "add_note", body: "Sent {{link}}" }]);
     expect(await processAutomations(env, { limit: 50, baseUrl: "https://app.test" })).toMatchObject({ done: 1 });
     const kept = call(note.queries.find((q) => q.table === "messages" && verb(q) === "insert")!, "insert")![1] as { channel: string; body: string };
     expect(kept.channel).toBe("note");
-    expect(kept.body).toMatch(/^Sent https:\/\/app\.test\/hub\/\S+$/);
-    const noted = await readClientLink(env, tokenOf(kept.body));
-    expect(noted).toMatchObject({ c: COMPANY, t: "quote", id: "quote-1", via: "office" });
-    expect(noted).not.toHaveProperty("own");
+    expect(kept.body).toBe(`Sent ${KEPT_LINK}`);
 
     // A task on a sent invoice: it's on the schedule, where the crew sees it.
     const task = sentRun("invoice", [{ type: "create_task", title: "Follow up on {{link}}", days_from_now: 2 }]);
     expect(await processAutomations(env, { limit: 50, baseUrl: "https://app.test" })).toMatchObject({ done: 1 });
     const visit = call(task.queries.find((q) => q.table === "visits" && verb(q) === "insert")!, "insert")![1] as { title: string };
-    expect(visit.title).toMatch(/^Follow up on https:\/\/app\.test\/hub\/\S+$/);
-    // A task's title stops at 200 characters, which cuts the link short (its signature, and now the
-    // time it was made), so what it was minted as is read straight from the start of it.
-    const tasked = Buffer.from(tokenOf(visit.title).split(".")[0]!, "base64url").toString();
-    expect(tasked).toContain(`{"c":"${COMPANY}","t":"invoice","id":"invoice-1","via":"office",`);
-    expect(tasked).not.toContain('"own"');
+    expect(visit.title).toBe(`Follow up on ${KEPT_LINK}`);
 
-    // A note from a rule about a client (a new one, say): the office's copy of their Hub home.
+    // A note from a rule about a client (a new one, say), and one about a visit, which crews read.
     const welcome = sentRun("client", [{ type: "add_note", body: "Welcome {{link}}" }]);
     expect(await processAutomations(env, { limit: 50, baseUrl: "https://app.test" })).toMatchObject({ done: 1 });
     const greeted = call(welcome.queries.find((q) => q.table === "messages" && verb(q) === "insert")!, "insert")![1] as { body: string };
-    const home = await readClientLink(env, tokenOf(greeted.body));
-    expect(home).toMatchObject({ c: COMPANY, t: "client", id: "client-1", via: "office" });
-    expect(home).not.toHaveProperty("own");
+    expect(greeted.body).toBe(`Welcome ${KEPT_LINK}`);
   });
 
   it("email the client their own link, marked as theirs, for a quote or invoice", async () => {
@@ -1503,7 +1489,7 @@ describe("automation runs", () => {
     expect(agreements.calls).toEqual(expect.arrayContaining([["eq", "client_id", "client-1"], ["is", "revoked_at", null], ["is", "paused_at", null]]));
   });
 
-  it("about autopay preview with the event's card, the office's copy of the link, and a warning while autopay is off", async () => {
+  it("about autopay preview with the event's card, no link to the client's page, and a warning while autopay is off", async () => {
     autopayRun("autopay.failed", []);
     const db = current.db as { from: (table: string) => unknown };
     const from = db.from;
@@ -1525,8 +1511,7 @@ describe("automation runs", () => {
     ]);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { previews: Array<{ type: string; title?: string; body?: string; to?: string }>; warnings: string[] };
-    expect(body.previews[0]).toMatchObject({ type: "notify", title: "Visa ending 4242" });
-    expect(await readClientLink(env, tokenOf(body.previews[0]!.body!))).toMatchObject({ t: "client", id: "client-1", via: "office" });
+    expect(body.previews[0]).toMatchObject({ type: "notify", title: "Visa ending 4242", body: KEPT_LINK });
     expect(body.previews[1]).toMatchObject({ type: "invite_autopay", to: "pat@example.com" });
     expect(body.previews[1]!.body).toContain("[autopay link]");
     expect(body.warnings).toContain("Autopay isn't on (Settings → Payments, and a Stripe key that can save cards), so invites won't go out until it is.");
@@ -1611,22 +1596,30 @@ describe("when a crew on its way should arrive", () => {
   const NOW = Date.parse("2026-10-17T15:00:00Z");
   const home = { lat: 37.13, lng: -80.41 };
   const visit = { scheduled_on: "2026-10-17", crew_id: "crew-1", property: home };
-  /** The visit, the company (25 mph) and the crew's last finished visit that day (`previous`). */
+  /**
+   * The visit, the company (25 mph, through company_settings(): the browser's role doesn't read the
+   * column) and the crew's last finished visit that day (`previous`).
+   */
   const world = (previous: unknown, own: object = visit) =>
-    fakeDb((q) => {
-      if (verb(q) === "update") return { data: [{ id: "visit-1", scheduled_on: "2026-10-17", starts_at: null, crew_id: "crew-1", status: "en_route" }] };
-      if (q.table === "companies") return { data: { settings: { schedule: { speed_mph: 25 } } } };
-      return { data: call(q, "neq") ? previous : { status: "scheduled", completed_at: null, ...own } };
-    });
+    fakeDb(
+      (q) => {
+        if (verb(q) === "update") return { data: [{ id: "visit-1", scheduled_on: "2026-10-17", starts_at: null, crew_id: "crew-1", status: "en_route" }] };
+        return { data: call(q, "neq") ? previous : { status: "scheduled", completed_at: null, ...own } };
+      },
+      (fn, args) => (fn === "company_settings" && args.p_company === COMPANY ? { data: { schedule: { speed_mph: 25 } } } : {}),
+    );
   const minutesTo = (at: string | null) => (at ? (Date.parse(at) - NOW) / 60_000 : null);
 
   it("is the drive from where the phone was, timed as routes time drives", async () => {
-    const { db, queries } = world(null);
+    const { db, queries, rpcs } = world(null);
     const phone = { lat: 37.18, lng: -80.41 };
     const at = await arrivalTime(db, COMPANY, "visit-1", phone, "u1", NOW);
     expect(minutesTo(at)).toBeCloseTo(driveBetween(phone, home, 25).minutes, 3);
     expect(etaWords(at, NOW)).toBe(" and should arrive in about 10 minutes");
     expect(queries.some((q) => call(q, "neq"))).toBe(false);
+    // The speed is read as the crew member reads the settings, not from the column.
+    expect(rpcs).toEqual([{ fn: "company_settings", args: { p_company: COMPANY } }]);
+    expect(queries.some((q) => q.table === "companies")).toBe(false);
   });
 
   it("without the phone's place, is the drive from the crew's last visit finished that day", async () => {

@@ -71,7 +71,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "d1070000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select public.create_company('Oscar Roofing', 'roofing', :'tz') as co \gset
-update public.companies set phone = '+15405550100', settings = settings || jsonb_build_object(
+update public.companies set phone = '+15405550100', settings = public.company_settings(id) || jsonb_build_object(
   'clock', jsonb_build_object('record_location', true, 'breaks', 'paid'),
   'branding', jsonb_build_object('color', '#225588', 'logo', :'co' || '/logo/d1070000-0000-0000-0000-0000000000f1.png', 'logo_size', jsonb_build_array(96, 48)),
   'working_hours', jsonb_build_object('start', '07:00', 'end', '17:00'),
@@ -355,6 +355,8 @@ insert into public.web_daily (company_id, day, kind, key) values (:'co', current
 insert into public.web_hits (company_id, day, visitor, path, entry, device) values (:'co', current_date, 'v1', '/', true, 'phone');
 insert into public.drive_folders (company_id, name) values (:'co', 'Company files');
 insert into public.trashed_files (company_id, path, source, label) values (:'co', :'co' || '/receipts/d1070000-0000-0000-0000-0000000000d8.jpg', 'receipt', 'Receipt');
+-- A booking form's upload link on record (20261123100500_public_upload_links.sql): the server's alone.
+insert into public.upload_links (path, company_id, kind, max_bytes, expires_at) values (:'co' || '/plans/d1070000-0000-0000-0000-0000000000d9.pdf', :'co', 'form', 1000, now() + interval '3 hours');
 insert into public.storage_allowances (company_id, role_key, limit_bytes) values (:'co', 'field_crew', 1000000000);
 -- Ann asked to cancel the roof visit Al is on (20261105000600_visit_change_requests.sql): the office's, never a sub's.
 insert into public.visit_change_requests (company_id, visit_id, client_id, kind, reason) values (:'co', :'v1', :'c1', 'cancel', 'Rain all week');
@@ -620,7 +622,10 @@ select t1070.check(array(
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each
   -- runs as the caller, and a sub reads no payments or invoices, so they get nothing or zeros.
-  'collected_by_day(uuid, date, date)', 'company_basics(uuid)', 'convert_quote_to_job(uuid)',
+  'collected_by_day(uuid, date, date)', 'company_basics(uuid)',
+  -- The company's settings (20261123100100_prices_and_settings_for_the_office.sql): for someone on the team only, none for a sub (company_basics is theirs).
+  'company_settings(uuid)',
+  'convert_quote_to_job(uuid)',
   'create_company(text, text, text)', 'create_invoice_for_job(uuid, text, numeric, date)', 'dashboard(uuid)',
   -- Deleting a time entry with a reason (20261113001800): runs as the caller, so a sub deletes no more this way than with a plain delete.
   'delete_time_entry(uuid, text)',
@@ -656,7 +661,7 @@ select t1070.check(array(
   -- Jobs with finished visits to invoice: runs as the caller, so a sub gets no more than the jobs of their own visits.
   'jobs_with_visits_to_invoice(uuid)', 'last_referral_ask(uuid, uuid)', 'last_review_ask(uuid, uuid)',
   'marketing_set_enabled(uuid, boolean)', 'marketing_summary(uuid)', 'material_choices(uuid)', 'merge_clients(uuid, uuid, uuid)',
-  -- Saving a screen's own settings: runs as the caller, so owners and admins only, never a sub.
+  -- Saving a screen's own settings: owners and admins only (it checks), never a sub.
   'merge_company_settings(uuid, jsonb)', 'my_crew_ids(uuid)', 'my_sub_offers(boolean, uuid)',
   'my_sub_pay_totals(uuid)',
   -- The next request, quote, job and invoice numbers (and set_next_number below): owners and admins only, never a sub.
@@ -713,6 +718,8 @@ select t1070.check(array(
   'trash_delete_forever(uuid, jsonb)', 'undo_price_change(uuid, uuid)', 'visit_autopay(uuid)', 'visit_contact(uuid)',
   -- A visit's extra work without prices: a sub's, for the jobs of their own visits (as job_scope).
   'visit_extra_scope(uuid)',
+  -- What visits bill: the roles that read a job's lines only (it checks), no rows for a sub.
+  'visit_prices(uuid[])',
   'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
   'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');
@@ -947,13 +954,15 @@ update public.visits set notes = 'All done, nails swept' where id = :'v1';
 select t1070.check((select notes from public.visits where id = :'v1') = 'All done, nails swept', 'they can still add to the notes');
 rollback;
 
--- The crew keeps what they had on a visit a sub is on too.
+-- The crew keeps what they had on a visit a sub is on too: they move it along and take notes on it.
+-- Renaming or cancelling it is the office's, as on any visit of theirs (20261123100200_what_field_crews_change.sql).
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "d1070000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
-update public.visits set title = 'Tear off, shingle and flash' where id = :'v1';
-update public.visits set status = 'cancelled' where id = :'v1';
-select t1070.check((select status = 'cancelled' and title like '%flash' from public.visits where id = :'v1'), 'the crew can still rename and cancel their own visit, as before');
+select t1070.expect_error(format('update public.visits set title = %L where id = %L', 'Tear off, shingle and flash', :'v1'), 'the crew doesn''t rename their visit');
+select t1070.expect_error(format('update public.visits set status = %L where id = %L', 'cancelled', :'v1'), 'or cancel it');
+update public.visits set status = 'en_route', notes = 'Ladder on the truck' where id = :'v1';
+select t1070.check((select status = 'en_route' and notes = 'Ladder on the truck' from public.visits where id = :'v1'), 'but moves it along and takes notes on it, as before');
 rollback;
 
 -- ===== Checklists, photos and files on their visits ============================================

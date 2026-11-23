@@ -3,6 +3,10 @@
  * Drive's files are too), subs' paperwork (20261025001001_subcontractors.sql), applicants' résumés
  * (20261028000100_careers.sql), and the Trash (20261028000300_drive.sql).
  *
+ * The hourly upkeep removes the files sent through a booking form's or a sub's upload link that
+ * nobody recorded, once the link has run out (tidyExpiredUploads, lib/publicUploads.ts): a stranger
+ * can't keep the business's storage filled by sending files and never recording them.
+ *
  * The daily "plans" task removes uploads nobody recorded:
  *   - A plan file uploaded but never recorded (a booking form closed before its files were recorded,
  *     an upload cut off before its row was saved) goes once it's a day old. So does a picture's
@@ -27,6 +31,7 @@
  * at most, and a file it left out would never be removed.
  */
 import { TRASH_DAYS } from "@crewtavo/core/drive";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Db } from "../lib/supabase";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -121,6 +126,39 @@ export async function tidyUnrecordedFiles(admin: Db): Promise<{ unrecorded: numb
     counts.unrecorded += gone.size;
     counts.kept += paths.length - gone.size;
     if (!gone.size || paths.length < PAGE) break;
+  }
+  return counts;
+}
+
+/** The folders upload links the server makes put files in: a booking form's (plans) and a sub's paperwork (subs). */
+const LINK_FOLDERS = new Set(["plans", "subs"]);
+/** A file expired_upload_links may hand over for a company: the company's own, in one of those folders, with no "." or ".." in its path. */
+const linkFile = (companyId: string, path: string) => {
+  const parts = path.split("/");
+  return inCompany(companyId, path) && LINK_FOLDERS.has(parts[1] ?? "") && !parts.some((part) => part === "." || part === "..");
+};
+
+/**
+ * Files sent through a booking form's or a sub's upload link that nobody recorded, removed once the
+ * link has run out (public.upload_links, 20261123100500_public_upload_links.sql). The database
+ * hands over the links that ran out, PAGE at a time, and forgets them; those whose file is on a
+ * request or a sub's paperwork, or in the Trash, aren't handed over. One Storage won't remove is
+ * left for the daily sweeps (tidyPlanFiles, tidySubFiles). Stops after PURGE_ROUNDS, or when a round
+ * has fewer than PAGE.
+ */
+export async function tidyExpiredUploads(admin: Db): Promise<{ removed: number; kept: number }> {
+  const storage = admin.storage.from("files");
+  const counts = { removed: 0, kept: 0 };
+  for (let round = 0; round < PURGE_ROUNDS; round++) {
+    // The generated database types learn the new function only when they're regenerated.
+    const { data, error } = await (admin as unknown as SupabaseClient).rpc("expired_upload_links", { p_limit: PAGE });
+    if (error) throw new Error(error.message);
+    const rows = (Array.isArray(data) ? data : []) as Array<{ company_id: string; paths: string[] | null; links: number }>;
+    const paths = [...new Set(rows.flatMap((row) => (row.paths ?? []).filter((path) => linkFile(row.company_id, path))))];
+    const gone = paths.length ? await removeStored(storage, paths) : new Set<string>();
+    counts.removed += gone.size;
+    counts.kept += paths.length - gone.size;
+    if (rows.reduce((sum, row) => sum + Number(row.links ?? 0), 0) < PAGE) break;
   }
   return counts;
 }

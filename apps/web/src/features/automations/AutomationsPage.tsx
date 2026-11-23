@@ -1,23 +1,30 @@
-/** Automation rules (turn them on and off, edit, duplicate) and the history of what they did. */
+/**
+ * Automation rules (turn them on and off, edit, duplicate) and the history of what they did. Rules
+ * are rows grouped by what starts them (requests, quotes, jobs, visits, invoices), each with its
+ * switch; the history is a row for each run with what it did, filtered by how it went.
+ */
 import { describeRuleSentence, TRIGGERS, triggerDef, type Action, type Condition } from "@crewtavo/core/automations";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, MetaLine } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading, StatsSkeleton } from "@/components/ui/Skeleton";
+import { InboxSkeleton, SectionSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
-import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { ConnectEmailHint, ConnectTextingHint } from "../settings/ConnectEmailHint";
 import { VisitNoticesNotice } from "../settings/VisitNotices";
+import styles from "./Automations.module.css";
 
 export interface RuleRow {
   id: string;
@@ -80,31 +87,30 @@ export function AutomationsPage() {
 
       {(usesEmail && !session.config.features.email) || (usesSms && !session.config.features.sms) ? (
         <div className="callout callout-warning">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             <div>{usesEmail && !session.config.features.email ? "Email isn't connected" : "Texting isn't set up"}</div>
-            <div className="small" style={{ fontWeight: 400 }}>Rules that send {usesEmail && !session.config.features.email ? "emails" : "texts"} will show as failed until it is. Notifications, tags and tasks still work.{usesEmail && !session.config.features.email ? <ConnectEmailHint /> : <ConnectTextingHint />}</div>
+            Rules that send {usesEmail && !session.config.features.email ? "emails" : "texts"} will show as failed until it is. Notifications, tags and tasks still work.{usesEmail && !session.config.features.email ? <ConnectEmailHint /> : <ConnectTextingHint />}
           </div>
         </div>
       ) : null}
 
+      {/* The rules didn't load: their counts would say "0 of 0", so the error below speaks for them. */}
       {stats.isPending || rules.isPending ? (
         <StatsSkeleton count={4} />
-      ) : (
-        <div className="stat-row">
-          <div className="card stat"><div className="label">Active rules</div><div className="value">{active}</div><div className="hint">of {rules.data?.length ?? 0}</div></div>
-          <div className="card stat"><div className="label">Done in the last 7 days</div><div className="value">{stats.data?.done ?? 0}</div></div>
-          <div className="card stat"><div className="label">Waiting to run</div><div className="value">{stats.data?.waiting ?? 0}</div><div className="hint">delayed follow-ups</div></div>
-          <button type="button" className="card stat card-link" style={{ textAlign: "left", background: "var(--surface)", font: "inherit" }} onClick={() => setTab("activity")}>
-            <div className="label">Failed in the last 7 days</div>
-            <div className="value" style={{ color: stats.data?.failed ? "var(--danger)" : undefined }}>{stats.data?.failed ?? 0}</div>
-            <div className="hint">{stats.data?.failed ? "Review and retry" : "All good"}</div>
-          </button>
-        </div>
+      ) : rules.error ? null : (
+        <StatStrip label="Automations">
+          <Stat label="Active rules" value={active} note={`of ${rules.data?.length ?? 0}`} onClick={tab === "rules" ? undefined : () => setTab("rules")} />
+          <Stat label="Done in the last 7 days" value={stats.data?.done ?? 0} />
+          <Stat label="Waiting to run" value={stats.data?.waiting ?? 0} note="delayed follow-ups" />
+          {/* Red only when something failed: then it's what needs looking at, and it opens the runs. */}
+          <Stat label="Failed in the last 7 days" value={stats.data?.failed ?? 0} tone={stats.data?.failed ? "danger" : undefined} note={stats.data?.failed ? "Review and retry" : "All good"} onClick={() => setTab("activity")} />
+        </StatStrip>
       )}
 
-      <div className="underline-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "rules"} onClick={() => setTab("rules")}>Rules <span className="badge">{rules.data?.length ?? "·"}</span></button>
+      {/* Chips on a phone, as Marketing's and Finance's sections are (Mobile-Business.dc.html). */}
+      <div className={cx("underline-tabs", styles.tabs)} role="tablist" aria-label="Automations">
+        <button type="button" role="tab" aria-selected={tab === "rules"} onClick={() => setTab("rules")}>Rules <span className="badge">{rules.data?.length ?? ""}</span></button>
         <button type="button" role="tab" aria-selected={tab === "activity"} onClick={() => setTab("activity")}>Activity</button>
       </div>
 
@@ -144,52 +150,52 @@ function RuleList({ rules }: { rules: ReturnType<typeof useQuery<RuleRow[]>> }) 
       navigate(`/automations/${row.id}`);
     },
   });
-  const list = useListAnimation<HTMLDivElement>();
   const remove = useMutation({
     meta: { success: "Rule deleted" },
     mutationFn: async (id: string) => unwrap(await supabase().from("automation_rules").delete().eq("id", id)),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });
 
-  if (rules.isPending) return <Loading><div className="stack">{[0, 1, 2, 3].map((i) => <CardSkeleton key={i} lines={2} />)}</div></Loading>;
-  if (rules.error) return <div className="card"><ErrorState error={rules.error} onRetry={() => rules.refetch()} /></div>;
+  if (rules.isPending) return <InboxSkeleton rows={5} groups={2} />;
+  if (rules.error) return <ErrorState error={rules.error} onRetry={() => rules.refetch()} />;
   if (!rules.data?.length) {
-    return (
-      <div className="card">
-        <EmptyState icon="bolt" title="No rules yet" action={<Button icon="plus" onClick={() => navigate("/automations/new")}>Create a rule</Button>} />
-      </div>
-    );
+    return <EmptyState icon="bolt" title="No rules yet" action={<Button icon="plus" onClick={() => navigate("/automations/new")}>Create a rule</Button>} />;
   }
+  // Grouped by what starts them, in workflow order (the list is sorted that way already).
+  const groups = [...new Set(rules.data.map((r) => triggerDef(r.trigger)?.group ?? "Other"))].map((group) => ({ group, rows: rules.data.filter((r) => (triggerDef(r.trigger)?.group ?? "Other") === group) }));
   return (
-    <div className="stack" ref={list}>
-      {rules.data.map((r) => {
-        const trigger = triggerDef(r.trigger);
-        return (
-          <div key={r.id} className="card card-pad row" style={{ alignItems: "flex-start", gap: 14, opacity: r.enabled ? 1 : 0.75, transition: "opacity 200ms" }}>
-            <input type="checkbox" className="switch" style={{ marginTop: 3 }} checked={r.enabled} aria-label={r.enabled ? `Turn off ${r.name}` : `Turn on ${r.name}`} onChange={(e) => toggle.mutate({ id: r.id, enabled: e.target.checked })} />
-            <Link to={`/automations/${r.id}`} className="grow" style={{ color: "inherit", minWidth: 0 }}>
-              <div className="row wrap" style={{ gap: 8 }}>
-                <strong style={{ fontSize: 16 }}>{r.name}</strong>
-                {trigger && <span className="chip">{trigger.group}</span>}
-                {!r.enabled && <span className="chip">Off</span>}
+    <InboxList label="Rules">
+      {groups.map(({ group, rows }) => (
+        <InboxGroup key={group} label={group} count={rows.length} end={`${rows.filter((r) => r.enabled).length} on`}>
+          {rows.map((r) => (
+            <li key={r.id} className={styles.rule} data-off={r.enabled ? undefined : ""}>
+              <span className={styles.switch}>
+                <input type="checkbox" className="switch" checked={r.enabled} aria-label={r.enabled ? `Turn off ${r.name}` : `Turn on ${r.name}`} onChange={(e) => toggle.mutate({ id: r.id, enabled: e.target.checked })} />
+              </span>
+              <div className={styles.body}>
+                <Link to={`/automations/${r.id}`} className={styles.link}>{r.name}</Link>
+                <p className={styles.what}>{describeRuleSentence(r)}</p>
+                <MetaLine className={styles.meta} parts={[r.last_run_at ? `Ran ${r.run_count} ${r.run_count === 1 ? "time" : "times"} · last ${timeAgo(r.last_run_at)}` : "Hasn't run yet", !r.enabled && "Off"]} />
               </div>
-              <div className="muted text-sm" style={{ marginTop: 2 }}>{describeRuleSentence(r)}</div>
-              <div className="muted small" style={{ marginTop: 6 }}>{r.last_run_at ? `Ran ${r.run_count} ${r.run_count === 1 ? "time" : "times"} · last ${timeAgo(r.last_run_at)}` : "Hasn't run yet"}</div>
-            </Link>
-            <Menu
-              triggerClassName="btn btn-sm btn-ghost btn-icon"
-              label={`Actions for ${r.name}`}
-              items={[
-                { label: "Edit", icon: "edit", onSelect: () => navigate(`/automations/${r.id}`) },
-                { label: "Duplicate", icon: "copy", onSelect: () => duplicate.mutate(r) },
-                { separator: true },
-                { label: "Delete", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: `Delete “${r.name}”?`, body: "Follow-ups it has waiting are cancelled. Its history is deleted.", confirmLabel: "Delete rule", danger: true })) && remove.mutate(r.id) },
-              ]}
-            />
-          </div>
-        );
-      })}
-    </div>
+              <div className={styles.end}>
+                <Menu
+                  triggerClassName="btn btn-sm btn-ghost btn-icon"
+                  label={`Actions for ${r.name}`}
+                  title={r.name}
+                  items={[
+                    { label: "Edit", icon: "edit", kbd: "E", onSelect: () => navigate(`/automations/${r.id}`) },
+                    { label: "Duplicate", icon: "copy", kbd: "D", onSelect: () => duplicate.mutate(r) },
+                    { label: r.enabled ? "Turn off" : "Turn on", icon: r.enabled ? "pause" : "play", onSelect: () => toggle.mutate({ id: r.id, enabled: !r.enabled }) },
+                    { separator: true },
+                    { label: "Delete", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: `Delete “${r.name}”?`, body: "Follow-ups it has waiting are cancelled. Its history is deleted.", confirmLabel: "Delete rule", danger: true })) && remove.mutate(r.id) },
+                  ]}
+                />
+              </div>
+            </li>
+          ))}
+        </InboxGroup>
+      ))}
+    </InboxList>
   );
 }
 
@@ -232,41 +238,50 @@ export function RunHistory({ ruleId }: { ruleId?: string }) {
   });
 
   return (
-    <div className="stack">
-      <div className="tabs" role="group" aria-label="Filter runs">
-        {RUN_FILTERS.map((f) => <button key={f.value} type="button" className="tab" aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>{f.label}</button>)}
+    <div className="stack-sm">
+      <div className={styles.filters}>
+        <FilterTabs label="Filter runs" value={filter} onChange={setFilter} options={RUN_FILTERS.map((f) => ({ value: f.value, label: f.label }))} />
       </div>
-      <div className="card">
-        {runs.isPending && <div className="card-pad"><CardSkeleton lines={3} title={false} /></div>}
-        {runs.error && <ErrorState compact error={runs.error} onRetry={() => runs.refetch()} />}
-        {runs.data?.length === 0 && <EmptyState inline title={RUN_FILTERS.find((f) => f.value === filter)!.empty} />}
-        {runs.data?.map((r) => {
-          const result = (Array.isArray(r.result) ? r.result : []) as Array<{ type: string; ok: boolean; detail: string; skipped?: boolean }>;
-          const rule = r.rule as { id: string; name: string } | null;
-          const path = r.subject_type && r.subject_id && SUBJECT_PATH[r.subject_type] ? `${SUBJECT_PATH[r.subject_type]}${r.subject_id}` : null;
-          return (
-            <div key={r.id} className="card-row" style={{ alignItems: "flex-start" }}>
-              <StatusPill label={RUN_LABELS[r.status] ?? r.status} tone={RUN_TONES[r.status] ?? "muted"} />
-              <span className="grow" style={{ minWidth: 0 }}>
-                {!ruleId && <strong>{rule?.name ?? "Deleted rule"}</strong>}
-                <span className="muted small" style={{ display: "block" }}>
-                  {r.status === "pending" ? `Runs ${timeAgo(r.run_after)}` : formatDateTime(r.finished_at ?? r.created_at)}
-                  {path && <> · <Link to={path}>Open {r.subject_type}</Link></>}
-                </span>
-                {/* An action with nothing to do (Marketing off, a client who opted out) is neither done nor failed. The pill says Skipped when they all were. */}
-                {result.map((x, i) => (
-                  <span key={i} className={`small ${x.skipped ? "muted" : x.ok ? "text-good" : "text-danger"}`} style={{ display: "block" }}>
-                    {x.skipped ? "–" : x.ok ? "✓" : "✕"} {x.skipped && r.status !== "skipped" ? `Skipped: ${x.detail}` : x.detail}
-                  </span>
-                ))}
-                {(!result.length || r.status === "pending") && r.error && <span className="small muted" style={{ display: "block" }}>{r.error}</span>}
-              </span>
-              {r.status === "failed" && <Button size="sm" icon="refresh" loading={act.isPending && act.variables?.id === r.id} onClick={() => act.mutate({ id: r.id, action: "retry" })}>Retry</Button>}
-              {r.status === "pending" && <Button size="sm" variant="ghost" loading={act.isPending && act.variables?.id === r.id} onClick={() => act.mutate({ id: r.id, action: "cancel" })}>Cancel</Button>}
-            </div>
-          );
-        })}
-      </div>
+      {runs.isPending && <SectionSkeleton rows={3} />}
+      {runs.error && <ErrorState compact error={runs.error} onRetry={() => runs.refetch()} />}
+      {runs.data?.length === 0 && <EmptyState inline title={RUN_FILTERS.find((f) => f.value === filter)!.empty} />}
+      {Boolean(runs.data?.length) && (
+        <ul className="rel" aria-label="Runs">
+          {runs.data!.map((r) => {
+            const result = (Array.isArray(r.result) ? r.result : []) as Array<{ type: string; ok: boolean; detail: string; skipped?: boolean }>;
+            const rule = r.rule as { id: string; name: string } | null;
+            const path = r.subject_type && r.subject_id && SUBJECT_PATH[r.subject_type] ? `${SUBJECT_PATH[r.subject_type]}${r.subject_id}` : null;
+            return (
+              <li key={r.id} className={styles.run}>
+                <div style={{ minWidth: 0 }}>
+                  {!ruleId && (rule ? <Link to={`/automations/${rule.id}`} className={styles.runName}>{rule.name}</Link> : <span className={styles.runName}>Deleted rule</span>)}
+                  <div className={styles.runWhen}>
+                    {r.status === "pending" ? `Runs ${timeAgo(r.run_after)}` : formatDateTime(r.finished_at ?? r.created_at)}
+                    {path && <> · <Link to={path}>Open {r.subject_type}</Link></>}
+                  </div>
+                  {/* An action with nothing to do (Marketing off, a client who opted out) is neither done nor failed. The pill says Skipped when they all were. */}
+                  {result.length > 0 && (
+                    <ul className={styles.results}>
+                      {result.map((x, i) => (
+                        <li key={i} data-tone={x.skipped ? "muted" : x.ok ? "good" : "danger"}>
+                          <span aria-hidden="true">{x.skipped ? "–" : x.ok ? "✓" : "✕"}</span>
+                          <span>{x.skipped && r.status !== "skipped" ? `Skipped: ${x.detail}` : x.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {(!result.length || r.status === "pending") && r.error && <p className={styles.runError}>{r.error}</p>}
+                </div>
+                <div className={styles.runEnd}>
+                  <StatusPill label={RUN_LABELS[r.status] ?? r.status} tone={RUN_TONES[r.status] ?? "muted"} />
+                  {r.status === "failed" && <Button size="sm" icon="refresh" loading={act.isPending && act.variables?.id === r.id} onClick={() => act.mutate({ id: r.id, action: "retry" })}>Retry</Button>}
+                  {r.status === "pending" && <Button size="sm" variant="ghost" loading={act.isPending && act.variables?.id === r.id} onClick={() => act.mutate({ id: r.id, action: "cancel" })}>Cancel</Button>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@
  * Quotes and invoices print as the business's estimate template. Add ?print=1 to print or save a PDF.
  */
 import { greetingName } from "@crewtavo/core/automations";
+import { documentColor } from "@crewtavo/core/documents";
 import { notIncludedText } from "@crewtavo/core/estimates";
 import { lineTotal } from "@crewtavo/core/money";
 import { promoRuleWords } from "@crewtavo/core/promos";
@@ -39,7 +40,7 @@ import {
 import { quoteSchedule } from "@/features/documents/build";
 import { smallInitials } from "@/features/documents/data";
 import { DocumentSheet, PrintableDocument } from "@/features/documents/EstimateDocument";
-import { openPrintablePdf } from "@/features/documents/pdfPrint";
+import { openPrintablePdf, printTicketsFrom } from "@/features/documents/pdfPrint";
 import { inkOn } from "@/features/documents/words";
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
@@ -91,6 +92,7 @@ import {
   yoursToPayNote,
   unpickedGroup,
   websiteHref,
+  hubToken,
   type HubCompany,
   type HubDrawing,
   type HubLine,
@@ -142,7 +144,7 @@ function usePrintMode(loaded: boolean) {
   const print = useCallback(() => {
     setOn(true);
     // In Safari, as a PDF of the page's document (filling the sheet, no browser header or footer); else the page itself.
-    if (!openPrintablePdf()) void printWhenReady();
+    if (!openPrintablePdf("new tab", () => void printWhenReady())) void printWhenReady();
   }, []);
   // A tab opened to print (?print=1, the office's Print): in Safari it becomes the PDF, and Back comes
   // to the page without ?print=1, so it doesn't print again.
@@ -151,7 +153,7 @@ function usePrintMode(loaded: boolean) {
     const url = new URL(window.location.href);
     url.searchParams.delete("print");
     window.history.replaceState(window.history.state, "", url);
-    if (!openPrintablePdf("this tab")) void printWhenReady();
+    if (!openPrintablePdf("this tab", () => void printWhenReady())) void printWhenReady();
   }, []);
   return { on: asked || loaded, print, printHere };
 }
@@ -195,13 +197,16 @@ function CompanyMark({ company, logoClass = "hub-logo", tileClass = "tile" }: { 
 }
 
 export function HubPage() {
-  const { token = "" } = useParams();
+  const { token: raw = "" } = useParams();
+  const token = hubToken(raw);
   const [params] = useSearchParams();
   const printing = params.get("print") === "1";
   const view = useQuery({ queryKey: ["hub", token], queryFn: () => hubFetch<View>(token), retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 2 });
   const [messaging, setMessaging] = useState<{ visit?: PortalVisit } | null>(null);
   const { on: printable, print, printHere } = usePrintMode(Boolean(view.data));
   const printed = useRef(false);
+  // The Hub has no sign-in: its PDF's print ticket comes with its link (pdfPrint.ts), for this quote or invoice only.
+  useEffect(() => printTicketsFrom(async () => (await hubFetch<{ ticket: string }>(`${token}/print-ticket`, {})).ticket), [token]);
 
   useEffect(() => {
     if (view.data) document.title = `${view.data.kind === "quote" ? `${view.data.quote.range ? rangeWords({ roof: isRoofJob(view.data), options: 0, first: null }).kind : "Quote"} #${view.data.quote.number}` : view.data.kind === "invoice" ? `Invoice #${view.data.invoice.number}` : "Your account"} · ${view.data.company.name}`;
@@ -215,25 +220,31 @@ export function HubPage() {
   const d = view.data;
   // The Hub has no session: its money shows in the business's currency from the page itself.
   if (d) setCurrency((d.company as { currency?: string | null }).currency);
-  const brand = d?.company.branding?.color || "#3b7d23";
+  // The business's brand color, else the navy its paper prints in without one (Settings → Document
+  // style says the brand color is also the Client Hub's): never Crewtavo's own green.
+  const brand = documentColor({ color: null }, { branding: d?.company.branding ?? null });
   const onBrand = inkOn(brand);
   const preview = Boolean(d && "preview" in d && d.preview);
+  // The client's account, for a quote or invoice reached from it: the back link over the page.
   const home = d && d.kind !== "client" ? d.home : null;
   const clientName = d ? (d.kind === "client" ? d.client.name : d.kind === "quote" ? d.quote.client?.display_name : d.invoice.client?.display_name) : null;
 
   // A roof estimate out as a price range is a page of its own, on the business's letterhead.
   if (d?.kind === "quote" && d.quote.range) {
     return (
-      <>
-        <RangeHub token={token} data={d} onChanged={() => view.refetch()} onAsk={() => setMessaging({})} onPrint={print} />
+      // The message dialog inside the page, so it takes the page's colors.
+      <RangeHub token={token} data={d} onChanged={() => view.refetch()} onAsk={() => setMessaging({})} onPrint={print}>
         {messaging && <MessageDialog token={token} company={d.company.name} hubFetch={hubFetch} onClose={() => setMessaging(null)} />}
-      </>
+      </RangeHub>
     );
   }
 
   return (
     <div
       className="public-page hub"
+      // Quotes and invoices lay out wider, with their summary beside them on a computer; a signed
+      // quote is as wide as its paper (features.css).
+      data-kind={d?.kind === "quote" && ["approved", "converted"].includes(d.quote.status) ? "signed" : d?.kind}
       data-printing={printing || undefined}
       // --brand-text: the brand color as text on white, or ink when it doesn't read there at body size (4.5:1), as on the range page.
       style={{ ["--brand" as string]: brand, ["--on-brand" as string]: onBrand, ["--brand-text" as string]: contrastOnWhite(brand) >= 4.5 ? brand : "var(--ink)" }}
@@ -241,38 +252,41 @@ export function HubPage() {
       {d && (
         <header className="hub-header">
           <div className="hub-header-inner">
-            {home ? (
-              <a className="hub-company" href={home} aria-label={`${d.company.name}: your account`}>
-                <CompanyMark company={d.company} />
-                <span className="stack-xs"><strong>{d.company.name}</strong><span className="hub-meta">Your account</span></span>
+            {/* Who it's from and what this is (Client-Desktop); "Your account" under it is the way back. */}
+            <div className="hub-company">
+              <CompanyMark company={d.company} />
+              <span className="hub-company-text"><strong>{d.company.name}</strong><span>{d.kind === "client" ? "Your account" : d.kind === "quote" ? `Quote #${d.quote.number}` : `Invoice #${d.invoice.number}`}</span></span>
+            </div>
+            {/* Words beside the icons on a computer; on a phone round buttons, the words still their names. */}
+            {d.company.phone && (
+              <a className="hub-head-btn no-print" href={`tel:${d.company.phone}`}>
+                <Icon name="phone" size={18} />
+                <span className="hub-head-text"><span className="sr-only">Call {d.company.name} at </span>{d.company.phone}</span>
               </a>
-            ) : (
-              <div className="hub-company">
-                <CompanyMark company={d.company} />
-                <span className="stack-xs"><strong>{d.company.name}</strong><span className="hub-meta">{d.kind === "client" ? "Your account" : d.kind === "quote" ? `Quote #${d.quote.number}` : `Invoice #${d.invoice.number}`}</span></span>
-              </div>
             )}
-            {d.company.phone && <a className="hub-icon-btn no-print" href={`tel:${d.company.phone}`} aria-label={`Call ${d.company.name}`}><Icon name="phone" size={20} /></a>}
-            {!preview && <button type="button" className="hub-icon-btn no-print" onClick={() => setMessaging({})} aria-label={`Message ${d.company.name}`}><Icon name="messages" size={20} /></button>}
-            {d.kind !== "client" && <button type="button" className="hub-icon-btn no-print" onClick={print} aria-label="Print or save as PDF"><Icon name="printer" size={20} /></button>}
+            {!preview && (
+              <button type="button" className="hub-head-btn no-print" onClick={() => setMessaging({})}>
+                <Icon name="messages" size={18} />
+                <span className="hub-head-text">Message us<span className="sr-only">: {d.company.name}</span></span>
+              </button>
+            )}
+            {d.kind !== "client" && <button type="button" className="hub-head-btn hub-head-icon no-print" onClick={print} aria-label="Print or save as PDF"><Icon name="printer" size={18} /></button>}
           </div>
         </header>
       )}
       <div className="public-wrap hub-wrap">
         {view.isPending && <HubSkeleton />}
         {view.error && (
-          <div className="card">
-            <div className="empty-state error-state">
-              <span className="empty-icon"><Icon name="link" size={24} /></span>
-              <h3>This link isn't working</h3>
-              <p>{(view.error as Error).message}</p>
-              {!(view.error instanceof ApiError && view.error.status < 500) && <div className="actions"><Button icon="refresh" onClick={() => view.refetch()}>Try again</Button></div>}
-            </div>
+          <div className="hub-card hub-done hub-broken" role="alert">
+            <span className="hub-done-mark" data-tone="quiet"><Icon name="link" size={26} /></span>
+            <h1>This link isn't working</h1>
+            <p>{(view.error as Error).message}</p>
+            {!(view.error instanceof ApiError && view.error.status < 500) && <Button icon="refresh" onClick={() => view.refetch()}>Try again</Button>}
           </div>
         )}
         {d && (
           <>
-            {preview && <div className="callout callout-info no-print"><Icon name="eye" size={20} /><div className="grow">Preview: this is what your client sees.</div></div>}
+            {preview && <div className="callout callout-info no-print"><Icon name="eye" size={16} /><div className="grow">Preview: this is what your client sees.</div></div>}
             {home && <a className="hub-back no-print" href={home}><Icon name="chevronLeft" size={16} />Your account</a>}
             {d.kind === "quote" && <QuoteHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} onPrint={print} />}
             {d.kind === "invoice" && <InvoiceHub token={token} data={d} onChanged={() => view.refetch()} printing={printable} />}
@@ -311,20 +325,20 @@ function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing
           counts.set(label, (counts.get(label) ?? 0) + Number(s.value));
         }
         return (
-          <section key={d.id} className="card hub-drawing">
+          <section key={d.id} className="hub-card hub-drawing">
             {d.has_picture && !broken.includes(d.id) && (
               <img src={`/api/hub/${token}/drawings/${d.id}.jpg`} alt={`Map of the measured areas: ${d.title}`} onError={() => setBroken((b) => [...b, d.id])} />
             )}
-            <div className="card-pad stack-sm">
-              <strong>{d.title}</strong>
-              <div className="totals">
+            <div className="hub-drawing-body">
+              <h2 className="hub-card-title">{d.title}</h2>
+              <div className="hub-totals">
                 {measured.map((s, i) => <div key={i} className="line"><span>{s.label}{mixed && s.kind === "Area" && s.pitch ? ` (${s.pitch} pitch)` : ""}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
                 {[...counts].map(([label, n]) => <div key={label} className="line"><span>{label}</span><span className="tabular">{n.toLocaleString()}</span></div>)}
-                {cutouts.map((s, i) => <div key={`cut${i}`} className="line muted"><span>{/^Cutout \d+$/.test(s.label) ? "Left out" : `${s.label} (left out)`}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
+                {cutouts.map((s, i) => <div key={`cut${i}`} className="line hub-quiet"><span>{/^Cutout \d+$/.test(s.label) ? "Left out" : `${s.label} (left out)`}</span><span className="tabular">{sizeText(s.value, s.unit)}</span></div>)}
                 {measured.filter((s) => s.kind === "Area").length > 1 && <div className="line grand"><span>Total area</span><span className="tabular">{sizeText(d.total_area_sqft, "sq ft")}</span></div>}
                 {d.roofing_squares && <div className="line"><span>Roofing squares{mixed ? "" : d.roof_pitch ? ` (${d.roof_pitch} pitch)` : ""}</span><span className="tabular">{Number(d.roofing_squares).toLocaleString()}</span></div>}
               </div>
-              <span className="muted small">Measured from aerial imagery{d.imagery ? ` (${d.imagery})` : ""}. Sizes on site may differ slightly.</span>
+              <p className="hub-fine">Measured from aerial imagery{d.imagery ? ` (${d.imagery})` : ""}. Sizes on site may differ slightly.</p>
             </div>
           </section>
         );
@@ -337,7 +351,7 @@ function HubDrawings({ token, drawings }: { token: string; drawings?: HubDrawing
 function HubFieldList({ fields }: { fields?: ReadonlyArray<{ label: string; text: string }> }) {
   if (!fields?.length) return null;
   return (
-    <dl className="kv" style={{ margin: "8px 0 0" }}>
+    <dl className="hub-facts">
       {fields.map((f) => (
         <Fragment key={f.label}>
           <dt>{f.label}</dt>
@@ -348,24 +362,26 @@ function HubFieldList({ fields }: { fields?: ReadonlyArray<{ label: string; text
   );
 }
 
+/** The page's shape while it loads: the greeting or title, then two cards. */
 function HubSkeleton() {
   return (
-    <div className="skeleton-wrap stack-lg" aria-busy="true" role="status">
+    <div className="hub-skeleton" aria-busy="true" role="status">
       <span className="sr-only">Loading…</span>
-      <div className="row"><Skeleton width={40} height={40} radius={8} /><span className="stack-sm" style={{ flex: 1 }}><Skeleton width={160} height={14} /><Skeleton width={220} height={10} /></span></div>
-      <div className="card card-pad stack-sm"><Skeleton width={120} height={10} /><Skeleton width="60%" height={24} /><Skeleton width="40%" height={10} /></div>
-      <div className="card">{[0, 1, 2].map((i) => <div key={i} className="card-row"><span className="grow stack-sm"><Skeleton width="50%" /><Skeleton width="30%" height={10} /></span><Skeleton width={70} /></div>)}</div>
+      <Skeleton width={180} height={28} radius={8} />
+      <div className="hub-card hub-skeleton-card"><Skeleton width={140} height={10} /><Skeleton width="62%" height={20} /><Skeleton width="38%" height={12} /><Skeleton width="100%" height={40} radius={12} /></div>
+      <div className="hub-card hub-skeleton-card">{[0, 1, 2].map((i) => <div key={i} className="hub-skeleton-row"><span><Skeleton width="55%" /><Skeleton width="30%" height={10} /></span><Skeleton width={64} /></div>)}</div>
     </div>
   );
 }
 
+/** Something finished (signed, sent, tipped): a check in the business's color, what happened, what's next. */
 function Done({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
-      <span className="success-mark"><Icon name="check" size={30} bold /></span>
-      <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>{title}</h2>
-      {children && <p className="muted" style={{ margin: 0, maxWidth: 440 }}>{children}</p>}
-      {action && <div className="no-print" style={{ marginTop: 6 }}>{action}</div>}
+    <div className="hub-card hub-done">
+      <span className="hub-done-mark"><Icon name="check" size={30} bold /></span>
+      <h2>{title}</h2>
+      {children && <p>{children}</p>}
+      {action && <div className="hub-done-actions no-print">{action}</div>}
     </div>
   );
 }
@@ -376,9 +392,10 @@ function QuoteHub({ token, data, onChanged, printing, onPrint }: { token: string
   // A price range that was turned down (marked lost or archived) keeps its exact price off the page.
   if (data.quote.total == null) {
     return (
-      <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }}>
-        <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>This estimate isn't open anymore</h2>
-        <p className="muted" style={{ margin: 0, maxWidth: 440 }}>Still thinking about it? Send {data.company.name} a message with the button at the top, and they'll get back to you.</p>
+      <div className="hub-card hub-done">
+        <span className="hub-done-mark" data-tone="quiet"><Icon name="clock" size={26} /></span>
+        <h1>This estimate isn't open anymore</h1>
+        <p>Still thinking about it? Send {data.company.name} a message with the button at the top, and they'll get back to you.</p>
       </div>
     );
   }
@@ -423,17 +440,21 @@ function OptionCard({ option, price, picked, onPick, words, disabled = false }: 
       <div className={styles.optionPictureBox}>
         <OptionPicture option={option} />
       </div>
-      <div className={styles.optionBody}>
+      <div className={styles.optionHead}>
         {option.tier && <span className={styles.tierChip}>{option.tier}</span>}
         <h3 className={styles.optionName}>{option.name}</h3>
+      </div>
+      {/* A pickable card's radio, for the eye only: the button below is what's pressed. */}
+      {onPick && <span className={styles.radio} data-on={picked || undefined} aria-hidden="true" />}
+      <div className={styles.optionBody}>
         {option.highlights.length > 0 && (
           <ul className={styles.highlights}>
             {option.highlights.map((h, i) => (
-              <li key={i}><Icon name="check" size={14} bold /><span>{h}</span></li>
+              <li key={i}><Icon name="check" size={16} bold /><span>{h}</span></li>
             ))}
           </ul>
         )}
-        {option.warranty.trim() && <p className={styles.warranty}>{option.warranty.trim()}</p>}
+        {option.warranty.trim() && <p className={styles.warranty}><Shield /><span>{option.warranty.trim()}</span></p>}
         <div className={styles.optionPrice} data-ask={price.ask || undefined}>{price.text}</div>
         {onPick && (
           <Button
@@ -465,7 +486,7 @@ function OptionCard({ option, price, picked, onPick, words, disabled = false }: 
  * later. On a computer the details are on the left and the price and buttons on the right; on a phone
  * it's one column (range.module.css). The exact price never reaches this page.
  */
-function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; data: QuoteView; onChanged: () => void; onAsk: () => void; onPrint: () => void }) {
+function RangeHub({ token, data, onChanged, onAsk, onPrint, children }: { token: string; data: QuoteView; onChanged: () => void; onAsk: () => void; onPrint: () => void; children?: ReactNode }) {
   const q = data.quote;
   const range = q.range!;
   const company = data.company;
@@ -551,7 +572,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
       </header>
 
       <main className={styles.main}>
-        {data.preview && <div className="callout callout-info no-print"><Icon name="eye" size={20} /><div className="grow">Preview: this is what your client sees.</div></div>}
+        {data.preview && <div className="callout callout-info no-print"><Icon name="eye" size={16} /><div className="grow">Preview: this is what your client sees.</div></div>}
         {data.home && <a className="hub-back no-print" href={data.home}><Icon name="chevronLeft" size={16} />Your account</a>}
 
         <section className={styles.intro}>
@@ -667,12 +688,12 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
                     <h2 className={styles.nextTitle}>Ready for the next step?</h2>
                     <p className={styles.nextText}>{words.next}</p>
                     {dates.expired && dates.goodUntil && (
-                      <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
+                      <div className="callout callout-warning"><Icon name="clock" size={16} /><div className="grow">This range was good until {dates.goodUntil}. You can still say yes, and we'll confirm the price.</div></div>
                     )}
                     {leanedOn && <p className={styles.leaning}>Leaning toward <strong>{leanedOn.tier ? `${leanedOn.tier} · ` : ""}{leanedOn.name}</strong></p>}
                     <Button variant="primary" size="lg" block className={styles.yes} loading={accept.isPending} onClick={yes}>Yes, send someone out</Button>
                     <Button size="lg" block className={styles.ask} onClick={ask}>I have a question</Button>
-                    {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={20} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
+                    {previewNote && <div className="callout callout-info" role="status"><Icon name="eye" size={16} /><div className="grow">This is a preview, so nothing was sent. Your client's own link sends it.</div></div>}
                     <FormError error={accept.error} />
                     <span className={styles.fine}>Saying yes doesn't commit you to anything.</span>
                   </>
@@ -724,6 +745,7 @@ function RangeHub({ token, data, onChanged, onAsk, onPrint }: { token: string; d
           <span className={styles.private}>A private link{clientName ? ` for ${clientName}` : ""}. Powered by Crewtavo.</span>
         </div>
       </footer>
+      {children}
     </div>
   );
 }
@@ -755,9 +777,14 @@ function RoofMeasured({ token, roof, included, timeZone, today }: { token: strin
   );
 }
 
+/** A warranty's shield. */
+function Shield() {
+  return <Icon name="shieldCheck" size={14} />;
+}
+
 /** A certificate (licensed) or a shield with a check (insured). */
-function BadgeIcon({ kind }: { kind: TrustBadge["kind"] }) {
-  return <Icon name={kind === "license" ? "certificate" : "shieldCheck"} size={22} />;
+function BadgeIcon({ kind, size = 22 }: { kind: TrustBadge["kind"]; size?: number }) {
+  return <Icon name={kind === "license" ? "certificate" : "shieldCheck"} size={size} />;
 }
 
 /**
@@ -767,14 +794,9 @@ function BadgeIcon({ kind }: { kind: TrustBadge["kind"] }) {
 function AutopayOffer({ home, required }: { home: string; required: boolean }) {
   return (
     <section className="hub-card hub-todo no-print" aria-label="Autopay">
-      <div className="hub-todo-head">
-        <span className="hub-icon-tile brand"><Icon name="card" size={20} /></span>
-        <span className="grow stack-xs">
-          <strong className="hub-title">{required ? "Finish setting up: add your card" : "Pay automatically after each visit"}</strong>
-          <span className="hub-meta">{required ? CARD_REQUIRED : "Save a card once, and you won't have to pay each invoice."}</span>
-        </span>
-      </div>
-      <a className="hub-btn hub-btn-brand" href={`${home}?view=autopay`}>{required ? "Add your card" : "Set up autopay"}</a>
+      <strong className="hub-title">{required ? "Finish setting up: add your card" : "Pay automatically after each visit"}</strong>
+      <span className="hub-sub">{required ? CARD_REQUIRED : "Save a card once, and you won't have to pay each invoice."}</span>
+      <a className="hub-btn hub-btn-sm" href={`${home}?view=autopay`}>{required ? "Add your card" : "Set up autopay"}</a>
     </section>
   );
 }
@@ -794,16 +816,16 @@ function SignedQuote({ token, data, printing, onPrint }: { token: string; data: 
   // The deposit asked for as they approved, still to pay (its invoice's own page pays it).
   const owed = (data.deposit?.balance_due ?? 0) > 0;
   return (
-    <>
+    <div className="hub-column">
       <Done
         title={`${signed ? "Signed" : "Approved"}${when ? ` on ${formatDate(dateIn(when, tz))}` : ""}`}
         action={
-          <div className="row wrap" style={{ gap: 8, justifyContent: "center" }}>
-            {owed && <a className="hub-btn hub-btn-brand" href={data.deposit!.link}>Pay the {formatMoneyCents(data.deposit!.balance_due)} deposit</a>}
+          <>
+            {owed && <a className="hub-btn" href={data.deposit!.link}>Pay the {formatMoneyCents(data.deposit!.balance_due)} deposit</a>}
             {/* Owed, with nothing to pay it with here: its invoice to look at, and the words below say what happens next. */}
-            {data.deposit_due && <a className="btn" href={data.deposit_due.link}>View the deposit invoice</a>}
-            <Button icon="printer" onClick={onPrint}>Print or save PDF</Button>
-          </div>
+            {data.deposit_due && <a className="hub-btn hub-btn-ghost" href={data.deposit_due.link}>View the deposit invoice</a>}
+            <button type="button" className="hub-btn hub-btn-ghost" onClick={onPrint}><Icon name="printer" size={18} />Print or save PDF</button>
+          </>
         }
       >
         {signedThanks(data)}
@@ -813,11 +835,11 @@ function SignedQuote({ token, data, printing, onPrint }: { token: string; data: 
         <DocumentSheet {...doc} headingLevel={3} />
       </section>
       {contract && <TermsToRead contract={contract} />}
-      {(q.portal_fields?.length ?? 0) > 0 && <section className="card card-pad"><HubFieldList fields={q.portal_fields} /></section>}
+      {(q.portal_fields?.length ?? 0) > 0 && <section className="hub-card hub-pad"><HubFieldList fields={q.portal_fields} /></section>}
       <HubDrawings token={token} drawings={data.drawings} />
       <HubReviews reviews={data.reviews} />
       {printing && <PrintableDocument {...doc} />}
-    </>
+    </div>
   );
 }
 
@@ -878,6 +900,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
   const missing = awaitingInitials(contract, initialedNow);
   const stamped = useMemo(() => (contract ? withInitials(contract, initials ? { image: initials, date: stampedAt } : null, initialedNow) : null), [contract, initials, stampedAt, initialedNow]);
   const choice = offers ? hubChoice(data, optionId) : null;
+  const badges = trustBadges(hubTemplate(data));
   const agreeKey = `${optionId ?? ""}|${totals.total}|${contract?.hash ?? ""}`;
   const agree = agreed === agreeKey;
   // Everything signing needs: the box ticked, their name, their signature and every initial asked for.
@@ -899,7 +922,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
   const depositDue = data.deposit_online ? depositToBook(q.deposit_amount, totals.total, q.deposit_percent) : 0;
   // Approve goes on to the deposit whenever one's due (Approve and set up autopay goes to the card instead).
   const approveLabel = depositDue > 0 ? "Approve and pay deposit" : q.change_order_for ? "Approve change order" : "Approve quote";
-  const depositNote = depositDue > 0 && <p className="muted small" style={{ margin: 0 }}>The {formatMoneyCents(depositDue)} deposit is paid next, by card or bank, on Stripe's secure page.</p>;
+  const depositNote = depositDue > 0 && <p className="hub-fine">The {formatMoneyCents(depositDue)} deposit is paid next, by card or bank, on Stripe's secure page.</p>;
   // `withAutopay`: "Approve and set up autopay" was pressed, so it goes on to saving a card.
   const approve = useMutation({
     meta: { inline: true },
@@ -979,216 +1002,261 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
               : "Draw your initials above, then add them to each section that asks."
             : null
         : null;
-  const lineCard = (
-    <LinesCard
-      token={token}
-      data={data}
-      lines={shownLines}
-      optionId={offers ? optionId : null}
-      chosen={chosen}
-      onChoose={setChosen}
-      // What's signed is what was reviewed: once signing, the add-ons and the promo code are changed from the steps before.
-      editable={open && (current !== "sign" || steps.length === 1)}
-      totals={totals}
-      expired={expired}
-      onChanged={onChanged}
-    />
+  // What's signed is what was reviewed: once signing, the add-ons and the promo code are changed from the steps before.
+  const editable = open && (current !== "sign" || steps.length === 1);
+  const lineCard = <LinesCard data={data} lines={shownLines} chosen={chosen} onChoose={setChosen} editable={editable} title={offers && option ? `What's in ${option.name}` : "What's included"} />;
+  const closed = !waiting && !data.preview;
+  // Going through the steps (not asking for changes, and not answered already).
+  const flow = !requestChanges.isSuccess && !closed && mode === "approve";
+
+  // What it comes to, beside the steps on a computer and after them on a phone: the choice, the
+  // totals with the promo code, and (going through the steps) the button on to the next one, which
+  // a phone keeps in a bar at the bottom of the screen.
+  const summary = (
+    <div className="hub-card hub-summary">
+      {choice && option && (
+        <div className="hub-summary-choice">
+          <span className="hub-kick">Your choice</span>
+          <div className="hub-summary-pick">
+            <span className="hub-choice-thumb"><OptionPicture option={option} /></span>
+            <span className="hub-summary-name">
+              <strong>{option.name}</strong>
+              {(option.tier || option.warranty.trim()) && <span>{[option.tier, option.warranty.trim()].filter(Boolean).join(" · ")}</span>}
+            </span>
+            {open && current !== "choose" && <button type="button" className="hub-link" onClick={() => goTo("choose")}>Change<span className="sr-only"> the option</span></button>}
+          </div>
+        </div>
+      )}
+      <QuoteTotals token={token} data={data} lines={shownLines} optionId={offers ? optionId : null} chosen={chosen} editable={editable} totals={totals} expired={expired} onChanged={onChanged} />
+    </div>
+  );
+  const barLabel = `${option ? option.name : "Total"}${q.recurrence_rule ? " per visit" : ""}${totals.tax > 0 ? " · with tax" : ""}`;
+  const bar = (
+    <div className="hub-bar no-print" data-pinned={nextStep ? "" : undefined}>
+      {nextStep && (
+        // The total again over the button, for the eye: the summary says it.
+        <div className="hub-bar-total" aria-hidden="true">
+          <span>{barLabel}</span>
+          <strong>{formatMoneyCents(totals.total)}</strong>
+        </div>
+      )}
+      {nextStep && (
+        <Button variant="primary" size="lg" block disabled={Boolean(hold)} onClick={() => goTo(nextStep)}>
+          {nextLabel}
+        </Button>
+      )}
+      {nextStep && hold && <p className="hub-hold" role="status">{hold}</p>}
+      {(at > 0 || open) && (
+        <div className="hub-bar-links">
+          {at > 0 && <button type="button" className="hub-link" onClick={() => goTo(steps[at - 1]!)}><Icon name="chevronLeft" size={16} />Back</button>}
+          {open && <button type="button" className="hub-link" onClick={() => setMode("changes")}>Request changes</button>}
+        </div>
+      )}
+    </div>
   );
 
   return (
     <>
-      <section className="card card-pad stack-sm">
-        <span className="muted">Quote #{q.number}{q.client ? ` for ${q.client.display_name}` : ""}</span>
-        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{q.title}</h1>
-        {q.property && <span className="muted">{q.property.line1}{q.property.city ? `, ${q.property.city}` : ""}</span>}
-        {q.message && <p className="pre-wrap" style={{ margin: "8px 0 0" }}>{q.message}</p>}
-        <HubFieldList fields={q.portal_fields} />
-      </section>
+      <div className="hub-layout" data-single={requestChanges.isSuccess || undefined}>
+        <div className="hub-main">
+          <section className="hub-card hub-intro">
+            <span className="hub-kick">Quote #{q.number}{q.client ? ` for ${q.client.display_name}` : ""}{q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
+            <h1>{q.title}</h1>
+            {q.property && <span className="hub-intro-place">{q.property.line1}{q.property.city ? `, ${q.property.city}` : ""}</span>}
+            {q.message && <p className="hub-intro-note pre-wrap">{q.message}</p>}
+            <HubFieldList fields={q.portal_fields} />
+          </section>
 
-      <HubDrawings token={token} drawings={data.drawings} />
+          <HubDrawings token={token} drawings={data.drawings} />
 
-      {/* Without options, what's on it and its add-ons, always in view. */}
-      {!offers && lineCard}
+          {/* Without options, what's on it and its add-ons, always in view: under the steps while going through them. */}
+          {!offers && !flow && lineCard}
 
-      <HubReviews reviews={data.reviews} />
-
-      {requestChanges.isSuccess ? (
-        <Done title="Request sent">{data.company.name} will review your notes and follow up with an updated quote.</Done>
-      ) : !waiting && !data.preview ? (
-        <>
-          {offers && <OptionsCompared options={options} optionId={q.option_id ?? null} />}
-          {offers && lineCard}
-          <div className="card card-pad muted">This quote is no longer open. Contact {data.company.name} if you have questions.</div>
-        </>
-      ) : mode === "changes" ? (
-        <section className="card card-pad stack no-print">
-          <h2 className="hub-step-title">Request changes</h2>
-          <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); requestChanges.mutate(); }}>
-            <Field label="What would you like changed?" requiredMessage="Tell us what you'd like changed, and we'll update the quote."><textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></Field>
-            <FormError error={requestChanges.error} />
-            <div className="hub-step-actions">
-              <Button type="submit" size="lg" icon="send" loading={requestChanges.isPending}>Send request</Button>
-              <Button size="lg" variant="ghost" onClick={() => setMode("approve")}>Back to the quote</Button>
-            </div>
-          </form>
-        </section>
-      ) : (
-        <>
-          {expired && <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">This quote's valid-until date has passed. You can still approve it, and {data.company.name} will confirm the price.</div></div>}
-          {q.status === "changes_requested" && <div className="callout"><Icon name="messages" size={20} /><div className="grow">You've asked for changes. {data.company.name} may send an updated quote, or you can approve this one as it is.</div></div>}
-
-          {steps.length > 1 && (
-            <ol className="hub-steps no-print" aria-label="Steps">
-              {steps.map((s, i) => (
-                <li key={s} aria-current={s === current ? "step" : undefined} data-done={i < at || undefined}>
-                  {i < at ? (
-                    <button type="button" onClick={() => goTo(s)}>
-                      <span className="hub-step-n"><Icon name="check" size={14} bold /></span>
-                      {STEP_LABELS[s]}
-                      <span className="sr-only"> (done, go back)</span>
-                    </button>
-                  ) : (
-                    <span>
-                      <span className="hub-step-n">{i + 1}</span>
-                      {STEP_LABELS[s]}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
-
-          {message && current !== "sign" && (
-            <div className="callout callout-warning no-print" role="alert">
-              <Icon name="alert" size={20} />
-              <div className="grow">{message}</div>
-            </div>
-          )}
-
-          {current === "choose" && (
+          {requestChanges.isSuccess ? (
+            <Done title="Request sent">{data.company.name} will review your notes and follow up with an updated quote.</Done>
+          ) : closed ? (
             <>
-              <section className="card card-pad stack" aria-labelledby="hub-choose">
-                <div className="stack-xs">
-                  <h2 id="hub-choose" ref={heading} tabIndex={-1} className="hub-step-title">Choose your option</h2>
-                  <p className="muted" style={{ margin: 0 }}>{options.length} options to compare. Pick one to see what's in it.</p>
-                </div>
-                <div className={styles.optionGrid}>
-                  {options.map((o) => (
-                    <OptionCard
-                      key={o.id}
-                      option={o}
-                      price={o.total !== null ? { text: formatMoneyCents(o.total) } : { text: "Ask us about this one", ask: true }}
-                      picked={o.id === optionId}
-                      onPick={() => pick(o.id)}
-                      disabled={o.total === null}
-                      words={["Choose this one", "Your choice"]}
-                    />
-                  ))}
-                </div>
-              </section>
-              {option && lineCard}
+              {offers && <OptionsCompared options={options} optionId={q.option_id ?? null} />}
+              {offers && lineCard}
+              <p className="hub-card hub-pad hub-note">This quote is no longer open. Contact {data.company.name} if you have questions.</p>
             </>
-          )}
-
-          {current !== "choose" && choice && option && (
-            <div className="card hub-choice-summary">
-              <span className="hub-choice-thumb"><OptionPicture option={option} /></span>
-              <span className="grow stack-xs">
-                <span className="hub-meta">Your choice</span>
-                <strong>{choiceLabel(choice)}</strong>
-              </span>
-              <strong className="hub-amount">{formatMoneyCents(totals.total)}{q.recurrence_rule ? " per visit" : ""}</strong>
-              {open && <Button size="sm" variant="ghost" onClick={() => goTo("choose")}>Change<span className="sr-only"> the option</span></Button>}
-            </div>
-          )}
-
-          {current === "review" && (
-            <>
-              <section className="card card-pad stack-xs" aria-labelledby="hub-review">
-                <h2 id="hub-review" ref={heading} tabIndex={-1} className="hub-step-title">Review the agreement</h2>
-                <p className="muted" style={{ margin: 0 }}>
-                  This is what you'll sign: the estimate{contract?.sections.length ? " and its terms" : ""}, as it prints.
-                  {asking.length ? " Add your initials where it asks, below." : ""}
-                </p>
-              </section>
-              <section className="hub-document" aria-label="The agreement">
-                {/* Its headings go under the step's. */}
-                <DocumentSheet {...doc} headingLevel={3} />
-              </section>
-              {contract && <TermsToRead contract={contract} />}
-              {asking.length > 0 && <InitialsCard sections={asking} initials={initials} onInitials={drawInitials} initialed={initialedNow} onInitial={initial} />}
-            </>
-          )}
-
-          {current === "sign" && (
-            <section className="card card-pad stack no-print" aria-labelledby="hub-sign">
-              <h2 id="hub-sign" ref={heading} tabIndex={-1} className="hub-step-title">{steps.length > 1 ? "Sign" : "Approve"}</h2>
-              {data.preview ? (
-                <div className="callout callout-info"><Icon name="eye" size={20} /><div className="grow">Preview: your client signs here.</div></div>
-              ) : (
-                <form
-                  className="stack-sm"
-                  onSubmit={(e: FormEvent) => {
-                    e.preventDefault();
-                    // Which button sent it: Enter in a field is the first, Approve.
-                    approve.mutate((e.nativeEvent as SubmitEvent).submitter?.dataset.autopay === "1");
-                  }}
-                >
-                  <Field label="Your full name" requiredMessage="Enter your full name, as you'd sign it."><input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></Field>
-                  <div className="field">
-                    <span>Your signature</span>
-                    <SignaturePad value={signature} onChange={setSignature} label="Sign with your finger or mouse" />
-                  </div>
-                  <label className="checkbox">
-                    <input type="checkbox" checked={agree} onChange={(e) => setAgreed(e.target.checked ? agreeKey : null)} />
-                    <span>
-                      I approve this {q.change_order_for ? "change order" : "quote"} for {formatMoneyCents(totals.total)}{q.recurrence_rule ? ` per visit, ${scheduleText(q.recurrence_rule, q.active_months).replace(/^./, (c) => c.toLowerCase())}` : ""}
-                      {choice ? ` (${choiceLabel(choice)})` : ""}
-                      {steps.includes("review") ? ", agree to the terms I reviewed," : ""} and authorize {data.company.name} to do {q.change_order_for ? "this added work" : "the work"}.
-                    </span>
-                  </label>
-                  <FormError error={approve.error} />
-                  {approve.error instanceof ApiError && approve.error.status === 400 && steps[0] !== "sign" && (
-                    <Button icon="refresh" style={{ justifySelf: "start" }} onClick={() => goTo(steps[0]!)}>Look it over again</Button>
-                  )}
-                  {data.card_required ? (
-                    // The business needs a card on file: approving always goes on to adding one.
-                    <>
-                      <div className="callout callout-info"><Icon name="card" size={20} /><div className="grow">A card on file is required for service. After you sign, you'll add yours on Stripe's secure page.</div></div>
-                      <Button type="submit" variant="primary" size="lg" icon="card" data-autopay="1" loading={approve.isPending} disabled={!ready || approve.isPending}>Approve and add your card</Button>
-                    </>
-                  ) : data.autopay_offer ? (
-                    // Work charged by the visit: approving can go straight on to saving a card for it.
-                    <>
-                      {depositNote}
-                      <div className="hub-step-actions">
-                        <Button type="submit" variant="primary" size="lg" icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending && !approve.variables} disabled={!ready || approve.isPending}>{approveLabel}</Button>
-                        <Button type="submit" data-autopay="1" size="lg" icon="card" loading={approve.isPending && approve.variables === true} disabled={!ready || approve.isPending}>Approve and set up autopay</Button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {depositNote}
-                      <Button type="submit" variant="primary" size="lg" icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending} disabled={!ready}>{approveLabel}</Button>
-                    </>
-                  )}
-                </form>
-              )}
+          ) : mode === "changes" ? (
+            <section className="hub-card hub-pad hub-changes no-print" aria-labelledby="hub-changes">
+              <h2 id="hub-changes" className="hub-step-title">Request changes</h2>
+              <form className="hub-form" onSubmit={(e: FormEvent) => { e.preventDefault(); requestChanges.mutate(); }}>
+                <Field label="What would you like changed?" requiredMessage="Tell us what you'd like changed, and we'll update the quote."><textarea className="textarea" value={changes} onChange={(e) => setChanges(e.target.value)} required minLength={3} maxLength={2000} placeholder="Could you add the side walkway? Can we start after the 15th?" /></Field>
+                <FormError error={requestChanges.error} />
+                <div className="hub-form-actions">
+                  <Button type="submit" variant="primary" size="lg" icon="send" loading={requestChanges.isPending}>Send request</Button>
+                  <Button size="lg" variant="ghost" onClick={() => setMode("approve")}>Back to the quote</Button>
+                </div>
+              </form>
             </section>
+          ) : (
+            <>
+              {expired && <div className="callout callout-warning"><Icon name="clock" size={16} /><div className="grow">This quote's valid-until date has passed. You can still approve it, and {data.company.name} will confirm the price.</div></div>}
+              {q.status === "changes_requested" && <div className="callout"><Icon name="messages" size={16} /><div className="grow">You've asked for changes. {data.company.name} may send an updated quote, or you can approve this one as it is.</div></div>}
+
+              {steps.length > 1 && (
+                <ol className="hub-steps no-print" aria-label="Steps">
+                  {steps.map((s, i) => (
+                    <li key={s} aria-current={s === current ? "step" : undefined} data-done={i < at || undefined}>
+                      {i < at ? (
+                        <button type="button" onClick={() => goTo(s)}>
+                          <span className="hub-step-n"><Icon name="check" size={13} bold /></span>
+                          {STEP_LABELS[s]}
+                          <span className="sr-only"> (done, go back)</span>
+                        </button>
+                      ) : (
+                        <span>
+                          <span className="hub-step-n">{i + 1}</span>
+                          {STEP_LABELS[s]}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+
+              {message && current !== "sign" && (
+                <div className="callout callout-warning no-print" role="alert">
+                  <Icon name="alert" size={16} />
+                  <div className="grow">{message}</div>
+                </div>
+              )}
+
+              {!offers && lineCard}
+
+              {current === "choose" && (
+                <>
+                  <section className="hub-step" aria-labelledby="hub-choose">
+                    <div className="hub-step-head">
+                      <h2 id="hub-choose" ref={heading} tabIndex={-1} className="hub-step-title">Choose your option</h2>
+                      <p>{options.length} options to compare. Pick one to see what's in it.</p>
+                    </div>
+                    <div className={styles.optionGrid}>
+                      {options.map((o) => (
+                        <OptionCard
+                          key={o.id}
+                          option={o}
+                          price={o.total !== null ? { text: formatMoneyCents(o.total) } : { text: "Ask us about this one", ask: true }}
+                          picked={o.id === optionId}
+                          onPick={() => pick(o.id)}
+                          disabled={o.total === null}
+                          words={["Choose this one", "Your choice"]}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                  {option && lineCard}
+                </>
+              )}
+
+              {/* On a phone, the choice above the steps after choosing (a computer has it in the summary). */}
+              {current !== "choose" && choice && option && (
+                <div className="hub-card hub-choice-strip">
+                  <span className="hub-choice-thumb"><OptionPicture option={option} /></span>
+                  <span className="hub-choice-text">
+                    <span>Your choice</span>
+                    <strong>{choiceLabel(choice)} · {formatMoneyCents(totals.total)}{q.recurrence_rule ? " per visit" : ""}</strong>
+                  </span>
+                  {open && <button type="button" className="hub-link" onClick={() => goTo("choose")}>Change<span className="sr-only"> the option</span></button>}
+                </div>
+              )}
+
+              {current === "review" && (
+                <>
+                  <section className="hub-step-head" aria-labelledby="hub-review">
+                    <h2 id="hub-review" ref={heading} tabIndex={-1} className="hub-step-title">Review the agreement</h2>
+                    <p>
+                      This is what you'll sign: the estimate{contract?.sections.length ? " and its terms" : ""}, as it prints.
+                      {asking.length ? " Add your initials where it asks, below." : ""}
+                    </p>
+                  </section>
+                  <section className="hub-document" aria-label="The agreement">
+                    {/* Its headings go under the step's. */}
+                    <DocumentSheet {...doc} headingLevel={3} />
+                  </section>
+                  {contract && <TermsToRead contract={contract} />}
+                  {asking.length > 0 && <InitialsCard sections={asking} initials={initials} onInitials={drawInitials} initialed={initialedNow} onInitial={initial} />}
+                </>
+              )}
+
+              {current === "sign" && (
+                <section className="hub-card hub-sign no-print" aria-labelledby="hub-sign">
+                  <h2 id="hub-sign" ref={heading} tabIndex={-1} className="hub-step-title">{steps.length > 1 ? "Sign" : "Approve"}</h2>
+                  {data.preview ? (
+                    <div className="callout callout-info"><Icon name="eye" size={16} /><div className="grow">Preview: your client signs here.</div></div>
+                  ) : (
+                    <form
+                      className="hub-form"
+                      onSubmit={(e: FormEvent) => {
+                        e.preventDefault();
+                        // Which button sent it: Enter in a field is the first, Approve.
+                        approve.mutate((e.nativeEvent as SubmitEvent).submitter?.dataset.autopay === "1");
+                      }}
+                    >
+                      <Field label="Your full name" requiredMessage="Enter your full name, as you'd sign it."><input className="input" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} maxLength={120} autoComplete="name" /></Field>
+                      <div className="field hub-signature">
+                        <span>Your signature</span>
+                        <SignaturePad value={signature} onChange={setSignature} label="Sign with your finger or mouse" />
+                      </div>
+                      <label className="checkbox">
+                        <input type="checkbox" checked={agree} onChange={(e) => setAgreed(e.target.checked ? agreeKey : null)} />
+                        <span>
+                          I approve this {q.change_order_for ? "change order" : "quote"} for {formatMoneyCents(totals.total)}{q.recurrence_rule ? ` per visit, ${scheduleText(q.recurrence_rule, q.active_months).replace(/^./, (c) => c.toLowerCase())}` : ""}
+                          {choice ? ` (${choiceLabel(choice)})` : ""}
+                          {steps.includes("review") ? ", agree to the terms I reviewed," : ""} and authorize {data.company.name} to do {q.change_order_for ? "this added work" : "the work"}.
+                        </span>
+                      </label>
+                      <FormError error={approve.error} />
+                      {approve.error instanceof ApiError && approve.error.status === 400 && steps[0] !== "sign" && (
+                        <Button icon="refresh" style={{ justifySelf: "start" }} onClick={() => goTo(steps[0]!)}>Look it over again</Button>
+                      )}
+                      {data.card_required ? (
+                        // The business needs a card on file: approving always goes on to adding one.
+                        <>
+                          <div className="callout callout-info"><Icon name="card" size={16} /><div className="grow">A card on file is required for service. After you sign, you'll add yours on Stripe's secure page.</div></div>
+                          <Button type="submit" variant="primary" size="lg" block icon="card" data-autopay="1" loading={approve.isPending} disabled={!ready || approve.isPending}>Approve and add your card</Button>
+                        </>
+                      ) : data.autopay_offer ? (
+                        // Work charged by the visit: approving can go straight on to saving a card for it.
+                        <>
+                          <div className="hub-form-actions">
+                            <Button type="submit" variant="primary" size="lg" icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending && !approve.variables} disabled={!ready || approve.isPending}>{approveLabel}</Button>
+                            <Button type="submit" data-autopay="1" size="lg" icon="card" loading={approve.isPending && approve.variables === true} disabled={!ready || approve.isPending}>Approve and set up autopay</Button>
+                          </div>
+                          {depositNote}
+                        </>
+                      ) : (
+                        <>
+                          <Button type="submit" variant="primary" size="lg" block icon={depositDue > 0 ? "card" : "check"} loading={approve.isPending} disabled={!ready}>{approveLabel}</Button>
+                          {depositNote}
+                        </>
+                      )}
+                    </form>
+                  )}
+                </section>
+              )}
+            </>
           )}
 
-          <div className="hub-step-actions no-print">
-            {nextStep && (
-              <Button variant="primary" size="lg" icon="arrowRight" disabled={Boolean(hold)} onClick={() => goTo(nextStep)}>
-                {nextLabel}
-              </Button>
+          <HubReviews reviews={data.reviews} />
+        </div>
+
+        {!requestChanges.isSuccess && (
+          <aside className="hub-aside" aria-label="Summary">
+            {summary}
+            {flow && bar}
+            {/* Licensed, Fully insured: under the button (Client-Desktop), when the document style shows them. */}
+            {badges.length > 0 && (
+              <ul className="hub-trust no-print">
+                {badges.map((b) => <li key={b.kind}><BadgeIcon kind={b.kind} size={15} />{b.title}</li>)}
+              </ul>
             )}
-            {at > 0 && <Button size="lg" variant="ghost" icon="chevronLeft" onClick={() => goTo(steps[at - 1]!)}>Back</Button>}
-            {open && <Button size="lg" variant="ghost" onClick={() => setMode("changes")}>Request changes</Button>}
-          </div>
-          {nextStep && hold && <p className="muted small no-print" role="status" style={{ margin: 0 }}>{hold}</p>}
-        </>
-      )}
+          </aside>
+        )}
+      </div>
 
       {/* What prints: the estimate on the business's template, with the option and add-ons the client has picked. */}
       {printing && printable && <PrintableDocument {...doc} />}
@@ -1199,7 +1267,7 @@ function OpenQuote({ token, data, onChanged, printing }: { token: string; data: 
 /** The options a closed quote offered, side by side, the one it showed marked. */
 function OptionsCompared({ options, optionId }: { options: HubOption[]; optionId: string | null }) {
   return (
-    <section className="card card-pad stack" aria-label="The options">
+    <section className="hub-step" aria-label="The options">
       <div className={styles.optionGrid}>
         {options.map((o) => (
           <OptionCard key={o.id} option={o} price={o.total !== null ? { text: formatMoneyCents(o.total) } : { text: "Ask us about this one", ask: true }} picked={o.id === optionId} words={["", ""]} />
@@ -1211,22 +1279,18 @@ function OptionsCompared({ options, optionId }: { options: HubOption[]; optionId
 
 /**
  * What's on the quote (the shared lines and the picked option's), with the add-ons to tick (a group
- * is one choice) and what it all comes to, with the promo code. Both change only while `editable`.
+ * is one choice). They change only while `editable`. What it all comes to is QuoteTotals.
  */
-function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, totals, expired, onChanged }: {
-  token: string;
+function LinesCard({ data, lines, chosen, onChoose, editable, title }: {
   data: QuoteView;
   lines: HubLine[];
-  /** The option picked (null without options): a promo code's minimum order is checked against it and the add-ons ticked. */
-  optionId: string | null;
   chosen: string[];
   onChoose: (ids: string[]) => void;
   editable: boolean;
-  totals: { subtotal: number; discount: number; tax: number; total: number };
-  expired: boolean;
-  onChanged: () => void;
+  title: string;
 }) {
   const q = data.quote;
+  const titleId = useId();
   const included = (l: HubLine) => !l.optional || chosen.includes(l.id!);
   const groupOf = (l: HubLine) => (l.optional && l.option_group ? l.option_group : null);
   const tiers = groupTiers(data);
@@ -1239,6 +1303,49 @@ function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, t
   // A price set on site below the estimate is two lines, shown as one.
   const listed = listedLines(lines);
   const firstOf = (l: HubLine, i: number) => groupOf(l) !== null && !listed.slice(0, i).some((x) => groupOf(x) === groupOf(l));
+  // Nothing on it (a change order before its lines are in): no empty card.
+  if (!listed.length) return null;
+  return (
+    <section className="hub-card hub-lines" aria-labelledby={titleId}>
+      <h2 id={titleId} className="hub-card-title">{title}</h2>
+      {listed.map((l, i) => (
+        <Fragment key={l.id}>
+          {firstOf(l, i) && <div className="hub-line-group"><strong>{l.option_group}</strong><span>{editable ? "Pick one" : "One of these"}</span></div>}
+          <div className="hub-line" data-off={included(l) ? undefined : ""}>
+            {l.optional && (
+              <input type={groupOf(l) ? "radio" : "checkbox"} name={groupOf(l) ? `choice-${groupOf(l)}` : undefined} aria-label={groupOf(l) ? `Choose ${l.name}` : `Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!editable} onChange={(e) => choose(l, e.target.checked)} />
+            )}
+            <div className="hub-line-text">
+              <strong>{l.name}</strong>
+              {l.optional && <span className="tag">{groupOf(l) ? tiers.get(l.id!) ?? "Choice" : "Optional"}</span>}
+              {l.description && <span className="hub-line-desc pre-wrap">{l.description}</span>}
+              <span className="hub-line-qty">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</span>
+            </div>
+            <span className="hub-line-total">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</span>
+          </div>
+        </Fragment>
+      ))}
+    </section>
+  );
+}
+
+/**
+ * What a quote comes to: the subtotal, the promo code (changed only while `editable`), tax and the
+ * total, how often for recurring work, the payment schedule or the deposit, and how long it's good.
+ */
+function QuoteTotals({ token, data, lines, optionId, chosen, editable, totals, expired, onChanged }: {
+  token: string;
+  data: QuoteView;
+  lines: HubLine[];
+  /** The option picked (null without options): a promo code's minimum order is checked against it and the add-ons ticked. */
+  optionId: string | null;
+  chosen: string[];
+  editable: boolean;
+  totals: { subtotal: number; discount: number; tax: number; total: number };
+  expired: boolean;
+  onChanged: () => void;
+}) {
+  const q = data.quote;
   const deposit = depositToBook(q.deposit_amount, totals.total, q.deposit_percent);
   // How it's paid, on what they're choosing; signed, as it was signed.
   const schedule = quoteSchedule({ payment_schedule: q.payment_schedule, approval: q.approval, total: totals.total }, q.status === "approved" || q.status === "converted");
@@ -1246,58 +1353,39 @@ function LinesCard({ token, data, lines, optionId, chosen, onChoose, editable, t
   const ticked = chosen.filter((id) => lines.some((l) => l.id === id));
   const short = promoShortfall(q.promo, lines, ticked);
   return (
-    <section className="card" aria-label="What's included">
-      {listed.map((l, i) => (
-        <Fragment key={l.id}>
-        {firstOf(l, i) && <div className="card-row hub-choice-head"><strong>{l.option_group}</strong><span className="muted small">{editable ? "Pick one" : "One of these"}</span></div>}
-        <div className="card-row" style={{ alignItems: "flex-start", opacity: included(l) ? 1 : 0.6, transition: "opacity 200ms" }}>
-          {l.optional && (
-            <input type={groupOf(l) ? "radio" : "checkbox"} name={groupOf(l) ? `choice-${groupOf(l)}` : undefined} aria-label={groupOf(l) ? `Choose ${l.name}` : `Add ${l.name}`} checked={chosen.includes(l.id!)} disabled={!editable} onChange={(e) => choose(l, e.target.checked)} style={{ marginTop: 4, width: 18, height: 18 }} />
-          )}
-          <div className="grow">
-            <strong>{l.name}</strong>
-            {l.optional && <span className="chip chip-blue" style={{ marginLeft: 6 }}>{groupOf(l) ? tiers.get(l.id!) ?? "Choice" : "Optional"}</span>}
-            {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
-            <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
-          </div>
-          <strong className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</strong>
+    <div className="hub-totals">
+      <div className="line"><span>Subtotal</span><span>{formatMoneyCents(totals.subtotal)}</span></div>
+      <HubDiscount
+        token={token}
+        promo={q.promo}
+        discount={totals.discount}
+        canChange={editable}
+        // A price agreed at the visit has its discount in it already, so no code goes on top.
+        canAdd={editable && !q.site_priced}
+        showRule
+        choice={{ ...(optionId ? { option_id: optionId } : {}), selected_line_ids: ticked }}
+        onChanged={onChanged}
+      />
+      {short !== null && (
+        <div className="callout callout-warning" role="status">
+          <Icon name="alert" size={16} />
+          <div className="grow">{q.promo?.code} needs an order of at least {formatMoneyCents(short)}. Remove the code, or change your choices.</div>
         </div>
-        </Fragment>
-      ))}
-      <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
-        <div className="line"><span>Subtotal</span><span>{formatMoneyCents(totals.subtotal)}</span></div>
-        <HubDiscount
-          token={token}
-          promo={q.promo}
-          discount={totals.discount}
-          canChange={editable}
-          // A price agreed at the visit has its discount in it already, so no code goes on top.
-          canAdd={editable && !q.site_priced}
-          showRule
-          choice={{ ...(optionId ? { option_id: optionId } : {}), selected_line_ids: ticked }}
-          onChanged={onChanged}
-        />
-        {short !== null && (
-          <div className="callout callout-warning" role="status" style={{ margin: "4px 0" }}>
-            <Icon name="alert" size={16} />
-            <div className="grow">{q.promo?.code} needs an order of at least {formatMoneyCents(short)}. Remove the code, or change your choices.</div>
-          </div>
-        )}
-        {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
-        {q.client?.tax_exempt && totals.tax === 0 && <div className="line"><span>Tax exempt{q.client.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
-        <div className="line grand" style={{ fontSize: 24 }}><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><span>{formatMoneyCents(totals.total)}</span></div>
-        {q.recurrence_rule && <div className="line"><span>How often</span><span style={{ textAlign: "right" }}>{scheduleText(q.recurrence_rule, q.active_months)}</span></div>}
-        {schedule ? (
-          <>
-            <div className="line" style={{ marginTop: 8 }}><strong>Payment schedule</strong><span /></div>
-            {schedule.map((p, i) => <div key={i} className="line"><span>{p.name}: {p.due}</span><span>{formatMoneyCents(p.amount)}</span></div>)}
-          </>
-        ) : (
-          deposit > 0 && <div className="line"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>
-        )}
-        {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
-      </div>
-    </section>
+      )}
+      {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
+      {q.client?.tax_exempt && totals.tax === 0 && <div className="line"><span>Tax exempt{q.client.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
+      <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><span>{formatMoneyCents(totals.total)}</span></div>
+      {q.recurrence_rule && <div className="line"><span>How often</span><span>{scheduleText(q.recurrence_rule, q.active_months)}</span></div>}
+      {schedule ? (
+        <>
+          <div className="line hub-totals-head"><strong>Payment schedule</strong></div>
+          {schedule.map((p, i) => <div key={i} className="line"><span>{p.name}: {p.due}</span><span>{formatMoneyCents(p.amount)}</span></div>)}
+        </>
+      ) : (
+        deposit > 0 && <div className="line hub-deposit"><span>Deposit to book</span><span>{formatMoneyCents(deposit)}</span></div>
+      )}
+      {q.valid_until && <div className="line"><span>Valid until</span><span className={expired ? "text-danger" : undefined}>{formatDate(q.valid_until)}</span></div>}
+    </div>
   );
 }
 
@@ -1314,10 +1402,10 @@ function InitialsCard({ sections, initials, onInitials, initialed, onInitial }: 
 }) {
   const id = useId();
   return (
-    <section className="card card-pad stack no-print" aria-labelledby={id}>
-      <div className="stack-xs">
-        <h3 id={id} style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>Your initials</h3>
-        <p className="muted small" style={{ margin: 0 }}>
+    <section className="hub-card hub-pad hub-initials-card no-print" aria-labelledby={id}>
+      <div className="hub-card-head">
+        <h3 id={id} className="hub-card-title">Your initials</h3>
+        <p>
           {sections.length === 1 ? "One section asks for your initials." : `${sections.length} sections ask for your initials.`} Draw them once, then add them to each.
         </p>
       </div>
@@ -1328,9 +1416,9 @@ function InitialsCard({ sections, initials, onInitials, initialed, onInitial }: 
           const on = Boolean(initials) && initialed.has(s.id);
           return (
             <div key={s.id} className="hub-initials-row" data-on={on || undefined}>
-              <span className="grow stack-xs">
+              <span className="hub-initials-text">
                 <strong>{title}</strong>
-                <span className="muted small">{s.place === "signatures" ? "Above the signatures" : "On the terms pages"}</span>
+                <span>{s.place === "signatures" ? "Above the signatures" : "On the terms pages"}</span>
               </span>
               {on ? (
                 <>
@@ -1359,17 +1447,17 @@ function TermsToRead({ contract }: { contract: QuoteContract }) {
   const sections = [...contract.sections.filter((s) => s.place === "signatures"), ...contract.sections.filter((s) => s.place === "terms")];
   if (!terms && !sections.length) return null;
   return (
-    <section className="card card-pad stack hub-terms-read no-print" aria-labelledby={id}>
-      <div className="stack-xs">
-        <h3 id={id} style={{ margin: 0, fontSize: 16, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>Read the terms</h3>
-        <p className="muted small" style={{ margin: 0 }}>The words on the pages above, in a size that's easy to read.</p>
+    <section className="hub-card hub-pad hub-terms-read no-print" aria-labelledby={id}>
+      <div className="hub-card-head">
+        <h3 id={id} className="hub-card-title">Read the terms</h3>
+        <p>The words on the pages above, in a size that's easy to read.</p>
       </div>
-      {terms && <p className="pre-wrap" style={{ margin: 0 }}>{terms}</p>}
+      {terms && <p className="pre-wrap">{terms}</p>}
       {sections.map((s) => (
-        <div key={s.id} className="stack-xs">
+        <div key={s.id} className="hub-terms-section">
           <h4>
             {s.title.trim() || "This section"}
-            {s.initials && <span className="chip chip-blue">Asks for your initials</span>}
+            {s.initials && <span className="tag">Asks for your initials</span>}
           </h4>
           <div className="prose" dangerouslySetInnerHTML={{ __html: sanitizeContractHtml(s.html) }} />
         </div>
@@ -1382,8 +1470,10 @@ function TermsToRead({ contract }: { contract: QuoteContract }) {
  * The tip choices, shown only while the business has tips on: percents of what's tipped on (0 is
  * "No tip", on Pay), or "Other" with an amount.
  */
-function TipChoices({ percents, choice, onChoice, custom, onCustom }: {
+function TipChoices({ percents, base, choice, onChoice, custom, onCustom }: {
   percents: readonly number[];
+  /** What a percent is of, for the amount under it. */
+  base: number;
   choice: number | "custom" | null;
   onChoice: (choice: number | "custom") => void;
   custom: string;
@@ -1391,15 +1481,20 @@ function TipChoices({ percents, choice, onChoice, custom, onCustom }: {
 }) {
   return (
     <>
-      <div className="segmented" role="group" aria-label="Tip">
+      <div className="hub-tips" role="group" aria-label="Tip" data-count={percents.length}>
         {percents.map((pct) => (
-          <button key={pct} type="button" aria-pressed={choice === pct} onClick={() => onChoice(pct)}>{pct ? `${pct}%` : "No tip"}</button>
+          <button key={pct} type="button" className="hub-tip" aria-pressed={choice === pct} onClick={() => onChoice(pct)}>
+            {pct ? `${pct}%` : "No tip"}
+            {pct > 0 && <small>{formatMoneyCents(hubTip({ tips: true, base, choice: pct, custom: "" }))}</small>}
+          </button>
         ))}
-        <button type="button" aria-pressed={choice === "custom"} onClick={() => onChoice("custom")}>Other</button>
       </div>
-      {choice === "custom" && (
-        <span className="input-group" style={{ maxWidth: 180 }}><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
-      )}
+      <div className="hub-tip-other">
+        <button type="button" className="hub-link" aria-pressed={choice === "custom"} onClick={() => onChoice("custom")}>Other amount</button>
+        {choice === "custom" && (
+          <span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
+        )}
+      </div>
     </>
   );
 }
@@ -1474,113 +1569,137 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
   // The invoice as it prints, with its contract (filled in by the server).
   const contract = hubInvoiceContract(data);
   const doc = { template: contractTemplate(hubTemplate(data), contract), company: hubLetterhead(data.company), data: invoiceDocument(data) };
+  // Owed, and not being charged to their card right now (Pay then could charge them twice).
+  const owing = balance > 0 && !data.preview && autopay?.status !== "charging";
   return (
     <>
-      <section className="card card-pad stack-sm">
-        <span className="muted">Invoice #{inv.number}{inv.client ? ` for ${inv.client.display_name}` : ""}{inv.subject ? ` · ${inv.subject}` : ""}</span>
-        <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{balance > 0 ? `${formatMoneyCents(balance)} due` : writtenOff ? "Nothing due" : "Paid in full"}</h1>
-        <span className={late ? "text-danger strong" : "muted"}>Issued {formatDate(inv.issued_on)}{inv.due_on ? ` · due ${formatDate(inv.due_on)}` : " · due on receipt"}</span>
-        {autopayLine && <span className="muted" role={autopay?.status === "paid" ? undefined : "status"}>{autopayLine}</span>}
-        {yoursNote && <span className="muted">{yoursNote}</span>}
-        <HubFieldList fields={inv.portal_fields} />
-      </section>
-      {offerSave && (
-        <section className="card card-pad stack-sm no-print" aria-labelledby="hub-save-card">
-          <strong id="hub-save-card">Paid. Pay automatically next time?</strong>
-          <span className="muted">Save a card once, and we charge it after each visit. You'll get a receipt each time.</span>
-          <span><Button variant="primary" icon="card" loading={saveCard.isPending} onClick={() => saveCard.mutate()}>Save a card</Button></span>
-          <FormError error={saveCard.error} />
-        </section>
-      )}
-      <HubDrawings token={token} drawings={data.drawings} />
-      <section className="card">
-        {inv.lines.map((l, i) => (
-          <div key={i} className="card-row" style={{ alignItems: "flex-start" }}>
-            <div className="grow">
-              <strong>{l.name}</strong>
-              {l.description && <div className="muted text-sm pre-wrap">{l.description}</div>}
-              <div className="muted small">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</div>
-            </div>
-            <span className="tabular">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</span>
-          </div>
-        ))}
-        <div className="card-pad totals" style={{ borderTop: "1px solid var(--divider)" }}>
-          <div className="line"><span>Subtotal</span><span>{formatMoneyCents(inv.subtotal)}</span></div>
-          <HubDiscount
-            token={token}
-            promo={inv.promo}
-            discount={Math.min(Number(inv.discount_amount), Math.max(Number(inv.subtotal), 0))}
-            // Not while a bank payment clears or the card is being charged: the client is paying what Stripe asked for (the server says so too).
-            canChange={promoCanChange}
-            // One code to an invoice: its job's code is on a line already.
-            canAdd={promoCanChange && !data.promo_line}
-            onChanged={onChanged}
-          />
-          {(doc.data.credits ?? []).map((c, i) => <div key={i} className="line"><span>{c.label}</span><span className="nowrap">−{formatMoneyCents(c.amount)}</span></div>)}
-          {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
-          {inv.client?.tax_exempt && Number(inv.tax_amount) === 0 && <div className="line"><span>Tax exempt{inv.client.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
-          <div className="line"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
-          {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
-          {inv.payments.map((p, i) =>
-            Number(p.amount) > 0 ? (
-              <div key={i} className="line"><span>Paid {formatDate(dateIn(p.received_at, tz))}</span><span>−{formatMoneyCents(p.amount)}</span></div>
-            ) : (
-              <div key={i} className="line"><span>Refunded {formatDate(dateIn(p.received_at, tz))}</span><span>+{formatMoneyCents(-Number(p.amount))}</span></div>
-            ),
+      <div className="hub-layout">
+        <div className="hub-main">
+          <section className="hub-card hub-intro hub-due">
+            <span className="hub-sub">{inv.subject ? `${inv.subject} · ` : ""}Invoice #{inv.number}{inv.client ? ` for ${inv.client.display_name}` : ""}</span>
+            <h1>{balance > 0 ? <>{formatMoneyCents(balance)}<span className="hub-due-word"> due</span></> : writtenOff ? "Nothing due" : "Paid in full"}</h1>
+            {/* Past due: only the date it was due in red, the words that ask for something. */}
+            <span className="hub-sub">Issued {formatDate(inv.issued_on)} · {inv.due_on ? <span className={late ? "hub-late" : undefined}>due {formatDate(inv.due_on)}</span> : "due on receipt"}</span>
+            {autopayLine && <span className="hub-sub" role={autopay?.status === "paid" ? undefined : "status"}>{autopayLine}</span>}
+            {yoursNote && <span className="hub-sub">{yoursNote}</span>}
+            <HubFieldList fields={inv.portal_fields} />
+          </section>
+          {offerSave && (
+            <section className="hub-card hub-todo no-print" aria-labelledby="hub-save-card">
+              <strong id="hub-save-card" className="hub-title">Paid. Pay automatically next time?</strong>
+              <span className="hub-sub">Save a card once, and we charge it after each visit. You'll get a receipt each time.</span>
+              <Button variant="primary" icon="card" loading={saveCard.isPending} onClick={() => saveCard.mutate()}>Save a card</Button>
+              <FormError error={saveCard.error} />
+            </section>
           )}
-          <div className="line grand" style={{ fontSize: 20 }}><span>Balance due</span><span>{formatMoneyCents(balance)}</span></div>
-        </div>
-      </section>
-      {inv.notes && <section className="card card-pad pre-wrap">{inv.notes}</section>}
-      <section className="hub-document" aria-label={`Invoice #${inv.number}, as it prints`}>
-        <DocumentSheet {...doc} />
-      </section>
-      {contract && <TermsToRead contract={contract} />}
-      {payNote && !data.preview && (
-        <div className="callout callout-warning no-print">
-          <Icon name="card" size={20} />
-          <div className="grow">
-            {payNote}
-            {data.home && <> <a href={`${data.home}?view=autopay`}>Update your card</a></>}
+          <HubDrawings token={token} drawings={data.drawings} />
+          <div className="hub-card hub-lines">
+            {inv.lines.map((l, i) => (
+              <div key={i} className="hub-line">
+                <div className="hub-line-text">
+                  <strong>{l.name}</strong>
+                  {l.description && <span className="hub-line-desc pre-wrap">{l.description}</span>}
+                  <span className="hub-line-qty">{Number(l.quantity).toLocaleString()} {l.unit} × {formatMoneyCents(l.unit_price)}</span>
+                </div>
+                <span className="hub-line-total">{formatMoneyCents(lineTotal(l.quantity, l.unit_price))}</span>
+              </div>
+            ))}
           </div>
+          {tipAfter && (
+            <section ref={tipSection} tabIndex={-1} className="hub-card hub-pad hub-tip-card no-print" aria-labelledby="hub-tip-after">
+              <h2 id="hub-tip-after" className="hub-card-title">Add a tip for the crew?</h2>
+              <TipChoices percents={TIP_PERCENTS} base={Number(inv.total)} choice={afterChoice} onChoice={setAfterChoice} custom={afterCustom} onCustom={setAfterCustom} />
+              {afterTip > 0 && afterTip < TIP_MINIMUM && <span className="hub-fine">A tip has to be at least {formatMoneyCents(TIP_MINIMUM)}.</span>}
+              {afterTip > Number(inv.total) && <span className="hub-fine">A tip can be up to the invoice total.</span>}
+              <Button variant="primary" icon="card" wrap loading={addTip.isPending} disabled={afterTip < TIP_MINIMUM || afterTip > Number(inv.total)} onClick={() => addTip.mutate()}>
+                {afterTip > 0 ? `Add a ${formatMoneyCents(afterTip)} tip to your ${data.tip_method ?? "card"}` : `Add a tip to your ${data.tip_method ?? "card"}`}
+              </Button>
+            </section>
+          )}
+          {addTip.isSuccess && <Done title="Thank you">Your {formatMoneyCents(addTip.data.tip)} tip is on its way to the crew.</Done>}
+          <FormError error={addTip.error} />
         </div>
-      )}
-      {/* Being charged to their card right now: no Pay, which could charge them twice. */}
-      {balance > 0 && !data.preview && autopay?.status !== "charging" && (
-        data.processing ? (
-          // A bank payment from autopay says so under the heading already.
-          autopay?.status === "processing" ? null : (
-            <div className="card card-pad muted no-print" role="status">Your bank payment is on its way. It usually takes a few business days to clear, and this page updates when it does.</div>
-          )
-        ) : data.can_pay ? (
-          <div className="stack no-print">
-            {data.tips && (
-              <section className="card card-pad stack-sm">
-                <strong>Add a tip for the crew?</strong>
-                <TipChoices percents={[0, ...TIP_PERCENTS]} choice={tipChoice} onChoice={setTipChoice} custom={customTip} onCustom={setCustomTip} />
-                {tip > 0 && <span className="muted small">{formatMoneyCents(tip)} tip. Thank you.</span>}
-              </section>
-            )}
-            <Button variant="primary" size="lg" icon="lock" loading={pay.isPending} onClick={() => pay.mutate()}>Pay {formatMoneyCents(balance + tip)} by card or bank</Button>
+
+        <aside className="hub-aside" aria-label="Summary">
+          <div className="hub-card hub-summary">
+            <div className="hub-totals">
+              <div className="line"><span>Subtotal</span><span>{formatMoneyCents(inv.subtotal)}</span></div>
+              <HubDiscount
+                token={token}
+                promo={inv.promo}
+                discount={Math.min(Number(inv.discount_amount), Math.max(Number(inv.subtotal), 0))}
+                // Not while a bank payment clears or the card is being charged: the client is paying what Stripe asked for (the server says so too).
+                canChange={promoCanChange}
+                // One code to an invoice: its job's code is on a line already.
+                canAdd={promoCanChange && !data.promo_line}
+                onChanged={onChanged}
+              />
+              {(doc.data.credits ?? []).map((c, i) => <div key={i} className="line"><span>{c.label}</span><span className="nowrap">−{formatMoneyCents(c.amount)}</span></div>)}
+              {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
+              {inv.client?.tax_exempt && Number(inv.tax_amount) === 0 && <div className="line"><span>Tax exempt{inv.client.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
+              <div className="line"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
+              {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
+              {inv.payments.map((p, i) =>
+                Number(p.amount) > 0 ? (
+                  <div key={i} className="line"><span>Paid {formatDate(dateIn(p.received_at, tz))}</span><span>−{formatMoneyCents(p.amount)}</span></div>
+                ) : (
+                  <div key={i} className="line"><span>Refunded {formatDate(dateIn(p.received_at, tz))}</span><span>+{formatMoneyCents(-Number(p.amount))}</span></div>
+                ),
+              )}
+              <div className="line grand"><span>Balance due</span><span>{formatMoneyCents(balance)}</span></div>
+            </div>
           </div>
-        ) : (
-          <div className="card card-pad muted">To pay, contact {data.company.name}{data.company.phone ? ` at ${data.company.phone}` : ""}.</div>
-        )
-      )}
-      <FormError error={pay.error} />
-      {tipAfter && (
-        <section ref={tipSection} tabIndex={-1} className="card card-pad stack-sm no-print" aria-labelledby="hub-tip-after">
-          <strong id="hub-tip-after">Add a tip for the crew?</strong>
-          <TipChoices percents={TIP_PERCENTS} choice={afterChoice} onChoice={setAfterChoice} custom={afterCustom} onCustom={setAfterCustom} />
-          {afterTip > 0 && afterTip < TIP_MINIMUM && <span className="muted small">A tip has to be at least {formatMoneyCents(TIP_MINIMUM)}.</span>}
-          {afterTip > Number(inv.total) && <span className="muted small">A tip can be up to the invoice total.</span>}
-          <Button variant="primary" icon="card" wrap loading={addTip.isPending} disabled={afterTip < TIP_MINIMUM || afterTip > Number(inv.total)} onClick={() => addTip.mutate()} style={{ justifySelf: "start" }}>
-            {afterTip > 0 ? `Add a ${formatMoneyCents(afterTip)} tip to your ${data.tip_method ?? "card"}` : `Add a tip to your ${data.tip_method ?? "card"}`}
-          </Button>
-        </section>
-      )}
-      {addTip.isSuccess && <Done title="Thank you">Your {formatMoneyCents(addTip.data.tip)} tip is on its way to the crew.</Done>}
-      <FormError error={addTip.error} />
+          {payNote && !data.preview && (
+            <div className="callout callout-warning no-print">
+              <Icon name="card" size={16} />
+              <div className="grow">
+                {payNote}
+                {data.home && <> <a href={`${data.home}?view=autopay`}>Update your card</a></>}
+              </div>
+            </div>
+          )}
+          {owing && (
+            data.processing ? (
+              // A bank payment from autopay says so under the heading already.
+              autopay?.status === "processing" ? null : (
+                <p className="hub-card hub-pad hub-note no-print" role="status">Your bank payment is on its way. It usually takes a few business days to clear, and this page updates when it does.</p>
+              )
+            ) : data.can_pay ? (
+              <>
+                {data.tips && (
+                  <section className="hub-card hub-pad hub-tip-card no-print" aria-labelledby="hub-tip">
+                    <h2 id="hub-tip" className="hub-card-title">Add a tip for the crew?</h2>
+                    <TipChoices percents={[0, ...TIP_PERCENTS]} base={balance} choice={tipChoice} onChoice={setTipChoice} custom={customTip} onCustom={setCustomTip} />
+                  </section>
+                )}
+                {/* On a phone, kept in a bar at the bottom of the screen. */}
+                <div className="hub-bar no-print" data-pinned="">
+                  {tip > 0 && (
+                    <div className="hub-bar-total">
+                      <span>With a {formatMoneyCents(tip)} tip</span>
+                      <strong>{formatMoneyCents(balance + tip)}</strong>
+                    </div>
+                  )}
+                  <Button variant="primary" size="lg" block loading={pay.isPending} onClick={() => pay.mutate()}>Pay {formatMoneyCents(balance + tip)} by card or bank</Button>
+                  <span className="hub-secure"><Icon name="lock" size={13} />Secure checkout on Stripe</span>
+                </div>
+              </>
+            ) : (
+              <p className="hub-card hub-pad hub-note">To pay, contact {data.company.name}{data.company.phone ? ` at ${data.company.phone}` : ""}.</p>
+            )
+          )}
+          <FormError error={pay.error} />
+        </aside>
+
+        {/* The paper and its notes: under the summary on a phone, so paying comes first. */}
+        <div className="hub-main hub-later">
+          {inv.notes && <section className="hub-card hub-pad pre-wrap">{inv.notes}</section>}
+          <section className="hub-document" aria-label={`Invoice #${inv.number}, as it prints`}>
+            <DocumentSheet {...doc} />
+          </section>
+          {contract && <TermsToRead contract={contract} />}
+        </div>
+      </div>
       {/* What prints: the invoice on the business's template. */}
       {printing && <PrintableDocument {...doc} />}
     </>
@@ -1617,11 +1736,11 @@ function HubDiscount({ token, promo, discount, canChange, canAdd = canChange, ch
 
   if (promo) {
     return (
-      <div className="line" style={{ alignItems: "flex-start" }}>
-        <span className="promo-applied">
-          <span className="promo-code">{promo.code}</span>
-          <span className="muted small">{promo.description ?? (promo.kind === "percent" ? `${Number(promo.value)}% off` : "Discount")}{showRule && promo.every_visit != null ? ` · ${promoRuleWords(promo.every_visit)}` : ""}</span>
-          {canChange && <button type="button" className="btn btn-sm btn-ghost no-print" disabled={remove.isPending} onClick={() => remove.mutate()}>Remove</button>}
+      <div className="line hub-promo">
+        <span className="hub-promo-text">
+          <span className="hub-promo-code">{promo.code}</span>
+          <span className="hub-promo-what">{promo.description ?? (promo.kind === "percent" ? `${Number(promo.value)}% off` : "Discount")}{showRule && promo.every_visit != null ? ` · ${promoRuleWords(promo.every_visit)}` : ""}</span>
+          {canChange && <button type="button" className="hub-link no-print" disabled={remove.isPending} onClick={() => remove.mutate()}>Remove<span className="sr-only"> {promo.code}</span></button>}
         </span>
         <span className="nowrap">−{formatMoneyCents(discount)}</span>
       </div>
@@ -1632,12 +1751,12 @@ function HubDiscount({ token, promo, discount, canChange, canAdd = canChange, ch
       {discount > 0 && <div className="line"><span>Discount</span><span>−{formatMoneyCents(discount)}</span></div>}
       {canAdd && (
         entering ? (
-          <form className="promo-entry no-print" onSubmit={(e: FormEvent) => { e.preventDefault(); if (code.trim()) apply.mutate(); }}>
-            <input className="input mono grow" aria-label="Promo code" placeholder="Promo code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={24} autoFocus autoCapitalize="characters" />
+          <form className="hub-promo-entry no-print" onSubmit={(e: FormEvent) => { e.preventDefault(); if (code.trim()) apply.mutate(); }}>
+            <input className="input mono" aria-label="Promo code" placeholder="Promo code" value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={24} autoFocus autoCapitalize="characters" />
             <Button type="submit" loading={apply.isPending} disabled={!code.trim()}>Apply</Button>
           </form>
         ) : (
-          <div className="line no-print"><button type="button" className="btn btn-sm btn-ghost" onClick={() => setEntering(true)}><Icon name="tag" size={14} />Have a promo code?</button></div>
+          <div className="line no-print"><button type="button" className="hub-link" onClick={() => setEntering(true)}>Have a promo code?</button></div>
         )
       )}
       {apply.error && <FormError error={apply.error} />}

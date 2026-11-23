@@ -1,18 +1,20 @@
 /**
- * What Finance and Metrics share: the date range in the address bar and its picker, the tab bar,
- * and the loading and error wrapper around a tab.
+ * What Finance and Metrics share: the date range in the address bar and its menu, the sections'
+ * tabs, and the loading and error wrapper around a tab.
  */
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
+import { cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { CardSkeleton, Loading, StatsSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./Finance.module.css";
 import { PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./range";
 
 export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null; sub?: { id: string; name: string } }
@@ -20,7 +22,8 @@ export { memberName } from "../subs/memberName";
 
 export { timeRates, type Rates } from "./jobCosts";
 
-export const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
+/** A share in whole percent; nothing (an empty cell, not "—") when there's nothing to divide by. */
+export const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "");
 export const hrs = (n: number) => (n > 0 && n < 1 ? `${Math.max(1, Math.round(n * 60))} min` : `${formatNumber(n, n < 10 && n % 1 ? 1 : 0)} h`);
 export const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + (f(r) || 0), 0);
 export const plural = (n: number, one: string, many = `${one}s`) => `${formatNumber(n)} ${n === 1 ? one : many}`;
@@ -51,48 +54,100 @@ export type RangeParams = ReturnType<typeof useRangeParams>;
 /** Carries the date range to another page's address: "range=month", or a custom range's dates. */
 export const rangeQuery = (range: Range) => (range.key === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.key}`);
 
-/** The date range picker: a preset, or two dates for a custom range. */
-export function RangePicker({ state }: { state: RangeParams }) {
-  const { presetKey, range, update } = state;
+/** The button's words: the preset ("This month"), or "Custom range". */
+const presetWords = (key: PresetKey) => (key === "custom" ? "Custom range" : (PRESETS.find((p) => p.key === key)?.label ?? key));
+
+/** A custom range's two dates. */
+export function CustomRange({ state }: { state: RangeParams }) {
+  const { range, update } = state;
   return (
-    <div className="row wrap" style={{ gap: 8 }}>
-      <label className="select-pill range-pill">
-        <Icon name="calendar" size={14} />
-        <span className="range-pill-label">Date range</span>
-        <Select className="select-plain" value={presetKey} onChange={(e) => update(e.target.value === "custom" ? { range: "custom", from: range.from, to: range.to } : { range: e.target.value, from: null, to: null })}>
-          {PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-        </Select>
-        <Icon name="chevronDown" size={14} />
-      </label>
-      {presetKey === "custom" && (
-        <div className="row" style={{ gap: 6 }}>
-          <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && update({ from: e.target.value })} aria-label="From" style={{ width: 150 }} />
-          <span className="muted">to</span>
-          <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && update({ to: e.target.value })} aria-label="To" style={{ width: 150 }} />
-        </div>
-      )}
+    <div className={styles.custom} role="group" aria-label="Custom range">
+      <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && update({ from: e.target.value })} aria-label="From" />
+      <span>to</span>
+      <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && update({ to: e.target.value })} aria-label="To" />
     </div>
   );
 }
 
-/** The range in words: "Oct 1 – Oct 20 · 20 days", with the year when it isn't this one. */
-export function rangeWords(range: Range, today: string): string {
-  const year = range.to.slice(0, 4) !== today.slice(0, 4) || range.from.slice(0, 4) !== today.slice(0, 4) ? `, ${range.to.slice(0, 4)}` : "";
-  return `${shortDate(range.from)}${range.from !== range.to ? ` – ${shortDate(range.to)}` : ""}${year} · ${plural(range.days, "day")}`;
+/**
+ * The date range: a small button saying the range ("This month ⌄") that opens a menu of the presets,
+ * the chosen one checked, then Custom range. With a custom range its two dates follow, unless
+ * `dates` is false (RangeHeader puts them on their own line under the title).
+ */
+export function RangePicker({ state, dates = true }: { state: RangeParams; dates?: boolean }) {
+  const { presetKey, range, update } = state;
+  const items: MenuEntry[] = [
+    ...PRESETS.filter((p) => p.key !== "custom").map((p) => ({ label: p.label, checked: presetKey === p.key, onSelect: () => update({ range: p.key, from: null, to: null }) })),
+    { separator: true },
+    { label: "Custom range", checked: presetKey === "custom", onSelect: () => update({ range: "custom", from: range.from, to: range.to }) },
+  ];
+  const menu = (
+    <Menu
+      items={items}
+      label={`Date range: ${presetWords(presetKey)}`}
+      title="Date range"
+      align="end"
+      triggerClassName={cx("btn btn-sm", styles.rangeBtn)}
+      trigger={<>{presetWords(presetKey)}<Icon name="chevronDown" size={14} /></>}
+    />
+  );
+  if (!dates || presetKey !== "custom") return menu;
+  return <div className={styles.picker}><CustomRange state={state} />{menu}</div>;
 }
 
-/** The page title with its date range picker, the range in words, and the tab bar. */
+/** Two dates in words: "Oct 1 – Oct 20", with the year when it isn't this one ("Jan 2 – Dec 31, 2024"). */
+export function datesWords(from: string, to: string, today: string): string {
+  const year = to.slice(0, 4) !== today.slice(0, 4) || from.slice(0, 4) !== today.slice(0, 4) ? `, ${to.slice(0, 4)}` : "";
+  return `${shortDate(from)}${from !== to ? ` – ${shortDate(to)}` : ""}${year}`;
+}
+
+/** The range in words: "Oct 1 – Oct 20 · 20 days", with the year when it isn't this one. */
+export function rangeWords(range: Range, today: string): string {
+  return `${datesWords(range.from, range.to, today)} · ${plural(range.days, "day")}`;
+}
+
+/** Ids that tie a section's tab to its panel. */
+export const tabId = (key: string) => `report-tab-${key}`;
+export const PANEL_ID = "report-panel";
+
+/**
+ * The page title with the range in words under it and its menu beside it, then the sections as
+ * underline tabs (chips on a phone). Arrow keys, Home and End move between the tabs.
+ */
 export function RangeHeader<K extends string>({ title, state, tabs, tab }: { title: string; state: RangeParams; tabs: ReadonlyArray<{ key: K; label: string }>; tab: K }) {
-  const { range, today, update } = state;
+  const { range, today, update, presetKey } = state;
   const first = tabs[0]?.key;
+  const open = (key: K) => update({ tab: key === first ? null : key });
+  const keys = (e: KeyboardEvent<HTMLDivElement>) => {
+    const at = tabs.findIndex((t) => t.key === tab);
+    const to = e.key === "ArrowRight" ? (at + 1) % tabs.length : e.key === "ArrowLeft" ? (at - 1 + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    open(tabs[to]!.key);
+    document.getElementById(tabId(tabs[to]!.key))?.focus();
+  };
   return (
     <>
-      <PageHeader title={title} actions={<RangePicker state={state} />} />
-      <p className="page-subtitle">{rangeWords(range, today)}</p>
-      <div className="underline-tabs" role="tablist" aria-label={title}>
-        {tabs.map((t) => <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => update({ tab: t.key === first ? null : t.key })}>{t.label}</button>)}
+      <PageHeader title={title} lede={rangeWords(range, today)} actions={<RangePicker state={state} dates={false} />}>
+        {presetKey === "custom" && <CustomRange state={state} />}
+      </PageHeader>
+      <div className={cx("underline-tabs", styles.tabs)} role="tablist" aria-label={title} onKeyDown={keys}>
+        {tabs.map((t) => (
+          <button key={t.key} id={tabId(t.key)} type="button" role="tab" aria-selected={tab === t.key} aria-controls={PANEL_ID} tabIndex={tab === t.key ? 0 : -1} onClick={() => open(t.key)}>
+            {t.label}
+          </button>
+        ))}
       </div>
     </>
+  );
+}
+
+/** The panel under the tabs: the chosen section's parts, a grouped look on a phone. */
+export function TabPanel({ tab, children }: { tab: string; children: ReactNode }) {
+  return (
+    <div key={tab} id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(tab)} className={cx("m-grouped", styles.panel)} style={{ animation: "page-in var(--dur-slow) var(--ease-out)" }}>
+      {children}
+    </div>
   );
 }
 
@@ -110,26 +165,17 @@ export function both<A, B>(a: Loaded<A>, b: Loaded<B>): Loaded<[A, B]> {
 
 /** Shared loading/error/stale wrapper for a tab's queries. */
 export function TabBody<T>({ query, skeleton, children }: { query: Loaded<T>; skeleton?: ReactNode; children: (data: T) => ReactNode }) {
-  if (query.error && !query.data) return <div className="card"><ErrorState error={query.error} onRetry={() => query.refetch()} /></div>;
+  if (query.error && !query.data) return <ErrorState error={query.error} onRetry={() => query.refetch()} />;
   if (!query.data)
     return (
-      <Loading label="Loading figures" className="stack">
+      <Loading label="Loading figures" className={styles.body}>
         {skeleton ?? (
           <>
-            <div className="card kpi-strip" aria-hidden>{[0, 1, 2, 3].map((i) => <div key={i} className="kpi" style={{ display: "grid", gap: 10 }}><Skeleton width="55%" height={10} /><Skeleton width="70%" height={22} /></div>)}</div>
-            <div className="report-grid"><CardSkeleton height={240} /><CardSkeleton lines={5} /></div>
+            <StatsSkeleton count={4} />
+            <div className={styles.cols2}><CardSkeleton lines={6} /><CardSkeleton lines={4} /></div>
           </>
         )}
       </Loading>
     );
-  return <div className={`stack${query.isPlaceholderData ? " is-stale" : ""}`} style={{ gap: 28 }}>{children(query.data)}</div>;
-}
-
-export function SectionHead({ title, id, children }: { title: string; id?: string; children?: ReactNode }) {
-  return (
-    <div className="fin-section-head">
-      <h2 id={id}>{title}</h2>
-      {children}
-    </div>
-  );
+  return <div className={cx(styles.body, query.isPlaceholderData && "is-stale")} aria-busy={query.isPlaceholderData || undefined}>{children(query.data)}</div>;
 }

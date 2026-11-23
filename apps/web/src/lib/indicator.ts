@@ -5,10 +5,25 @@
  * --ind-x, --ind-y, --ind-w and --ind-h on the container from the selected child's box, plus
  * data-indicator ("still" the first time it's placed, so it doesn't fly in from the corner, then
  * "on"). Without data-indicator, as when nothing or several are selected or the container is
- * hidden, the selected child keeps its own fill (components.css).
+ * hidden, the selected child keeps its own fill (components.css). A list's filters (.tabs) that
+ * scroll sideways also get data-more on the edge with more past it, as lib/tabStrip.ts gives tabs.
  */
+import { moreEdges } from "./tabStrip";
+
 const CONTAINERS = ".segmented, .tabs, .underline-tabs";
 const SELECTED = '[aria-pressed="true"], [aria-selected="true"], [aria-current="page"]';
+/** A list's filters scroll sideways when they don't fit: these say which edge has more past it (data-more, faded in components.css). */
+const SCROLLS = ".tabs";
+
+function markMore(el: HTMLElement, more: ReturnType<typeof moreEdges>) {
+  if (more) {
+    if (el.getAttribute("data-more") !== more) el.setAttribute("data-more", more);
+  } else if (el.hasAttribute("data-more")) el.removeAttribute("data-more");
+}
+const onScroll = (e: Event) => {
+  const el = e.currentTarget as HTMLElement;
+  markMore(el, moreEdges(el.scrollLeft, el.clientWidth, el.scrollWidth));
+};
 
 export function startSlidingIndicators(): () => void {
   if (typeof ResizeObserver === "undefined" || typeof MutationObserver === "undefined") return () => undefined;
@@ -33,6 +48,7 @@ export function startSlidingIndicators(): () => void {
     if (!containers.has(el)) {
       containers.add(el);
       resize.observe(el);
+      if (el.matches(SCROLLS)) el.addEventListener("scroll", onScroll, { passive: true });
     }
     for (const child of el.children) resize.observe(child);
     queue(el);
@@ -46,15 +62,17 @@ export function startSlidingIndicators(): () => void {
   const forget = (el: HTMLElement) => {
     containers.delete(el);
     resize.unobserve(el);
+    el.removeEventListener("scroll", onScroll);
     for (const child of el.children) resize.unobserve(child);
   };
 
   // All the measuring first, then all the writing, so the page lays out once.
   const flush = () => {
     frame = 0;
-    const boxes = Array.from(pending, (el) => [el, el.isConnected ? measure(el) : undefined] as const);
+    const boxes = Array.from(pending, (el) => [el, el.isConnected ? measure(el) : undefined, el.isConnected && el.matches(SCROLLS) ? moreEdges(el.scrollLeft, el.clientWidth, el.scrollWidth) : null] as const);
     pending.clear();
-    for (const [el, box] of boxes) {
+    for (const [el, box, more] of boxes) {
+      if (el.isConnected && el.matches(SCROLLS)) markMore(el, more);
       if (!el.isConnected) {
         forget(el);
       } else if (!box) {

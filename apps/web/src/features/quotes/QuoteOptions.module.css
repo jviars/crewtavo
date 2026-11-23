@@ -1,37 +1,86 @@
-/* The options bar above an estimate's lines (QuoteOptions): a tab per option, what can be done with
-   the one being looked at, the invitation to offer options when there are none yet, and adding them. */
+/* The options bar above an estimate's lines (QuoteOptions, Page-Quote.dc.html): a small tile per
+   option with its picture, name and total, the one looked at ringed in ink, "Add an option" at the
+   end; under it, what can be done with the one looked at. The invitation to offer options when there
+   are none yet, and adding them. */
 
-.bar { display: grid; gap: 10px; min-width: 0; }
+.bar { display: grid; gap: 6px; min-width: 0; }
+.strip { display: flex; align-items: stretch; gap: 10px; min-width: 0; }
 
-.tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 8px; }
+.tabs { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; }
 .tab {
-  display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 64px; padding: 8px 12px 8px 8px;
-  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
-  font: inherit; font-weight: 400; text-align: left; cursor: pointer;
-  transition: border-color var(--dur-fast), box-shadow var(--dur-fast), background var(--dur-fast);
+  display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 60px; padding: 10px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--border);
+  font: inherit; font-weight: 400; text-align: left; cursor: pointer; transition: box-shadow var(--dur-fast), background var(--dur-fast);
 }
-.tab:hover { border-color: var(--border-strong); }
-.tab:focus-visible { outline: none; box-shadow: var(--ring); }
-.tab[aria-selected="true"] { border-color: var(--green); box-shadow: var(--ring); }
-.tabPicture { width: 64px; border-radius: 8px; }
-.tabText { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; justify-items: start; }
-.tabChips { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
-/* A long tier word stops at the tab's edge. */
-.tabChips :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-.tabName { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-14); font-weight: 700; }
-.tabTotal { font-size: var(--fs-13); font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tab:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.tab:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.tab[aria-selected="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
+.tabPicture { flex: none; width: 40px; height: 40px; overflow: hidden; border-radius: 8px; }
+.tabPicture :global(img), .tabPicture :global(svg) { width: 100%; height: 100%; object-fit: cover; }
+.tabText { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; justify-items: start; }
+.tabChips { display: flex; gap: 6px; max-width: 100%; min-width: 0; font-size: var(--fs-11); font-weight: 600; line-height: 1.3; }
+.tabShown { flex: none; color: var(--green-dark); }
+/* A long tier word stops at the tile's edge. */
+.tabTier { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.tabName { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); font-weight: 600; }
+.tabTotal { font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* An option still on setup's example warranty (office only), as the package pickers flag it. */
-.tabFlag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
+.tabFlag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: 600; color: var(--warning); }
 
-.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
-.note { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
-
-/* No options yet: the invitation, on the screens that keep it (QuoteOptions' invite) */
-.offer {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px;
-  border: 1px dashed var(--border-strong); border-radius: var(--radius-card); color: var(--text-2); font-size: var(--fs-13);
+.addTile {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 132px; min-height: 60px; padding: 0 12px;
+  border: 0; border-radius: 10px; background: none; box-shadow: inset 0 0 0 1px var(--border); color: var(--text-3);
+  font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; transition: box-shadow var(--dur-fast), color var(--dur-fast);
 }
-.offer > svg { flex: none; color: var(--text-3); }
+.addTile:hover { box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--ink); }
+.addTile:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.addTile > svg { color: var(--quiet); }
+
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; min-height: 32px; }
+.note { margin: 0; font-size: var(--fs-12); color: var(--text-3); }
+
+/* On the iPad with the homeowner (mode visit): bigger tiles, the picture showing more. */
+.bar[data-mode="visit"] .tab { min-height: 76px; padding: 12px; }
+.bar[data-mode="visit"] .tabPicture { width: 56px; height: 56px; }
+.bar[data-mode="visit"] .tabName { font-size: var(--fs-15); }
+.bar[data-mode="visit"] .tabTotal { font-size: var(--fs-14); }
+
+/* A phone: two tiles to a row on a white card, as the grouped kit has them; adding sits under them. */
+@media (max-width: 900px) {
+  .strip { flex-direction: column; }
+  .tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tab { min-height: 64px; padding: 10px 12px; border-radius: 12px; background: var(--m-card); }
+  .tabName { font-size: var(--fs-14); }
+  .tabTotal { font-size: var(--fs-14); color: var(--text-2); }
+  .tabChips { font-size: var(--fs-12); }
+  .addTile { width: auto; min-height: 44px; border-radius: 12px; }
+  .actions { min-height: 44px; }
+  /* "Show this one first" and the option's menu, at a thumb's size. */
+  .actions :global(.btn) { height: 44px; }
+  .actions :global(.btn-icon) { width: 44px; margin-right: -10px; }
+  .note { font-size: var(--fs-13); }
+}
+@media (max-width: 600px) {
+  .bar:not([data-mode="visit"]) .tabPicture { display: none; }
+}
+
+/* No options yet: the invitation, on the screens that keep it (QuoteOptions' invite), as one quiet
+   hairline row (no box): a small icon, the words, and the way to do it as quiet words on the right. */
+.offer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; padding: 4px 0;
+  border-bottom: 1px solid var(--row-divider); color: var(--text-3); font-size: var(--fs-13);
+}
+.offer > svg { flex: none; color: var(--quiet); }
+.offer > :global(.btn) { margin-right: -8px; color: var(--text-2); }
+.offer > :global(.btn):hover { color: var(--ink); }
+@media (max-width: 900px) {
+  .offer { font-size: var(--fs-14); }
+  /* The words take the row; the way to do it goes under them, past the icon, in the phone's green. */
+  .offer { align-items: flex-start; padding: 10px 0 2px; }
+  .offer > svg { margin-top: 3px; }
+  .offer > :global(.grow) { flex: 1 1 calc(100% - 26px); }
+  .offer > :global(.btn) { margin: 0 0 0 26px; padding-inline: 0; color: var(--green); }
+}
 
 /* Adding options: the estimate's lines that stay on every option as it becomes option 1 */
 .keep { list-style: none; margin: 0; padding: 2px 0; display: grid; gap: 8px; max-height: 220px; overflow-y: auto; }
@@ -41,3 +90,5 @@
 .nameRow { display: flex; flex-wrap: wrap; gap: 12px 14px; }
 .nameField { flex: 1 1 240px; }
 .tierField { flex: 0 1 160px; min-width: 120px; }
+
+@media (prefers-reduced-motion: reduce) { .tab, .addTile { transition: none; } }

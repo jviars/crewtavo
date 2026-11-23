@@ -39,7 +39,7 @@ describe("database backups in Settings → Your data", () => {
     expect(words).toContain("only covered if the files volume or bucket is backed up separately");
     // The dumps sit next to what they back up, so a download is the copy kept elsewhere.
     expect(words).toContain("The backups are kept on the same Railway project as Crewtavo, so if that's lost, they go with it.");
-    expect(html).not.toContain("form-error");
+    expect(html).not.toContain('role="alert"');
   });
 
   it("says the same server off Railway", () => {
@@ -62,7 +62,8 @@ describe("database backups in Settings → Your data", () => {
   it("says why the last backup didn't work, and when there's been none for two days", () => {
     const failed: BackupStatus = { ...GOOD, lastRun: { at: "2026-11-12T08:05:20Z", ok: false, error: "Storage didn't take the backup (500)." }, warning: "failed" };
     expect(backupProblem(failed)).toBe("The last backup didn't work. Storage didn't take the backup (500).");
-    expect(card(failed)).toContain("form-error");
+    // Said as a red callout, read out as soon as it shows.
+    expect(card(failed)).toMatch(/class="callout callout-danger" role="alert">.*The last backup didn&#x27;t work/);
     expect(backupProblem({ ...GOOD, warning: "stale" })).toBe("There's been no good backup for over two days.");
     expect(backupProblem(GOOD)).toBeNull();
   });
@@ -96,7 +97,7 @@ describe("database backups in Settings → Your data", () => {
     expect(words).toContain("Being made…");
     expect(words).toContain("(made by hand)");
     expect(html.match(/Download/g)?.length).toBe(1);
-    expect(text(renderToStaticMarkup(createElement(BackupList, { backups: [], busy: null, onDownload: () => undefined })))).toContain("No backups yet.");
+    expect(text(renderToStaticMarkup(createElement(BackupList, { backups: [], busy: null, onDownload: () => undefined })))).toContain("No backups yet");
   });
 
   it("says which secrets to save, what stops working without them and where they are, by name only", () => {

@@ -62,6 +62,7 @@ export function SignedEstimate({ quote, extras }: { quote: EstimateQuote; extras
 
   return (
     <section className={styles.panel} aria-labelledby={id}>
+      <h3 id={id} className={styles.subhead}>The signed estimate</h3>
       <div className={styles.doc}>
         {/* The little first page opens the whole document with a click; Open beside it does the same for keyboards and screen readers. */}
         <div className={styles.thumb} onClick={() => setOpen(true)} aria-hidden="true">
@@ -69,7 +70,6 @@ export function SignedEstimate({ quote, extras }: { quote: EstimateQuote; extras
         </div>
         <div className={styles.docText}>
           <div>
-            <h3 id={id}>The signed estimate</h3>
             <p>{signedBy(approval)}</p>
             {companyLineBlank && (
               <p>

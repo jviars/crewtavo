@@ -5,7 +5,7 @@
 import { laborRates } from "@crewtavo/core/billing";
 import { monthText } from "@crewtavo/core/jobBilling";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
@@ -13,27 +13,43 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FormChecks, FormError } from "@/components/ui/Field";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow } from "@/components/ui/Section";
+import { StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState } from "@/components/ui/States";
 import { statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
+import { formatDate, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
-import { formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { Change } from "../finance/change";
 import { failureText, invoiceInChunks, type BatchResult } from "./batch";
 import { chargeBusy, chargeInChunks, chargeLiveText, chargeOutcomeText, chargeSummary, chargeTotal, type ChargeableInvoice, type ChargeResult } from "./charges";
 import { invoiceTotals, readyJobs, type ReadyJob } from "./totals";
+import styles from "./invoices.module.css";
+import { Select } from "@/components/ui/Select";
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+
+/**
+ * A figure's change from an earlier one, as the strip says it after its note: "+8%" in green when it
+ * went the better way, red when not ("down" is better for what's past due), "24×" past ten times, and
+ * nothing without an earlier figure to compare with.
+ */
+export function changeFrom(now: number, before: number, better: "up" | "down" = "up", after = "vs 30 days ago"): { text: string; tone?: "good" | "danger"; after: string } | undefined {
+  if (!before) return undefined;
+  const change = Math.round(((now - before) / Math.abs(before)) * 100);
+  if (change === 0) return { text: "No change", after };
+  const up = change > 0;
+  const text = change >= 900 ? `${formatNumber(Math.round(now / before))}×` : `${up ? "+" : "−"}${formatNumber(Math.abs(change))}%`;
+  return { text, tone: up === (better === "up") ? "good" : "danger", after };
+}
 
 /**
  * What's owed and past due today, and what came in over the past 30 days, each with its change: the
  * balances against 30 days ago, money in against the 30 days before. The database adds them up
  * (invoice_summary): balances back then are walked back from today's through the payments since, so
- * they're close rather than exact.
+ * they're close rather than exact. Each figure opens its tab. A phone shows the first two.
  */
 export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue" | "paid") => void }) {
   const { company } = useSession();
@@ -43,32 +59,20 @@ export function InvoiceSummary({ onPick }: { onPick: (filter: "open" | "overdue"
     queryFn: () => invoiceTotals(company.id, today),
   });
   const s = summary.data;
-  const stat = (label: string, value: number, change: ReactNode, hint: string, filter: "open" | "overdue" | "paid", tone?: "bad") => (
-    <button type="button" className="card stat stat-button" onClick={() => onPick(filter)}>
-      <span className="row-between" style={{ width: "100%" }}><span className="label">{label}</span><span className="stat-view" aria-hidden="true">View</span></span>
-      <span className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span className="value" style={tone ? { color: "var(--danger)" } : undefined}><AnimatedNumber value={value} format={MONEY} /></span>
-        {change}
-      </span>
-      <span className="hint">{hint}</span>
-    </button>
-  );
-  if (!s) return <div className="stat-row">{[0, 1, 2].map((i) => <div key={i} className="card stat"><Skeleton width="50%" height={11} /><Skeleton width="70%" height={24} /><Skeleton width="60%" height={11} style={{ marginTop: 6 }} /></div>)}</div>;
-  // A balance's chip compares it with 30 days ago, which the hint then says.
-  const since = (shown: boolean) => (shown ? " · vs 30 days ago" : "");
+  if (!s) return <StatsSkeleton count={3} />;
   return (
-    <div className="stat-row">
-      {stat(statusText("invoice", "sent"), s.owed, <Change now={s.owed} before={s.before.owed} compared="30 days ago" same="No change" />, `${plural(s.owedCount, "invoice")}${since(s.before.owed > 0)}`, "open")}
-      {stat(
-        statusText("invoice", "overdue"),
-        s.late,
-        <Change now={s.late} before={s.before.pastDue} compared="30 days ago" same="No change" better="down" />,
-        `${s.lateCount ? plural(s.lateCount, "invoice") : "Nothing late"}${since(s.before.pastDue > 0)}`,
-        "overdue",
-        s.lateCount ? "bad" : undefined,
-      )}
-      {stat("Collected", s.collected, <Change now={s.collected} before={s.before.collected} compared="the 30 days before" />, `${plural(s.payments, "payment")} · Past 30 days`, "paid")}
-    </div>
+    <StatStrip label="Invoice totals" className={styles.summary}>
+      <Stat label={statusText("invoice", "sent")} value={<AnimatedNumber value={s.owed} format={MONEY} />} note={plural(s.owedCount, "invoice")} delta={changeFrom(s.owed, s.before.owed)} onClick={() => onPick("open")} />
+      <Stat
+        label={statusText("invoice", "overdue")}
+        value={<AnimatedNumber value={s.late} format={MONEY} />}
+        tone={s.lateCount ? "danger" : undefined}
+        note={s.lateCount ? plural(s.lateCount, "invoice") : "Nothing late"}
+        delta={changeFrom(s.late, s.before.pastDue, "down")}
+        onClick={() => onPick("overdue")}
+      />
+      <Stat label="Collected" value={<AnimatedNumber value={s.collected} format={MONEY} />} note={`${plural(s.payments, "payment")} · past 30 days`} delta={changeFrom(s.collected, s.before.collected, "up", "vs the 30 days before")} onClick={() => onPick("paid")} />
+    </StatStrip>
   );
 }
 
@@ -82,14 +86,14 @@ function useReadyJobs() {
 }
 
 /**
- * Autopay charges someone has to see to, on the Invoices screen: ones that failed (the client was
- * sent the Pay link and a way to update their card), each name opening its invoice, and ones over
- * the autopay limit waiting for the office's OK. Nothing when there are none.
+ * Autopay charges someone has to see to: ones that failed (the client was sent the Pay link and a way
+ * to update their card), and ones over the autopay limit waiting for the office's OK.
  */
-export function AutopayAttention() {
+function useAutopayAttention(enabled: boolean) {
   const { company } = useSession();
-  const charges = useQuery({
+  return useQuery({
     queryKey: ["invoices", company.id, "autopay"],
+    enabled,
     meta: { silent: true },
     queryFn: async () => {
       const select = "id, status, invoice:invoices!autopay_charges_invoice_fkey(id, number), client:clients!autopay_charges_client_fkey(display_name)";
@@ -101,9 +105,25 @@ export function AutopayAttention() {
       return { failed: unwrap(failed), failedCount: failed.count ?? 0, asking: unwrap(asking)[0] ?? null, askingCount: asking.count ?? 0 };
     },
   });
-  const data = charges.data;
-  if (!data || (!data.failedCount && !data.askingCount)) return null;
-  const failed = data.failed.filter((c) => c.invoice);
+}
+
+/**
+ * What wants the office on the Invoices screen, as quiet rows over the list (Page-Invoices.dc.html):
+ * finished jobs waiting for their invoice, with Invoice them; and, for `autopay` (the people who look
+ * after money), autopay charges that failed, each name opening its invoice, and one waiting for an OK.
+ * Nothing when there's nothing.
+ */
+export function InvoiceNudges({ autopay }: { autopay: boolean }) {
+  const ready = useReadyJobs();
+  const charges = useAutopayAttention(autopay);
+  const [batching, setBatching] = useState(false);
+  const jobs = ready.data ?? [];
+  const data = autopay ? charges.data : undefined;
+  const failed = (data?.failed ?? []).filter((c) => c.invoice);
+  const asking = data && data.askingCount > 0 && data.asking?.invoice ? data.asking : null;
+  if (!jobs.length && !data?.failedCount && !asking) return null;
+  // Who the jobs are for, each once (a client with two jobs ready is one name).
+  const who = [...new Set(jobs.map((j) => j.client?.display_name ?? j.title))];
   // The same client twice (two invoices) says which is which.
   const name = (c: (typeof failed)[number]) => {
     const who = c.client?.display_name ?? `Invoice #${c.invoice!.number}`;
@@ -111,51 +131,43 @@ export function AutopayAttention() {
   };
   return (
     <>
-      {data.failedCount > 0 && (
-        <div className="callout callout-danger">
-          <Icon name="card" size={20} />
-          <div className="grow">
-            <strong>{plural(data.failedCount, "autopay charge")} failed:</strong>{" "}
-            {failed.map((c, i) => (
-              <Fragment key={c.id}>
-                {i > 0 && ", "}
-                <Link to={`/invoices/${c.invoice!.id}`}>{name(c)}</Link>
-              </Fragment>
-            ))}
-            {data.failedCount > failed.length && ` and ${data.failedCount - failed.length} more`}
-          </div>
-        </div>
-      )}
-      {data.askingCount > 0 && data.asking?.invoice && (
-        <div className="callout callout-warning">
-          <Icon name="card" size={20} />
-          <div className="grow">
-            <strong>{data.askingCount === 1 ? "1 charge needs" : `${data.askingCount} charges need`} your OK.</strong>{" "}
-            <span className="muted">{data.asking.client?.display_name ? `${data.asking.client.display_name} · ` : ""}Invoice #{data.asking.invoice.number}</span>
-          </div>
-          <Link className="btn btn-sm" to={`/invoices/${data.asking.invoice.id}`}>Review</Link>
-        </div>
-      )}
-    </>
-  );
-}
-
-export function ReadyToInvoice() {
-  const ready = useReadyJobs();
-  const [open, setOpen] = useState(false);
-  const jobs = ready.data ?? [];
-  if (!jobs.length) return null;
-  return (
-    <>
-      <div className="callout callout-info">
-        <Icon name="invoice" size={20} />
-        <div className="grow">
-          <strong>{jobs.length} {jobs.length === 1 ? "job is" : "jobs are"} ready to invoice.</strong>{" "}
-          <span className="muted">{jobs.slice(0, 3).map((j) => j.client?.display_name ?? j.title).join(", ")}{jobs.length > 3 ? ` and ${jobs.length - 3} more` : ""}</span>
-        </div>
-        <Button size="sm" onClick={() => setOpen(true)}>Invoice them</Button>
-      </div>
-      {open && <BatchDialog jobs={jobs} onClose={() => setOpen(false)} />}
+      <RelatedList label="Needs attention">
+        {jobs.length > 0 && (
+          <RelatedRow
+            lead={<span className="rel-icon" data-tone="good"><Icon name="job" size={15} /></span>}
+            title={`${jobs.length} ${jobs.length === 1 ? "job is" : "jobs are"} ready to invoice`}
+            detail={<span className={styles.who}>{`${who.slice(0, 3).join(", ")}${who.length > 3 ? ` and ${who.length - 3} more` : ""}`}</span>}
+            actions={<button type="button" className="link-btn" onClick={() => setBatching(true)}>Invoice them</button>}
+          />
+        )}
+        {data && data.failedCount > 0 && (
+          <RelatedRow
+            lead={<span className="rel-icon" data-tone="danger"><Icon name="card" size={15} /></span>}
+            title={`${plural(data.failedCount, "autopay charge")} failed`}
+            detail={
+              <>
+                {failed.map((c, i) => (
+                  <Fragment key={c.id}>
+                    {i > 0 && ", "}
+                    <Link to={`/invoices/${c.invoice!.id}`}>{name(c)}</Link>
+                  </Fragment>
+                ))}
+                {data.failedCount > failed.length && ` and ${data.failedCount - failed.length} more`}
+              </>
+            }
+            actions={failed.length === 1 ? <Link className="link-btn" to={`/invoices/${failed[0]!.invoice!.id}`}>Review</Link> : undefined}
+          />
+        )}
+        {data && asking && (
+          <RelatedRow
+            lead={<span className="rel-icon" data-tone="warning"><Icon name="card" size={15} /></span>}
+            title={data.askingCount === 1 ? "1 charge needs your OK" : `${data.askingCount} charges need your OK`}
+            detail={`${asking.client?.display_name ? `${asking.client.display_name} · ` : ""}Invoice #${asking.invoice!.number}`}
+            actions={<Link className="link-btn" to={`/invoices/${asking.invoice!.id}`}>Review</Link>}
+          />
+        )}
+      </RelatedList>
+      {batching && <BatchDialog jobs={jobs} onClose={() => setBatching(false)} />}
     </>
   );
 }
@@ -214,39 +226,43 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
   return (
     <Dialog open onClose={onClose} title="Invoice finished jobs" description="Each job gets its invoice, less any deposits or progress payments already billed. A monthly job's covers its month." size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); run.mutate(); }}>
-        <div className="card" style={{ boxShadow: "none", maxHeight: 340, overflowY: "auto" }}>
+        <ul className={styles.picks} role="list" aria-label="Jobs to invoice">
           {jobs.map((j) => (
-            <label key={j.id} className="card-row" style={{ cursor: "pointer" }}>
-              <input type="checkbox" checked={picked.includes(j.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, j.id] : picked.filter((x) => x !== j.id))} />
-              <span className="grow" style={{ minWidth: 0 }}>
-                <strong>{j.client?.display_name ?? j.title}</strong>
-                <span className="muted small" style={{ display: "block" }}>
-                  Job #{j.number} · {j.title}
-                  {j.months ? ` · ${j.months.map((m) => monthText(m)).join(", ")}` : j.billing_mode === "per_visit" ? " · completed visits" : ""}
-                  {send && !j.client?.email ? " · no email on file" : ""}
+            <li key={j.id}>
+              <label className={styles.pick}>
+                <input type="checkbox" checked={picked.includes(j.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, j.id] : picked.filter((x) => x !== j.id))} />
+                <span className={styles.pickText}>
+                  <span className={styles.pickName}>{j.client?.display_name ?? j.title}</span>
+                  <span className={styles.pickSub}>
+                    Job #{j.number} · {j.title}
+                    {j.months ? ` · ${j.months.map((m) => monthText(m)).join(", ")}` : j.billing_mode === "per_visit" ? " · completed visits" : ""}
+                    {send && !j.client?.email ? " · no email on file" : ""}
+                  </span>
                 </span>
-              </span>
-              <span className="tabular">{amountOf(j) ? formatMoney(amountOf(j)) : <span className="muted small">per visit</span>}</span>
-            </label>
+                <span className={styles.pickEnd}>{amountOf(j) ? formatMoney(amountOf(j)) : <span className={styles.pickNote}>per visit</span>}</span>
+              </label>
+            </li>
           ))}
-        </div>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" checked={work} onChange={(e) => setWork(e.target.checked)} />
-          Add logged hours and materials
-        </label>
-        {work && rates.data && (rates.data.length ? (
-          <Select className="select input-sm" style={{ width: "auto" }} value={rate?.id ?? ""} onChange={(e) => setRateId(e.target.value)} aria-label="Bill hours at">
-            {rates.data.map((r) => <option key={r.id} value={r.id}>Hours at {r.name} · {formatMoneyCents(Number(r.unit_price))}/{r.unit}</option>)}
-          </Select>
-        ) : (
-          <span className="muted small">To bill hours, add an item sold by the hour (unit hr), like Labor, to your price list.</span>
-        ))}
-        {canEmail && (
-          <label className="switch-row" style={{ fontWeight: 400 }}>
-            <input type="checkbox" className="switch" checked={send} onChange={(e) => setSend(e.target.checked)} />
-            Email each client their invoice now
+        </ul>
+        <div className={styles.switches}>
+          <label className="switch-row">
+            <input type="checkbox" className="switch" checked={work} onChange={(e) => setWork(e.target.checked)} />
+            Add logged hours and materials
           </label>
-        )}
+          {work && rates.data && (rates.data.length ? (
+            <Select className="select input-sm" style={{ width: "auto" }} value={rate?.id ?? ""} onChange={(e) => setRateId(e.target.value)} aria-label="Bill hours at">
+              {rates.data.map((r) => <option key={r.id} value={r.id}>Hours at {r.name} · {formatMoneyCents(Number(r.unit_price))}/{r.unit}</option>)}
+            </Select>
+          ) : (
+            <span className="muted small">To bill hours, add an item sold by the hour (unit hr), like Labor, to your price list.</span>
+          ))}
+          {canEmail && (
+            <label className="switch-row">
+              <input type="checkbox" className="switch" checked={send} onChange={(e) => setSend(e.target.checked)} />
+              Email each client their invoice now
+            </label>
+          )}
+        </div>
         <FormError error={run.error ?? rates.error} />
         <div className="form-actions">
           <FormChecks />
@@ -265,6 +281,10 @@ function BatchDialog({ jobs, onClose }: { jobs: ReadyJob[]; onClose: () => void 
 
 const notSent = (skipped: Array<{ number: number; reason: string }>) => skipped.map((s) => `Invoice #${s.number}: ${s.reason}`).join(". ");
 
+/**
+ * Remind the past due, all at once, by email: the action on the Past due group's heading, so it draws
+ * as green words there. "Remind both" for two. Nothing without email, or with nobody owing.
+ */
 export function RemindAllButton({ ids }: { ids: string[] }) {
   const { config } = useSession();
   const remind = useMutation({
@@ -283,15 +303,17 @@ export function RemindAllButton({ ids }: { ids: string[] }) {
   });
   if (!ids.length || !config.features.email) return null;
   return (
-    <Button
-      icon="send"
-      loading={remind.isPending}
+    <button
+      type="button"
+      disabled={remind.isPending}
+      aria-busy={remind.isPending || undefined}
       onClick={async () => {
         if (await confirm({ title: `Email ${ids.length} payment ${ids.length === 1 ? "reminder" : "reminders"}?`, body: "Each client gets a friendly note with a link to view and pay.", confirmLabel: "Send reminders" })) remind.mutate();
       }}
     >
-      Remind all
-    </Button>
+      {remind.isPending && <span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />}
+      {ids.length === 1 ? "Send a reminder" : ids.length === 2 ? "Remind both" : "Remind all"}
+    </button>
   );
 }
 
@@ -341,20 +363,20 @@ export function ChargeCardsDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onClose={onClose} title="Charge saved cards" description="Unpaid invoices whose client saved a card and agreed to be charged." size="lg">
       {done ? (
         <div className="stack">
-          <div className="card" style={{ boxShadow: "none", maxHeight: 340, overflowY: "auto" }}>
+          <ul className={styles.picks} role="list" aria-label="Invoices charged">
             {done.map(({ row, result }) => (
-              <div key={row.id} className="card-row">
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{row.client_name}</strong>
-                  <span className="muted small" style={{ display: "block" }}>#{row.number} · {row.card}</span>
+              <li key={row.id} className={styles.pick} data-static="">
+                <span className={styles.pickText}>
+                  <span className={styles.pickName}>{row.client_name}</span>
+                  <span className={styles.pickSub}>#{row.number} · {row.card}</span>
                 </span>
-                <span style={{ textAlign: "right" }}>
-                  <span className="tabular">{formatMoneyCents(row.balance_due)}</span>
-                  <span className={`small ${result.outcome === "queued" || result.outcome === "in_progress" ? "muted" : "text-danger"}`} style={{ display: "block" }}>{chargeOutcomeText(result)}</span>
+                <span className={styles.pickEnd}>
+                  {formatMoneyCents(row.balance_due)}
+                  <span className={styles.pickNote} data-tone={result.outcome === "queued" || result.outcome === "in_progress" ? undefined : "danger"}>{chargeOutcomeText(result)}</span>
                 </span>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
           <FormError error={charge.data?.error} />
           <span className="muted small" role="status">{chargeSummary(done.map((d) => d.result))}</span>
           <div className="form-actions">
@@ -369,29 +391,31 @@ export function ChargeCardsDialog({ onClose }: { onClose: () => void }) {
             <EmptyState inline title="No saved cards to charge">Unpaid invoices show here once their client saves a card and agrees to be charged.</EmptyState>
           ) : (
             rows.length > 0 && (
-              <>
-                <label className="row" style={{ gap: 8, cursor: open.length ? "pointer" : "default" }}>
+              <div className={styles.pickGroup}>
+                <label className={styles.pickAll} data-off={!open.length || undefined}>
                   <input type="checkbox" checked={all} disabled={!open.length} onChange={(e) => setPicked(e.target.checked ? open.map((r) => r.id) : [])} />
                   Select all ({open.length})
                 </label>
-                <div className="card" style={{ boxShadow: "none", maxHeight: 340, overflowY: "auto" }}>
+                <ul className={styles.picks} role="list" aria-label="Unpaid invoices">
                   {rows.map((r) => (
-                    <label key={r.id} className="card-row" style={{ cursor: chargeBusy(r) ? "default" : "pointer" }}>
-                      <input type="checkbox" disabled={chargeBusy(r)} checked={!chargeBusy(r) && picked.includes(r.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, r.id] : picked.filter((x) => x !== r.id))} />
-                      <span className="grow" style={{ minWidth: 0 }}>
-                        <strong>{r.client_name}</strong>
-                        <span className="muted small" style={{ display: "block" }}>
-                          #{r.number} · <span className={r.status === "overdue" ? "text-danger" : undefined}>{r.due_on ? `Due ${formatDate(r.due_on)}` : "Due on receipt"}</span> · {r.card}
+                    <li key={r.id}>
+                      <label className={styles.pick} data-off={chargeBusy(r) || undefined}>
+                        <input type="checkbox" disabled={chargeBusy(r)} checked={!chargeBusy(r) && picked.includes(r.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, r.id] : picked.filter((x) => x !== r.id))} />
+                        <span className={styles.pickText}>
+                          <span className={styles.pickName}>{r.client_name}</span>
+                          <span className={styles.pickSub}>
+                            #{r.number} · <span className={r.status === "overdue" ? "text-danger" : undefined}>{r.due_on ? `Due ${formatDate(r.due_on)}` : "Due on receipt"}</span> · {r.card}
+                          </span>
                         </span>
-                      </span>
-                      <span style={{ textAlign: "right" }}>
-                        <span className="tabular">{formatMoneyCents(r.balance_due)}</span>
-                        {chargeBusy(r) && <span className="muted small" style={{ display: "block" }}>{chargeLiveText(r)}</span>}
-                      </span>
-                    </label>
+                        <span className={styles.pickEnd}>
+                          {formatMoneyCents(r.balance_due)}
+                          {chargeBusy(r) && <span className={styles.pickNote}>{chargeLiveText(r)}</span>}
+                        </span>
+                      </label>
+                    </li>
                   ))}
-                </div>
-              </>
+                </ul>
+              </div>
             )
           )}
           <FormError error={charge.error ?? list.error} />

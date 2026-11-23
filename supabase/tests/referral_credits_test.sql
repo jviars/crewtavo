@@ -164,7 +164,7 @@ begin;
 set local role authenticated;
 select trc.as_user(:'mia');
 -- Saved as Marketing → Referrals saves it (useSettingsSaver), from a copy without settings.marketing.
-update public.companies set settings = (settings - 'marketing') || jsonb_build_object('referrals', '{"reward": {"kind": "amount", "value": 50}, "offer": "10% off your first mow", "message": "Hi {{client.first_name}} {{link}} {{rewards}}"}'::jsonb)
+update public.companies set settings = (public.company_settings(id) - 'marketing') || jsonb_build_object('referrals', '{"reward": {"kind": "amount", "value": 50}, "offer": "10% off your first mow", "message": "Hi {{client.first_name}} {{link}} {{rewards}}"}'::jsonb)
  where id = :'co';
 commit;
 select trc.check((select settings #>> '{referrals,message}' = 'Hi {{client.first_name}} {{link}} {{rewards}}' and settings #>> '{marketing,enabled}' = 'true' from public.companies where id = :'co'),

@@ -9,6 +9,7 @@ import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { Fact, Facts } from "@/components/ui/Section";
 import { supabase } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useLive, type ChatMember } from "./data";
@@ -38,11 +39,11 @@ export function MembersPanel({ members, onPerson, onClose }: { members: ChatMemb
   const live = useLive();
   return (
     <aside className={s.members} aria-label={t("Members")}>
-      <div className="row" style={{ justifyContent: "space-between", padding: "10px 8px 0" }}>
-        <strong style={{ fontSize: 13 }}>{members ? `${members.length} ${members.length === 1 ? "member" : "members"}` : t("Members")}</strong>
-        <button type="button" className="icon-btn" aria-label={t("Close the member list")} onClick={onClose}><Icon name="x" size={16} /></button>
+      <div className={s.membersHead}>
+        <span>{members ? t.plural(members.length, { one: "{count} member", other: "{count} members" }) : t("Members")}</span>
+        <button type="button" className={`icon-btn ${s.membersClose}`} aria-label={t("Close the member list")} onClick={onClose}><Icon name="x" size={16} /></button>
       </div>
-      {!members && <p className="muted small" style={{ padding: "8px" }}>{t("Loading…")}</p>}
+      {!members && <p className="muted small" style={{ margin: "8px 0" }}>{t("Loading…")}</p>}
       {members &&
         groupMembers(members, live.online).map((g) => (
           <div key={g.title}>
@@ -50,15 +51,13 @@ export function MembersPanel({ members, onPerson, onClose }: { members: ChatMemb
             {g.people.map((m) => {
               const on = m.online || live.online.has(m.id);
               return (
-                <button key={m.id} type="button" className={s.member} onClick={() => onPerson(m.id)}>
-                  <span className={s.memberAvatar} data-offline={!on || undefined} style={{ background: m.avatar_color || "var(--avatar)" }} aria-hidden="true">
+                <button key={m.id} type="button" className={s.member} data-offline={!on || undefined} onClick={() => onPerson(m.id)} aria-label={on ? `${m.name}, ${m.role_label}` : `${m.name}, ${t("{role} · offline", { role: m.role_label })}`}>
+                  <span className={s.memberAvatar} style={{ background: m.avatar_color || "var(--avatar)" }} aria-hidden="true">
                     <Face name={m.name} photo={m.avatar_url} />
                     {on && <span className={s.presence} />}
                   </span>
-                  <span className="grow">
-                    <span className={s.memberName} style={{ color: on ? roleColor(m.color) : "var(--text-3)" }}>{m.name}</span>
-                    <span className={s.memberRole}>{on ? m.role_label : t("{role} · offline", { role: m.role_label })}</span>
-                  </span>
+                  <span className={s.memberName}>{m.name}</span>
+                  <span className={s.memberRole}>{m.role_label}</span>
                 </button>
               );
             })}
@@ -96,17 +95,16 @@ export function PersonDialog({ person, onClose, onMention }: { person: ChatMembe
       <div className="dialog-body">
         <div className={s.profile}>
           <div className={s.profileHead}>
-            <Avatar name={person.name} color={person.avatar_color} photo={person.avatar_url} size={64} className={s.profileAvatar} />
-            <div className="stack-sm" style={{ gap: 4 }}>
-              <span className={s.roleChip}><span className={s.roleDot} style={{ background: roleColor(person.color) }} />{person.role_label}</span>
+            <Avatar name={person.name} color={person.avatar_color} photo={person.avatar_url} size={56} className={s.profileAvatar} />
+            <div className="stack-sm" style={{ gap: 2 }}>
+              <span className={s.roleLine}><span className={s.roleDot} style={{ background: roleColor(person.color) }} />{person.role_label}</span>
               <span className="muted small">{person.id === userId ? t("You") : on ? t("Online now") : t("Offline")}</span>
             </div>
           </div>
           {details.data && details.data.crews.length > 0 && (
-            <div className="stack-sm" style={{ gap: 4 }}>
-              <strong className="small" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", color: "var(--text-3)" }}>{t("Crews")}</strong>
-              <span>{details.data.crews.join(", ")}</span>
-            </div>
+            <Facts>
+              <Fact label={t("Crews")}>{details.data.crews.join(", ")}</Fact>
+            </Facts>
           )}
           <div className="row wrap" style={{ gap: 8 }}>
             {onMention && person.id !== userId && (

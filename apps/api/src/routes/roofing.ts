@@ -6,7 +6,7 @@
  * measurement; its estimate is a quote (services/roofPackages.ts). An estimate that offers two or
  * three options gets them from routes/packages.ts.
  */
-import { ADMINS, OFFICE, SALES } from "@crewtavo/core";
+import { ADMINS, OFFICE, SALES, seesInvoices } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -22,7 +22,7 @@ import { saveLeftOut, sendCheck } from "../services/sendCheck";
 
 export const roofing = new Hono<AppEnv>();
 
-const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c) });
+const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c), noMoney: !seesInvoices(c.var.role, c.var.permissions) });
 
 /** Roofing on its Apps page: Install and Uninstall (public.trade_app_set_enabled). */
 roofing.post("/roofing/enabled", requireUser, requireCompany(ADMINS, "apps"), async (c) => {

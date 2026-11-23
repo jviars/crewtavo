@@ -43,7 +43,7 @@ select public.create_company('Nell Snow', 'general') as other \gset
 select t_csm.as_user(:'opal');
 select public.create_company('Opal Lawn', 'general') as co \gset
 select :'co' || '/logo/e7c30000-0000-0000-0000-0000000000aa.png' as logo \gset
-update public.companies set settings = settings || '{"payment_terms_days": 30, "minimum_charge": 50,
+update public.companies set settings = public.company_settings(id) || '{"payment_terms_days": 30, "minimum_charge": 50,
   "clock": {"record_location": true, "breaks": "paid", "remind_after_hours": 10}, "weather_rules": [{"applies_to": "Mowing", "max_rain_pct": 70}]}'
   || jsonb_build_object('branding', jsonb_build_object('color', '#0f2a35', 'logo', :'logo'))
 where id = :'co';
@@ -61,30 +61,30 @@ commit;
 begin;
 set local role authenticated;
 select t_csm.as_user(:'opal');
-create temp table before on commit drop as select settings from public.companies where id = :'co';
+create temp table before on commit drop as select public.company_settings(id) as settings from public.companies where id = :'co';
 -- Settings → Company, open since before a weather rule was added, saves what it shows.
-update public.companies set settings = jsonb_set(settings, '{weather_rules}', settings -> 'weather_rules' || '[{"applies_to": "Aeration", "max_rain_pct": 40}]') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{weather_rules}', public.company_settings(id) -> 'weather_rules' || '[{"applies_to": "Aeration", "max_rain_pct": 40}]') where id = :'co';
 select public.merge_company_settings(:'co', '{"payment_terms_days": 15, "minimum_charge": null, "branding": {"color": "#3b7d23"},
   "clock": {"record_location": false, "breaks": "short_paid"}, "late_fee": {"type": "flat", "amount": 25, "grace_days": 7}}');
-select t_csm.check((select settings -> 'weather_rules' = '[{"applies_to": "Mowing", "max_rain_pct": 70}, {"applies_to": "Aeration", "max_rain_pct": 40}]' from public.companies where id = :'co'),
+select t_csm.check((select public.company_settings(id) -> 'weather_rules' = '[{"applies_to": "Mowing", "max_rain_pct": 70}, {"applies_to": "Aeration", "max_rain_pct": 40}]' from public.companies where id = :'co'),
   'a newer change to a key it doesn''t save stays');
-select t_csm.check((select (settings ->> 'payment_terms_days')::int = 15 and settings -> 'minimum_charge' = 'null' and settings -> 'late_fee' = '{"type": "flat", "amount": 25, "grace_days": 7}'
+select t_csm.check((select (public.company_settings(id) ->> 'payment_terms_days')::int = 15 and public.company_settings(id) -> 'minimum_charge' = 'null' and public.company_settings(id) -> 'late_fee' = '{"type": "flat", "amount": 25, "grace_days": 7}'
   from public.companies where id = :'co'), 'the keys it gives replace the ones saved, null and new ones too');
-select t_csm.check((select settings -> 'branding' = jsonb_build_object('color', '#3b7d23', 'logo', :'logo')
-  and settings -> 'clock' = '{"record_location": false, "breaks": "short_paid", "remind_after_hours": 10}' from public.companies where id = :'co'),
+select t_csm.check((select public.company_settings(id) -> 'branding' = jsonb_build_object('color', '#3b7d23', 'logo', :'logo')
+  and public.company_settings(id) -> 'clock' = '{"record_location": false, "breaks": "short_paid", "remind_after_hours": 10}' from public.companies where id = :'co'),
   'an object is merged into the one saved: the logo and the clock''s other settings stay');
-select t_csm.check((select (c.settings - array['payment_terms_days', 'minimum_charge', 'branding', 'clock', 'late_fee', 'weather_rules'])
+select t_csm.check((select (public.company_settings(c.id) - array['payment_terms_days', 'minimum_charge', 'branding', 'clock', 'late_fee', 'weather_rules'])
   = (b.settings - array['payment_terms_days', 'minimum_charge', 'branding', 'clock', 'late_fee', 'weather_rules']) from public.companies c, before b where c.id = :'co'),
   'and nothing else changes');
 select public.merge_company_settings(:'co', '{"late_fee": null}');
-select t_csm.check((select settings -> 'late_fee' = 'null' from public.companies where id = :'co'), 'an object can be turned off again');
+select t_csm.check((select public.company_settings(id) -> 'late_fee' = 'null' from public.companies where id = :'co'), 'an object can be turned off again');
 select public.merge_company_settings(:'co', '{}');
-select t_csm.check((select settings ->> 'payment_terms_days' = '15' and settings ? 'weather_rules' from public.companies where id = :'co'), 'nothing to merge changes nothing');
+select t_csm.check((select public.company_settings(id) ->> 'payment_terms_days' = '15' and public.company_settings(id) ? 'weather_rules' from public.companies where id = :'co'), 'nothing to merge changes nothing');
 select t_csm.expect_error(format($q$select public.merge_company_settings(%L, '[{"payment_terms_days": 15}]')$q$, :'co'), 'settings are names and values');
 select t_csm.expect_error(format($q$select public.merge_company_settings(%L, null)$q$, :'co'), 'and there are some');
 select t_csm.as_user(:'abe');
 select public.merge_company_settings(:'co', '{"quote_valid_days": 45}');
-select t_csm.check((select settings ->> 'quote_valid_days' = '45' from public.companies where id = :'co'), 'an admin merges them too');
+select t_csm.check((select public.company_settings(id) ->> 'quote_valid_days' = '45' from public.companies where id = :'co'), 'an admin merges them too');
 commit;
 
 begin;
@@ -115,10 +115,12 @@ select t_csm.as_user(:'opal', :'details');
 select set_config('request.method', 'POST', true), set_config('request.path', '/rpc/merge_company_settings', true);
 select hooks.before_request();
 select t_csm.check(current_setting('transaction_read_only') = 'off', 'an assistant that may change company details can merge settings');
-select public.merge_company_settings(:'co', '{"working_hours": {"start": "08:00", "end": "17:00", "days": [1, 2, 3, 4, 5, 6]}, "hub_tips": true}');
-select t_csm.check((select settings -> 'working_hours' = '{"start": "08:00", "end": "17:00", "days": [1, 2, 3, 4, 5, 6]}' and settings -> 'hub_tips' = 'true'
+select public.merge_company_settings(:'co', '{"working_hours": {"start": "08:00", "end": "17:00", "days": [1, 2, 3, 4, 5, 6]}, "quote_valid_days": 45}');
+select t_csm.check((select public.company_settings(id) -> 'working_hours' = '{"start": "08:00", "end": "17:00", "days": [1, 2, 3, 4, 5, 6]}' and public.company_settings(id) -> 'quote_valid_days' = '45'
   from public.companies where id = :'co'), 'the settings on Settings → Company');
 select t_csm.expect_error(format($q$select public.merge_company_settings(%L, '{"assistants": {"read_only": false}}')$q$, :'co'), 'nothing else the guard keeps from assistants');
+-- Tips, like tax and late fees, go with invoices (20261123100600_assistant_prices_are_money.sql).
+select t_csm.expect_error(format($q$select public.merge_company_settings(%L, '{"hub_tips": true}')$q$, :'co'), 'nor tips, without invoices');
 rollback;
 begin;
 set local role authenticated;

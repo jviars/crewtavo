@@ -8,20 +8,21 @@ import { standardTiers } from "@crewtavo/core/snow";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
-import { NumberInput } from "@/components/ui/NumberInput";
+import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { addressLine, formatMoney } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { useCrews } from "../jobs/JobDialogs";
 import { bandsKey, customer, loadBands, loadPushPrice, nameOf, PRIORITIES, tiersOf, type Member, type Site } from "./snowData";
 import { amount, depthRow, DepthRows, readDepths, within } from "./SnowPrices";
+import styles from "./snow.module.css";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 export function SnowSiteDialog({ site, team, onClose }: { site: Site | null; team: Member[]; onClose: () => void }) {
   const { company } = useSession();
@@ -95,95 +96,114 @@ export function SnowSiteDialog({ site, team, onClose }: { site: Site | null; tea
   };
 
   return (
-    <Dialog open onClose={onClose} title={site ? customer(site) : "Add snow customer"} size="lg">
+    <Dialog
+      open
+      onClose={onClose}
+      title={site ? customer(site) : "Add snow customer"}
+      description={site ? <><Link to={`/jobs/${site.job_id}`}>Job #{site.job.number}</Link> · {site.job.title}{addressLine(site.job.property) ? ` · ${addressLine(site.job.property)}` : ""}</> : undefined}
+      size="lg"
+    >
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        {site ? (
-          <p className="muted small" style={{ marginTop: 0 }}>
-            <Link to={`/jobs/${site.job_id}`}>Job #{site.job.number}</Link> · {site.job.title}{addressLine(site.job.property) ? ` · ${addressLine(site.job.property)}` : ""}
-          </p>
-        ) : (
+        {!site && (
           <Field label="Job" hint={<>A snow customer is one of your jobs. Don't see it? <Link to="/jobs?new=1">Create the job</Link> first.</>}>
-            <input className="input" placeholder="Find the job" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Find the job" />
-            <div className="card" style={{ maxHeight: 200, overflowY: "auto", boxShadow: "none", marginTop: 8 }}>
-              {jobs.isPending && <div className="card-row"><Skeleton width="60%" /></div>}
-              {shown.map((j) => (
-                <label key={j.id} className="card-row" style={{ cursor: "pointer" }}>
-                  <input type="radio" name="snow-job" checked={jobId === j.id} onChange={() => { setJobId(j.id); setCrewId(j.default_crew_id ?? ""); setInstructions(j.instructions ?? ""); }} />
-                  <span className="grow"><strong>{j.client?.display_name ?? j.title}</strong><span className="muted small" style={{ display: "block" }}>Job #{j.number} · {j.title}</span></span>
-                </label>
-              ))}
-              {jobs.data && !shown.length && <EmptyState inline title={term ? "No active jobs match" : "Every active job is a snow customer already"} />}
+            <div>
+              <div className={cx("search-field", styles.pickSearch)}>
+                <Icon name="search" size={15} />
+                <input type="search" placeholder="Find the job" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Find the job" autoComplete="off" />
+              </div>
+              <div className={styles.pick} role="radiogroup" aria-label="Job">
+                {jobs.isPending && <div className={styles.pickRow}><Skeleton width="60%" /></div>}
+                {shown.map((j) => (
+                  <label key={j.id} className={styles.pickRow}>
+                    <input type="radio" name="snow-job" checked={jobId === j.id} onChange={() => { setJobId(j.id); setCrewId(j.default_crew_id ?? ""); setInstructions(j.instructions ?? ""); }} />
+                    <span className={styles.pickText}><b>{j.client?.display_name ?? j.title}</b><span>Job #{j.number} · {j.title}</span></span>
+                  </label>
+                ))}
+                {jobs.data && !shown.length && <div className={styles.pickEmpty}>{term ? "No active jobs match" : "Every active job is a snow customer already"}</div>}
+              </div>
             </div>
           </Field>
         )}
-        <div className="form-grid form-grid-3">
-          <Field label="Plow at" hint="Inches forecast from 6pm through the next day.">
-            <div className="input-group">
-              <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={trigger} onChange={(e) => setTrigger(e.target.value)} required />
-              <span className="addon addon-right addon-unit">in</span>
-            </div>
-          </Field>
-          <Field label="Salt at" optional hint="Less snow than that, and for ice or a refreeze.">
-            <div className="input-group">
-              <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={salt} onChange={(e) => setSalt(e.target.value)} placeholder="No salting" />
-              <span className="addon addon-right addon-unit">in</span>
-            </div>
-          </Field>
-          <Field label="Push again every" optional hint="In a long storm, past the trigger.">
-            <div className="input-group">
-              <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={repeat} onChange={(e) => setRepeat(e.target.value)} placeholder="One push" />
-              <span className="addon addon-right addon-unit">in</span>
-            </div>
-          </Field>
-        </div>
-        <div className="form-grid form-grid-3">
-          <Field label="Clear by" optional hint="A time of day you've promised.">
-            <input className="input" type="time" value={clearBy} onChange={(e) => setClearBy(e.target.value)} />
-          </Field>
-          <Field label="Priority" hint="Who's told about first.">
-            <Select className="select" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
-              {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-            </Select>
-          </Field>
-          <Field label="Crew" hint="Its lead and members are told.">
-            <Select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
-              <option value="">No crew</option>
-              {(crews.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <Field label="Other people on it" hint="A sub, or anyone on no crew who works this property. They're told too, and put on the visit when you schedule it. A sub is also asked whether they can go out.">
-          <div className="card" style={{ maxHeight: 160, overflowY: "auto", boxShadow: "none" }}>
-            {team.map((m) => (
-              <label key={m.user_id} className="card-row" style={{ cursor: "pointer" }}>
-                <input type="checkbox" checked={people.includes(m.user_id)} onChange={(e) => setPeople(e.target.checked ? [...people, m.user_id] : people.filter((u) => u !== m.user_id))} />
-                <span className="grow">{nameOf(m)}</span>
-              </label>
-            ))}
+
+        <section className={styles.part} aria-labelledby="snow-when">
+          <h3 className={styles.partHead} id="snow-when">When it goes out</h3>
+          <div className={cx("form-grid form-grid-3", styles.three)}>
+            <Field label="Plow at" hint="Inches forecast from 6pm through the next day.">
+              <div className="input-group">
+                <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={trigger} onChange={(e) => setTrigger(e.target.value)} required />
+                <span className="addon addon-right addon-unit">in</span>
+              </div>
+            </Field>
+            <Field label="Salt at" optional hint="Less snow than that, and for ice or a refreeze.">
+              <div className="input-group">
+                <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={salt} onChange={(e) => setSalt(e.target.value)} placeholder="No salting" />
+                <span className="addon addon-right addon-unit">in</span>
+              </div>
+            </Field>
+            <Field label="Push again every" optional hint="In a long storm, past the trigger.">
+              <div className="input-group">
+                <NumberInput className="input" inputMode="decimal" min={0.1} max={48} step={0.1} value={repeat} onChange={(e) => setRepeat(e.target.value)} placeholder="One push" />
+                <span className="addon addon-right addon-unit">in</span>
+              </div>
+            </Field>
           </div>
-        </Field>
-        <Field label="Instructions for the crew" optional hint="Where the snow goes, what to keep clear, who to call. They read these on the visit, and they're the job's own. Start a line with - for a list or # for a heading, and put **two stars** around words to bold them.">
-          <textarea className="textarea" value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={5000} />
-        </Field>
-        <Field label="What a storm bills" hint="By how much fell: the storm's first visit bills this, and more pushes that day are included. With no prices here, each push bills the job's own lines.">
+        </section>
+
+        <section className={styles.part} aria-labelledby="snow-how">
+          <h3 className={styles.partHead} id="snow-how">How it's served</h3>
+          <div className={cx("form-grid form-grid-3", styles.three)}>
+            <Field label="Clear by" optional hint="A time of day you've promised.">
+              <input className="input" type="time" value={clearBy} onChange={(e) => setClearBy(e.target.value)} />
+            </Field>
+            <Field label="Priority" hint="Who's told about first.">
+              <Select className="select" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
+                {PRIORITIES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </Select>
+            </Field>
+            <Field label="Crew" hint="Its lead and members are told.">
+              <Select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
+                <option value="">No crew</option>
+                {(crews.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+          </div>
+          <Field label="Other people on it" hint="A sub, or anyone on no crew who works this property. They're told too, and put on the visit when you schedule it. A sub is also asked whether they can go out.">
+            <div className={styles.pick} role="group" aria-label="Other people on it">
+              {team.map((m) => (
+                <label key={m.user_id} className={styles.pickRow}>
+                  <input type="checkbox" checked={people.includes(m.user_id)} onChange={(e) => setPeople(e.target.checked ? [...people, m.user_id] : people.filter((u) => u !== m.user_id))} />
+                  <span className={styles.pickText}><b>{m.profile?.full_name || nameOf(m)}</b>{m.sub && <span>{m.sub.name}</span>}</span>
+                </label>
+              ))}
+            </div>
+          </Field>
+          <Field label="Instructions for the crew" optional hint="Where the snow goes, what to keep clear, who to call. They read these on the visit, and they're the job's own. Start a line with - for a list or # for a heading, and put **two stars** around words to bold them.">
+            <textarea className="textarea" value={instructions} onChange={(e) => setInstructions(e.target.value)} maxLength={5000} />
+          </Field>
+          <label className={styles.toggle}>
+            <input type="checkbox" className="switch" checked={tellClient} onChange={(e) => setTellClient(e.target.checked)} />
+            <span>
+              <b>Tell the client</b>
+              <span>They get a message when their storm is scheduled and when each visit is done. The wording is yours to change in <Link to="/automations">Automations</Link>.</span>
+            </span>
+          </label>
+        </section>
+
+        <section className={styles.part} aria-labelledby="snow-bills">
+          <h3 className={styles.partHead} id="snow-bills">What a storm bills</h3>
+          <p className={styles.partHint}>By how much fell: the storm's first visit bills this, and more pushes that day are included. With no prices here, each push bills the job's own lines.</p>
           <DepthRows rows={tiers} onChange={setTiers} money what="Storm price" addLabel="Price storms by depth" />
           {Boolean(bands.data?.length) && (
-            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-              <Button size="sm" disabled={!push.data} loading={push.isFetching} onClick={() => setTiers(standardTiers(bands.data!, push.data!).map((t) => depthRow(t.up_to_in, t.price)))}>Use the standard prices</Button>
-              <span className="muted small">{!jobId ? "Pick the job first." : push.data === 0 ? "The job has no price on its lines yet." : push.data ? `From its push price, ${formatMoney(push.data)}.` : ""}</span>
+            <div className={styles.fill}>
+              <Button size="sm" variant="ghost" icon="refresh" disabled={!push.data} loading={push.isFetching} onClick={() => setTiers(standardTiers(bands.data!, push.data!).map((t) => depthRow(t.up_to_in, t.price)))}>Use the standard prices</Button>
+              <span>{!jobId ? "Pick the job first." : push.data === 0 ? "The job has no price on its lines yet." : push.data ? `From its push price, ${formatMoney(push.data)}.` : ""}</span>
             </div>
           )}
-        </Field>
-        <label className="row" style={{ gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
-          <input type="checkbox" checked={tellClient} onChange={(e) => setTellClient(e.target.checked)} style={{ marginTop: 3 }} />
-          <span>
-            <strong>Tell the client</strong>
-            <span className="muted small" style={{ display: "block" }}>They get a message when their storm is scheduled and when each visit is done. The wording is yours to change in <Link to="/automations">Automations</Link>.</span>
-          </span>
-        </label>
+        </section>
+
         <FormError error={save.error ?? remove.error} />
         <div className="form-actions">
-          {site && <Button variant="ghost" onClick={askRemove} loading={remove.isPending}>Remove</Button>}
+          {site && <Button variant="ghost" icon="trash" className={styles.remove} onClick={askRemove} loading={remove.isPending}>Remove</Button>}
           <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending}>{site ? "Save" : "Add"}</Button>

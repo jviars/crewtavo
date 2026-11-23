@@ -37,7 +37,7 @@ function october(): Record<string, Row[]> {
   }));
   return {
     jobs: [...jobs, { ...jobs[0]!, id: "still-going", status: "active" }, { ...jobs[0]!, id: "september", updated_at: "2026-09-30T12:00:00.000Z" }],
-    companies: [{ id: COMPANY, settings: { margin_target: 30 } }],
+    company_private_settings: [{ company_id: COMPANY, settings: { margin_target: 30 } }],
     time_entries: jobs.flatMap((j, i) => [0, 1].map((k) => ({ id: `t-${i}-${k}`, job_id: j.id, started_at: "2026-10-14T13:00:00.000Z", ended_at: "2026-10-14T14:00:00.000Z" }))),
     expenses: jobs.map((j, i) => ({ id: `x-${i}`, job_id: j.id, amount: 10 })),
     // A load ticket for something that isn't on its job's lines: read with the rest, and not counted.
@@ -48,9 +48,6 @@ function october(): Record<string, Row[]> {
 let db: FakeDb;
 beforeEach(() => {
   db = new FakeDb(october(), { job_pay_costs: ({ p_jobs }: { p_jobs: string[] }) => p_jobs.map((id) => ({ job_id: id, amount: 50, payees: 1 })) });
-  // The one company's settings, as `.single()` gives them.
-  const from = db.from.bind(db);
-  db.from = (table: string) => (table === "companies" ? ({ select: () => ({ eq: () => ({ single: async () => ({ data: db.tables.companies![0], error: null }) }) }) } as never) : from(table));
   state.db = db;
   state.rateCalls = [];
 });
@@ -79,7 +76,8 @@ describe("Finance → Profit with 1,250 completed jobs", () => {
     // The jobs themselves are more than one request brings.
     expect(db.requests.filter((r) => r.table === "jobs").map((r) => [r.order, r.sent])).toEqual([["id.asc", 1000], ["id.asc", 250]]);
     expect(db.requests.filter((r) => r.table === "time_entries").reduce((n, r) => n + r.sent, 0)).toBe(JOBS * 2);
-    expect(db.requests.every((r) => r.order.endsWith("id.asc"))).toBe(true);
+    // Every list is read in a set order; the target margin is one row.
+    expect(db.requests.filter((r) => r.table !== "company_private_settings").every((r) => r.order.endsWith("id.asc"))).toBe(true);
   });
 
   it("reads no pay rates or sub pay for someone without job costs", async () => {
@@ -93,7 +91,7 @@ describe("Finance → Profit with 1,250 completed jobs", () => {
   it("asks nothing more when no job was finished", async () => {
     const { jobs } = await loadProfit({ companyId: COMPANY, range: { start: "2025-01-01T05:00:00.000Z", end: "2025-02-01T05:00:00.000Z" }, costs: true });
     expect(jobs).toEqual([]);
-    expect(db.requests.map((r) => r.table)).toEqual(["jobs"]);
+    expect(db.requests.map((r) => r.table).sort()).toEqual(["company_private_settings", "jobs"]);
     expect(state.rateCalls).toEqual([]);
   });
 });

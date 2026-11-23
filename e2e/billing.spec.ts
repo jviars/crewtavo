@@ -20,7 +20,7 @@ test("invoice a job, send it, and record the payment", async ({ as, browser, dat
   const invoiceId = page.url().split("/invoices/")[1]!;
   const main = page.getByRole("main");
   await expect(main.getByText("Driveway sealcoat").first()).toBeVisible();
-  await expect(main.getByText("$1,250.00").first()).toBeVisible();
+  await expect(main.getByText("$1,250.00").filter({ visible: true }).first()).toBeVisible();
   await expectAccessible(page, "a draft invoice");
 
   // Sent by email; the dialog shows the client's link.
@@ -65,4 +65,25 @@ test("invoice a job, send it, and record the payment", async ({ as, browser, dat
   await expect(hub.getByRole("button", { name: /^Pay / })).toHaveCount(0);
   await expectAccessible(portal, "a paid invoice in the customer portal");
   await portal.context().close();
+
+  // In Safari, Print opens the invoice as a PDF the server makes, in a new tab: the page asks the
+  // link for a print ticket first and sends it with the invoice, in the form, never in the address.
+  // (This browser says it's Safari: navigator.vendor is what the page goes by.)
+  const safari = await browser.newContext();
+  await safari.addInitScript(() => Object.defineProperty(Navigator.prototype, "vendor", { get: () => "Apple Computer, Inc." }));
+  const client = await safari.newPage();
+  await client.goto(`/hub/${token}`);
+  await expect(client.locator("#root").getByText("Driveway sealcoat").first()).toBeVisible();
+  const ticket = client.waitForResponse((r) => r.url().endsWith("/print-ticket"));
+  const made = safari.waitForEvent("response", (r) => r.url().includes("/api/public/documents/"));
+  await client.getByRole("button", { name: "Print or save as PDF" }).click();
+  expect((await ticket).status()).toBe(200);
+  const pdf = await made;
+  expect(pdf.status()).toBe(200);
+  expect(pdf.headers()["content-type"]).toBe("application/pdf");
+  expect(new URL(pdf.url()).search).toBe("");
+  // Without a ticket, the server makes none.
+  const bare = await client.request.post(new URL(pdf.url()).pathname, { form: { document: "{}" } });
+  expect(bare.status()).toBe(403);
+  await safari.close();
 });

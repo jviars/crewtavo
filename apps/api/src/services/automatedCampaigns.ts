@@ -23,7 +23,7 @@ import type { Env } from "../env";
 import { isEmail } from "../lib/email";
 import { emailReady } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
-import { companyFooter, officeVars, Skip, type RunContext } from "./automations";
+import { companyFooter, keptVars, officeVars, Skip, type RunContext } from "./automations";
 import { emailClient } from "./marketingEmail";
 import { addressList, recipientsColumn, recipientsFor, sendToEach } from "./recipients";
 import { Busy, WaitUntil } from "./reviews";
@@ -263,8 +263,10 @@ export async function sendCampaignEmail(
   // recorded failed, so the next try sends it again), rather than failing for someone to retry.
   if (emailBusy(result)) throw new Busy(reason!);
   if (!result.sent) throw new Error(reason);
-  // The timeline's copy has the office's link: the client's own can say yes to a card, or tip on one.
-  const kept = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+  // A contact's copy has the office's link (the client's own can say yes to a card, or tip on one),
+  // and the timeline's copy none (keptVars).
+  const forContacts = { ...ctx, vars: await officeVars(env, ctx, baseUrl) };
+  const kept = { ...ctx, vars: keptVars(ctx) };
   // A quote's follow-up is about the client's work, not marketing, so their contacts ticked for
   // emails get a copy (services/recipients.ts), with the office's link and nothing tracked. A copy
   // that doesn't go is noted on the message; the client's went, so the run isn't tried again for it.
@@ -275,12 +277,12 @@ export async function sendCampaignEmail(
       companyId: ctx.company.id,
       company: ctx.company,
       client: { id: client.id, email: person.to },
-      subject: render(action.subject, kept),
-      text: render(action.body, kept),
+      subject: render(action.subject, forContacts),
+      text: render(action.body, forContacts),
       baseUrl: baseUrl!,
       footer: companyFooter(ctx.company),
       unsubscribe: false,
-      buttons: typeof kept.vars.link === "string" ? { [kept.vars.link]: linkButton(campaign.key) } : undefined,
+      buttons: typeof forContacts.vars.link === "string" ? { [forContacts.vars.link]: linkButton(campaign.key) } : undefined,
     }),
   );
   await admin.from("messages").insert({

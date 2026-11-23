@@ -1,6 +1,7 @@
 /**
- * A right-click menu, on Base UI's ContextMenu (MIT), with the same entries as Menu. It's a quicker
- * way in, never the only one: whatever it offers is on the page too (a row opens with a click, its ⋯
+ * A right-click menu, on Base UI's ContextMenu (MIT), drawn as Menu.tsx's menus are (the same
+ * entries, menuModel.ts, and the same .menu look; a sub menu isn't offered here). It's a quicker way
+ * in, never the only one: whatever it offers is on the page too (a row opens with a click, its ⋯
  * menu has the rest), since not everyone knows to right-click, or can.
  *
  * The browser's own menu still comes up where it's what's wanted: over a text field, over words
@@ -8,13 +9,9 @@
  */
 import { ContextMenu as Base } from "@base-ui/react/context-menu";
 import { useRef, useState, type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
-import { copyText } from "@/lib/clipboard";
-import { t } from "@/lib/i18n";
+import { Icon } from "./Icon";
 import { layerFor } from "./layer";
-import { MenuPopup } from "./Menu";
-import { hasActions, shownEntries, type MenuEntry } from "./menuEntries";
-import type { Selection } from "./Selection";
+import { hasActions, isAction, visibleEntries, type MenuEntry } from "./menuModel";
 
 /** How long a touch counts as how a right-click came, where the event doesn't say. */
 const TOUCH_MS = 1000;
@@ -34,7 +31,7 @@ export function ContextMenu({
   items: MenuEntry[] | ((target: Element) => MenuEntry[] | null);
   /** Whether holding a finger down opens it too: not where that already does something (useHoldToPick). */
   touch?: boolean;
-  /** The element it's on, e.g. <tbody />: a <div> otherwise. */
+  /** The element it's on, e.g. <li />: a <div> otherwise. */
   render?: ReactElement;
   children: ReactNode;
 } & Omit<HTMLAttributes<HTMLElement>, "children">) {
@@ -45,7 +42,7 @@ export function ContextMenu({
   const lastPointer = useRef({ type: "", at: 0 });
   const entriesFor = (el: Element) => {
     const list = typeof items === "function" ? items(el) : items;
-    return list ? shownEntries(list) : [];
+    return list && hasActions(list) ? visibleEntries(list).filter((e) => !("items" in e)) : [];
   };
 
   const byTouch = (e: ReactMouseEvent) => {
@@ -56,7 +53,7 @@ export function ContextMenu({
   };
   /** Whether there's a menu for this spot: not over a text field, and only with something in it. */
   const offers = (el: Element) =>
-    !el.closest('input:not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable]:not([contenteditable="false"])') && hasActions(entriesFor(el));
+    !el.closest('input:not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable]:not([contenteditable="false"])') && entriesFor(el).some(isAction);
   const wanted = (e: ReactMouseEvent) => {
     const el = e.target as Element;
     if (!touch && byTouch(e)) return false;
@@ -91,6 +88,7 @@ export function ContextMenu({
         }}
         onContextMenu={(e) => {
           onContextMenu?.(e);
+          // One inside another (a row's own in a list's): the inner one has it.
           if (e.isDefaultPrevented()) {
             e.preventBaseUIHandler();
             return;
@@ -107,51 +105,34 @@ export function ContextMenu({
       >
         {children}
       </Base.Trigger>
-      <MenuPopup
-        layer={layerFor(target) ?? undefined}
-        entries={target ? entriesFor(target) : []}
-        // Back where focus was (Base UI would take it to the first thing in the area it covers),
-        // unless what was chosen put it somewhere else, like a dialog's first field.
-        finalFocus={() => {
-          const now = document.activeElement;
-          if (now && now !== document.body && !now.closest('[role="menu"]')) return false;
-          return before.current?.isConnected ? before.current : false;
-        }}
-      />
+      {/* In the layer what was right-clicked is in (a dialog, a popover), where one on the page would sit behind it. */}
+      <Base.Portal container={layerFor(target) ?? undefined}>
+        <Base.Positioner className="menu-positioner" positionMethod="fixed" collisionPadding={8}>
+          <Base.Popup
+            className="menu"
+            // Back where focus was (Base UI would take it to the first thing in the area it covers),
+            // unless what was chosen put it somewhere else, like a dialog's first field.
+            finalFocus={() => {
+              const now = document.activeElement;
+              if (now && now !== document.body && !now.closest('[role="menu"]')) return false;
+              return before.current?.isConnected ? before.current : false;
+            }}
+          >
+            {(target ? entriesFor(target) : []).map((entry, i) =>
+              "separator" in entry ? (
+                <Base.Separator key={i} className="menu-sep" />
+              ) : "heading" in entry ? (
+                <div key={i} className="menu-label">{entry.heading}</div>
+              ) : isAction(entry) ? (
+                <Base.Item key={i} className="menu-item" data-danger={entry.danger || undefined} disabled={entry.disabled} title={entry.title} onClick={() => entry.onSelect()}>
+                  {entry.icon && <Icon name={entry.icon} size={16} />}
+                  {entry.label}
+                </Base.Item>
+              ) : null,
+            )}
+          </Base.Popup>
+        </Base.Positioner>
+      </Base.Portal>
     </Base.Root>
-  );
-}
-
-/**
- * Right-click on a list's rows (Jobs, Quotes, Invoices, Clients): open it, here or in a new tab,
- * pick it where the row has a box (SelectCell), or copy its link. It's the list's <tbody>, taking its
- * props (useHoldToPick's among them), and each row says which it is with data-row={id}.
- *
- * A mouse's only: on a phone, holding a row already picks it.
- */
-export function RowMenu({ href, selection, children, ...props }: { href: (id: string) => string; selection?: Selection; children: ReactNode } & Omit<HTMLAttributes<HTMLElement>, "children">) {
-  const navigate = useNavigate();
-  const entries = (target: Element): MenuEntry[] | null => {
-    const row = target.closest<HTMLElement>("tr[data-row]");
-    const id = row?.dataset.row;
-    if (!row || !id) return null;
-    const url = href(id);
-    // A link in the row to somewhere else (the client's name) keeps the browser's own menu, so its
-    // "Open in new tab" and "Copy link" are for where it goes, not for the row.
-    const link = target.closest<HTMLAnchorElement>("a[href]");
-    if (link && new URL(link.href, location.href).pathname !== new URL(url, location.href).pathname) return null;
-    const picked = selection?.has(id) ?? false;
-    return [
-      { label: t("Open"), icon: "arrowRight", onSelect: () => navigate(url) },
-      { label: t("Open in a new tab"), icon: "external", onSelect: () => window.open(url, "_blank", "noopener") },
-      { label: picked ? t("Deselect") : t("Select"), icon: picked ? "x" : "check", hidden: !selection || !row.querySelector("[data-pick]"), onSelect: () => selection?.toggle(id) },
-      { separator: true },
-      { label: t("Copy link"), icon: "link", onSelect: () => void copyText(new URL(url, window.location.origin).href, t("Link copied")) },
-    ];
-  };
-  return (
-    <ContextMenu render={<tbody />} touch={false} items={entries} {...props}>
-      {children}
-    </ContextMenu>
   );
 }

@@ -2,7 +2,7 @@
  * Signing in with a code, for a sub on a new phone (docs/subcontractors-plan.md §7, phases E and E2):
  * their phone number or email address, then the 6-digit code texted or emailed to it
  * (apps/api/src/routes/signInCodes.ts). A right code comes back as a one-time sign-in token, redeemed
- * the way emailed sign-in links are (redeemEmailLink in lib/session.tsx). Unlike a link, this works
+ * the way emailed sign-in links are (redeemEmailLink in lib/emailLink.ts). Unlike a link, this works
  * inside an app added to the Home Screen, which keeps its own sign-in. Texts come first; email is the
  * way in when this Crewtavo can't text, and for a sub with no phone on file when it can.
  */

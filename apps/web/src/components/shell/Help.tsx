@@ -10,6 +10,7 @@ import { Link, useLocation } from "react-router-dom";
 import { hasRole, isSub, useSession } from "@/lib/session";
 import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
+import { SHEET_QUERY } from "../ui/menuModel";
 import { t } from "@/lib/i18n";
 
 const DOCS = "https://crewtavo.com/docs/";
@@ -81,7 +82,14 @@ export function askUrl(ai: "claude" | "chatgpt", page: string | null, question: 
   return ai === "claude" ? `https://claude.ai/new?q=${q}` : `https://chatgpt.com/?q=${q}`;
 }
 
-export function HelpButton() {
+/** Opens Help from elsewhere (the phone's More sheet, where the team finds it). */
+let opener: (() => void) | null = null;
+export const openHelp = () => opener?.();
+
+/** Whether the shell's popovers are the phone's sheets rather than dropping from their buttons: the same width a menu turns into a sheet at. */
+export const phoneLayout = () => window.matchMedia(SHEET_QUERY).matches;
+
+export function HelpButton({ buttonClassName = "icon-btn" }: { buttonClassName?: string }) {
   const session = useSession();
   const location = useLocation();
   const id = useId();
@@ -105,17 +113,31 @@ export function HelpButton() {
   useEffect(() => {
     const p = panel.current;
     if (!p) return;
+    opener = () => {
+      try {
+        p.showPopover();
+      } catch {
+        // Already open.
+      }
+    };
     const onToggle = (e: Event) => {
       const isOpen = (e as Event & { newState: string }).newState === "open";
       setOpen(isOpen);
-      if (isOpen && button.current) {
-        const r = button.current.getBoundingClientRect();
-        p.style.top = `${r.bottom + 8}px`;
-        p.style.left = `${Math.max(12, Math.min(window.innerWidth - p.offsetWidth - 12, r.right - p.offsetWidth))}px`;
+      if (!isOpen) return;
+      // A phone's sheet sits at the bottom (base.css); a computer's drops from the ?.
+      const r = button.current?.getBoundingClientRect();
+      if (phoneLayout() || !r?.width) {
+        p.style.top = p.style.left = "";
+        return;
       }
+      p.style.top = `${r.bottom + 8}px`;
+      p.style.left = `${Math.max(12, Math.min(window.innerWidth - p.offsetWidth - 12, r.right - p.offsetWidth))}px`;
     };
     p.addEventListener("toggle", onToggle);
-    return () => p.removeEventListener("toggle", onToggle);
+    return () => {
+      opener = null;
+      p.removeEventListener("toggle", onToggle);
+    };
   }, []);
 
   const close = () => panel.current?.hidePopover();
@@ -129,51 +151,47 @@ export function HelpButton() {
 
   return (
     <>
-      <button ref={button} type="button" className="icon-btn" aria-label={t("Help")} title={t("Help")} popovertarget={id} aria-expanded={open}>
+      <button ref={button} type="button" className={buttonClassName} aria-label={t("Help")} title={t("Help")} popovertarget={id} aria-expanded={open}>
         <Icon name="help" size={20} />
       </button>
-      <div ref={panel} id={id} className="panel" popover="auto" role="dialog" aria-label={t("Help")}>
-        <div className="panel-head">
-          <h2>{t("Help")}</h2>
+      <div ref={panel} id={id} className="panel help-panel" popover="auto" role="dialog" aria-label={t("Help")}>
+        <span className="sheet-grab" aria-hidden="true" />
+        <h2 className="sheet-title">{t("Help")}</h2>
+        <form className="help-ask" onSubmit={ask}>
+          <input id={`${id}-q`} name="question" className="input" required pattern=".*\S.*" aria-label={t("Ask AI about Crewtavo")} placeholder={t("Ask AI about Crewtavo")} autoComplete="off" />
+          <div className="help-ask-buttons">
+            <Button type="submit" value="claude" size="sm" className="grow">{t("Ask Claude")}</Button>
+            <Button type="submit" value="chatgpt" size="sm" className="grow">{t("Ask ChatGPT")}</Button>
+          </div>
+          <span className="help-note">{t("It reads Crewtavo's docs to answer. Leave out client names.")}</span>
+        </form>
+        <div className="help-list">
+          <HelpRow icon="book" title={page ? t("Docs for this screen") : t("Crewtavo docs")} href={`${DOCS}${page ? `${page}/` : ""}`} onClick={close} />
+          {!sub && <HelpRow icon="clipboard" title={t("Your company's guides")} to="/kb" onClick={close} />}
+          {!sub && <HelpRow icon="sparkle" title={t("Connect Claude or ChatGPT")} to="/settings?tab=assistants" onClick={close} />}
+          {admin && <HelpRow icon="alert" title={t("Report a problem")} body={t("Public on GitHub, with no promise of a reply. Leave out client details.")} href={report} onClick={close} />}
         </div>
-        <div className="panel-body">
-          <form className="stack-sm" style={{ padding: "0 16px 14px" }} onSubmit={ask}>
-            <label htmlFor={`${id}-q`} className="small" style={{ fontWeight: 600 }}>{t("Ask AI about Crewtavo")}</label>
-            <input id={`${id}-q`} name="question" className="input" required pattern=".*\S.*" placeholder={t("How do I send invoices in a batch?")} autoComplete="off" />
-            <div className="row">
-              <Button type="submit" value="claude" icon="external" className="grow">{t("Ask Claude")}</Button>
-              <Button type="submit" value="chatgpt" icon="external" className="grow">{t("Ask ChatGPT")}</Button>
-            </div>
-            <span className="muted small">{t("It reads Crewtavo's docs to answer. Leave out client names.")}</span>
-          </form>
-          <HelpRow icon="book" title={page ? t("Docs for this screen") : t("Crewtavo docs")} body="crewtavo.com/docs" href={`${DOCS}${page ? `${page}/` : ""}`} onClick={close} />
-          {!sub && <HelpRow icon="clipboard" title={t("Your company's guides")} body={t("Knowledge base")} to="/kb" onClick={close} />}
-          {!sub && <HelpRow icon="sparkle" title={t("Connect Claude or ChatGPT")} body={t("Have it do the work in Crewtavo")} to="/settings?tab=assistants" onClick={close} />}
-          {admin ? (
-            <HelpRow icon="alert" title={t("Report a problem")} body={t("Public on GitHub, with no promise of a reply. Leave out client details.")} href={report} onClick={close} />
-          ) : (
-            <p className="muted small" style={{ padding: "12px 16px", borderTop: "1px solid var(--row-divider)", margin: 0 }}>{t("Stuck on something else? Ask someone at {company}.", { company: session.company.name })}</p>
-          )}
-        </div>
+        {!admin && <p className="help-foot">{t("Stuck on something else? Ask someone at {company}.", { company: session.company.name })}</p>}
       </div>
     </>
   );
 }
 
-function HelpRow({ icon, title, body, href, to, onClick }: { icon: IconName; title: string; body: string; href?: string; to?: string; onClick: () => void }) {
+/** A row of Help: a menu's look (a 15px icon, 13px words), and an arrow out for what opens in a new tab. */
+function HelpRow({ icon, title, body, href, to, onClick }: { icon: IconName; title: string; body?: string; href?: string; to?: string; onClick: () => void }) {
   const inside = (
     <>
-      <span className="n-icon"><Icon name={icon} size={16} /></span>
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <div className="n-title">{title}</div>
-        <div className="n-body">{body}</div>
+      <Icon name={icon} size={16} />
+      <span className="help-row-text">
+        {title}
+        {body && <span className="help-row-desc">{body}</span>}
       </span>
-      {href && <Icon name="external" size={14} />}
+      {href && <span className="help-row-out"><Icon name="arrowUpRight" size={14} /></span>}
     </>
   );
   return to ? (
-    <Link className="notice" to={to} onClick={onClick}>{inside}</Link>
+    <Link className="help-row" to={to} onClick={onClick}>{inside}</Link>
   ) : (
-    <a className="notice" href={href} target="_blank" rel="noopener noreferrer" onClick={onClick}>{inside}</a>
+    <a className="help-row" href={href} target="_blank" rel="noopener noreferrer" onClick={onClick}>{inside}</a>
   );
 }

@@ -135,7 +135,6 @@ export default {
   "I'll look around myself": "Exploraré por mi cuenta",
   "Show me around": "Muéstrame",
   "Keep exploring": "Seguir explorando",
-  "Back": "Atrás",
   "Welcome to {business}": "Bienvenido a {business}",
   "This is your own sample business, with clients, this week's work, quotes and invoices. Take a one-minute tour, or click around on your own. Nothing you do here reaches anyone.":
     "Este es tu propio negocio de ejemplo, con clientes, el trabajo de esta semana, cotizaciones y facturas. Haz un recorrido de un minuto o explora por tu cuenta. Nada de lo que hagas aquí le llega a nadie.",

@@ -53,7 +53,7 @@ export function PitchNote({ pitch }: { pitch: string }) {
   const more = Math.round((pitchFactor(pitch) - 1) * 100);
   return (
     <div className="pitch-note">
-      <span className="muted small">
+      <span className="pitch-note-text">
         {rise === 0 ? "Flat: the roof is the size it looks from above." : `×${formatNumber(pitchFactor(pitch), 3)}: the roof is ${more}% bigger than it looks from above.`}
       </span>
       {rise >= STEEP_FROM && <span className="chip chip-amber">Steep</span>}
@@ -89,7 +89,7 @@ export function PitchPicker({ value, onChange, inherit, label = "Roof pitch" }: 
         ))}
       </div>
       <label className="pitch-other">
-        <span className="small strong">Other</span>
+        <span className="pitch-label">Other</span>
         <input
           className="input"
           value={editing ? other : custom ? value : ""}
@@ -135,9 +135,9 @@ export function MeasurePitch({
     setOpen(null);
   };
   return (
-    <div className="stack-sm">
-      <span className="small strong">Measure it</span>
-      <div className="row wrap" style={{ gap: 6 }}>
+    <div className="pitch-ways">
+      <span className="pitch-label">Measure it</span>
+      <div className="pitch-ways-buttons">
         {roofs && <Button size="sm" icon="layers" onClick={() => setOpen("lidar")}>From lidar (free)</Button>}
         <Button size="sm" icon="smartphone" onClick={() => setOpen("phone")}>Phone on the roof</Button>
         <Button size="sm" icon="camera" onClick={() => setOpen("photo")}>From a photo</Button>
@@ -149,7 +149,7 @@ export function MeasurePitch({
         ) : (
           <Dialog open onClose={() => setOpen(null)} title="Roof pitch from lidar" size="sm">
             <div className="dialog-body stack">
-              <div className="callout"><Icon name="info" size={20} /><span className="grow">Draw the roof with Area first (or choose Outline the building in the middle), then try again. Lidar reads the pitch inside what you draw.</span></div>
+              <div className="callout callout-info"><Icon name="info" size={16} /><span className="grow">Draw the roof with Area first (or choose Outline the building in the middle), then try again. Lidar reads the pitch inside what you draw.</span></div>
               <div className="form-actions"><Button variant="primary" onClick={() => setOpen(null)}>OK</Button></div>
             </div>
           </Dialog>
@@ -236,12 +236,12 @@ function PhoneGauge({ onUse, onClose }: { onUse: (pitch: string) => void; onClos
           <>
             <div className="pitch-reading" role="status" aria-live="polite">
               {rise === null ? (
-                <span className="muted">Waiting for the sensor…</span>
+                <span className="pitch-wait"><span className="spinner" style={{ width: 16, height: 16 }} />Waiting for the sensor…</span>
               ) : (
                 <>
                   <RoofGlyph rise={rise} size={72} />
                   <strong className="num">{formatNumber(rise, 1)}/12</strong>
-                  <span className="muted small">{formatNumber(reading!.tilt, 1)}° · {reading!.steady ? "Steady" : "Hold still…"}</span>
+                  <span className="pitch-reading-note" data-steady={reading!.steady || undefined}>{formatNumber(reading!.tilt, 1)}° · {reading!.steady ? "Steady" : "Hold still…"}</span>
                 </>
               )}
             </div>
@@ -262,7 +262,7 @@ function PhoneGauge({ onUse, onClose }: { onUse: (pitch: string) => void; onClos
 function Unavailable({ children, onClose }: { children: string; onClose: () => void }) {
   return (
     <>
-      <div className="callout"><Icon name="info" size={20} /><span className="grow">{children}</span></div>
+      <div className="callout callout-info"><Icon name="info" size={16} /><span className="grow">{children}</span></div>
       <div className="form-actions"><Button variant="primary" onClick={onClose}>OK</Button></div>
     </>
   );
@@ -315,7 +315,7 @@ function PhotoGauge({ onUse, onClose }: { onUse: (pitch: string) => void; onClos
               <li>Step back and zoom in rather than shooting up from close by.</li>
               <li>Then drag the orange line along the roof edge and the blue line along something level: the gutter, the fascia, or a row of siding.</li>
             </ol>
-            <label className="btn btn-primary" style={{ justifySelf: "start" }}>
+            <label className="btn btn-primary pitch-photo-pick">
               <Icon name="camera" size={16} />Take or choose a photo
               <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => choose(e.target.files?.[0])} />
             </label>
@@ -359,9 +359,9 @@ function PhotoGauge({ onUse, onClose }: { onUse: (pitch: string) => void; onClos
                 </>
               )}
             </div>
-            <div className="row wrap" style={{ gap: 12, alignItems: "center" }}>
-              <span className="chip" style={{ background: "#f97316", color: "#fff" }}>Roof edge</span>
-              <span className="chip" style={{ background: "#2563eb", color: "#fff" }}>Level line</span>
+            <div className="pitch-photo-key">
+              <span className="pitch-key" data-line="roof">Roof edge</span>
+              <span className="pitch-key" data-line="level">Level line</span>
               <span className="grow" />
               {rise !== null && <strong className="num" role="status">{formatNumber(rise, 1)}/12 · {formatNumber(angle!, 1)}°</strong>}
             </div>
@@ -398,22 +398,22 @@ function GoogleRoof({ at, onUse, onClose }: { at: { lat: number; lng: number }; 
     <Dialog open onClose={onClose} title="Roof pitch from Google" description="Google's Solar API looks at the building nearest the middle of the map." size="sm">
       <div className="dialog-body stack">
         {insights.isPending ? (
-          <span className="muted">Asking Google…</span>
+          <span className="pitch-wait" role="status"><span className="spinner" style={{ width: 16, height: 16 }} />Asking Google…</span>
         ) : insights.error ? (
-          <div className="callout"><Icon name="info" size={20} /><span className="grow">{(insights.error as Error).message}</span></div>
+          <div className="callout callout-info"><Icon name="info" size={16} /><span className="grow">{(insights.error as Error).message}</span></div>
         ) : !pitches.length ? (
-          <span className="muted">Google found the building but no sloped roof on it.</span>
+          <p className="pitch-note-text">Google found the building but no sloped roof on it.</p>
         ) : (
-          <div className="stack-sm">
+          <div className="pitch-results">
             {pitches.map(([pitch, sqft]) => (
-              <div key={pitch} className="row" style={{ gap: 10 }}>
+              <div key={pitch} className="pitch-result">
                 <RoofGlyph rise={riseOf(pitch) ?? 0} />
                 <strong className="grow">{pitch}</strong>
-                <span className="muted small">{formatNumber(sqft)} sq ft from above</span>
+                <span className="pitch-note-text">{formatNumber(sqft)} sq ft from above</span>
                 <Button size="sm" onClick={() => onUse(pitch)}>Use</Button>
               </div>
             ))}
-            {insights.data?.imagery_date && <span className="muted small">From Google imagery taken {insights.data.imagery_date}.</span>}
+            {insights.data?.imagery_date && <p className="pitch-note-text">From Google imagery taken {insights.data.imagery_date}.</p>}
           </div>
         )}
         <div className="form-actions"><Button variant="ghost" onClick={onClose}>Close</Button></div>

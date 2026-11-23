@@ -4,7 +4,7 @@ import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { encryptJson } from "../src/lib/crypto";
-import { readClientLink } from "../src/lib/links";
+import { KEPT_LINK, readClientLink } from "../src/lib/links";
 import { packageLines, type PackageService } from "../src/services/roofPackages";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
@@ -69,6 +69,8 @@ vi.mock("../src/lib/supabase", () => {
   const client = (by: string) => ({
     auth: { getClaims: async () => ({ data: { claims: { sub: "viewer" } }, error: null }) },
     rpc: async (name: string, args: Record<string, unknown> = {}) => {
+      // The company's settings as the person reads them (lib/companySettings.ts settingsAs): all of them, for the office.
+      if (name === "company_settings") return { data: (state.tables.companies ?? []).find((c) => c.id === args.p_company)?.settings ?? null, error: null };
       const meanwhile = state.meanwhile;
       state.meanwhile = null;
       meanwhile?.();
@@ -507,7 +509,7 @@ describe("the price range", () => {
 
   it("emails the range in its own words, with the business's room on top and rounding", async () => {
     roofer({ lines });
-    rows("companies")[0]!.settings = { roofing: { range_pct: 10, range_round: 100 } };
+    state.tables.company_private_settings = [{ company_id: ROOFER, settings: { roofing: { range_pct: 10, range_round: 100 } } }];
     env.MAILPIT_URL = "http://mailpit.local";
     try {
       const body = await (await send(`/roofing/${QUOTE}/send-range`, { channel: "email" })).json();
@@ -839,7 +841,7 @@ describe("the link a send hands back", () => {
     expect(rows("messages")).toEqual([]);
   });
 
-  it("is the client's own only in the email that goes out; the timeline keeps the office's copy", async () => {
+  it("is the client's own only in the email that goes out; the timeline keeps no link", async () => {
     roofer({ lines, status: "sent" });
     env.MAILPIT_URL = "http://mailpit.local";
     let body: { sent: boolean; link: string };
@@ -854,7 +856,9 @@ describe("the link a send hands back", () => {
     expect(own).toMatchObject({ c: ROOFER, t: "quote", id: QUOTE });
     expect(own!.via).toBeUndefined();
     expect(await payload(body.link)).toMatchObject({ t: "quote", id: QUOTE, via: "office" });
-    expect(await payload(hubLink(rows("messages")[0]!.body))).toMatchObject({ t: "quote", id: QUOTE, via: "office" });
+    // Estimators, and any assistant connected as someone, read a quote's timeline: no link there.
+    expect(rows("messages")[0]!.body).toContain(KEPT_LINK);
+    expect(rows("messages")[0]!.body).not.toContain("/hub/");
   });
 
   /** The link in what went out, by email or text, for a send with this body. */

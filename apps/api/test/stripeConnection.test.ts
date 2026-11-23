@@ -38,6 +38,7 @@ import {
 import { loadSecret } from "../src/integrations/tokens";
 import { NO_PASSWORD, WRONG_PASSWORD } from "../src/lib/auth";
 import { forgetMailbox } from "../src/lib/notify";
+import { OWNERS_CONNECT_EMAIL } from "../src/routes/email";
 import { clientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 
@@ -891,12 +892,12 @@ describe("changing the Stripe key: the password, the record and the owners", () 
     signedIn("owner");
     expect((await putKey("sk_live_Aqzx9", others.password)).status).toBe(200);
     await vi.waitFor(() => expect(others.emails).toHaveLength(2));
-    // Each try counts for the sign-in and for the person; the 11th stopped at the sign-in's.
+    // Each try counts for the sign-in and for the person (across every kind of check); the 11th stopped at the sign-in's.
     expect(db.rpcs.filter((r) => r.fn === "rate_limit_hit").map((r) => r.args.p_key)).toEqual([
-      ...Array(10).fill([`stripe-key:${USER}:stolen`, `stripe-key:${USER}`]).flat(),
+      ...Array(10).fill([`stripe-key:${USER}:stolen`, `password-check:${USER}`]).flat(),
       `stripe-key:${USER}:stolen`,
       `stripe-key:${USER}:owner`,
-      `stripe-key:${USER}`,
+      `password-check:${USER}`,
     ]);
   });
 
@@ -1076,7 +1077,28 @@ describe("the company's email: the password and the owners", () => {
       [SAM, "The company's email was disconnected"],
     ]);
     // Each password tried counts (a missing one isn't a try).
-    expect(db.rpcs.filter((r) => r.fn === "rate_limit_hit").map((r) => r.args.p_key)).toEqual(Array(3).fill([`mailbox:${USER}:`, `mailbox:${USER}`]).flat());
+    expect(db.rpcs.filter((r) => r.fn === "rate_limit_hit").map((r) => r.args.p_key)).toEqual(Array(3).fill([`mailbox:${USER}:`, `password-check:${USER}`]).flat());
+  });
+
+  const state = async () => (await app.request("/api/email", { headers }, env)).json();
+
+  it("is an owner's to connect, change or disconnect: an admin is told so, and still sees how it stands", async () => {
+    expect((await resend("office@greenlawn.example", others.password)).status).toBe(200);
+    expect(await state()).toMatchObject({ can_change: true, mailbox: { from_email: "office@greenlawn.example", owner_connected: true } });
+    // Pat is an admin now.
+    db.tables.memberships!.find((m) => m.user_id === USER)!.role = "admin";
+    others.signIns.length = 0;
+    const change = await resend("billing@greenlawn.example", others.password);
+    expect(change.status).toBe(403);
+    expect(await errorOf(change)).toBe(OWNERS_CONNECT_EMAIL);
+    const disconnect = await remove(others.password);
+    expect(disconnect.status).toBe(403);
+    expect(await errorOf(disconnect)).toBe(OWNERS_CONNECT_EMAIL);
+    // Nothing changed, and no password was even checked.
+    expect(mailbox()).toMatchObject({ status: "connected", account_label: "office@greenlawn.example" });
+    expect(others.signIns).toEqual([]);
+    // What they see: no way to change it, and that it was connected by someone who isn't an owner now.
+    expect(await state()).toMatchObject({ can_change: false, mailbox: { from_email: "office@greenlawn.example", owner_connected: false } });
   });
 });
 

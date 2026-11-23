@@ -76,8 +76,13 @@ select trates.as_user(:'office');
 select trates.check(not private.has_perm(:'co', 'job_costs') and private.has_perm(:'co', 'timesheets'), 'Oli approves time and has no job costs');
 insert into public.time_entries (company_id, user_id, category, started_at, ended_at, labor_rate) values (:'co', :'office', 'shop', now() - interval '3 hours', now() - interval '2 hours', 999) returning id as own \gset
 select trates.check(trates.entry_rate(:'own') is null, 'a rate typed on new time isn''t kept, from the office either');
-update public.time_entries set approved_at = now(), approved_by = :'office', labor_rate = 500 where id = :'own';
-select trates.check(trates.entry_rate(:'own') = 30, 'approving their own time with a rate of their choosing pays their real rate');
+-- Only an owner approves their own time (20261123100700_own_pay_in_pay_periods.sql).
+select trates.check(trates.error_of(format('update public.time_entries set approved_at = now(), approved_by = %L, labor_rate = 500 where id = %L', :'office', :'own'))
+    like '%An owner approves your own time.%', 'the office doesn''t approve their own time');
+select trates.as_user(:'owner');
+update public.time_entries set approved_at = now(), approved_by = :'owner', labor_rate = 500 where id = :'own';
+select trates.check(trates.entry_rate(:'own') = 30, 'approved with a rate of someone''s choosing, their time pays their real rate');
+select trates.as_user(:'office');
 update public.time_entries set labor_rate = 500 where id = :'own';
 select trates.check(trates.entry_rate(:'own') = 30, 'and it can''t be raised afterwards');
 update public.time_entries set approved_at = now(), approved_by = :'office', labor_rate = 500 where id = :'crew_time';

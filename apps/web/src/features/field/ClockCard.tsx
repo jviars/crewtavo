@@ -13,8 +13,8 @@
 import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button, Spinner } from "@/components/ui/Button";
-import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { hasRole, keepsTime, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -24,6 +24,9 @@ import { LocationNotice } from "./LocationNoticeDialog";
 import { msg, t } from "@/lib/i18n";
 
 interface VisitUnderWay { id: string; title: string; job_id: string | null }
+
+/** Each kind of work the clock can go onto, in the Switch menu. */
+export const CATEGORY_ICONS: Record<TimerCategory, IconName> = { visit: "job", assessment: "clipboard", drive: "truck", shop: "wrench", break: "pause", other: "clock" };
 
 export function ClockCard({ visits = [] }: { visits?: VisitUnderWay[] }) {
   const session = useSession();
@@ -60,36 +63,49 @@ export function ClockCard({ visits = [] }: { visits?: VisitUnderWay[] }) {
   // Which tap is on its way. One waiting for signal isn't: the card is free for the next.
   const going = locating ?? (action.isPending && !action.isPaused ? (action.variables?.target ? "start" : "stop") : null);
   if (!clocks) return null;
+  // What it can go onto: a visit under way (to clock back on after a break), then the rest of the work.
+  const targets: MenuEntry[] = [
+    ...visits.filter((v) => v.id !== visit?.id).map((v) => ({ label: v.title, icon: "job" as const, disabled: going !== null, onSelect: () => void tap({ category: "visit", visit: { id: v.id, jobId: v.job_id, title: v.title } }) })),
+    { separator: true },
+    ...(["drive", "shop", "break", "other"] as TimerCategory[]).map((c) => ({
+      label: t(CATEGORY_LABELS[c]),
+      icon: CATEGORY_ICONS[c],
+      // The one it's on now, when it isn't a visit.
+      checked: on && !visit && timer.data?.category === c ? true : undefined,
+      disabled: going !== null,
+      onSelect: () => void tap({ category: c }),
+    })),
+  ];
   return (
-    <div className="card card-pad row wrap" style={{ gap: 12, background: on ? "var(--green-tint)" : undefined, borderColor: on ? "transparent" : undefined, transition: "background var(--dur), border-color var(--dur)" }}>
+    <div className="clock-card" data-on={on || undefined}>
       {/* What's saved about where they are, said once before the first tap that would save it. */}
       <LocationNotice />
-      <span className="avatar" style={{ width: 40, height: 40, background: on ? "var(--green-solid)" : "var(--fill-3)", color: on ? "#fff" : "var(--text-2)" }}><Icon name="clock" size={20} /></span>
-      <div className="grow">
+      <span className="clock-dot" aria-hidden="true" />
+      <div className="clock-text">
         {on ? (
           <>
-            <div className="strong">{visit ? visit.title : t(CATEGORY_LABELS[timer.data!.category as TimerCategory] ?? msg("Working"))}</div>
-            <div className="small" style={{ color: "var(--green-dark)" }}>{t("Clock running · {elapsed}", { elapsed })}</div>
-            {day && <div className="small muted">{t("It runs between visits too, until you stop for the day.")}</div>}
+            <div className="clock-what">{visit ? visit.title : t(CATEGORY_LABELS[timer.data!.category as TimerCategory] ?? msg("Working"))}</div>
+            <div className="clock-meta tabular">{t("Clock running · {elapsed}", { elapsed })}</div>
+            {day && <div className="clock-note">{t("It runs between visits too, until you stop for the day.")}</div>}
           </>
         ) : (
           <>
-            <div className="strong">{t("Clock is off")}</div>
-            {day && <div className="small muted">{t("On my way or Start visit starts your day.")}</div>}
-            {recordsPlaces(session.company) && !hasRole(session, "admin", "office") && <div className="small muted">{t("Clocking in and out saves where you are, for the office.")}</div>}
+            <div className="clock-what">{t("Clock is off")}</div>
+            {day && <div className="clock-note">{t("On my way or Start visit starts your day.")}</div>}
+            {recordsPlaces(session.company) && !hasRole(session, "admin", "office") && <div className="clock-note">{t("Clocking in and out saves where you are, for the office.")}</div>}
           </>
         )}
       </div>
-      {on && <Button variant="dark" icon="pause" loading={going === "stop"} disabled={going === "start"} onClick={() => void tap(null)}>{day ? t("Stop for the day") : t("Stop")}</Button>}
-      <Menu
-        label={t("Start a timer")}
-        triggerClassName="btn"
-        trigger={<>{going === "start" ? <Spinner size={16} /> : <Icon name="play" size={16} />}{on ? t("Switch") : t("Start timer")}</>}
-        items={[
-          ...visits.filter((v) => v.id !== visit?.id).map((v) => ({ label: v.title, disabled: going !== null, onSelect: () => void tap({ category: "visit", visit: { id: v.id, jobId: v.job_id, title: v.title } }) })),
-          ...(["drive", "shop", "break", "other"] as TimerCategory[]).map((c) => ({ label: t(CATEGORY_LABELS[c]), disabled: going !== null, onSelect: () => void tap({ category: c }) })),
-        ]}
-      />
+      <div className="clock-acts">
+        <Menu
+          label={on ? t("Switch") : t("Start timer")}
+          title={on ? t("Switch") : t("Start timer")}
+          triggerClassName={on ? "btn clock-switch" : "btn"}
+          trigger={<>{going === "start" ? <Spinner size={16} /> : <Icon name={on ? "refresh" : "play"} size={16} />}<span className={on ? "clock-switch-text" : undefined}>{on ? t("Switch") : t("Start timer")}</span></>}
+          items={targets}
+        />
+        {on && <Button icon="pause" className="clock-stop" loading={going === "stop"} disabled={going === "start"} onClick={() => void tap(null)}>{day ? t("Stop for the day") : t("Stop")}</Button>}
+      </div>
     </div>
   );
 }

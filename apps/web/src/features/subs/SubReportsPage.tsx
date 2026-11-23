@@ -11,18 +11,19 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
 import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Loading, StatsSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
 import { formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import { Kpi, KpiStrip } from "../finance/Charts";
 import { auditPresets, coverageTone, defaultYear, thresholdText, workDays, yearChoices } from "./pay";
 import { handlesSubPay, useWcAudit, useYearTotals } from "./payData";
+import styles from "./Subs.module.css";
 
 const download = (path: string) => api.get<{ filename: string; csv: string }>(path).then((r) => downloadCsv(r.filename, r.csv));
 
@@ -55,29 +56,22 @@ function YearEnd() {
       <BackLink to="/subs">Subcontractors</BackLink>
       <PageHeader
         title="Year-end totals"
-        actions={
-          <>
-            <label className="select-pill">
-              <Icon name="calendar" size={14} />
-              <Select className="select-plain" value={year} onChange={(e) => setParams({ year: e.target.value }, { replace: true })} aria-label="Year">
-                {(choices.includes(year) ? choices : [year, ...choices]).map((y) => <option key={y} value={y}>{y}</option>)}
-              </Select>
-              <Icon name="chevronDown" size={14} />
-            </label>
-            <Button icon="download" loading={csv.isPending} disabled={!d?.subs.length} onClick={() => csv.mutate()}>Download CSV</Button>
-          </>
-        }
+        lede={`What you paid each sub in ${year}, by the day you paid them, for their 1099-NEC.`}
+        actions={<Button icon="download" loading={csv.isPending} disabled={!d?.subs.length} onClick={() => csv.mutate()}>Download CSV</Button>}
       />
-      <p className="page-subtitle">What you paid each sub in {year}, by the day you paid them, for their 1099-NEC.</p>
       <FormError error={csv.error} />
+      {/* The year, picked like the audit's period: a segmented control here, chips on a phone. */}
+      <div className={styles.periodBar}>
+        <FilterTabs label="Year" value={String(year)} onChange={(y) => setParams({ year: y }, { replace: true })} options={(choices.includes(year) ? choices : [year, ...choices]).map((y) => ({ value: String(y), label: String(y) }))} />
+      </div>
 
-      {totals.isPending && <Loading><CardSkeleton lines={5} /></Loading>}
-      {totals.error && <div className="card"><ErrorState error={totals.error} onRetry={() => totals.refetch()} /></div>}
+      {totals.isPending && <Loading className="stack-lg"><StatsSkeleton count={3} /><TableSkeleton columns={5} /></Loading>}
+      {totals.error && <ErrorState error={totals.error} onRetry={() => totals.refetch()} />}
       {d && (
-        <div className="stack">
+        <div className="stack-lg">
           <div className="callout callout-info">
-            <Icon name="info" size={20} />
-            <div className="grow stack-sm" style={{ fontWeight: 400 }}>
+            <Icon name="info" size={16} />
+            <div className={`grow ${styles.notes}`}>
               <span>{thresholdText(year, d.threshold)}{d.threshold_note ? ` ${d.threshold_note}` : ""}</span>
               <span>Card and payment-app payments are left out: the card company or app reports those on a 1099-K.</span>
               {payroll && <span>Payments through your payroll service are counted. If the service paid a sub, it may file their 1099 itself: check before you send one.</span>}
@@ -85,14 +79,14 @@ function YearEnd() {
             </div>
           </div>
           {d.subs.length === 0 ? (
-            <div className="card"><EmptyState icon="dollar" title={`No subs were marked paid in ${year}`}>Mark subs' pay paid from a job, from their page, or from what's owed under Subcontractors.</EmptyState></div>
+            <EmptyState icon="dollar" title={`No subs were marked paid in ${year}`}>Mark subs' pay paid from a job, from their page, or from what's owed under Subcontractors.</EmptyState>
           ) : (
             <>
-              <KpiStrip label={`Totals for ${year}`}>
-                <Kpi label="Paid to subs" value={formatMoneyCents(d.total)} hint={card > 0 ? `Plus ${formatMoneyCents(card)} by card or app` : undefined} />
-                <Kpi label="Subs paid" value={String(d.subs.length)} />
-                <Kpi label="Need a 1099" value={String(d.needing_1099)} />
-              </KpiStrip>
+              <StatStrip label={`Totals for ${year}`}>
+                <Stat label="Paid to subs" value={formatMoneyCents(d.total)} note={card > 0 ? `Plus ${formatMoneyCents(card)} by card or app` : undefined} />
+                <Stat label="Subs paid" value={String(d.subs.length)} />
+                <Stat label="Need a 1099" value={String(d.needing_1099)} />
+              </StatStrip>
               <div className="card">
                 <table className="table table-stack">
                   <thead><tr><th>Sub</th><th>Tax classification</th><th className="num">Total</th><th className="num">Payments</th><th>1099-NEC</th><th>Note</th></tr></thead>
@@ -113,7 +107,7 @@ function YearEnd() {
                           <span className="mobile-inline small">1099-NEC: </span>
                           {s.needs_1099 ? <StatusPill label="Needed" tone="warning" /> : <StatusPill label="Not needed" tone="muted" />}
                         </td>
-                        <td className="small muted" style={{ minWidth: 200 }}>{s.note || "—"}</td>
+                        <td className="small muted" style={{ minWidth: 200 }}>{s.note}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -155,43 +149,41 @@ function WorkersComp() {
   return (
     <>
       <BackLink to="/subs">Subcontractors</BackLink>
-      <PageHeader title="Workers' comp audit" actions={<Button icon="download" loading={csv.isPending} disabled={!d?.rows.length} onClick={() => csv.mutate()}>Download CSV</Button>} />
-      <p className="page-subtitle" style={{ maxWidth: 760 }}>
-        At your workers' comp audit, the auditor asks what you paid subs during the policy period and whether each one had their own workers' comp. Work by a sub who wasn't covered can be charged to your policy as if they were your employee, so keep a current certificate (or exemption) on file for every sub.
-      </p>
+      <PageHeader
+        title="Workers' comp audit"
+        lede="At your workers' comp audit, the auditor asks what you paid subs during the policy period and whether each one had their own workers' comp. Work by a sub who wasn't covered can be charged to your policy as if they were your employee, so keep a current certificate (or exemption) on file for every sub."
+        actions={<Button icon="download" loading={csv.isPending} disabled={!d?.rows.length} onClick={() => csv.mutate()}>Download CSV</Button>}
+      />
       <FormError error={csv.error} />
 
-      <div className="toolbar" style={{ flexWrap: "wrap", marginBottom: 16 }}>
+      <div className={styles.periodBar}>
         {/* A choice, not an action: the highlight slides to the period picked. */}
-        <div className="segmented" role="group" aria-label="Period">
-          {presets.map((p) => <button key={p.key} type="button" aria-pressed={from === p.from && to === p.to} onClick={() => setRange(p.from, p.to)}>{p.label}</button>)}
-        </div>
-        {/* Wraps on a phone: the label above, the two dates sharing the width. */}
-        <div className="row" style={{ gap: 6, flexWrap: "wrap", minWidth: 0, flex: "1 1 300px" }}>
-          <span className="muted small" style={{ flexBasis: "100%" }}>Policy period</span>
-          <input className="input" type="date" value={from} max={to} onChange={(e) => e.target.value && setRange(e.target.value, to)} aria-label="Policy starts" style={{ flex: "1 1 120px", maxWidth: 170, minWidth: 0 }} />
+        <FilterTabs label="Period" value={presets.find((p) => from === p.from && to === p.to)?.key ?? ""} onChange={(key) => { const p = presets.find((x) => x.key === key); if (p) setRange(p.from, p.to); }} options={presets.map((p) => ({ value: p.key, label: p.label }))} />
+        <div className={styles.dates} role="group" aria-label="Policy period">
+          <span className={styles.datesLabel}>Policy period</span>
+          <input className="input" type="date" value={from} max={to} onChange={(e) => e.target.value && setRange(e.target.value, to)} aria-label="Policy starts" />
           <span className="muted">to</span>
-          <input className="input" type="date" value={to} min={from} onChange={(e) => e.target.value && setRange(from, e.target.value)} aria-label="Policy ends" style={{ flex: "1 1 120px", maxWidth: 170, minWidth: 0 }} />
+          <input className="input" type="date" value={to} min={from} onChange={(e) => e.target.value && setRange(from, e.target.value)} aria-label="Policy ends" />
         </div>
       </div>
 
-      {!valid && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">The period has to end on or after it starts.</div></div>}
-      {valid && audit.isPending && <Loading><CardSkeleton lines={5} /></Loading>}
-      {audit.error && <div className="card"><ErrorState error={audit.error} onRetry={() => audit.refetch()} /></div>}
+      {!valid && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">The period has to end on or after it starts.</div></div>}
+      {valid && audit.isPending && <Loading className="stack-lg"><StatsSkeleton count={3} /><TableSkeleton columns={6} /></Loading>}
+      {audit.error && <ErrorState error={audit.error} onRetry={() => audit.refetch()} />}
       {d && (
         d.rows.length === 0 ? (
-          <div className="card"><EmptyState icon="clipboard" title="No sub work in this period">Pay on jobs that's agreed, done or paid shows here, by the days the work was done.</EmptyState></div>
+          <EmptyState icon="clipboard" title="No sub work in this period">Pay on jobs that's agreed, done or paid shows here, by the days the work was done.</EmptyState>
         ) : (
-          <div className="stack">
-            <KpiStrip label="Totals for the period">
-              <Kpi
+          <div className="stack-lg">
+            <StatStrip label="Totals for the period">
+              <Stat
                 label="Sub work in the period"
                 value={formatMoneyCents(d.totals.amount)}
-                hint={d.totals.not_paid_yet > 0 ? `${formatMoneyCents(d.totals.paid)} paid, ${formatMoneyCents(d.totals.not_paid_yet)} not paid yet` : `${d.totals.subs} ${d.totals.subs === 1 ? "sub" : "subs"}, all paid`}
+                note={d.totals.not_paid_yet > 0 ? `${formatMoneyCents(d.totals.paid)} paid, ${formatMoneyCents(d.totals.not_paid_yet)} not paid yet` : `${d.totals.subs} ${d.totals.subs === 1 ? "sub" : "subs"}, all paid`}
               />
-              <Kpi label="Covered" value={formatMoneyCents(d.totals.covered)} />
-              <Kpi label="Not covered" value={formatMoneyCents(d.totals.not_covered)} tone={d.totals.not_covered > 0 ? "bad" : undefined} hint={d.totals.not_covered_subs ? `${d.totals.not_covered_subs} ${d.totals.not_covered_subs === 1 ? "sub" : "subs"}` : undefined} />
-            </KpiStrip>
+              <Stat label="Covered" value={formatMoneyCents(d.totals.covered)} />
+              <Stat label="Not covered" value={formatMoneyCents(d.totals.not_covered)} tone={d.totals.not_covered > 0 ? "danger" : undefined} note={d.totals.not_covered_subs ? `${d.totals.not_covered_subs} ${d.totals.not_covered_subs === 1 ? "sub" : "subs"}` : undefined} />
+            </StatStrip>
             <div className="card">
               <table className="table table-stack">
                 <thead><tr><th>Sub</th><th>Job</th><th>Days worked</th><th className="num">Amount</th><th>Workers' comp</th><th>Certificate on file</th></tr></thead>
@@ -201,11 +193,11 @@ function WorkersComp() {
                     return (
                       <tr key={r.job_pay_id}>
                         <td style={{ minWidth: 140 }}><Link className="cell-link" to={`/subs/${r.subcontractor_id}`}>{r.sub_name}</Link></td>
-                        <td><Link to={`/jobs/${r.job_id}`}>{r.job_number ? `#${r.job_number} ` : ""}{r.job_title}</Link></td>
-                        <td className="small"><span className="mobile-inline">Worked </span>{workDays(r.work_dates) || "—"}</td>
+                        <td><Link className={styles.jobLink} to={`/jobs/${r.job_id}`}>{r.job_number ? `#${r.job_number} ` : ""}{r.job_title}</Link></td>
+                        <td className="small"><span className="mobile-inline">Worked </span>{workDays(r.work_dates)}</td>
                         <td className="num tabular">
                           <strong>{formatMoneyCents(Number(r.amount))}</strong>
-                          <div className="muted small">{r.status === "paid" ? "Paid" : `${jobPayStatusLabel(r.status)}, not paid yet`}</div>
+                          <div className={`muted small ${styles.nowrap}`}>{r.status === "paid" ? "Paid" : `${jobPayStatusLabel(r.status)}, not paid yet`}</div>
                           {wcPartNote(r) && <div className="muted small">{wcPartNote(r)}</div>}
                         </td>
                         <td>
@@ -219,7 +211,7 @@ function WorkersComp() {
                 </tbody>
               </table>
             </div>
-            <p className="muted small" style={{ margin: 0 }}>
+            <p className={styles.reportNote}>
               Amounts are what you paid, or agreed to pay where it isn't paid yet. Only certificates you've verified count, and one without a start date is taken as a one-year policy: add the date to be sure. Partly covered work, and work running past these dates, is split by days.
             </p>
           </div>

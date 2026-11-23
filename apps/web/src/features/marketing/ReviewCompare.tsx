@@ -31,7 +31,8 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { formatTime } from "@/lib/format";
 import { reportError } from "@/lib/monitoring";
@@ -61,6 +62,7 @@ import {
   type Readings,
   type SavedPlace,
 } from "./reviewCompareState";
+import styles from "./Presence.module.css";
 import { comparisonKey, PLACE_GONE, PlacesProblem, readPlace, searchPlaces, type FoundPlace, type Provider } from "./reviewPlaces";
 
 const stars = (rating: number | null) => (rating == null ? "—" : `${rating.toFixed(1)} ★`);
@@ -128,8 +130,8 @@ function CompareCard() {
     },
   });
 
-  if (state.isPending) return <div className="card card-pad"><CardSkeleton lines={4} /></div>;
-  if (state.error) return <div className="card"><ErrorState compact error={state.error} onRetry={() => state.refetch()} /></div>;
+  if (state.isPending) return <SectionSkeleton rows={3} />;
+  if (state.error) return <ErrorState compact error={state.error} onRetry={() => state.refetch()} />;
   const s = state.data;
   const rows = compareRows(s.places, readings);
   const where = standingOf(rows);
@@ -152,56 +154,58 @@ function CompareCard() {
   }
 
   return (
-    <section className="card card-pad stack" aria-labelledby="review-compare">
-      <div className="row-between wrap">
-        <h2 id="review-compare" className="section-title" style={{ fontSize: 16 }}>How you compare</h2>
-        {s.can_switch && (
-          <label className="switch-row" style={{ gap: 8 }}>
-            <span className="small">Compare on Google</span>
-            <input type="checkbox" role="switch" className="switch" checked={toggle.isPending ? Boolean(toggle.variables) : s.enabled} disabled={toggle.isPending || (!s.enabled && !googleKey)} onChange={(e) => toggle.mutate(e.target.checked)} />
-          </label>
+    <Section
+      id="review-compare"
+      title="How you compare"
+      action={s.can_switch && (
+        <label className={styles.headSwitch}>
+          <span>Compare on Google</span>
+          <input type="checkbox" role="switch" className="switch" checked={toggle.isPending ? Boolean(toggle.variables) : s.enabled} disabled={toggle.isPending || (!s.enabled && !googleKey)} onChange={(e) => toggle.mutate(e.target.checked)} />
+        </label>
+      )}
+    >
+      <div className={styles.form}>
+        {!s.enabled ? (
+          <>
+            <p className={styles.note}>
+              See your Google rating and number of reviews next to up to five nearby competitors'. Your browser reads them from Google Places with{" "}
+              {ownKey ? <>your Google key from <Link to="/settings?tab=maps" style={{ textDecoration: "underline" }}>Settings → Maps</Link></> : googleKey ? "the Google key this Crewtavo was set up with" : "a Google key"} when you press Compare now: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says.
+            </p>
+            {!googleKey && <NoKey />}
+            {!s.can_switch && <p className={styles.note}>An owner or admin can turn it on here.</p>}
+            <FormError error={toggle.error} />
+          </>
+        ) : (
+          <>
+            {!googleKey && <NoKey />}
+            {run.problem && <div className="callout callout-warning" role="alert"><Icon name="alert" size={16} /><div className="grow">{run.problem}</div></div>}
+            {!rows.length ? (
+              <EmptyState inline icon="star" title="Pick who to compare with">Add your own business and up to five competitors from Google.</EmptyState>
+            ) : (
+              <CompareTable rows={rows} running={run.running} removing={remove.isPending || run.running} onRemove={(id) => remove.mutate(id)} />
+            )}
+            {where && (
+              <p className={styles.standing}>
+                <strong>{standingWords(where)}</strong>
+                {where.ratingVsAverage != null && ` · ${where.ratingVsAverage === 0 ? "the same rating as" : `${Math.abs(where.ratingVsAverage).toFixed(1)} ${where.ratingVsAverage > 0 ? "above" : "below"}`} the others' average`}
+                {where.reviewsVsAverage != null && ` · ${Math.abs(where.reviewsVsAverage).toLocaleString("en-US")} ${where.reviewsVsAverage >= 0 ? "more" : "fewer"} reviews than their average`}
+              </p>
+            )}
+            {!hasOwn && rows.length > 0 && <p className={styles.note}>Add your own business too, to see how you stand.</p>}
+            <div className={styles.inline}>
+              <Button size="sm" icon="plus" disabled={(full && hasOwn) || !googleKey || run.running} onClick={() => setAdding(true)}>Add a business</Button>
+              <Button size="sm" icon="refresh" loading={run.running} disabled={!canCompare({ places: s.places.length, running: run.running, waiting, key: googleKey })} onClick={() => googleKey && compare(s.places, googleKey)}>Compare now</Button>
+            </div>
+            <FormError error={remove.error ?? toggle.error} />
+            <p className={styles.fine}>
+              {run.at
+                ? `Google's figures as of ${formatTime(run.at)}. Crewtavo doesn't keep them, so there's no change over time to show: Compare now reads them from Google again.`
+                : "Compare now reads each place's rating and number of reviews from Google: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says, only which places to ask about."}
+              {waiting && !run.running ? " You can compare again in a minute." : ""}
+            </p>
+          </>
         )}
       </div>
-      {!s.enabled ? (
-        <div className="stack-sm">
-          <span className="muted small">
-            See your Google rating and number of reviews next to up to five nearby competitors'. Your browser reads them from Google Places with{" "}
-            {ownKey ? <>your Google key from <Link to="/settings?tab=maps" style={{ textDecoration: "underline" }}>Settings → Maps</Link></> : googleKey ? "the Google key this Crewtavo was set up with" : "a Google key"} when you press Compare now: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says.
-          </span>
-          {!googleKey && <NoKey />}
-          {!s.can_switch && <span className="muted small">An owner or admin can turn it on here.</span>}
-          <FormError error={toggle.error} />
-        </div>
-      ) : (
-        <>
-          {!googleKey && <NoKey />}
-          {run.problem && <div className="callout callout-warning" role="alert"><Icon name="alert" size={20} /><div className="grow">{run.problem}</div></div>}
-          {!rows.length ? (
-            <EmptyState icon="star" title="Pick who to compare with">Add your own business and up to five competitors from Google.</EmptyState>
-          ) : (
-            <CompareTable rows={rows} running={run.running} removing={remove.isPending || run.running} onRemove={(id) => remove.mutate(id)} />
-          )}
-          {where && (
-            <p className="small" style={{ margin: 0 }}>
-              <strong>{standingWords(where)}</strong>
-              {where.ratingVsAverage != null && ` · ${where.ratingVsAverage === 0 ? "the same rating as" : `${Math.abs(where.ratingVsAverage).toFixed(1)} ${where.ratingVsAverage > 0 ? "above" : "below"}`} the others' average`}
-              {where.reviewsVsAverage != null && ` · ${Math.abs(where.reviewsVsAverage).toLocaleString("en-US")} ${where.reviewsVsAverage >= 0 ? "more" : "fewer"} reviews than their average`}
-            </p>
-          )}
-          {!hasOwn && rows.length > 0 && <span className="muted small">Add your own business too, to see how you stand.</span>}
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Button size="sm" icon="plus" disabled={(full && hasOwn) || !googleKey || run.running} onClick={() => setAdding(true)}>Add a business</Button>
-            <Button size="sm" icon="refresh" loading={run.running} disabled={!canCompare({ places: s.places.length, running: run.running, waiting, key: googleKey })} onClick={() => googleKey && compare(s.places, googleKey)}>Compare now</Button>
-          </div>
-          <FormError error={remove.error ?? toggle.error} />
-          <span className="muted small">
-            {run.at
-              ? `Google's figures as of ${formatTime(run.at)}. Crewtavo doesn't keep them, so there's no change over time to show: Compare now reads them from Google again.`
-              : "Compare now reads each place's rating and number of reviews from Google: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says, only which places to ask about."}
-            {waiting && !run.running ? " You can compare again in a minute." : ""}
-          </span>
-        </>
-      )}
       {adding && googleKey && (
         <AddPlaceDialog
           googleKey={googleKey}
@@ -214,14 +218,14 @@ function CompareCard() {
           }}
         />
       )}
-    </section>
+    </Section>
   );
 }
 
 const NoKey = () => (
-  <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>
+  <p className={styles.warnLine}>
     Add a Google key in <Link to="/settings?tab=maps" style={{ textDecoration: "underline" }}>Settings → Maps</Link> first, with Places API (New) turned on for it.
-  </span>
+  </p>
 );
 
 /**
@@ -252,8 +256,8 @@ function PlaceRow({ row, running, removing, onRemove }: { row: CompareRow; runni
     <tr style={row.is_own ? { fontWeight: 700 } : undefined}>
       <td>
         {row.fromGoogle && row.maps_url ? <a href={row.maps_url} target="_blank" rel="noreferrer">{row.label}</a> : <span className={row.fromGoogle ? undefined : "muted"}>{row.label}</span>}
-        {row.is_own && <span className="chip chip-green" style={{ marginLeft: 6 }}>You</span>}
-        {note && <span className={warn ? "small" : "small muted"} style={{ display: "block", fontWeight: 400, color: warn ? "var(--warning)" : undefined }}>{note}</span>}
+        {row.is_own && <span className="tag" style={{ marginLeft: 6 }}>You</span>}
+        {note && <span className={warn ? styles.warnLine : styles.note} style={{ display: "block", fontWeight: warn ? 600 : 400 }}>{note}</span>}
       </td>
       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{stars(row.rating)}</td>
       <td style={{ textAlign: "right" }}>{row.ratings_total == null ? "—" : row.ratings_total.toLocaleString("en-US")}</td>
@@ -261,7 +265,7 @@ function PlaceRow({ row, running, removing, onRemove }: { row: CompareRow; runni
         {row.status === "gone" ? (
           <Button size="sm" disabled={removing} onClick={onRemove}>Remove</Button>
         ) : (
-          <button type="button" className="icon-btn" aria-label={`Remove ${row.label}`} disabled={removing} onClick={onRemove}><Icon name="x" size={14} /></button>
+          <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={`Remove ${row.label}`} disabled={removing} onClick={onRemove}><Icon name="x" size={14} /></button>
         )}
       </td>
     </tr>

@@ -14,6 +14,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { FileViewer } from "@/features/files/FileViewer";
 import { refreshStorage, useStorageFull } from "@/features/settings/storage";
+import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
@@ -299,7 +300,7 @@ export function LineUpBanner({ plan }: { plan: PlanOnMap }) {
   const s = STEPS[plan.step.stage];
   return (
     <div className="measure-banner measure-banner-good" role="status" aria-live="polite">
-      <span className="chip chip-green tabular">Step {s.n} of 4</span>
+      <span className="measure-banner-step tabular">Step {s.n} of 4</span>
       <span className="grow"><strong>{plan.step.stage.startsWith("plan") ? "On the plan: " : "On the aerial: "}</strong>{s.text}</span>
       <Button size="sm" onClick={plan.cancelLineUp}>Cancel</Button>
     </div>
@@ -320,22 +321,16 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
   // Nothing to offer and nowhere to keep a new plan: say how to get one.
   if (!shown && !list.length && !hasPlace) {
     return (
-      <div className="card card-pad stack-sm">
-        <strong>Plan on the map</strong>
-        <span className="muted small">To measure from a site plan, open Measure from the client's property, quote or job, or pick the client's property in the search above.</span>
-      </div>
+      <Section title="Plan on the map" className="plan-card">
+        <p className="plan-note">To measure from a site plan, open Measure from the client's property, quote or job, or pick the client's property in the search above.</p>
+      </Section>
     );
   }
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>Plan on the map</strong>
-        {shown && <Button size="sm" variant="ghost" icon="x" onClick={plan.remove}>Take it off</Button>}
-      </div>
-      <input ref={input} type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void plan.add(f); }} />
+    <Section title="Plan on the map" className="plan-card" action={shown ? <button type="button" onClick={plan.remove}><Icon name="x" size={14} />Take it off</button> : undefined}>
       {!shown && (
         <>
-          <span className="muted small">For new paving, where the aerial still shows dirt or the old site: put the site plan on the map, line it up, and draw over it.</span>
+          <p className="plan-note">For new paving, where the aerial still shows dirt or the old site: put the site plan on the map, line it up, and draw over it.</p>
           {list.length > 0 && (
             <label className="field">
               <span>Plan</span>
@@ -349,20 +344,20 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
         </>
       )}
       {sending && (
-        <div className="stack-sm" role="status">
-          <div className="row-between small"><span className="strong" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sending.name}</span><span className="muted tabular">{Math.round(sending.progress * 100)}%</span></div>
+        <div className="plan-sending" role="status">
+          <div className="row-between"><span className="plan-sending-name">{sending.name}</span><span className="plan-note tabular">{Math.round(sending.progress * 100)}%</span></div>
           <div className="progress"><span style={{ width: `${Math.round(sending.progress * 100)}%` }} /></div>
         </div>
       )}
       {!shown && canAdd && hasPlace && !sending && (
-        <Button size="sm" icon="upload" style={{ justifySelf: "start" }} disabled={Boolean(plan.loading)} title="A PDF or a picture of the plan" onClick={() => input.current?.click()}>Add a plan</Button>
+        <Button size="sm" icon="upload" disabled={Boolean(plan.loading)} title="A PDF or a picture of the plan" onClick={() => input.current?.click()}>Add a plan</Button>
       )}
-      {plan.loading && shown && <span className="muted small"><span className="spinner" style={{ width: 12, height: 12 }} /> Opening the page…</span>}
+      {plan.loading && shown && <span className="plan-note plan-loading"><span className="spinner" style={{ width: 12, height: 12 }} /> Opening the page…</span>}
       {shown && (
         <>
-          <div className="stack-sm" style={{ gap: 2 }}>
-            <span className="strong text-sm">{shown.file.title}{shown.file.revision ? ` · ${shown.file.revision}` : ""}</span>
-            <span className="muted small">
+          <div className="plan-file">
+            <span className="plan-file-name">{shown.file.title}{shown.file.revision ? ` · ${shown.file.revision}` : ""}</span>
+            <span className="plan-note">
               {fileSize(shown.file.size_bytes)}{shown.image.pages > 1 ? ` · ${shown.image.pages} pages` : ""} ·{" "}
               <button type="button" className="link-btn" onClick={() => setViewing(true)}>Open it</button>
             </span>
@@ -376,28 +371,30 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
             </label>
           )}
           {!plan.step && (
-            <Button size="sm" icon="pin" style={{ justifySelf: "start" }} onClick={plan.startLineUp}>
+            <Button size="sm" icon="pin" onClick={plan.startLineUp}>
               {shown.linedUp ? "Line it up again" : "Line it up with the aerial"}
             </Button>
           )}
-          {!shown.linedUp && !plan.step && <span className="small" style={{ color: "var(--warning)" }}>Not lined up yet, so sizes drawn on it won't be right.</span>}
-          {scale && <span className="small"><Icon name="check" size={14} /> Lined up at <strong>{scale}</strong>. The scale printed on the plan should say the same; if it's off, line it up again with spots farther apart.</span>}
+          {!shown.linedUp && !plan.step && <p className="plan-note" data-tone="warning">Not lined up yet, so sizes drawn on it won't be right.</p>}
+          {scale && <p className="plan-note plan-scale"><Icon name="check" size={14} /><span>Lined up at <strong>{scale}</strong>. The scale printed on the plan should say the same; if it's off, line it up again with spots farther apart.</span></p>}
           <label className="field">
             <span>See-through</span>
             <input type="range" min={10} max={100} step={5} value={Math.round(shown.opacity * 100)} disabled={shown.hidden} onChange={(e) => plan.patch({ opacity: Number(e.target.value) / 100 })} aria-label="How solid the plan is" />
           </label>
-          <label className="switch-row" style={{ fontWeight: 400 }}>
-            <input type="checkbox" className="switch" checked={shown.paper} onChange={(e) => plan.patch({ paper: e.target.checked })} />
-            Show the white paper
-          </label>
-          <span className="muted small" style={{ marginTop: -4 }}>Off shows just the plan's lines on the aerial.</span>
-          <label className="switch-row" style={{ fontWeight: 400 }}>
-            <input type="checkbox" className="switch" checked={!shown.hidden} onChange={(e) => plan.patch({ hidden: !e.target.checked })} />
-            Show the plan
-          </label>
-          <span className="muted small">Draw over it with Area, Line and Count. Sizes come from the map, so they're right once the plan is lined up.</span>
+          <div className="plan-switches">
+            <label className="switch-row">
+              <input type="checkbox" className="switch" checked={shown.paper} onChange={(e) => plan.patch({ paper: e.target.checked })} />
+              <span className="grow">Show the white paper<span className="plan-note">Off shows just the plan's lines on the aerial.</span></span>
+            </label>
+            <label className="switch-row">
+              <input type="checkbox" className="switch" checked={!shown.hidden} onChange={(e) => plan.patch({ hidden: !e.target.checked })} />
+              <span className="grow">Show the plan</span>
+            </label>
+          </div>
+          <p className="plan-note">Draw over it with Area, Line and Count. Sizes come from the map, so they're right once the plan is lined up.</p>
         </>
       )}
+      <input ref={input} type="file" accept="application/pdf,.pdf,image/png,image/jpeg,image/webp" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void plan.add(f); }} />
       {viewing && shown && (
         <FileViewer
           file={shown.file}
@@ -413,6 +410,6 @@ export function PlanCard({ plan, canAdd, hasPlace }: { plan: PlanOnMap; canAdd: 
           }}
         />
       )}
-    </div>
+    </Section>
   );
 }

@@ -14,14 +14,13 @@ import { EXPENSE_CATEGORIES as CATEGORIES, lineAmount, type ReadField, type Rece
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { Select } from "@/components/ui/Select";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { RelatedRow, Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
@@ -31,11 +30,14 @@ import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { CostingNote, LineAlreadyLogged } from "./expenseChecks";
+import { RowsSkeleton } from "./JobMaterials";
+import styles from "./jobMoney.module.css";
 import { lookalikes, materialsPlan, sameReceiptQuestion, type KnownExpense, type LoggedBefore } from "./expenseMaterials";
 import { ReceiptDrafts, useReceiptDrafts, type ExpenseDraft } from "./ReceiptDrafts";
 import { readFieldsText, readingOn, readPickedFile, suggestedJobText, type ReadAnswer } from "./receiptReading";
 import { translateError } from "@crewtavo/core/i18n/patterns";
 import { getLocale, intlLocale, msg, t } from "@/lib/i18n";
+import { Select } from "@/components/ui/Select";
 
 export const EXPENSE_CATEGORIES: readonly string[] = CATEGORIES;
 
@@ -81,7 +83,7 @@ type ExpenseRow = NonNullable<ReturnType<typeof useJobExpenses>["data"]>[number]
 export function ExpensesCard({ jobId, onChanged, startAdding = false, onAddClosed }: { jobId: string; onChanged: () => void; startAdding?: boolean; onAddClosed?: () => void }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Expense | "new" | null>(startAdding ? "new" : null);
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
   const key = expensesKey(jobId);
   const expenses = useJobExpenses(jobId);
   const drafts = useReceiptDrafts(jobId);
@@ -120,49 +122,63 @@ export function ExpensesCard({ jobId, onChanged, startAdding = false, onAddClose
     onSuccess: refresh,
   });
   const total = expenses.data?.reduce((s, e) => s + Number(e.amount), 0) ?? 0;
+  const rows = expenses.data ?? [];
+  const pictures = rows.some((e) => e.receipt_url);
+  const waiting = drafts.data?.length ?? 0;
 
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">{t("Expenses")}</h2>
-        {!!expenses.data?.length && <AnimatedNumber className="muted tabular" value={total} format={MONEY_CENTS} />}
-        <Button size="sm" icon="plus" onClick={() => setEditing("new")}>{t("Add expense")}</Button>
-      </div>
-      <div className="card" ref={listRef}>
-        {expenses.isPending && [0, 1].map((i) => <div key={i} className="card-row"><Skeleton width={40} height={40} radius={8} /><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="25%" height={10} /></span><Skeleton width={70} /></div>)}
-        {expenses.data?.length === 0 && !drafts.data?.length && <EmptyState inline title={t("No expenses yet")} />}
-        {expenses.data?.map((e) => (
-          <div key={e.id} className="card-row">
-            {e.receipt_url ? (
-              <a href={e.receipt_url} target="_blank" rel="noreferrer" className="thumb" style={{ width: 40, height: 40, flex: "none" }} aria-label={t("Open receipt")}><img src={e.receipt_url} alt="" /></a>
-            ) : (
-              <span className="n-icon" style={{ width: 40, height: 40, borderRadius: 8, display: "grid", placeItems: "center", background: "var(--fill-2)", color: "var(--text-3)", flex: "none" }}><Icon name="receipt" size={20} /></span>
-            )}
-            <span className="grow">
-              <strong>{e.vendor || e.category || t("Expense")}</strong>
-              <span className="muted small" style={{ display: "block" }}>
-                {[e.category, e.description, formatDate(e.incurred_on)].filter(Boolean).join(" · ")}
-                {e.reimbursable && (e.reimbursed_at ? t(" · reimbursed") : t(" · to reimburse"))}
-                {e.in_line_costs && t(" · already in the line items, not counted again")}
-              </span>
-            </span>
-            <strong className="tabular">{formatMoneyCents(e.amount)}</strong>
-            <Menu
-              triggerClassName="btn btn-sm btn-ghost btn-icon"
-              label={t("Expense actions")}
-              items={[
-                { label: t("Edit"), icon: "edit", onSelect: () => setEditing(e) },
-                { label: t("Mark reimbursed"), icon: "check", hidden: !e.reimbursable || Boolean(e.reimbursed_at), onSelect: () => reimburse.mutate(e.id) },
-                { label: t("Delete"), icon: "trash", danger: true, onSelect: () => removeLater(e) },
-              ]}
-            />
+    <Section className="rel-figures" title={t("Expenses")} count={rows.length || undefined} action={<Button size="sm" icon="plus" onClick={() => setEditing("new")}>{t("Add expense")}</Button>}>
+      <div className={styles.parts}>
+        {/* Receipts waiting to be checked come first: they need someone. Several at once, each a draft to check and confirm. */}
+        <ReceiptDrafts jobId={jobId} onSaved={refresh} part="list" />
+        {expenses.isPending && <RowsSkeleton rows={2} />}
+        {expenses.data?.length === 0 && !waiting && <EmptyState inline title={t("No expenses yet")} />}
+        {rows.length > 0 && (
+          <div>
+            {waiting > 0 && <h3 className={styles.subhead}>{t("Saved expenses")}<span className={styles.count}>{rows.length}</span></h3>}
+            <ul className="rel" role="list" aria-label={t("Expenses")} ref={listRef}>
+              {rows.map((e) => (
+                <RelatedRow
+                  key={e.id}
+                  onClick={() => setEditing(e)}
+                  // The same receipt on every row says nothing: leads only once one has a picture, so the rows line up.
+                  lead={!pictures ? undefined : e.receipt_url ? (
+                    <a href={e.receipt_url} target="_blank" rel="noreferrer" className={cx("rel-icon", styles.thumb)} aria-label={t("Open receipt")}><img src={e.receipt_url} alt="" /></a>
+                  ) : (
+                    <span className={cx("rel-icon", styles.square)} aria-hidden="true"><Icon name="receipt" size={16} /></span>
+                  )}
+                  title={e.vendor || (e.category ? t(CATEGORY_NAMES[e.category] ?? e.category) : t("Expense"))}
+                  sub={[
+                    e.vendor && e.category ? t(CATEGORY_NAMES[e.category] ?? e.category) : null,
+                    e.description,
+                    formatDate(e.incurred_on),
+                    e.reimbursable && (e.reimbursed_at ? t("reimbursed") : <span className={styles.warn}>{t("to reimburse")}</span>),
+                    e.in_line_costs && <span title={t("Already in the job's line item costs")}>{t("in line item costs")}</span>,
+                  ]}
+                  end={<b>{formatMoneyCents(e.amount)}</b>}
+                  actions={(
+                    <Menu
+                      label={t("Expense actions")}
+                      title={e.vendor || t("Expense")}
+                      items={[
+                        { label: t("Edit"), icon: "edit", kbd: "E", onSelect: () => setEditing(e) },
+                        { label: t("Open receipt"), icon: "image", hidden: !e.receipt_url, onSelect: () => window.open(e.receipt_url!, "_blank", "noreferrer") },
+                        { label: t("Mark reimbursed"), icon: "check", hidden: !e.reimbursable || Boolean(e.reimbursed_at), onSelect: () => reimburse.mutate(e.id) },
+                        { separator: true },
+                        { label: t("Delete"), icon: "trash", danger: true, onSelect: () => removeLater(e) },
+                      ]}
+                    />
+                  )}
+                />
+              ))}
+            </ul>
+            <div className={styles.total}><span>{t("Total")}</span><b><AnimatedNumber value={total} format={MONEY_CENTS} /></b></div>
           </div>
-        ))}
+        )}
+        <ReceiptDrafts jobId={jobId} onSaved={refresh} part="drop" />
       </div>
-      {/* Several receipts or supplier invoices at once, each a draft to check and confirm. */}
-      <ReceiptDrafts jobId={jobId} onSaved={refresh} />
       {editing && <ExpenseDialog jobId={jobId} expense={editing === "new" ? null : editing} onClose={close} onSaved={refresh} />}
-    </section>
+    </Section>
   );
 }
 
@@ -351,20 +367,20 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
     <Dialog open onClose={onClose} title={expense ? t("Edit expense") : draft ? t("Check receipt") : t("Add expense")}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         {reading === "reading" && (
-          <div className="callout callout-info" role="status"><span className="spinner" style={{ width: 14, height: 14 }} aria-hidden="true" /><span className="grow small" style={{ fontWeight: 400 }}>{t("Reading the receipt. You can start filling it in.")}</span></div>
+          <div className="callout callout-info" role="status"><span className="spinner" style={{ width: 14, height: 14, marginTop: 3 }} aria-hidden="true" /><span className="grow">{t("Reading the receipt. You can start filling it in.")}</span></div>
         )}
-        {reading !== "no" && reading !== "reading" && <p className="muted small" role="status" style={{ margin: 0 }}>{t("Couldn't read it: {reason}. Fill it in by hand.", { reason: translateError(getLocale(), reading).replace(/\.$/, "") })}</p>}
-        {draft?.status === "failed" && !answer && <p className="muted small" style={{ margin: 0 }}>{draft.error ? t("This one couldn't be read: {reason}. Fill it in by hand.", { reason: translateError(getLocale(), draft.error).replace(/\.$/, "") }) : t("This one couldn't be read. Fill it in by hand.")}</p>}
+        {reading !== "no" && reading !== "reading" && <p className={styles.hint} role="status">{t("Couldn't read it: {reason}. Fill it in by hand.", { reason: translateError(getLocale(), reading).replace(/\.$/, "") })}</p>}
+        {draft?.status === "failed" && !answer && <p className={styles.hint}>{draft.error ? t("This one couldn't be read: {reason}. Fill it in by hand.", { reason: translateError(getLocale(), draft.error).replace(/\.$/, "") }) : t("This one couldn't be read. Fill it in by hand.")}</p>}
         {answer && answer.fields.length > 0 && (
           <div className="callout callout-info" role="status">
             <Icon name="sparkle" size={16} />
-            <span className="grow small" style={{ fontWeight: 400 }}>{t("Read from the receipt: {fields}. Check them before you save.", { fields: readFieldsText(answer.fields) })}</span>
+            <span className="grow">{t("Read from the receipt: {fields}. Check them before you save.", { fields: readFieldsText(answer.fields) })}</span>
           </div>
         )}
         {answer && answer.problems.length > 0 && (
           <div className="callout callout-warning" role="status">
             <Icon name="alert" size={16} />
-            <div className="grow small stack-sm" style={{ fontWeight: 400 }}>{answer.problems.map((p) => <span key={p}>{translateError(getLocale(), p)}</span>)}</div>
+            <span className="grow">{answer.problems.map((p) => <span key={p} style={{ display: "block" }}>{translateError(getLocale(), p)}</span>)}</span>
           </div>
         )}
         <div className="form-grid">
@@ -385,22 +401,21 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
         </div>
         <Field label={t("Description")} optional><input className="input" value={f.description} onChange={(e) => set("description", e.target.value)} maxLength={300} /></Field>
         {lines.length > 0 && (
-          <div className="stack-sm">
-            <strong className="small">{t("Lines on the invoice")}</strong>
-            <div className="card">
+          <div className={styles.group}>
+            <div className={styles.label}><span>{t("Lines on the invoice")}</span></div>
+            <div className={styles.rows}>
               {lines.map((l, i) => {
                 const lineTotal = lineAmount(l);
+                const how = [l.quantity !== null ? `${qty(l.quantity)}${l.unit ? ` ${l.unit}` : ""}` : null, l.unit_price !== null ? t("at {price}", { price: formatMoneyCents(l.unit_price) }) : null].filter(Boolean).join(" ");
                 return (
-                  <div key={i} className="card-row" style={{ flexWrap: "wrap" }}>
-                    <span className="grow small">
-                      {l.description}
-                      <span className="muted" style={{ display: "block" }}>
-                        {[l.quantity !== null ? `${qty(l.quantity)}${l.unit ? ` ${l.unit}` : ""}` : null, l.unit_price !== null ? t("at {price}", { price: formatMoneyCents(l.unit_price) }) : null].filter(Boolean).join(" ")}
-                      </span>
+                  <div key={i} className={styles.invLine}>
+                    <span className={styles.what}>
+                      <b>{l.description}</b>
+                      {how && <small>{how}</small>}
                     </span>
-                    {lineTotal !== null && <span className="small tabular">{formatMoneyCents(lineTotal)}</span>}
+                    <span className={styles.amount}>{lineTotal !== null ? formatMoneyCents(lineTotal) : null}</span>
                     {onJob && candidates.length > 0 && (
-                      <Select className="select" style={{ width: "auto", maxWidth: 220 }} aria-label={t("Log {line} as", { line: l.description })} value={choices[i] ?? -1} onChange={(e) => setChoices(choices.map((c, n) => (n === i ? Number(e.target.value) : c)))}>
+                      <Select className={cx("select", styles.match)} aria-label={t("Log {line} as", { line: l.description })} value={choices[i] ?? -1} onChange={(e) => setChoices(choices.map((c, n) => (n === i ? Number(e.target.value) : c)))}>
                         <option value={-1}>{t("Not a material on this job")}</option>
                         {candidates.map((c, n) => <option key={n} value={n}>{c.name} ({c.unit}){c.estimated ? "" : t(" · price list")}</option>)}
                       </Select>
@@ -411,20 +426,22 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
               })}
             </div>
             {onJob && candidates.length > 0 && (
-              <label className="checkbox" style={{ alignItems: "flex-start" }}>
+              <label className="checkbox" style={{ alignItems: "flex-start", marginTop: 10 }}>
                 <input type="checkbox" checked={logMaterials} disabled={!toLog.length} onChange={(e) => setLogMaterials(e.target.checked)} />
                 <span>
                   {t.plural(toLog.length, { one: "Also log the matched line as materials used on this job", other: "Also log the {count} matched lines as materials used on this job" })}
-                  <span className="muted small" style={{ display: "block" }}>{t("Each counts in job costing at the line item's cost, in place of the estimate. The job's line items don't change.")}</span>
+                  <span className={styles.note}>{t("Each counts in job costing at the line item's cost, in place of the estimate. The job's line items don't change.")}</span>
                 </span>
               </label>
             )}
           </div>
         )}
-        <label className="dropzone" style={{ padding: 14 }}>
-          <Icon name="camera" size={20} />
-          <span className="small strong">{file ? file.name : draft ? draft.file_name ?? t("The receipt") : expense?.receipt_path ? t("Replace the receipt photo") : t("Add a receipt photo")}</span>
-          {!expense && !draft && readingOn(session.company.settings) && !file && <span className="small muted">{t("It's read and fills in the form for you to check.")}</span>}
+        <label className={cx("dropzone", styles.drop)}>
+          <Icon name={/pdf$/i.test(file?.name ?? draft?.file_name ?? expense?.receipt_path ?? "") ? "file" : file || draft || expense?.receipt_path ? "image" : "camera"} size={20} />
+          <span className={styles.dropText}>
+            {file ? file.name : draft ? draft.file_name ?? t("The receipt") : expense?.receipt_path ? t("Replace the receipt photo") : t("Add a receipt photo")}
+            {!expense && !draft && readingOn(session.company.settings) && !file && <small>{t("It's read and fills in the form for you to check.")}</small>}
+          </span>
           <input type="file" accept="image/*,application/pdf" capture="environment" className="sr-only" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
         </label>
         <label className="checkbox"><input type="checkbox" checked={f.reimbursable} onChange={(e) => set("reimbursable", e.target.checked)} /> {t("Paid with my own money (reimburse me)")}</label>
@@ -433,7 +450,7 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
             <input type="checkbox" checked={f.in_line_costs} onChange={(e) => set("in_line_costs", e.target.checked)} />
             <span>
               {t("Already in the job's line item costs")}
-              <span className="muted small" style={{ display: "block" }}>{t("For the supplier's invoice for materials the estimate covers. Job costing keeps the line items' cost and doesn't count this again.")}</span>
+              <span className={styles.note}>{t("For the supplier's invoice for materials the estimate covers. Job costing keeps the line items' cost and doesn't count this again.")}</span>
             </span>
           </label>
         )}

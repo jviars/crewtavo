@@ -6,7 +6,7 @@ vi.mock("@/lib/session", () => ({ useSession: () => ({}) }));
 
 const { readEvents } = await import("../src/features/chat/data");
 const { groupMembers } = await import("../src/features/chat/Members");
-const { dayLabel, isNewDay, startsGroup } = await import("../src/features/chat/ui");
+const { dayLabel, isNewDay, listTime, startsGroup } = await import("../src/features/chat/ui");
 
 function stream(chunks: string[]) {
   const encoder = new TextEncoder();
@@ -82,5 +82,14 @@ describe("message grouping", () => {
     expect(dayLabel("2026-10-18T08:00:00", now)).toBe("Yesterday");
     expect(dayLabel("2026-10-16T08:00:00", now)).toMatch(/Friday/);
     expect(dayLabel("2025-10-16T08:00:00", now)).toMatch(/2025/);
+  });
+
+  it("says when a channel last spoke as a phone's list does: a time today, Yesterday, a weekday, then a date", () => {
+    const now = new Date("2026-10-19T15:00:00");
+    expect(listTime("2026-10-19T13:52:00", now)).toMatch(/1:52/);
+    expect(listTime("2026-10-18T08:00:00", now)).toBe("Yesterday");
+    expect(listTime("2026-10-16T08:00:00", now)).toMatch(/Fri/);
+    expect(listTime("2026-10-02T08:00:00", now)).toMatch(/Oct 2/);
+    expect(listTime("2025-10-02T08:00:00", now)).toMatch(/2025/);
   });
 });

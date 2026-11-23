@@ -65,9 +65,11 @@ instead of an error.
 > including $5 of usage) to keep it running. Busy instances use more; check
 > [Railway's pricing](https://railway.com/pricing) for current numbers.
 
-**Your own domain:** when you first sign in, Crewtavo asks to connect to Railway (you're still
-signed in there, so it's one press of **Authorize**), which is how it warns you before Railway's
-trial runs out. Right after you set up the business, it offers to set up your web address:
+**Your own domain:** setting up takes a few short steps: your owner account, a key file that gets
+you back in if you lose your password, then your business's name, trade and terms. Then Crewtavo
+asks to connect to Railway (you're still signed in there, so it's one press of **Authorize**),
+which is how it shows what Railway charges under **Settings → Hosting** and warns you before the
+trial runs out. Last, it offers to set up your web address:
 - **Need a domain?** Buy one on Railway. Railway sets it up, Crewtavo spots it and switches over,
   and there's nothing to add.
 - **Have one already** (like `app.yourbusiness.com`)? Crewtavo adds it in Railway and shows the two
@@ -248,9 +250,10 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
       leave, while Crewtavo is open on the phone. It never takes anyone off the clock by itself: on
       the visits-only clock it asks first. It installs like an app on Android and iPhone, keeps working with no signal and
       catches up when the connection is back.</p>
-      <p><strong>For your clients.</strong> The Client Hub, with no account to create: approve
-      quotes, pay invoices (with an optional tip), see the next visit, ask for changes, request
-      work and message the office. A booking form on your website, or its link, lets people pick a
+      <p><strong>For your clients.</strong> The Client Hub, in your business's color and with no
+      account to create: approve quotes, pay invoices (with an optional tip), follow the next visit
+      from on the way to done, see photos from finished visits (the ones marked OK to share), ask
+      for changes, request work and message the office. A booking form on your website, or its link, lets people pick a
       time from the openings your schedule really has.</p>
     </td>
   </tr>
@@ -408,9 +411,17 @@ to the **crewtavo** service's variables on Railway, or to `.env.instance` when s
   site plan can go on the measuring map, lined up with the aerial by tapping two spots, to measure
   new paving from it.
 - **People and roles:** General manager, Office manager, Operations manager, Foreman and Employee
-  to start with, renamable, plus your own. A foreman runs their crew and never sees prices. A
+  to start with, renamable, plus your own: each starts from a level and turns areas on or off
+  (sales and money, jobs and crews, growing the business, running the business), each with a line
+  on what it opens. A foreman runs their crew and never sees prices. Prices and price settings stay
+  with the roles that sell, and pay rates with those who manage the team or job costs. A
   Subcontractor sign-in sees only their own jobs, their price on each and their paperwork. The
   database enforces every rule, not just the screens.
+- **Getting around:** search finds clients, requests, quotes, jobs and invoices by name, address,
+  phone or number (`#7`, or just `7`). On a computer, right-click a list's row to open it in a new
+  tab, pick it or copy its link, and point at a client's name for how to reach them (and what they
+  owe, for those who see invoices). On a phone, hold a row to pick it and pull a sheet down to
+  close it. Photos open in a gallery to swipe or click through.
 - **Subcontractors:** a record for each sub, whether or not they sign in, with their W-9,
   insurance certificates and licenses, expiry reminders, and upload links for subs without an
   account. Job offers they accept or decline in the field app (a lapsed certificate warns, and the
@@ -516,7 +527,7 @@ Everything an instance needs is generated. These optional settings turn on extra
 
 | Name | Turns on |
 | --- | --- |
-| `APP_URL` | Your own domain. **Settings → Web address** sets it on Railway. Defaults to the instance's address. |
+| `APP_URL` | Your own domain. **Settings → Web address** sets it on Railway. Defaults to the instance's address on Railway and with `npm run instance`; set it yourself anywhere else, since sign-in, reset and invitation links are only made for it. |
 | `ENCRYPTION_KEY` | A separate key for app tokens and client links (32+ characters). Keep it stable once set: changing it disconnects every app and invalidates links already sent. |
 | `ANTHROPIC_API_KEY`, `AI_MODEL` | AI rewriting and answers from your SOPs, with Claude. Companies can also add their own Claude or OpenAI key on the Apps page. |
 | `OPENAI_MODEL` | The OpenAI model used with a company's own OpenAI key or a person's ChatGPT plan, instead of the one picked on Apps → ChatGPT. There is no server-wide OpenAI key. |
@@ -600,6 +611,10 @@ source code.
 
 Whoever sets up a business in Crewtavo agrees to the [Crewtavo Terms](TERMS) during setup: the
 business runs Crewtavo on its own accounts and is responsible for its data and its customers.
+
+The open-source software built into Crewtavo, and its licenses, are listed with each build: the
+app's under **Settings → Terms and license → Open-source licenses** (`/licenses.txt`), and the server's in
+`server-licenses.txt` next to it.
 
 Copyright (C) 2026 Joshua Viars. Commercial licenses are available on request.
 

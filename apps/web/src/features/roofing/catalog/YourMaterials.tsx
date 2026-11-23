@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Section } from "@/components/ui/Section";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
@@ -29,6 +29,7 @@ import { MaterialSearch } from "../../materials/MaterialSearch";
 import { packagesKey, type PriceListService, type RoofPackage } from "../packages";
 import styles from "./catalog.module.css";
 import { listed, usesOf } from "./uses";
+import { Select } from "@/components/ui/Select";
 
 /** The newest of the price list's links to one item: its last price and what ABC said. */
 const newest = (links: readonly ServiceMaterial[]) => [...links].sort((a, b) => (b.priced_at ?? "").localeCompare(a.priced_at ?? ""))[0]!;
@@ -80,80 +81,80 @@ export function YourMaterials({ materials, services, packages, canEdit, onOpen }
   const rowsRef = useListAnimation<HTMLUListElement>();
 
   return (
-    <section className="stack" aria-labelledby="catalog-yours" style={{ gap: 14 }}>
-      <div className={styles.head}>
-        <div>
-          <h2 id="catalog-yours">Your materials</h2>
-          <p>Every ABC item in your price list, the services it's in, and its last price{checkedAt ? `, from ${timeAgo(checkedAt)}` : ""}.</p>
-        </div>
-        {canEdit && groups.length > 0 && (
-          <Button icon="refresh" loading={check.isPending} slowHint={false} onClick={() => check.mutate()}>Check with ABC</Button>
+    <Section
+      title="Your materials"
+      count={groups.length || undefined}
+      action={canEdit && groups.length > 0 ? <Button icon="refresh" loading={check.isPending} slowHint={false} onClick={() => check.mutate()}>Check with ABC</Button> : undefined}
+    >
+      <p className={styles.lede}>Every ABC item in your price list, the services it's in, and its last price{checkedAt ? `, from ${timeAgo(checkedAt)}` : ""}.</p>
+      <div className={styles.stack}>
+        {needLook > 0 && (
+          <div className="callout callout-warning" role="status">
+            <Icon name="alert" size={16} />
+            <div className="grow">
+              <strong>{needLook} {needLook === 1 ? "needs" : "need"} a look.</strong> Your branch couldn't price {needLook === 1 ? "it" : "them"} last time, or ABC doesn't carry {needLook === 1 ? "it" : "them"} any more.
+              Each keeps its last price, so nothing gets cheaper by itself. {canEdit ? "Replace one and every service it's in changes with it." : ""}
+            </div>
+          </div>
         )}
-      </div>
-      {needLook > 0 && (
-        <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <span className="grow" style={{ fontWeight: 400 }}>
-            <strong>{needLook} {needLook === 1 ? "needs" : "need"} a look.</strong> Your branch couldn't price {needLook === 1 ? "it" : "them"} last time, or ABC doesn't carry {needLook === 1 ? "it" : "them"} any more.
-            Each keeps its last price, so nothing gets cheaper by itself. {canEdit ? "Replace one and every service it's in changes with it." : ""}
-          </span>
-        </div>
-      )}
 
-      {materials.isPending ? (
-        <Loading className={styles.rows} label="Loading your materials">
-          {Array.from({ length: 4 }, (_, i) => <div key={i} className="card card-pad"><Skeleton width="60%" /><Skeleton width="35%" /></div>)}
-        </Loading>
-      ) : materials.error ? (
-        <div className="card"><ErrorState error={materials.error} onRetry={() => materials.refetch()} /></div>
-      ) : !groups.length ? (
-        <div className="card">
+        {materials.isPending ? (
+          <Loading label="Loading your materials">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className={styles.skRow}>
+                <Skeleton width={40} height={40} radius={8} />
+                <span><Skeleton width="45%" height={11} /><Skeleton width="30%" height={9} /></span>
+              </div>
+            ))}
+          </Loading>
+        ) : materials.error ? (
+          <ErrorState error={materials.error} onRetry={() => materials.refetch()} />
+        ) : !groups.length ? (
           <EmptyState icon="package" title="No ABC materials in your price list yet">
             Open any item in the catalog and add it to a service, or pick materials on a roof estimate's Materials card. They show here, so you can keep them current.
           </EmptyState>
-        </div>
-      ) : (
-        <ul ref={rowsRef} className={styles.rows} aria-label="Your materials">
-          {groups.map((links) => {
-            const last = newest(links);
-            const note = links.find((l) => l.price_note)?.price_note ?? null;
-            const price = last.unit_price !== null && Number(last.unit_price) > 0 ? Number(last.unit_price) : null;
-            return (
-              <li key={links[0]!.id} className={styles.row} data-flagged={note ? "" : undefined}>
-                <AbcPicture item={{ name: last.name }} />
-                <span className={styles.rowName}>
-                  <strong>{last.name}</strong>
-                  <span className="muted small">{last.item_number}{last.length_ft ? ` · ${formatNumber(Number(last.length_ft), 2)} ft` : ""} · by the {uomName(last)}</span>
-                </span>
-                <span className={styles.rowUses}>
-                  {usesOf(links, services, packages).map((u) => (
-                    <span key={u.link.id}>
-                      <strong>{u.service?.name ?? "A service"}</strong> · {u.amount}{u.packages.length ? ` · ${listed(u.packages)}` : ""}
-                    </span>
-                  ))}
-                </span>
-                <span className={styles.rowPrice}>
-                  {price !== null ? <strong>{formatMoneyCents(price)}</strong> : <span className="muted">No price</span>}
-                  <span className="muted small">/ {uomName(last)}{last.priced_at ? ` · ${timeAgo(last.priced_at)}` : ""}</span>
-                </span>
-                <span className={styles.rowActions}>
-                  <Button size="sm" onClick={() => onOpen(last.item_number, { item_number: last.item_number, name: last.name })}>Open</Button>
-                  {canEdit && <Button size="sm" onClick={() => setReplacing(links)}>Replace</Button>}
-                </span>
-                {note && (
-                  <span className={styles.flag}>
-                    <Icon name="alert" size={14} />
-                    <span>{note.replace(/ ?Replace it in Roofing → Catalog\.?/, "")}{price !== null ? " Until then, it counts at its last price." : ""}</span>
+        ) : (
+          <ul ref={rowsRef} className={styles.rows} aria-label="Your materials">
+            {groups.map((links) => {
+              const last = newest(links);
+              const note = links.find((l) => l.price_note)?.price_note ?? null;
+              const price = last.unit_price !== null && Number(last.unit_price) > 0 ? Number(last.unit_price) : null;
+              return (
+                <li key={links[0]!.id} className={styles.row} data-flagged={note ? "" : undefined}>
+                  <AbcPicture item={{ name: last.name }} className={styles.rowPicture} />
+                  <span className={styles.rowName}>
+                    <button type="button" className={styles.rowOpen} onClick={() => onOpen(last.item_number, { item_number: last.item_number, name: last.name })}>{last.name}</button>
+                    <span className={styles.rowMeta}>{last.item_number}{last.length_ft ? ` · ${formatNumber(Number(last.length_ft), 2)} ft` : ""} · by the {uomName(last)}</span>
                   </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  <span className={styles.rowUses}>
+                    {usesOf(links, services, packages).map((u) => (
+                      <span key={u.link.id}>
+                        <strong>{u.service?.name ?? "A service"}</strong> · {u.amount}{u.packages.length ? ` · ${listed(u.packages)}` : ""}
+                      </span>
+                    ))}
+                  </span>
+                  <span className={styles.rowPrice}>
+                    {price !== null ? <strong>{formatMoneyCents(price)}</strong> : <span>No price</span>}
+                    <span>/ {uomName(last)}{last.priced_at ? <span className={styles.rowAge}>{timeAgo(last.priced_at)}</span> : null}</span>
+                  </span>
+                  <span className={styles.rowActions}>
+                    {canEdit && <Button size="sm" variant="ghost" icon="refresh" onClick={() => setReplacing(links)}>Replace</Button>}
+                  </span>
+                  {note && (
+                    <span className={styles.flag}>
+                      <Icon name="alert" size={14} />
+                      <span>{note.replace(/ ?Replace it in Roofing → Catalog\.?/, "")}{price !== null ? " Until then, it counts at its last price." : ""}</span>
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
       {replacing && <ReplaceDialog links={replacing} services={services} onClose={() => setReplacing(null)} onDone={() => { refresh(); setReplacing(null); }} />}
-    </section>
+    </Section>
   );
 }
 
@@ -218,13 +219,13 @@ function ReplaceForm({ links, services, item, onBack, onDone }: { links: Service
   return (
     <form onSubmit={submit}>
       <div className={styles.replacing}>
-        <span className="muted small">Instead of {first.name} ({first.item_number})</span>
+        <span>Instead of {first.name} ({first.item_number})</span>
         <span>
           <strong>{item.name}</strong>
           <span className="muted small" style={{ display: "block" }}>{[item.item_number, item.color, price !== null ? `${formatMoneyCents(price)} / ${unit.name.toLowerCase()}` : (detail.isPending && detail.fetchStatus !== "idle" ? "Getting the price…" : item.note)].filter(Boolean).join(" · ")}</span>
         </span>
       </div>
-      <div className="row wrap" style={{ gap: 12, alignItems: "flex-end" }}>
+      <div className={styles.replaceFields}>
         {units.length > 1 && (
           <Field label="Priced by the">
             <Select className="select" value={uom} onChange={(e) => { setUom(e.target.value); setAmounts(Object.fromEntries(links.map((l) => [l.id, amountFor(l, e.target.value)]))); }}>

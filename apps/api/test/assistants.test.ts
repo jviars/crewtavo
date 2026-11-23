@@ -35,6 +35,9 @@ const signedIn = token();
 const reading = token({ client_id: "client-reads" });
 const records = token({ client_id: "client-records" });
 const prices = token({ client_id: "client-prices" });
+const scheduling = token({ client_id: "client-schedule" });
+const details = token({ client_id: "client-company" });
+const nomoney = token({ client_id: "client-nomoney" });
 const full = token({ client_id: "client-full" });
 const expired = token({ client_id: "client-expired" });
 
@@ -44,6 +47,9 @@ const CONNECTIONS: Record<string, { level: string; areas: string[] }> = {
   // What "Allow changes" became.
   "client-records": { level: "areas", areas: ["records"] },
   "client-prices": { level: "areas", areas: ["prices"] },
+  "client-schedule": { level: "areas", areas: ["schedule"] },
+  "client-company": { level: "areas", areas: ["company"] },
+  "client-nomoney": { level: "full_no_money", areas: [] },
   "client-full": { level: "full", areas: [] },
 };
 
@@ -85,6 +91,9 @@ function supabase(company: { settings?: object; held?: object; role?: string; lo
       }
       case "/rest/v1/rpc/assistant_switch":
         return Response.json(company.held ?? { state: "on" });
+      // The company's settings as the person reads them (lib/companySettings.ts settingsAs): all of them, for an owner.
+      case "/rest/v1/rpc/company_settings":
+        return Response.json(settings);
       case "/rest/v1/rpc/company_assistant_connections":
         return Response.json(TEAM);
       case "/rest/v1/rpc/end_assistant_connection":
@@ -149,7 +158,7 @@ describe("MCP tools", () => {
       const calls = supabase();
       expect(await call(bearer, "add_note", note)).toMatchObject({ isError: true, content: [{ type: "text", text: assistantRefusal("records") }] });
       expect(await call(bearer, "add_services", service)).toMatchObject({ isError: true, content: [{ text: assistantRefusal("prices") }] });
-      expect(assistantRefusal("prices")).toBe("This assistant can't change the price list. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.");
+      expect(assistantRefusal("prices")).toBe("This assistant can't change prices. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.");
       expect(wrote(calls, "/rest/v1/messages") || wrote(calls, "/rest/v1/services")).toBe(false);
       // The refusal is in the activity log the owner sees.
       expect(calls.find((c) => c.path === "/rest/v1/assistant_calls")?.body).toMatchObject({ tool: "add_note", ok: false });
@@ -242,21 +251,48 @@ describe("MCP tools", () => {
     expect(wrote(calls, "/rest/v1/services")).toBe(false);
   });
 
-  it("read and set weather rules through the function that checks them, as a change to the price list", async () => {
+  it("read and set weather rules through the function that checks them, as a change to the schedule", async () => {
     supabase({ settings: { weather_rules: [{ applies_to: "Paver patio", max_rain_pct: 50, requires_dry_hours: 24 }, "not a rule"] } });
     expect((await call(full, "list_weather_rules", {})).structuredContent.result).toEqual([
       { applies_to: "Paver patio", max_rain_pct: 50, requires_dry_hours: 24, summary: "Paver patio: at most 50% rain, 24 dry hours after" },
     ]);
     const rules = [{ applies_to: "Sealcoat", min_temp_f: 50, requires_dry_hours: 24 }, { max_wind_mph: 15 }];
-    for (const bearer of [full, prices]) {
+    // They warn about visits and change no price, so full access without money sets them too.
+    for (const bearer of [full, scheduling, nomoney]) {
       const calls = supabase();
       expect((await call(bearer, "set_weather_rules", { rules })).structuredContent.result).toEqual({ saved: ["Sealcoat: at least 50°F, 24 dry hours after", "Every job: wind at most 15 mph"] });
       expect(calls.find((c) => c.path === "/rest/v1/rpc/set_weather_rules")?.body).toEqual({ p_company: "company-1", p_rules: rules });
       expect(wrote(calls, "/rest/v1/companies")).toBe(false);
     }
     const calls = supabase();
-    expect((await call(records, "set_weather_rules", { rules })).content[0].text).toBe(assistantRefusal("prices"));
+    expect((await call(prices, "set_weather_rules", { rules })).content[0].text).toBe(assistantRefusal("schedule"));
     expect(wrote(calls, "/rest/v1/rpc/set_weather_rules")).toBe(false);
+  });
+
+  it("keep the price list from full access without money: it's what clients pay", async () => {
+    const calls = supabase();
+    expect((await call(nomoney, "add_services", service)).content[0].text).toBe(assistantRefusal("prices", false, { level: "full_no_money", areas: [] }));
+    expect((await call(nomoney, "add_services", service)).content[0].text).toMatch(/^This assistant can't change money: prices, quotes/);
+    expect(wrote(calls, "/rest/v1/services")).toBe(false);
+  });
+
+  it("change the company's money settings only with invoices", async () => {
+    for (const [bearer, args] of [
+      [details, { sales_tax_percent: 8.875 }],
+      [details, { client_tips: true }],
+      [nomoney, { minimum_charge: 75 }],
+      [nomoney, { late_fee: { type: "flat", amount: 25, grace_days: 10 } }],
+      [nomoney, { payment_terms_days: 15 }],
+    ] as const) {
+      const calls = supabase();
+      const res = await call(bearer, "update_company_settings", args);
+      expect(res.content[0].text, JSON.stringify(args)).toMatch(/Payment terms, sales tax, the minimum charge, late fees and tips go with invoices\.$/);
+      expect(wrote(calls, "/rest/v1/rpc/merge_company_settings") || wrote(calls, "/rest/v1/companies"), JSON.stringify(args)).toBe(false);
+    }
+    // The rest of Settings → Company is company details.
+    const calls = supabase();
+    expect((await call(details, "update_company_settings", { brand_color: "#3b7d23", quote_valid_days: 45 })).isError).toBeUndefined();
+    expect(calls.find((c) => c.path === "/rest/v1/rpc/merge_company_settings")?.body).toEqual({ p_company: "company-1", p_settings: { quote_valid_days: 45, branding: { color: "#3b7d23" } } });
   });
 
   it("change company settings without touching the owner's limits on assistants", async () => {
@@ -420,6 +456,18 @@ describe("the instance's gateway", () => {
     expect((await guardAssistant(env, ask("GET", "/auth/v1/user", reading), "/auth/v1", send)).status).toBe(200);
     expect((await guardAssistant(env, ask("PUT", "/auth/v1/user", signedIn), "/auth/v1", send)).status).toBe(200);
     expect(sent).toHaveLength(3);
+  });
+
+  it("reads Auth's paths as Auth's router does: its own token's address by any spelling, and nothing else by one", async () => {
+    supabase();
+    const { sent, send } = upstream();
+    for (const path of ["/auth/v1/oauth/token/", "/auth/v1//oauth/token", "/auth/v1/OAuth/Token", "/auth/v1/oauth/%74oken"]) {
+      expect((await guardAssistant(env, ask("POST", path, reading), "/auth/v1", send)).status, path).toBe(200);
+    }
+    for (const path of ["/auth/v1/user/", "/auth/v1//user", "/auth/v1/%75ser", "/auth/v1/oauth/token/../../user"]) {
+      expect((await guardAssistant(env, ask("PUT", path, full), "/auth/v1", send)).status, path).toBe(403);
+    }
+    expect(sent).toHaveLength(4);
   });
 });
 

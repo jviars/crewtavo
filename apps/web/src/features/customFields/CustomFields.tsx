@@ -3,16 +3,18 @@
  * filled in under a record's other fields, and listed with its details when they have a value. The
  * rules for values (their types, what shows where) are core customFields.ts.
  */
-import { CUSTOM_FIELD_LIMITS, customFieldsFor, customValueDraft, customValues, saveCustomDrafts, shownCustomFields, type CustomFieldRecord, type CustomValue } from "@crewtavo/core/customFields";
+import { CUSTOM_FIELD_LIMITS, customFieldsFor, customValueDraft, customValues, customValueText, saveCustomDrafts, shownCustomFields, type CustomFieldDef, type CustomFieldRecord, type CustomValue } from "@crewtavo/core/customFields";
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
-import { Fragment, useMemo, useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Button, cx } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
+import { Fact, Facts, Section } from "@/components/ui/Section";
+import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import styles from "./CustomFields.module.css";
+import { Select } from "@/components/ui/Select";
 
 export interface CustomFieldRow {
   id: string;
@@ -52,6 +54,40 @@ export function customFieldsToSave(fields: readonly CustomFieldRow[], current: u
   return values;
 }
 
+/** How a value reads on a page: core's words (customValueText), with yes and no in the reader's language. */
+function valueText(field: CustomFieldDef, value: unknown): string {
+  if (typeof value === "boolean") return value ? t("Yes") : t("No");
+  return customValueText(field, value).trim();
+}
+
+/**
+ * One field's control: a list for a choice or yes/no, else a text, number or date field. A choice
+ * since taken off the field stays in the list until it's changed.
+ */
+function CustomFieldControl({ field: f, value, onChange, className }: { field: CustomFieldDef; value: string; onChange: (value: string) => void; className?: string }) {
+  if (f.type === "choice" || f.type === "yes_no") {
+    const options: Array<[string, string]> = f.type === "yes_no" ? [["yes", t("Yes")], ["no", t("No")]] : (f.choices ?? []).map((c) => [c, c]);
+    return (
+      <Select className={cx("select", className)} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("Not set")}</option>
+        {options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        {value && !options.some(([v]) => v === value) && <option value={value}>{value}</option>}
+      </Select>
+    );
+  }
+  return (
+    <input
+      className={cx("input", className)}
+      type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+      step={f.type === "number" ? "any" : undefined}
+      maxLength={f.type === "text" ? CUSTOM_FIELD_LIMITS.text : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      autoComplete="off"
+    />
+  );
+}
+
 /**
  * The fields in use, to fill in under a record's other fields. `draft` holds only what's been typed
  * here, by key; the rest show the record's `current` values.
@@ -62,33 +98,11 @@ export function CustomFieldInputs({ fields, current, draft, onChange }: { fields
   const values = customValues(current);
   return (
     <div className="form-grid">
-      {shown.map((f) => {
-        const value = draft[f.key] ?? customValueDraft(f, values[f.key]);
-        const set = (e: { target: { value: string } }) => onChange({ ...draft, [f.key]: e.target.value });
-        const options: Array<[string, string]> = f.type === "yes_no" ? [["yes", "Yes"], ["no", "No"]] : (f.choices ?? []).map((c) => [c, c]);
-        return (
-          <Field key={f.key} label={f.label} optional>
-            {f.type === "choice" || f.type === "yes_no" ? (
-              <Select className="select" value={value} onChange={set}>
-                <option value="">{t("Not set")}</option>
-                {options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-                {/* A choice since taken off the field stays until it's changed. */}
-                {value && !options.some(([v]) => v === value) && <option value={value}>{value}</option>}
-              </Select>
-            ) : (
-              <input
-                className="input"
-                type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
-                step={f.type === "number" ? "any" : undefined}
-                maxLength={f.type === "text" ? CUSTOM_FIELD_LIMITS.text : undefined}
-                value={value}
-                onChange={set}
-                autoComplete="off"
-              />
-            )}
-          </Field>
-        );
-      })}
+      {shown.map((f) => (
+        <Field key={f.key} label={f.label} optional>
+          <CustomFieldControl field={f} value={draft[f.key] ?? customValueDraft(f, values[f.key])} onChange={(value) => onChange({ ...draft, [f.key]: value })} />
+        </Field>
+      ))}
     </div>
   );
 }
@@ -108,44 +122,120 @@ export function CustomFieldList({ fields, values }: { fields: readonly CustomFie
 }
 
 /**
- * A quote's or invoice's fields in a card: the ones with a value, and Edit to fill them in. Nothing
- * while the business has none for it, or when none has a value and it can't be edited.
+ * The fields as Fact rows, for inside a <Facts> list: the ones with a value, or with `empty` every
+ * field in use, an empty one as a quiet dash (read out as "Not set").
+ */
+export function CustomFieldFacts({ fields, values, empty = false }: { fields: readonly CustomFieldRow[]; values: unknown; empty?: boolean }) {
+  const all = customValues(values);
+  return (
+    <>
+      {customFieldsFor(fields).map((f) => {
+        const text = valueText(f, all[f.key]);
+        if (!text && !empty) return null;
+        return (
+          <Fact key={f.key} label={f.label}>
+            {text ? (
+              <span className="pre-wrap">{text}</span>
+            ) : (
+              <span className={styles.unset}>
+                <span aria-hidden="true">—</span>
+                <span className="sr-only">{t("Not set")}</span>
+              </span>
+            )}
+          </Fact>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * A quote's or invoice's fields as a section of its page: label and value on hairline rows, and Edit
+ * on the right to fill them in right there. Nothing while the business has none for it, or when none
+ * has a value and it can't be edited.
  */
 export function CustomFieldsCard({ record, values, editable, onSave }: { record: CustomFieldRecord; values: unknown; editable: boolean; onSave: (values: Record<string, CustomValue>) => Promise<unknown> }) {
   const fields = useCustomFields(record);
   const [editing, setEditing] = useState(false);
-  const shown = shownCustomFields(fields, values);
-  if (!customFieldsFor(fields).length || (!editable && !shown.length)) return null;
+  const editButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  const open = editing && editable;
+
+  // Back on Edit once the form closes, so the keyboard doesn't start over at the top of the page.
+  useEffect(() => {
+    if (open || !returnFocus.current) return;
+    returnFocus.current = false;
+    editButton.current?.focus();
+  }, [open]);
+
+  const hasValues = shownCustomFields(fields, values).length > 0;
+  if (!customFieldsFor(fields).length || (!editable && !hasValues)) return null;
+  const close = () => {
+    returnFocus.current = true;
+    setEditing(false);
+  };
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{t("Details")}</strong>
-        {editable && <Button size="sm" variant="ghost" icon="edit" onClick={() => setEditing(true)}>{t("Edit")}</Button>}
-      </div>
-      {shown.length ? <dl className="kv"><CustomFieldList fields={fields} values={values} /></dl> : <span className="muted small">{t("Nothing filled in yet.")}</span>}
-      {editing && <CustomFieldsDialog fields={fields} current={values} onSave={onSave} onClose={() => setEditing(false)} />}
-    </div>
+    <Section
+      title={t("Details")}
+      action={editable && !open && <button ref={editButton} type="button" aria-label={t("Edit details")} onClick={() => setEditing(true)}>{t("Edit")}</button>}
+    >
+      {open ? (
+        <CustomFieldsForm fields={fields} current={values} onSave={onSave} onDone={close} />
+      ) : hasValues ? (
+        <Facts>
+          <CustomFieldFacts fields={fields} values={values} empty={editable} />
+        </Facts>
+      ) : (
+        <EmptyState inline title={t("Nothing filled in yet")} />
+      )}
+    </Section>
   );
 }
 
-function CustomFieldsDialog({ fields, current, onSave, onClose }: { fields: readonly CustomFieldRow[]; current: unknown; onSave: (values: Record<string, CustomValue>) => Promise<unknown>; onClose: () => void }) {
+/**
+ * The section's fields in place: each row's value becomes a quiet field, with Save and Cancel under
+ * them. Escape cancels. Saving with nothing changed just closes it.
+ */
+function CustomFieldsForm({ fields, current, onSave, onDone }: { fields: readonly CustomFieldRow[]; current: unknown; onSave: (values: Record<string, CustomValue>) => Promise<unknown>; onDone: () => void }) {
   const [draft, setDraft] = useState<Record<string, string>>({});
+  const form = useRef<HTMLFormElement>(null);
   const save = useMutation({
     meta: { inline: true, success: t("Details saved") },
     mutationFn: () => onSave(customFieldsToSave(fields, current, draft)),
-    onSuccess: onClose,
+    onSuccess: onDone,
   });
+  const values = customValues(current);
+
+  useEffect(() => {
+    form.current?.querySelector<HTMLElement>("input, select")?.focus();
+  }, []);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!Object.keys(draft).length) onDone();
+    else save.mutate();
+  };
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || e.defaultPrevented || save.isPending) return;
+    e.preventDefault();
+    onDone();
+  };
+
   return (
-    <Dialog open onClose={onClose} title={t("Details")}>
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <CustomFieldInputs fields={fields} current={current} draft={draft} onChange={setDraft} />
-        <FormError error={save.error} />
-        <div className="form-actions">
-          <FormChecks />
-          <Button onClick={onClose}>{t("Cancel")}</Button>
-          <Button type="submit" variant="primary" loading={save.isPending}>{t("Save")}</Button>
-        </div>
-      </form>
-    </Dialog>
+    <form ref={form} className={styles.form} onSubmit={submit} onKeyDown={onKeyDown}>
+      <div className={styles.rows}>
+        {customFieldsFor(fields).map((f) => (
+          <Field key={f.key} label={f.label} className={styles.row}>
+            <CustomFieldControl field={f} value={draft[f.key] ?? customValueDraft(f, values[f.key])} onChange={(value) => setDraft((d) => ({ ...d, [f.key]: value }))} className={styles.control} />
+          </Field>
+        ))}
+      </div>
+      <FormError error={save.error} />
+      <div className={cx("form-actions", styles.actions)}>
+        <FormChecks />
+        <Button size="sm" variant="ghost" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</Button>
+        <Button size="sm" type="submit" variant="primary" loading={save.isPending}>{t("Save")}</Button>
+      </div>
+    </form>
   );
 }

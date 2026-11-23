@@ -230,7 +230,7 @@ schedule.post("/booking-forms/openings", requireUser, requireCompany(OFFICE, "se
       crew_id: uuid.nullable().optional(),
     }),
   );
-  const company = must(await c.var.db.from("companies").select("id, name, phone, timezone, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("id, name, phone, timezone, settings").eq("id", c.var.companyId).maybeSingle());
   // A crew of this company's only (the read is the person's own).
   if (body.crew_id) must(await c.var.db.from("crews").select("id").eq("company_id", c.var.companyId).eq("id", body.crew_id).maybeSingle(), "That crew isn't on your team anymore.");
   if (body.form_id) must(await c.var.db.from("intake_forms").select("id").eq("company_id", c.var.companyId).eq("id", body.form_id).maybeSingle(), "Form not found.");

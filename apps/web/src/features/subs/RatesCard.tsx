@@ -12,7 +12,7 @@ import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Menu } from "@/components/ui/Menu";
-import { Select } from "@/components/ui/Select";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
@@ -20,6 +20,8 @@ import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { perUnit, rateText, readRate, squaresText } from "./pay";
 import { refreshPay, usePayRates, useServices, type PayeeRef, type PayRate } from "./payData";
+import styles from "./Subs.module.css";
+import { Select } from "@/components/ui/Select";
 
 export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) {
   const session = useSession();
@@ -40,30 +42,18 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
   const list = rates.data ?? [];
   const team = !payee.subcontractor_id;
 
-  const body = (
-    <>
-      {rates.isPending ? (
-        <div className="card-row"><Skeleton width="60%" /></div>
-      ) : rates.error ? (
-        <div className="card-row"><ErrorState compact error={rates.error} onRetry={() => rates.refetch()} /></div>
-      ) : list.length === 0 ? (
-        <EmptyState inline title="No rates yet" action={bare ? <Button onClick={() => setEditing("new")}>Add a rate</Button> : undefined}>
-          {team
-            ? "What they earn per square, per job or per day. Pay on a job is filled in from these."
-            : "What you pay them per square, per job or per day. Pay on a job is filled in from these, and you can still change it there."}
-        </EmptyState>
-      ) : (
-        list.map((r) => (
-          <div key={r.id} className="card-row" style={{ alignItems: "flex-start", opacity: r.active ? undefined : 0.6 }}>
-            <span className="grow" style={{ minWidth: 0 }}>
-              <strong>{r.description || rateText(r)}</strong>
-              <span className="muted small" style={{ display: "block" }}>
-                {[r.description ? rateText(r) : null, squaresText(r), r.active ? null : "Turned off"].filter(Boolean).join(" · ")}
-              </span>
-            </span>
+  const rows = (
+    <RelatedList label={team ? "Their rates" : "Rates"}>
+      {list.map((r) => (
+        <RelatedRow
+          key={r.id}
+          title={<span className={r.active ? undefined : styles.off}>{r.description || rateText(r)}</span>}
+          sub={[r.description ? rateText(r) : null, squaresText(r), r.active ? null : "Turned off"]}
+          actions={
             <Menu
               triggerClassName="btn btn-sm btn-ghost btn-icon"
               label={`Actions for ${rateText(r)}`}
+              title={r.description || rateText(r)}
               items={[
                 { label: "Edit", icon: "edit", onSelect: () => setEditing(r) },
                 { label: r.active ? "Turn off" : "Turn back on", icon: r.active ? "archive" : "restore", onSelect: () => setActive.mutate({ id: r.id, active: !r.active }) },
@@ -76,10 +66,23 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
                 },
               ]}
             />
-          </div>
-        ))
-      )}
-    </>
+          }
+        />
+      ))}
+    </RelatedList>
+  );
+  const body = rates.isPending ? (
+    <Skeleton width="60%" />
+  ) : rates.error ? (
+    <ErrorState compact error={rates.error} onRetry={() => rates.refetch()} />
+  ) : list.length === 0 ? (
+    <EmptyState inline title="No rates yet" action={bare ? <Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button> : undefined}>
+      {team
+        ? "What they earn per square, per job or per day. Pay on a job is filled in from these."
+        : "What you pay them per square, per job or per day. Pay on a job is filled in from these, and you can still change it there."}
+    </EmptyState>
+  ) : (
+    <div ref={listRef}>{rows}</div>
   );
   // Outside the list, so the rows' animation never touches the dialog.
   const dialog = editing && <RateDialog payee={payee} rate={editing === "new" ? null : editing} onClose={() => setEditing(null)} />;
@@ -87,21 +90,17 @@ export function RatesCard({ payee, bare }: { payee: PayeeRef; bare?: boolean }) 
   if (bare) {
     return (
       <div className="stack-sm">
-        <div className="card" ref={listRef}>{body}</div>
+        {body}
         {list.length > 0 && <span><Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button></span>}
         {dialog}
       </div>
     );
   }
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">Rates</h2>
-        <Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a rate</Button>
-      </div>
-      <div className="card" ref={listRef}>{body}</div>
+    <Section title="Rates" count={list.length || undefined} action={<Button icon="plus" onClick={() => setEditing("new")}>Add a rate</Button>}>
+      {body}
       {dialog}
-    </section>
+    </Section>
   );
 }
 

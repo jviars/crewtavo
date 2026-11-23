@@ -20,7 +20,7 @@ export function SenderAddressNote({ what }: { what: string }) {
   if (hasPostalAddress(session.company.address)) return null;
   return (
     <div className="callout callout-warning">
-      <Icon name="alert" size={20} />
+      <Icon name="alert" size={16} />
       <div className="grow">
         Marketing emails have to show your company's postal address, and it isn't filled in yet, so {what}.
         {hasRole(session, "admin")

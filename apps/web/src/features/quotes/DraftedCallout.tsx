@@ -112,7 +112,7 @@ export function DraftedCallout({ quoteId, message, drafted, lines, requestId, ad
   const [first, ...rest] = draftedWords(d, checkNames);
   return (
     <div className="callout callout-info">
-      <Icon name="sparkle" size={20} />
+      <Icon name="sparkle" size={16} />
       <div className="grow stack-sm" style={{ gap: 4 }}>
         <span>{first}</span>
         {rest.map((line, i) => <span key={i} style={{ fontWeight: 400 }}>{line}</span>)}

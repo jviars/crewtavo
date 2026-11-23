@@ -11,7 +11,9 @@ import { featureOn } from "@/components/shell/nav";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { useInstallHint } from "@/lib/install";
@@ -129,70 +131,70 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
   return (
     <>
     {canInstall && (
-      <div className="card card-pad stack-sm">
-        <strong>{t("Crewtavo app")}</strong>
-        <span className="muted small">{t("Install Crewtavo on this device. It opens in its own window, from your home screen or app list, like any other app.")}</span>
-        <InstallAppButton style={{ justifySelf: "start" }} />
-      </div>
-    )}
-    <div className="card card-pad stack-sm">
-      <strong>{t("Notifications")}</strong>
-      <span className="muted small">{t("The bell shows everything. Choose what also reaches you when you're not in Crewtavo.")}</span>
-
-      <PushRow state={push.data} sub={pushSub} busy={pushToggle.isPending} onToggle={(on) => pushToggle.mutate(on)} onTest={() => test.mutate()} testing={test.isPending} />
-      <FormError error={pushToggle.error} />
-
-      {prefs.isPending ? (
-        <Skeleton height={140} radius={8} />
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table" style={{ minWidth: 340 }}>
-            <thead>
-              <tr>
-                <th scope="col" style={{ paddingLeft: 0 }}>{t("Tell me about")}</th>
-                {COLUMNS.map((c) => <th key={c.channel} scope="col" style={{ textAlign: "center", width: 64, padding: "10px 4px" }}>{t(c.label)}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {topicsFor(session).map((topic) => (
-                <tr key={topic.key}>
-                  <th scope="row" style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)", whiteSpace: "normal", padding: "10px 8px 10px 0" }}>
-                    {t(topic.label)}
-                    <span className="muted small" style={{ display: "block", fontWeight: 400 }}>{t(topic.hint)}</span>
-                  </th>
-                  {COLUMNS.map((c) => (
-                    <td key={c.channel} style={{ textAlign: "center", padding: "10px 4px" }}>
-                      <input
-                        type="checkbox"
-                        style={{ width: 20, height: 20 }}
-                        aria-label={t("{topic} by {channel}", { topic: t(topic.label), channel: t(c.label).toLowerCase() })}
-                        // Off where it can't reach them, whatever was saved: a box can't be ticked for nothing.
-                        checked={available(c.channel) && (prefs.data ?? DEFAULT_NOTIFICATION_PREFS)[c.channel].includes(topic.key)}
-                        disabled={!available(c.channel)}
-                        onChange={(e) => toggle(c.channel, topic.key, e.target.checked)}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <Section level={3} title={t("Crewtavo app")}>
+        <div className="set-stack">
+          <p className="set-note">{t("Install Crewtavo on this device. It opens in its own window, from your home screen or app list, like any other app.")}</p>
+          <InstallAppButton style={{ justifySelf: "start" }} />
         </div>
-      )}
-      {!session.config.features.sms ? (
-        <span className="muted small">{t("Texts need texting turned on for the company.")}</span>
-      ) : !available("sms") ? (
-        <span className="muted small">{isSub(session) ? t("Add your mobile phone above to get texts, or ask {company} to add it.", { company: session.company.name }) : t("Add your mobile phone above to get texts.")}</span>
-      ) : null}
-      {isSub(session)
-        ? !available("email") && (
-          <span className="muted small">
-            {session.config.features.email ? t("Ask {company} to add your email to get these by email.", { company: session.company.name }) : t("{company} doesn't send email from Crewtavo yet.", { company: session.company.name })}
-          </span>
-        )
-        : !session.config.features.email && <span className="muted small">{t("Email needs the company's email connected (Settings → Email).")}</span>}
-      <FormError error={save.error} />
-    </div>
+      </Section>
+    )}
+    <Section level={3} title={t("Notifications")}>
+      <div className="set-stack">
+        <p className="set-note">{t("The bell shows everything. Choose what also reaches you when you're not in Crewtavo.")}</p>
+        <PushRow state={push.data} sub={pushSub} busy={pushToggle.isPending} onToggle={(on) => pushToggle.mutate(on)} onTest={() => test.mutate()} testing={test.isPending} />
+        <FormError error={pushToggle.error} />
+
+        {prefs.isPending ? (
+          <Skeleton height={140} radius={8} />
+        ) : (
+          <div className="set-matrix-scroll">
+            <table className="set-matrix">
+              <thead>
+                <tr>
+                  <th scope="col">{t("Tell me about")}</th>
+                  {COLUMNS.map((c) => <th key={c.channel} scope="col">{t(c.label)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {topicsFor(session).map((topic) => (
+                  <tr key={topic.key}>
+                    <th scope="row">
+                      {t(topic.label)}
+                      <span>{t(topic.hint)}</span>
+                    </th>
+                    {COLUMNS.map((c) => (
+                      <td key={c.channel}>
+                        <input
+                          type="checkbox"
+                          aria-label={t("{topic} by {channel}", { topic: t(topic.label), channel: t(c.label).toLowerCase() })}
+                          // Off where it can't reach them, whatever was saved: a box can't be ticked for nothing.
+                          checked={available(c.channel) && (prefs.data ?? DEFAULT_NOTIFICATION_PREFS)[c.channel].includes(topic.key)}
+                          disabled={!available(c.channel)}
+                          onChange={(e) => toggle(c.channel, topic.key, e.target.checked)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!session.config.features.sms ? (
+          <p className="set-note">{t("Texts need texting turned on for the company.")}</p>
+        ) : !available("sms") ? (
+          <p className="set-note">{isSub(session) ? t("Add your mobile phone above to get texts, or ask {company} to add it.", { company: session.company.name }) : t("Add your mobile phone above to get texts.")}</p>
+        ) : null}
+        {isSub(session)
+          ? !available("email") && (
+            <p className="set-note">
+              {session.config.features.email ? t("Ask {company} to add your email to get these by email.", { company: session.company.name }) : t("{company} doesn't send email from Crewtavo yet.", { company: session.company.name })}
+            </p>
+          )
+          : !session.config.features.email && <p className="set-note">{t("Email needs the company's email connected (Settings → Email).")}</p>}
+        <FormError error={save.error} />
+      </div>
+    </Section>
     </>
   );
 }
@@ -207,26 +209,26 @@ function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
 }) {
   if (!state) return <Skeleton height={38} radius={8} />;
   if (state === "needs-install" && sub?.blocked) {
-    return <span className="muted small">{t("On an iPhone, notifications need the app on your Home Screen. To sign in there, the office needs your phone number or email on file. Ask them to add it. You'll still see everything in the bell.")}</span>;
+    return <p className="set-note">{t("On an iPhone, notifications need the app on your Home Screen. To sign in there, the office needs your phone number or email on file. Ask them to add it. You'll still see everything in the bell.")}</p>;
   }
   if (state === "needs-install") {
     return (
       <div className="callout callout-info">
-        <Icon name="phone" size={20} />
-        <div className="grow small" style={{ fontWeight: 400 }}>
-          <div style={{ fontWeight: 700 }}>{t("Get notifications on this iPhone")}</div>
+        <Icon name="phone" size={16} />
+        <div className="grow">
+          <div>{t("Get notifications on this iPhone")}</div>
           <T text="Tap the Share button, choose <b>Add to Home Screen</b>, then open Crewtavo from your Home Screen and turn notifications on here." b={(s) => <strong>{s}</strong>} />
           {sub?.note && <> {sub.note}</>}
         </div>
       </div>
     );
   }
-  if (state === "unsupported") return <span className="muted small">{t("This browser can't show notifications. Email and text still work.")}</span>;
+  if (state === "unsupported") return <p className="set-note">{t("This browser can't show notifications. Email and text still work.")}</p>;
   if (state === "blocked") {
     return (
       <div className="callout callout-warning">
-        <Icon name="bell" size={20} />
-        <div className="grow small" style={{ fontWeight: 400 }}>{t("Notifications are blocked for Crewtavo in this browser. Allow them in the browser's site settings, then come back here.")}</div>
+        <Icon name="bell" size={16} />
+        <div className="grow">{t("Notifications are blocked for Crewtavo in this browser. Allow them in the browser's site settings, then come back here.")}</div>
       </div>
     );
   }
@@ -234,12 +236,12 @@ function PushRow({ state, sub, busy, testing, onToggle, onTest }: {
     <div className="row wrap" style={{ gap: 8 }}>
       {state === "on" ? (
         <>
-          <span className="chip chip-green"><Icon name="check" size={12} />{t("On for this phone")}</span>
+          <StatusPill tone="good" label={t("On for this phone")} />
           <Button size="sm" icon="send" loading={testing} onClick={onTest}>{t("Send a test")}</Button>
           <Button size="sm" variant="ghost" loading={busy} onClick={() => onToggle(false)}>{t("Turn off")}</Button>
         </>
       ) : (
-        <Button icon="bell" loading={busy} onClick={() => onToggle(true)}>{t("Turn on notifications")}</Button>
+        <Button size="sm" icon="bell" loading={busy} onClick={() => onToggle(true)}>{t("Turn on notifications")}</Button>
       )}
     </div>
   );

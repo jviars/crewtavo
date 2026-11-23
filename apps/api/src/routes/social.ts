@@ -59,7 +59,7 @@ const PAGE = 25;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)?$/;
 
 async function companyOf(c: Ctx) {
-  const company = must(await c.var.db.from("companies").select("name, settings, timezone").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, settings, timezone").eq("id", c.var.companyId).maybeSingle());
   return { ...company, settings: (company.settings ?? {}) as Record<string, unknown> };
 }
 

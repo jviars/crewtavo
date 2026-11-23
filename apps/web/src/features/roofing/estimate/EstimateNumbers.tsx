@@ -6,6 +6,7 @@
  */
 import { useId } from "react";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
+import { Icon } from "@/components/ui/Icon";
 import { useSession } from "@/lib/session";
 import { useSupplier, type Supplier } from "../../materials/data";
 import { estimateFigures, firstName, LOW_MARGIN, whenText, type FiguresQuote } from "./rows";
@@ -41,9 +42,10 @@ export function EstimateNumbers({ quote, clientName, optionId, optionLabel }: {
   const low = figures.margin !== null && figures.margin < LOW_MARGIN;
   return (
     <section className={styles.numbers} aria-labelledby={id}>
-      <h3 id={id} className={styles.numbersTitle}>
-        Your numbers{optionLabel ? ` for ${optionLabel}` : ""} · {first ? `${first} never sees these` : "only your team sees these"}
-      </h3>
+      <div className={styles.numbersTitle}>
+        <h3 id={id} className={styles.numbersHeading}>Your numbers{optionLabel ? ` for ${optionLabel}` : ""}</h3>
+        <span className={styles.private}><Icon name="lock" size={12} />{first ? `${first} never sees these` : "Only your team sees these"}</span>
+      </div>
       <dl className={styles.figures}>
         {figures.materials !== null && (
           <>
@@ -56,7 +58,7 @@ export function EstimateNumbers({ quote, clientName, optionId, optionLabel }: {
         <dt>Profit</dt>
         <dd><AnimatedNumber value={figures.profit} format={MONEY} /></dd>
         <dt className={styles.strong}>Margin</dt>
-        <dd className={styles.strong} data-low={low || undefined}>{figures.margin === null ? "—" : <><AnimatedNumber value={figures.margin} />%</>}</dd>
+        <dd className={styles.strong} data-low={low || undefined}>{figures.margin === null ? "" : <><AnimatedNumber value={figures.margin} />%</>}</dd>
       </dl>
       {figures.pricedAt && (
         <p className={styles.abc}>

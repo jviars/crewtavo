@@ -165,11 +165,13 @@ export const timeTools = {
     },
   }),
   approve_time: tool({
-    description: "Approve finished time: these entries, or everyone's (or these people's) from one date to another. Running clocks are left. Needs \"Approve timesheets\"; a crew lead can't approve their own time. Approved time is costed at the person's pay rate then.",
+    description: "Approve finished time: these entries, or everyone's (or these people's) from one date to another. Running clocks are left. Needs \"Approve timesheets\"; only an owner approves their own time, so anyone else's own is left (a crew lead's for the office, the office's for an owner). Approved time is costed at the person's pay rate then.",
     input: z.object({ entry_ids: z.array(z.uuid()).max(2000).optional(), user_ids: z.array(z.uuid()).max(200).optional(), from: date.optional(), to: date.optional(), ...companyArg }),
     area: "time",
     run: async (ctx, a) => {
       let q = ctx.db.from("time_entries").update({ approved_at: new Date().toISOString(), approved_by: ctx.userId }).eq("company_id", ctx.companyId).is("approved_at", null).not("ended_at", "is", null);
+      // Their own time is an owner's to approve (the database refuses the rest), so it's left out.
+      if (ctx.role !== "owner") q = q.neq("user_id", ctx.userId);
       if (a.entry_ids) q = q.in("id", a.entry_ids);
       else {
         if (!a.from || !a.to) throw new Error("Give entry_ids, or from and to dates.");

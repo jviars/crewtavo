@@ -115,7 +115,7 @@ describe("the connect screen", () => {
 
   it("doesn't say it can't change anything about an app the person already gave more", () => {
     const html = screen({ name: "Claude" }, "https://claude.ai/api/mcp/auth_callback", { level: "areas", areas: ["prices"] });
-    expect(html).toContain("It keeps what you gave it before (Can change: Price list).");
+    expect(html).toContain("It keeps what you gave it before (Can change: Price list and job prices).");
     expect(html).not.toContain("It can&#x27;t change anything until you allow it");
   });
 });

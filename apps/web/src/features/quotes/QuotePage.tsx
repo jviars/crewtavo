@@ -22,21 +22,22 @@ import { isPackagePicturePath } from "@crewtavo/core/presets";
 import { quotePromoRule } from "@crewtavo/core/promos";
 import { parseRule } from "@crewtavo/core/recurrence";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button, cx } from "@/components/ui/Button";
 import { ClientPreview } from "@/components/ui/ClientPreview";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
+import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import type { MenuEntry } from "@/components/ui/Menu";
 import { MoneyInput } from "@/components/ui/MoneyInput";
 import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
@@ -89,7 +90,7 @@ import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
 import { PackagePicture } from "../roofing/PackageCards";
 import { lineSums, LineItems, visibleLines } from "./LineItems";
-import { ALREADY_ANSWERED, duplicateQuote, optionsOpen, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
+import { ALREADY_ANSWERED, duplicateQuote, hasOptionArt, optionsOpen, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
 import styles from "./QuotePage.module.css";
 import { depthLines, lineDepths, type DepthLine } from "./depths";
 import { AddOptionsDialog, QuoteOptions } from "./QuoteOptions";
@@ -99,6 +100,7 @@ import { PaymentScheduleCard } from "./PaymentSchedule";
 import { DiscountRows } from "./PromoRow";
 import { SendDialog } from "./SendDialog";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
+import { Select } from "@/components/ui/Select";
 
 export { SendDialog } from "./SendDialog";
 
@@ -392,6 +394,7 @@ export function QuotePage() {
   // Every field here saves as it loses focus; the header says when it's saving and saved.
   const save = useSaveStatus();
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
+  const narrow = useNarrow();
 
   const quote = useQuery({ queryKey: ["quote", id], queryFn: () => loadQuote(id) });
   const q = quote.data;
@@ -585,305 +588,362 @@ export function QuotePage() {
   const converting = convert.isPending || (approve.isPending && approve.variables?.convert === true);
   const choices = choosing ? optionChoices(options, q.lines, q) : [];
 
+  // The next step as a button, one solid green: sending while it's a draft (or again once they
+  // asked for changes), making the job once it's approved. Each has an icon for the phone.
+  const sendButton =
+    canSell && !isTemplate && EDITABLE.includes(q.status)
+      ? rangeAccepted
+        ? (bar?: boolean) => <Button key="send" className={bar ? undefined : "hide-mobile"} icon="send" onClick={() => setDialog("exact")} disabled={!q.lines.length}>Send the exact price</Button>
+        : (bar?: boolean) => (
+            <Button key="send" className={bar ? undefined : "hide-mobile"} icon="send" variant={q.status === "draft" || q.status === "changes_requested" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>
+              {q.status === "draft" ? "Send quote" : "Resend"}
+            </Button>
+          )
+      : null;
+  const convertButton =
+    canSell && !isTemplate && ["approved", "sent", "changes_requested"].includes(q.status)
+      ? (bar?: boolean) => (
+          <Button key="convert" className={bar ? undefined : "hide-mobile"} variant={q.status === "approved" ? "primary" : "secondary"} icon="job" loading={converting} disabled={!q.lines.length || settling} onClick={startConvert}>
+            {convertLabel}
+          </Button>
+        )
+      : null;
+  // A lost or archived quote's way back: open to change and send again.
+  const reopenButton =
+    canSell && !isTemplate && ["lost", "archived"].includes(q.status)
+      ? (bar?: boolean) => <Button key="reopen" className={bar ? undefined : "hide-mobile"} icon="undo" loading={update.isPending} onClick={() => update.mutate({ status: "draft", lost_reason: null })}>Reopen as draft</Button>
+      : null;
+  // The green one comes last, nearest the thumb and the edge.
+  const mainButtons = (bar?: boolean) => (q.status === "approved" ? [sendButton?.(bar), convertButton?.(bar)] : [reopenButton?.(bar), convertButton?.(bar), sendButton?.(bar)]);
+
+  const markable = EDITABLE.includes(q.status);
+  const more: MenuEntry[] = isTemplate
+    ? [
+        {
+          label: "Delete template",
+          icon: "trash",
+          danger: true,
+          onSelect: async () => {
+            if (await confirm({ title: `Delete the template ${q.title}?`, body: "Quotes made from it stay as they are. This can't be undone.", confirmLabel: "Delete template", danger: true })) remove.mutate();
+          },
+        },
+      ]
+    : [
+        { label: "Preview as client", icon: "eye", kbd: "V", onSelect: () => openClientView.mutate() },
+        { label: "Print or save PDF", icon: "printer", kbd: "P", onSelect: () => printer.print() },
+        { separator: true },
+        { label: "Copy as new draft", icon: "copy", kbd: "D", disabled: copy.isPending, onSelect: () => copy.mutate() },
+        { label: "Save as template", icon: "quote", onSelect: () => setDialog("template") },
+        { separator: true },
+        { label: convertLabel, icon: "job", hidden: q.status !== "draft", disabled: settling, onSelect: startConvert },
+        {
+          label: "Mark as",
+          icon: "circle",
+          hidden: !markable,
+          items: [
+            { label: "Approved", icon: "thumbsUp", disabled: approve.isPending || settling, onSelect: startApprove },
+            { label: "Lost", icon: "x", onSelect: () => setDialog("lost") },
+          ],
+        },
+        { separator: true },
+        { label: "Archive", icon: "archive", hidden: ["archived", "converted"].includes(q.status), onSelect: () => update.mutate({ status: "archived" }) },
+        {
+          label: "Delete quote",
+          icon: "trash",
+          danger: true,
+          hidden: !["draft", "lost", "archived"].includes(q.status) || q.jobs.length > 0,
+          onSelect: async () => {
+            if (await confirm({ title: `Delete quote #${q.number}?`, body: "Its line items are deleted too. This can't be undone.", confirmLabel: "Delete quote", danger: true })) remove.mutate();
+          },
+        },
+      ];
+
+  const totals = (
+    <Section title="Totals" className={styles.totalsSection}>
+      {viewedRow && <p className={styles.totalsFor}>{totalsCaption(viewedRow.name, { shown: viewed === q.option_id, signed })}</p>}
+      <div className={cx("totals", styles.sum)}>
+        {/* The figures roll to their new values as lines change, rather than snapping. */}
+        <div className="line"><span>Subtotal</span><AnimatedNumber value={tab.subtotal} format={MONEY_CENTS} /></div>
+        <DiscountRows
+          kind="quote"
+          id={q.id}
+          promo={q.promo}
+          discount={q.promo ? tab.discount : Number(q.discount_amount)}
+          subtotal={tab.subtotal}
+          canEditDiscount={editable}
+          canChangePromo={editable && !sitePriced && !isTemplate}
+          suggestedCode={sitePriced ? null : q.request?.promo_code}
+          suggestedFrom={q.request?.website_form_id ? "website" : "booking"}
+          rejected={!sitePriced && q.request?.rejected_promo_code ? { code: q.request.rejected_promo_code, problem: q.request.promo_problem } : null}
+          onSaveDiscount={(v) => saveField({ discount_amount: v })}
+          onEditDiscount={save.edited}
+          onUnchangedDiscount={unchanged}
+          onChanged={refresh}
+        />
+        {offers && (editable || Number(q.discount_amount) > 0) && (
+          <p className={styles.note}>{q.promo ? "The promo code is worked out on whichever option they choose." : "The discount comes off whichever option they choose."}</p>
+        )}
+        {/* A tax-exempt client's quote is kept at 0% by the database, so there's no rate to type. */}
+        <div className="line">
+          <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : editable ? "Tax" : `Tax (${formatTaxRate(q.tax_rate)})`}</span>
+          {editable && !taxExempt ? (
+            <span className={styles.taxCell}>
+              <MoneyInput percent label="Tax rate" width={84} value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} />
+              <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />
+            </span>
+          ) : (
+            <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />
+          )}
+        </div>
+        <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><AnimatedNumber value={tab.total} format={MONEY_CENTS} /></div>
+        {!q.change_order_for && (
+          <div className={cx("line", styles.howOftenRow)}>
+            <span>How often</span>
+            <HowOften quote={q} editable={editable} onSaved={refresh} />
+          </div>
+        )}
+        <div className="line">
+          <span>Deposit required</span>
+          {scheduled ? (
+            <span title="The payment due when they approve, in the payment schedule">{formatMoneyCents(deposit)}</span>
+          ) : editable ? (
+            <span className={styles.deposit}>
+              {/* A percent follows the total as lines change, and the option and add-ons the client picks. */}
+              <span className="segmented" role="group" aria-label="Deposit as">
+                <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>$</button>
+                <button type="button" aria-pressed={percentDeposit} title="A percent of the total" onClick={() => !percentDeposit && void saveField({ deposit_percent: depositAsPercent(q.deposit_amount, q.total) })}>%</button>
+              </span>
+              {percentDeposit ? (
+                <MoneyInput percent label="Deposit percent" width={84} value={Number(q.deposit_percent)} max={100} onSave={(v) => saveField({ deposit_percent: v })} onEdit={save.edited} onUnchanged={unchanged} />
+              ) : (
+                <MoneyInput label="Deposit" width={96} value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} onUnchanged={unchanged} />
+              )}
+            </span>
+          ) : (
+            <span>{formatMoneyCents(deposit)}{percentDeposit ? ` (${Number(q.deposit_percent)}%)` : ""}</span>
+          )}
+        </div>
+        {percentDeposit && editable && !scheduled && <div className="line"><span>Deposit amount</span><AnimatedNumber value={deposit} format={MONEY_CENTS} /></div>}
+        {!percentDeposit && !scheduled && cap.name && editable && Number(q.deposit_amount) > cap.amount && (
+          <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>
+        )}
+        {/* A quote made from a template is valid for the usual days from then. */}
+        {!isTemplate && (
+          <div className="line">
+            <span>Valid until</span>
+            <ValidUntil value={q.valid_until} editable={editable} expired={Boolean(expired)} onEdit={save.edited} onUnchanged={unchanged} onSave={(validUntil) => saveField({ valid_until: validUntil })} />
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+
+  const margin = priceForMargin - cost;
+  const profit = canSell && cost > 0 && (
+    <Section title="Profit estimate">
+      <div className={cx("totals", styles.sum)}>
+        <div className="line"><span>Price before tax</span><AnimatedNumber value={priceForMargin} format={MONEY_CENTS} /></div>
+        <div className="line"><span>Estimated cost</span><AnimatedNumber value={cost} format={MONEY_CENTS} /></div>
+        <div className={cx("line", styles.profit)}>
+          <span>Profit</span>
+          <span data-tone={margin < 0 ? "danger" : "good"}>
+            <AnimatedNumber value={margin} format={MONEY_CENTS} /> {priceForMargin > 0 && `(${Math.round((margin / priceForMargin) * 100)}%)`}
+          </span>
+        </div>
+      </div>
+    </Section>
+  );
+
+  // What happened to it, the latest first, ending where it was made.
+  const historyRows = canSell && !isTemplate && history.data?.activity.length ? history.data.activity : null;
+
   return (
     <>
-      {isTemplate ? <BackLink to="/quotes?status=templates">Quote templates</BackLink> : <BackLink to="/quotes">Quotes</BackLink>}
-      <div className="page-header">
-        <h1 className="page-title">{editable ? <TitleInput value={q.title} onEdit={save.edited} onUnchanged={unchanged} onSave={(title) => saveField({ title })} /> : q.title}</h1>
-        {canSell && isTemplate && (
-          <div className="page-actions">
-            <Button icon="plus" onClick={() => navigate(`/quotes?new=1&template=${q.id}`)}>New quote from it</Button>
-            <Menu
-              items={[
-                {
-                  label: "Delete template",
-                  icon: "trash",
-                  danger: true,
-                  onSelect: async () => {
-                    if (await confirm({ title: `Delete the template ${q.title}?`, body: "Quotes made from it stay as they are. This can't be undone.", confirmLabel: "Delete template", danger: true })) remove.mutate();
-                  },
-                },
-              ]}
-            />
-          </div>
-        )}
-        {canSell && !isTemplate && (
-          <div className="page-actions">
-            {/* One solid green button: the next step. Sending while it's a draft (or again once they asked for changes), making the job once it's approved. */}
-            {EDITABLE.includes(q.status) &&
-              (rangeAccepted ? (
-                <Button icon="send" variant="secondary" onClick={() => setDialog("exact")} disabled={!q.lines.length}>Send the exact price</Button>
-              ) : (
-                <Button icon="send" variant={q.status === "draft" || q.status === "changes_requested" ? "primary" : "secondary"} onClick={() => setDialog("send")} disabled={!q.lines.length} title={!q.lines.length ? "Add a line item first" : undefined}>{q.status === "draft" ? "Send quote" : "Resend"}</Button>
-              ))}
-            {q.status !== "draft" && ["approved", "sent", "changes_requested"].includes(q.status) && (
-              <Button variant={q.status === "approved" ? "primary" : "secondary"} icon="job" loading={converting} disabled={!q.lines.length || settling} onClick={startConvert}>{convertLabel}</Button>
-            )}
-            <Menu
-              items={[
-                { label: "Preview as client", icon: "eye", onSelect: () => openClientView.mutate() },
-                { label: "Print or save PDF", icon: "printer", onSelect: () => printer.print() },
-                { label: "Copy as new draft", icon: "copy", disabled: copy.isPending, onSelect: () => copy.mutate() },
-                { label: "Save as template", icon: "quote", onSelect: () => setDialog("template") },
-                { separator: true },
-                { label: "Mark approved", icon: "check", hidden: !["sent", "changes_requested", "draft"].includes(q.status), disabled: approve.isPending || settling, onSelect: startApprove },
-                { label: convertLabel, icon: "job", hidden: q.status !== "draft", disabled: settling, onSelect: startConvert },
-                { label: "Mark as lost", icon: "x", hidden: !EDITABLE.includes(q.status), onSelect: () => setDialog("lost") },
-                { label: "Reopen as draft", icon: "undo", hidden: !["lost", "archived"].includes(q.status), onSelect: () => update.mutate({ status: "draft", lost_reason: null }) },
-                { label: "Archive", icon: "archive", hidden: ["archived", "converted"].includes(q.status), onSelect: () => update.mutate({ status: "archived" }) },
-                {
-                  label: "Delete quote",
-                  icon: "trash",
-                  danger: true,
-                  hidden: !["draft", "lost", "archived"].includes(q.status) || q.jobs.length > 0,
-                  onSelect: async () => {
-                    if (await confirm({ title: `Delete quote #${q.number}?`, body: "Its line items are deleted too. This can't be undone.", confirmLabel: "Delete quote", danger: true })) remove.mutate();
-                  },
-                },
-              ]}
-            />
-          </div>
-        )}
-      </div>
-      <div className="page-meta">
-        {isTemplate ? (
-          <span className="muted">Quote template · new quotes start from it, and it's never sent</span>
-        ) : (
+      <DetailHeader
+        crumb={isTemplate ? { to: "/quotes?status=templates", label: "Templates" } : { to: "/quotes", label: "Quotes" }}
+        title={<h1 className="page-title">{editable ? <TitleInput value={q.title} onEdit={save.edited} onUnchanged={unchanged} onSave={(title) => saveField({ title })} /> : q.title}</h1>}
+        meta={[
+          isTemplate ? "Quote template · new quotes start from it, and it's never sent" : `Quote #${q.number}`,
+          !isTemplate && <EntityStatus kind="quote" status={q.status} />,
+          q.status === "lost" && q.lost_reason,
+          q.status === "sent" && q.sent_at && !ranged && `Sent ${timeAgo(q.sent_at)}`,
+          <SaveStatus status={save.status} />,
+          q.client && <ClientPreview id={q.client.id}><Link to={`/clients/${q.client.id}`} className={styles.client}>{q.client.display_name}</Link></ClientPreview>,
+          q.property && addressLine(q.property),
+        ]}
+        actions={
+          canSell &&
+          (isTemplate ? (
+            <Button variant="primary" icon="plus" onClick={() => navigate(`/quotes?new=1&template=${q.id}`)}>New quote from it</Button>
+          ) : (
+            mainButtons()
+          ))
+        }
+        more={canSell ? more : undefined}
+        moreTitle={isTemplate ? q.title : `Quote #${q.number}`}
+      />
+
+      <DetailColumns
+        grouped
+        className={styles.cols}
+        side={
           <>
-            <span className="muted">Quote #{q.number}</span>
-            <EntityStatus kind="quote" status={q.status} />
+            {!narrow && totals}
+            {profit}
+            {/* On a template too: the quotes made from it carry it. */}
+            {canSell && <PaymentScheduleCard quote={q} editable={editable} onSaved={refresh} />}
+            {/* Filled in after it's signed too: a permit number often comes later. */}
+            <CustomFieldsCard record="quote" values={q.custom_fields} editable={canSell} onSave={async (values) => { unwrap(await supabase().from("quotes").update({ custom_fields: values }).eq("id", q.id)); refresh(); }} />
+            {/* The paper's look is picked on each quote, so a quote template doesn't have one. */}
+            {canSell && !isTemplate && templateRows.length > 1 && (
+              <Section title="Document style">
+                <div className={styles.styleField}>
+                  <Select
+                    id="quote-template"
+                    className="select"
+                    aria-label="Document style"
+                    aria-describedby="quote-template-note"
+                    value={templateId}
+                    disabled={!editable}
+                    onChange={(e) => {
+                      const chosen = templateRows.find((t) => t.id === e.target.value);
+                      // The default one isn't pinned: the quote follows whichever template is the default.
+                      if (chosen) void saveField({ template_id: chosen.is_default ? null : chosen.id });
+                    }}
+                  >
+                    {templateRows.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_default ? " (default)" : ""}</option>)}
+                  </Select>
+                  <span id="quote-template-note" className={styles.quiet}>{frozen ? "It keeps the look it was signed with." : "How it looks printed, as a PDF and on the client's link."}</span>
+                </div>
+              </Section>
+            )}
+            {/* The paving calculator's working behind its lines: costs and profit, the office's only. */}
+            {canSell && !isTemplate && <WorksheetsCard quoteId={q.id} editable={editable} />}
+            {canSell && !isTemplate && <MeasurementsCard quoteId={q.id} propertyId={q.property?.id ?? null} lat={q.property?.lat ?? null} lng={q.property?.lng ?? null} editable={editable} onApplied={refresh} />}
+            {historyRows && (
+              <Section title="History">
+                <ul className={styles.history}>
+                  {historyRows.map((a) => (
+                    <li key={a.id}>
+                      <Icon name={historyIcon(a.verb)} size={14} />
+                      <span>{a.summary} <time className={styles.when} dateTime={a.created_at} title={formatDate(a.created_at)}>{timeAgo(a.created_at)}</time></span>
+                    </li>
+                  ))}
+                  <li>
+                    <Icon name="plus" size={14} />
+                    <span>Quote created <time className={styles.when} dateTime={q.created_at} title={formatDate(q.created_at)}>{timeAgo(q.created_at)}</time></span>
+                  </li>
+                </ul>
+              </Section>
+            )}
           </>
-        )}
-        <SaveStatus status={save.status} />
-        {q.client && <ClientPreview id={q.client.id}><Link to={`/clients/${q.client.id}`} className="strong">{q.client.display_name}</Link></ClientPreview>}
-        {q.property && <span className="muted">{addressLine(q.property)}</span>}
-      </div>
-
-      {q.status === "approved" && (
-        <div className="callout callout-good">
-          <Icon name="check" size={20} />
-          <div className="grow">
-            <div>
-              {approval?.method === "in_person" ? "Signed on site" : "Approved"} {q.approved_at ? formatDate(q.approved_at) : ""}
-              {approval?.name ? ` by ${approval.name}` : ""}
-              {approval?.option ? `, for ${choiceLabel(approval.option)}` : ""}
+        }
+      >
+        {q.status === "changes_requested" && (
+          <div className="callout callout-warning">
+            <Icon name="messages" size={16} />
+            <div className="grow">
+              <div>{q.client?.display_name ?? "The client"} asked for changes</div>
+              {changeRequest && <q className={styles.said}>{changeRequest.body}</q>}
+              <span className={styles.calloutNote}>Update the quote, then resend it.</span>
             </div>
-            {signatures}
           </div>
-          {/* The header's button is the solid one. */}
-          {canSell && <Button size="sm" loading={convert.isPending} onClick={() => convert.mutate()}>{convertLabel}</Button>}
-        </div>
-      )}
-      {changeJob && (
-        <div className="callout callout-info">
-          <Icon name="job" size={20} />
-          <div className="grow">
-            <div>Change order for <Link to={`/jobs/${changeJob.id}`} className="strong">job #{changeJob.number}</Link>: {changeJob.title}</div>
-            <div className="small" style={{ fontWeight: 400 }}>{q.status === "converted" ? "It's been added to the job." : "Once the client approves it, its items are added to the job and its total goes up."}</div>
+        )}
+        {q.status === "approved" && (
+          <div className="callout callout-good">
+            <Icon name="check" size={16} />
+            <div className="grow">
+              <div>
+                {approval?.method === "in_person" ? "Signed on site" : "Approved"} {q.approved_at ? formatDate(q.approved_at) : ""}
+                {approval?.name ? ` by ${approval.name}` : ""}
+                {approval?.option ? `, for ${choiceLabel(approval.option)}` : ""}
+              </div>
+              {signatures}
+            </div>
           </div>
-        </div>
-      )}
-      {!changeJob && q.status === "converted" && q.jobs.length > 0 && (
-        <div className="callout callout-info">
-          <Icon name="job" size={20} />
-          <div className="grow">
-            <div>Converted to <Link to={`/jobs/${q.jobs[0].id}`} className="strong">job #{q.jobs[0].number}</Link>.</div>
-            {approval && signatures}
+        )}
+        {changeJob && (
+          <div className="callout callout-info">
+            <Icon name="job" size={16} />
+            <div className="grow">
+              <div>Change order for <Link to={`/jobs/${changeJob.id}`}>job #{changeJob.number}</Link>: {changeJob.title}</div>
+              {q.status === "converted" ? "It's been added to the job." : "Once the client approves it, its items are added to the job and its total goes up."}
+            </div>
           </div>
-        </div>
-      )}
-      {q.status === "changes_requested" && (
-        <div className="callout callout-warning">
-          <Icon name="messages" size={20} />
-          <div className="grow">
-            <div>{q.client?.display_name ?? "The client"} asked for changes</div>
-            {changeRequest && <div className="pre-wrap small" style={{ fontWeight: 400, marginTop: 4 }}>“{changeRequest.body}”</div>}
-            <div className="small" style={{ fontWeight: 400, marginTop: 4 }}>Update the quote, then resend it.</div>
+        )}
+        {!changeJob && q.status === "converted" && q.jobs.length > 0 && (
+          <div className="callout callout-info">
+            <Icon name="job" size={16} />
+            <div className="grow">
+              <div>Converted to <Link to={`/jobs/${q.jobs[0].id}`}>job #{q.jobs[0].number}</Link>.</div>
+              {approval && signatures}
+            </div>
           </div>
-        </div>
-      )}
-      {q.status === "draft" && <DraftedCallout quoteId={q.id} message={q.message} drafted={q.drafted} lines={q.lines} requestId={q.request_id} admin={hasRole(session, "admin")} canEdit={editable} onChanged={refresh} />}
-      {q.status === "lost" && <div className="callout callout-danger"><Icon name="x" size={20} /><div className="grow">Marked lost{q.lost_reason ? `: ${q.lost_reason}` : ""}.</div></div>}
-      {q.status === "sent" && q.sent_at && (
-        <div className="callout">
-          <Icon name="clock" size={20} />
-          <div className="grow">
-            {rangeAccepted
-              ? `${q.client?.display_name ?? "The client"} said yes to the range, ${formatMoney(q.range_low)} to ${formatMoney(q.range_high)}, on ${dayText(q.range_accepted_at!, session.company.timezone)}. Book the site visit: the exact price is set there.`
-              : ranged
-              ? `Sent ${timeAgo(q.sent_at)} as a price range, ${formatMoney(q.range_low)} to ${formatMoney(q.range_high)}. ${q.client?.display_name ?? "The client"} sees the range, not this exact price, until it's priced on site.`
-              : `Sent ${timeAgo(q.sent_at)}. Waiting for ${q.client?.display_name ?? "the client"} to respond.`}
-            {expired ? " This quote has expired; update the date before resending." : ""}
+        )}
+        {q.status === "draft" && <DraftedCallout quoteId={q.id} message={q.message} drafted={q.drafted} lines={q.lines} requestId={q.request_id} admin={hasRole(session, "admin")} canEdit={editable} onChanged={refresh} />}
+        {q.status === "sent" && q.sent_at && ranged && (
+          <div className="callout callout-info">
+            <Icon name="clock" size={16} />
+            <div className="grow">
+              {rangeAccepted
+                ? `${q.client?.display_name ?? "The client"} said yes to the range, ${formatMoney(q.range_low)} to ${formatMoney(q.range_high)}, on ${dayText(q.range_accepted_at!, session.company.timezone)}. Book the site visit: the exact price is set there.`
+                : `Sent ${timeAgo(q.sent_at)} as a price range, ${formatMoney(q.range_low)} to ${formatMoney(q.range_high)}. ${q.client?.display_name ?? "The client"} sees the range, not this exact price, until it's priced on site.`}
+              {expired ? " This quote has expired; update the date before resending." : ""}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+        {expired && !ranged && (
+          <div className="callout callout-warning">
+            <Icon name="calendar" size={16} />
+            <div className="grow">
+              <div>This quote expired {formatDate(q.valid_until)}</div>
+              {q.status === "draft" ? "Update the date in Totals before you send it." : "Update the date in Totals before you resend it."}
+            </div>
+          </div>
+        )}
 
-      <div className="two-col">
-        <div className="wide stack-lg">
-          {/* Without options there's no bar: they're offered from the lines' add row instead. */}
-          <QuoteOptions quote={q} options={options} lines={q.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={refresh} panelId={panelId} invite={false} />
-          <div className="stack-sm">
-            <div className="segmented" role="group" aria-label="Show the estimate as" style={{ justifySelf: "start" }}>
+        {/* Without options there's no bar: they're offered from the lines' add row instead. */}
+        <QuoteOptions quote={q} options={options} lines={q.lines} viewing={viewing} onView={setViewing} mode="office" onChanged={refresh} panelId={panelId} invite={false} />
+        <Section
+          title="Line items"
+          className={styles.linesSection}
+          action={
+            <div className={cx("segmented", styles.viewSwitch)} role="group" aria-label="Show the estimate as">
               <button type="button" aria-pressed={view === "lines"} aria-controls={panelId} onClick={() => setView("lines")}>Lines</button>
               <button type="button" aria-pressed={view === "paper"} aria-controls={panelId} onClick={() => setView("paper")}>Paper</button>
             </div>
-            <div id={panelId} role={offers ? "tabpanel" : undefined} aria-label={viewedRow ? viewedRow.name : undefined}>
-              {view === "lines" && (
-                <LineItems
-                  table="quote_line_items"
-                  parent="quote_id"
-                  parentId={q.id}
-                  lines={q.lines}
-                  editable={editable}
-                  onChanged={refresh}
-                  withOptions
-                  optionId={viewed}
-                  shownOptionId={q.option_id}
-                  options={options}
-                  followMarkup={q.package?.price_mode === "follow" ? Number(q.package.markup_pct) : null}
-                  saveStatus={save}
-                  propertyId={q.property?.id}
-                  onOfferOptions={!offers && optionsOpen(q.status) ? () => setOffering(true) : undefined}
-                />
-              )}
-              {(view === "paper" || printer.request > 0) && <QuotePaper quote={q} options={options} viewed={viewed} sheet={view === "paper"} print={printer.request} />}
-            </div>
+          }
+        >
+          <div id={panelId} role={offers ? "tabpanel" : undefined} aria-label={viewedRow ? viewedRow.name : undefined}>
+            {view === "lines" && (
+              <LineItems
+                table="quote_line_items"
+                parent="quote_id"
+                parentId={q.id}
+                lines={q.lines}
+                editable={editable}
+                onChanged={refresh}
+                withOptions
+                optionId={viewed}
+                shownOptionId={q.option_id}
+                options={options}
+                followMarkup={q.package?.price_mode === "follow" ? Number(q.package.markup_pct) : null}
+                saveStatus={save}
+                propertyId={q.property?.id}
+                onOfferOptions={!offers && optionsOpen(q.status) ? () => setOffering(true) : undefined}
+              />
+            )}
+            {(view === "paper" || printer.request > 0) && <QuotePaper quote={q} options={options} viewed={viewed} sheet={view === "paper"} print={printer.request} />}
           </div>
-          <MessageCard value={q.message} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(message) => saveField({ message })} />
-          {canSell && !isTemplate && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
-        </div>
-        <aside className="narrow stack">
-          <div className="card card-pad totals">
-            {viewedRow && <p className={styles.totalsFor}>{totalsCaption(viewedRow.name, { shown: viewed === q.option_id, signed })}</p>}
-            {/* The figures roll to their new values as lines change, rather than snapping. */}
-            <div className="line"><span>Subtotal</span><AnimatedNumber value={tab.subtotal} format={MONEY_CENTS} /></div>
-            <DiscountRows
-              kind="quote"
-              id={q.id}
-              promo={q.promo}
-              discount={q.promo ? tab.discount : Number(q.discount_amount)}
-              subtotal={tab.subtotal}
-              canEditDiscount={editable}
-              canChangePromo={editable && !sitePriced && !isTemplate}
-              suggestedCode={sitePriced ? null : q.request?.promo_code}
-              suggestedFrom={q.request?.website_form_id ? "website" : "booking"}
-              rejected={!sitePriced && q.request?.rejected_promo_code ? { code: q.request.rejected_promo_code, problem: q.request.promo_problem } : null}
-              onSaveDiscount={(v) => saveField({ discount_amount: v })}
-              onEditDiscount={save.edited}
-              onUnchangedDiscount={unchanged}
-              onChanged={refresh}
-            />
-            {offers && (editable || Number(q.discount_amount) > 0) && (
-              <p className={styles.note}>{q.promo ? "The promo code is worked out on whichever option they choose." : "The discount comes off whichever option they choose."}</p>
-            )}
-            {/* A tax-exempt client's quote is kept at 0% by the database, so there's no rate to type. */}
-            <div className="line">
-              <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(q.tax_rate)})`}`}</span>
-              {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={tab.tax} format={MONEY_CENTS} />}
-            </div>
-            {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={tab.tax} format={MONEY_CENTS} /></div>}
-            <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><AnimatedNumber value={tab.total} format={MONEY_CENTS} /></div>
-            {!q.change_order_for && (
-              <div className={cx("line", styles.howOftenRow)}>
-                <span>How often</span>
-                <HowOften quote={q} editable={editable} onSaved={refresh} />
-              </div>
-            )}
-            <div className="line">
-              <span>Deposit required</span>
-              {scheduled ? (
-                <span title="The payment due when they approve, in the payment schedule">{formatMoneyCents(deposit)}</span>
-              ) : editable ? (
-                <span className={styles.deposit}>
-                  {/* A percent follows the total as lines change, and the option and add-ons the client picks. */}
-                  <span className="segmented" role="group" aria-label="Deposit as">
-                    <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>$</button>
-                    <button type="button" aria-pressed={percentDeposit} title="A percent of the total" onClick={() => !percentDeposit && void saveField({ deposit_percent: depositAsPercent(q.deposit_amount, q.total) })}>%</button>
-                  </span>
-                  {percentDeposit ? (
-                    <MoneyInput percent label="Deposit percent" width={96} value={Number(q.deposit_percent)} max={100} onSave={(v) => saveField({ deposit_percent: v })} onEdit={save.edited} onUnchanged={unchanged} />
-                  ) : (
-                    <MoneyInput label="Deposit" width={96} value={Number(q.deposit_amount)} max={cap.amount} onSave={(v) => saveField({ deposit_amount: v })} onEdit={save.edited} onUnchanged={unchanged} />
-                  )}
-                </span>
-              ) : (
-                <span>{formatMoneyCents(deposit)}{percentDeposit ? ` (${Number(q.deposit_percent)}%)` : ""}</span>
-              )}
-            </div>
-            {percentDeposit && editable && !scheduled && <div className="line"><span>Deposit amount</span><AnimatedNumber value={deposit} format={MONEY_CENTS} /></div>}
-            {!percentDeposit && !scheduled && cap.name && editable && Number(q.deposit_amount) > cap.amount && (
-              <p className={styles.warn}>That's more than {cap.name} comes to ({formatMoneyCents(cap.amount)}). Lower it so it fits whichever option they choose.</p>
-            )}
-            {/* A quote made from a template is valid for the usual days from then. */}
-            {!isTemplate && (
-              <div className="line">
-                <span>Valid until</span>
-                <ValidUntil value={q.valid_until} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(validUntil) => saveField({ valid_until: validUntil })} />
-              </div>
-            )}
-          </div>
-          {/* On a template too: the quotes made from it carry it. */}
-          {canSell && <PaymentScheduleCard quote={q} editable={editable} onSaved={refresh} />}
-          {/* Filled in after it's signed too: a permit number often comes later. */}
-          <CustomFieldsCard record="quote" values={q.custom_fields} editable={canSell} onSave={async (values) => { unwrap(await supabase().from("quotes").update({ custom_fields: values }).eq("id", q.id)); refresh(); }} />
-          {/* The paper's look is picked on each quote, so a quote template doesn't have one. */}
-          {canSell && !isTemplate && templateRows.length > 1 && (
-            <div className="card card-pad stack-sm">
-              <label htmlFor="quote-template"><strong>Document style</strong></label>
-              <Select
-                id="quote-template"
-                className="select"
-                value={templateId}
-                disabled={!editable}
-                onChange={(e) => {
-                  const chosen = templateRows.find((t) => t.id === e.target.value);
-                  // The default one isn't pinned: the quote follows whichever template is the default.
-                  if (chosen) void saveField({ template_id: chosen.is_default ? null : chosen.id });
-                }}
-              >
-                {templateRows.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_default ? " (default)" : ""}</option>)}
-              </Select>
-              <span className="muted small">{frozen ? "It keeps the look it was signed with." : "How it looks printed, as a PDF and on the client's link."}</span>
-            </div>
-          )}
-          {canSell && <QuoteSections quote={q} optionSectionIds={viewedRow?.section_ids ?? null} approval={q.approval} />}
-          {canSell && cost > 0 && (
-            <div className="card card-pad stack-sm">
-              <strong>Profit estimate</strong>
-              <div className="totals">
-                <div className="line"><span>Price before tax</span><AnimatedNumber value={priceForMargin} format={MONEY_CENTS} /></div>
-                <div className="line"><span>Estimated cost</span><AnimatedNumber value={cost} format={MONEY_CENTS} /></div>
-                <div className="line grand">
-                  <span>Profit</span>
-                  <span style={{ color: priceForMargin - cost < 0 ? "var(--danger)" : "var(--green-dark)" }}>
-                    <AnimatedNumber value={priceForMargin - cost} format={MONEY_CENTS} /> {priceForMargin > 0 && `(${Math.round(((priceForMargin - cost) / priceForMargin) * 100)}%)`}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* The paving calculator's working behind its lines: costs and profit, the office's only. */}
-          {canSell && !isTemplate && <WorksheetsCard quoteId={q.id} editable={editable} />}
-          {canSell && !isTemplate && <MeasurementsCard quoteId={q.id} propertyId={q.property?.id ?? null} lat={q.property?.lat ?? null} lng={q.property?.lng ?? null} editable={editable} onApplied={refresh} />}
-          {canSell && !isTemplate && !!history.data?.activity.length && (
-            <div className="card">
-              <div className="card-head"><strong>History</strong></div>
-              <div className="timeline">
-                {history.data.activity.map((a) => (
-                  <div key={a.id} className="timeline-item" style={{ padding: "10px 20px" }}>
-                    <span className="t-icon" style={{ width: 28, height: 28 }}><Icon name={a.verb.endsWith("approved") || a.verb.endsWith("accepted") ? "check" : a.verb.endsWith("sent") ? "send" : "history"} size={14} /></span>
-                    <div><div className="text-sm">{a.summary}</div><div className="t-meta">{timeAgo(a.created_at)}</div></div>
-                  </div>
-                ))}
-                <div className="timeline-item" style={{ padding: "10px 20px" }}>
-                  <span className="t-icon" style={{ width: 28, height: 28 }}><Icon name="plus" size={14} /></span>
-                  <div><div className="text-sm">Quote created</div><div className="t-meta">{timeAgo(q.created_at)}</div></div>
-                </div>
-              </div>
-            </div>
-          )}
-        </aside>
-      </div>
+        </Section>
+        {narrow && totals}
+        <MessageCard value={q.message} editable={editable} onEdit={save.edited} onUnchanged={unchanged} onSave={(message) => saveField({ message })} />
+        {/* What prints with it, under its message: part of the document, and too long a list for the side. */}
+        {canSell && <QuoteSections quote={q} optionSectionIds={viewedRow?.section_ids ?? null} approval={q.approval} />}
+        {canSell && !isTemplate && <PlansCard scope={{ kind: "quote", id: q.id, propertyId: q.property?.id ?? null }} />}
+      </DetailColumns>
+      {/* A phone's main steps, within thumb reach above the tab bar (the header's are hidden there). */}
+      {(sendButton || convertButton || reopenButton) && <ActionBar>{mainButtons(true)}</ActionBar>}
 
       {dialog === "send" &&
         (ranged ? (
@@ -929,6 +989,30 @@ export function QuotePage() {
         />
       )}
     </>
+  );
+}
+
+/** The small icon before a line of a quote's history, from what happened. */
+export function historyIcon(verb: string): IconName {
+  if (verb.endsWith("approved") || verb.endsWith("accepted")) return "check";
+  if (verb.endsWith("sent")) return "send";
+  if (verb.endsWith("changes_requested")) return "messages";
+  if (verb.endsWith("converted")) return "job";
+  if (verb.endsWith("lost")) return "x";
+  return "history";
+}
+
+/** A page narrower than the two columns (1100px): the totals then go right under the lines, as the phone kit has them. */
+const NARROW = "(max-width: 1100px)";
+function useNarrow() {
+  return useSyncExternalStore(
+    (changed) => {
+      const query = window.matchMedia(NARROW);
+      query.addEventListener("change", changed);
+      return () => query.removeEventListener("change", changed);
+    },
+    () => window.matchMedia(NARROW).matches,
+    () => false,
   );
 }
 
@@ -1005,7 +1089,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
   return (
     <>
       {sheet && (
-        <section className="stack" aria-label="The estimate as it prints">
+        <section className={cx("stack", styles.paper)} aria-label="The estimate as it prints">
           {terms.error && (
             <p className="muted small" style={{ margin: 0 }}>
               The contract didn't load, so it's not on the pages below.{" "}
@@ -1064,7 +1148,8 @@ function ChooseOptionDialog({ choices, initial, shownId, pricedOnSite, action, c
           {choices.map(({ option, tier, total, priced }) => (
             <label key={option.id} className={styles.choice} data-on={picked === option.id || undefined} data-disabled={!priced || undefined}>
               <input type="radio" name={group} value={option.id} checked={picked === option.id} disabled={!priced} onChange={() => setPicked(option.id)} />
-              <PackagePicture path={option.picture} style={option.style} className={styles.choicePicture} />
+              {/* A plain option with no picture of its own has no art worth the room. */}
+              {hasOptionArt(option) && <PackagePicture path={option.picture} style={option.style} className={styles.choicePicture} />}
               <span className={styles.choiceText}>
                 {(tier || option.id === shownId) && (
                   <span className={styles.choiceChips}>
@@ -1227,25 +1312,46 @@ function LostDialog({ onClose, onSave }: { onClose: () => void; onSave: (reason:
         <Field label="Note" optional><input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} /></Field>
         <div className="form-actions">
           <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="danger-solid" loading={saving}>Mark lost</Button>
+          {/* Not a deletion: a lost quote can be reopened, so it isn't red. */}
+          <Button type="submit" variant="primary" loading={saving}>Mark lost</Button>
         </div>
       </form>
     </Dialog>
   );
 }
 
-/** The quote's title, typed over in the header; saved as it loses focus, and a blank one goes back. */
+/**
+ * The quote's title, typed over in the header; saved as it loses focus, and a blank one goes back.
+ * It wraps onto a second line as a long title does in print (a one-line box that grows), so a
+ * phone shows all of it. Enter saves it rather than starting a new line.
+ */
 function TitleInput({ value, onEdit, onUnchanged, onSave }: { value: string; onEdit: () => void; onUnchanged: () => void; onSave: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
+  const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => setDraft(value), [value]);
+  // As tall as its words, at any width: measured again as they or the window change.
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fit();
+    const watch = new ResizeObserver(fit);
+    watch.observe(el.parentElement ?? el);
+    return () => watch.disconnect();
+  }, [draft]);
   return (
-    <input
-      className="title-input"
+    <textarea
+      ref={box}
+      className={cx("title-input", styles.titleBox)}
       aria-label="Quote title"
+      rows={1}
       value={draft}
       maxLength={200}
       onChange={(e) => {
-        setDraft(e.target.value);
+        setDraft(e.target.value.replace(/[\r\n]+/g, " "));
         onEdit();
       }}
       onBlur={() => {
@@ -1254,7 +1360,11 @@ function TitleInput({ value, onEdit, onUnchanged, onSave }: { value: string; onE
         if (!title) setDraft(value);
         onUnchanged();
       }}
-      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.currentTarget.blur();
+      }}
     />
   );
 }
@@ -1264,7 +1374,7 @@ function TitleInput({ value, onEdit, onUnchanged, onSave }: { value: string; onE
  * shows only while a date is being picked (it opens on the picker), so an empty one never reads as
  * the browser's "mm/dd/yyyy". Saved as it loses focus; Escape puts it back.
  */
-function ValidUntil({ value, editable, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
+function ValidUntil({ value, editable, expired = false, onEdit, onUnchanged, onSave }: { value: string | null; editable: boolean; expired?: boolean; onEdit: () => void; onUnchanged: () => void; onSave: (v: string | null) => void }) {
   const [picking, setPicking] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
   const input = useRef<HTMLInputElement>(null);
@@ -1288,7 +1398,7 @@ function ValidUntil({ value, editable, onEdit, onUnchanged, onSave }: { value: s
     }
   }, [picking]);
 
-  if (!editable) return value ? <span>{formatDate(value)}</span> : <span className="muted">No end date</span>;
+  if (!editable) return value ? <span data-tone={expired ? "warning" : undefined}>{formatDate(value)}</span> : <span className="muted">No end date</span>;
   if (picking) {
     return (
       <input
@@ -1322,7 +1432,7 @@ function ValidUntil({ value, editable, onEdit, onUnchanged, onSave }: { value: s
   // The date as picked, while it saves.
   return draft ? (
     <span ref={shown} className={styles.validUntil}>
-      <Button size="sm" variant="ghost" className={styles.validUntilDate} aria-label={`Valid until ${formatDate(draft)}. Change the date`} onClick={() => setPicking(true)}>{formatDate(draft)}</Button>
+      <Button size="sm" variant="ghost" className={styles.validUntilDate} data-tone={expired ? "warning" : undefined} aria-label={`Valid until ${formatDate(draft)}${expired ? ", expired" : ""}. Change the date`} onClick={() => setPicking(true)}>{formatDate(draft)}</Button>
       <Button
         size="sm"
         variant="ghost"
@@ -1421,31 +1531,32 @@ function MessageCard({ value, editable, onEdit, onUnchanged, onSave }: { value: 
       toast.success("Message polished", { description: "Review it before sending." });
     },
   });
+  const title = <>Message to client <span className={styles.titleNote}>shown above the line items</span></>;
   if (!editable) {
-    return value ? <div className="card card-pad"><strong>Message to client</strong><p className="pre-wrap" style={{ margin: "8px 0 0" }}>{value}</p></div> : null;
+    return value ? <Section title={title}><p className={cx("pre-wrap", styles.message)}>{value}</p></Section> : null;
   }
   return (
-    <div className="card card-pad stack-sm">
-      <label htmlFor="quote-message"><strong>Message to client</strong> <span className="muted small">(shown above the line items)</span></label>
-      <textarea
-        id="quote-message"
-        className="textarea"
-        value={draft}
-        maxLength={4000}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          onEdit();
-        }}
-        onBlur={() => (draft !== (value ?? "") ? onSave(draft) : onUnchanged())}
-        placeholder="Thanks for having us out. Here's what we recommend…"
-      />
-      {config.features.ai && (
-        <div className="row">
-          <Button size="sm" icon="sparkle" loading={polish.isPending} disabled={draft.trim().length < 3} onClick={() => polish.mutate()}>Polish with AI</Button>
-          <UsingChatGptPlan />
-        </div>
-      )}
-    </div>
+    <Section
+      title={title}
+      action={config.features.ai && <Button size="sm" icon="sparkle" loading={polish.isPending} disabled={draft.trim().length < 3} onClick={() => polish.mutate()}>Polish with AI</Button>}
+    >
+      <div className={styles.messageField}>
+        <textarea
+          id="quote-message"
+          className="textarea"
+          aria-label="Message to client"
+          value={draft}
+          maxLength={4000}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            onEdit();
+          }}
+          onBlur={() => (draft !== (value ?? "") ? onSave(draft) : onUnchanged())}
+          placeholder="Thanks for having us out. Here's what we recommend…"
+        />
+        {config.features.ai && <UsingChatGptPlan />}
+      </div>
+    </Section>
   );
 }
 

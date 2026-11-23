@@ -1,4 +1,6 @@
 import { daysOff } from "@crewtavo/core/slots";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -63,6 +65,28 @@ describe("what a visit block has room for", () => {
     expect(fitBlock(58, all)).toMatchObject({ people: "row", client: false, title: 1 });
     expect(fitBlock(70, all)).toMatchObject({ people: "row", client: true, title: 1 });
     expect(fitBlock(200, all).title).toBe(3);
+  });
+});
+
+describe("the board's look", () => {
+  const css = readFileSync(join(__dirname, "../src/styles/features.css"), "utf8");
+  const rule = (selector: string) => new RegExp(`(^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[2] ?? "";
+
+  it("keeps a block's 6px of padding above and below, which fitBlock counts on", () => {
+    expect(rule(".tg-event")).toContain("padding: 4px 8px 2px;");
+    expect(rule(".tg-event")).not.toMatch(/border(-left)?:/);
+  });
+
+  it("keeps a sideways-scrolling board's screen-reader words inside it, so a phone's page never runs past the screen", () => {
+    // .sr-only is absolute: with no positioned board around it, it escapes the board's scroll box and
+    // widens the page, which pushes the tab bar and New visit off a phone's screen (week, People day).
+    expect(rule(".tg-wrap")).toContain("position: relative;");
+    expect(css).toContain(".tg-wrap[data-wide] { overflow-x: auto;");
+  });
+
+  it("tints only the day a visit is dragged over in the month, not every day", () => {
+    expect(css).not.toMatch(/\.month-cell\[data-drop\] \{/);
+    expect(css).toContain(".month-cell[data-over] { background: var(--green-tint);");
   });
 });
 

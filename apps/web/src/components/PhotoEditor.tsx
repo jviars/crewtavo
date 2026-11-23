@@ -46,8 +46,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { announceTopLayer } from "@/lib/motion";
 import { errorMessage } from "@/lib/errors";
 import { choose, confirm } from "./ui/Confirm";
-import { Button, Spinner } from "./ui/Button";
+import { Button, cx, Spinner } from "./ui/Button";
 import { Icon, type IconName } from "./ui/Icon";
+import { Menu } from "./ui/Menu";
+import styles from "./PhotoEditor.module.css";
 import { t } from "@/lib/i18n";
 
 const TOOL_ICONS: Record<MarkupTool, IconName> = { pen: "pen", arrow: "arrowUpRight", ellipse: "circle", box: "square", text: "type" };
@@ -335,11 +337,27 @@ export function PhotoEditor({
         void leave();
       }}
     >
-      <div className="photo-editor-bar">
-        <strong className="grow">{title ?? t("Draw on the photo")}</strong>
-        <button type="button" className="photo-editor-tool" aria-label={t("Undo")} title={t("Undo (Ctrl+Z)")} disabled={!canUndo(history) || Boolean(busy)} onClick={() => setHistory(undo)}><Icon name="undo" size={20} /></button>
-        <button type="button" className="photo-editor-tool" aria-label={t("Redo")} title={t("Redo (Ctrl+Shift+Z)")} disabled={!canRedo(history) || Boolean(busy)} onClick={() => setHistory(redo)}><Icon name="redo" size={20} /></button>
-        <button type="button" className="photo-editor-tool" aria-label={t("Clear")} title={t("Clear")} disabled={!history.marks.length || Boolean(busy)} onClick={() => setHistory(clearMarks)}><Icon name="trash" size={20} /></button>
+      {/* Photos' own markup (iOS, Android): Cancel and Save at the top, undo and redo between, the tools at the foot. */}
+      <div className={cx("photo-editor-bar", styles.head)}>
+        <Button variant="ghost" className={styles.cancel} disabled={Boolean(busy)} onClick={() => void leave()}>{t("Cancel")}</Button>
+        <strong className={styles.title}>{title ?? t("Draw on the photo")}</strong>
+        <div className={styles.history}>
+          <button type="button" className="photo-editor-tool" aria-label={t("Undo")} title={t("Undo (Ctrl+Z)")} disabled={!canUndo(history) || Boolean(busy)} onClick={() => setHistory(undo)}><Icon name="undo" size={20} /></button>
+          <button type="button" className="photo-editor-tool" aria-label={t("Redo")} title={t("Redo (Ctrl+Shift+Z)")} disabled={!canRedo(history) || Boolean(busy)} onClick={() => setHistory(redo)}><Icon name="redo" size={20} /></button>
+          <Menu
+            label={t("More actions")}
+            title={title ?? t("Draw on the photo")}
+            triggerClassName={cx("photo-editor-tool", styles.more)}
+            trigger={<Icon name="more" size={20} />}
+            items={[
+              { label: t("Clear"), icon: "trash", disabled: !history.marks.length || Boolean(busy), onSelect: () => setHistory(clearMarks) },
+              ...(onRemoveDrawing ? [{ separator: true as const }, { label: t("Take the drawing off"), icon: "undo" as const, danger: true, disabled: Boolean(busy), onSelect: () => void removeDrawing() }] : []),
+            ]}
+          />
+        </div>
+        <Button variant="primary" className={styles.save} loading={busy === "save" || busy === "remove"} disabled={(nothing || !picture) && !(keepsBlank && failed) || Boolean(busy)} onClick={() => (failed && keepsBlank ? void onSave(null, () => null) : void save())}>
+          {saveLabel ?? t("Save")}
+        </Button>
       </div>
 
       <div className="photo-editor-stage" ref={stage}>
@@ -369,30 +387,12 @@ export function PhotoEditor({
         )}
       </div>
 
-      <div className="photo-editor-bar photo-editor-tools">
-        <div className="row wrap" role="group" aria-label={t("Draw with")} style={{ gap: 4 }}>
-          {MARKUP_TOOLS.map((m) => (
-            <button key={m.tool} type="button" className="photo-editor-tool" aria-pressed={tool === m.tool} aria-label={t(m.label)} title={t(m.label)} onClick={() => setTool(m.tool)}>
-              <Icon name={TOOL_ICONS[m.tool]} size={20} />
-            </button>
-          ))}
-        </div>
-        <div className="row wrap" role="group" aria-label={t("Colour")} style={{ gap: 6 }}>
-          {MARKUP_COLORS.map((c) => (
-            <button key={c.color} type="button" className="photo-editor-swatch" aria-pressed={color === c.color} aria-label={t(c.label)} title={t(c.label)} style={{ background: c.color }} onClick={() => setColor(c.color)} />
-          ))}
-        </div>
-        <div className="row" role="group" aria-label={t("Line")} style={{ gap: 4 }}>
-          {(["thin", "thick"] as const).map((w) => (
-            <button key={w} type="button" className="photo-editor-tool" aria-pressed={width === w} aria-label={w === "thin" ? t("Thin line") : t("Thick line")} title={w === "thin" ? t("Thin") : t("Thick")} onClick={() => setWidth(w)}>
-              <span aria-hidden="true" style={{ display: "block", width: 20, height: w === "thin" ? 2 : 6, borderRadius: 3, background: "currentColor" }} />
-            </button>
-          ))}
-        </div>
-        {tool === "text" && (
+      {problem && <div className={cx("photo-editor-bar", styles.problem)}><span className="grow small photo-editor-problem" role="alert">{problem}</span></div>}
+      {tool === "text" && (
+        <div className={cx("photo-editor-bar", styles.words)}>
           <form
             className="row grow"
-            style={{ gap: 6, minWidth: 220 }}
+            style={{ gap: 6 }}
             onSubmit={(e) => {
               e.preventDefault();
               addWords();
@@ -401,16 +401,28 @@ export function PhotoEditor({
             <input id="photo-editor-words" className="input grow" aria-label={t("Words to add")} placeholder={t("Type, then tap where it goes")} value={words} maxLength={120} onChange={(e) => setWords(e.target.value)} />
             <Button size="sm" type="submit" disabled={!words.trim()}>{t("Add")}</Button>
           </form>
-        )}
-      </div>
-
-      <div className="photo-editor-bar">
-        {problem ? <span className="grow small photo-editor-problem" role="alert">{problem}</span> : <span className="grow" />}
-        {onRemoveDrawing && <Button variant="ghost" loading={busy === "remove"} disabled={busy === "save"} onClick={() => void removeDrawing()}>{t("Take the drawing off")}</Button>}
-        <Button variant="secondary" disabled={Boolean(busy)} onClick={() => void leave()}>{t("Cancel")}</Button>
-        <Button variant="primary" icon="check" loading={busy === "save"} disabled={(nothing || !picture) && !(keepsBlank && failed) || busy === "remove"} onClick={() => (failed && keepsBlank ? void onSave(null, () => null) : void save())}>
-          {saveLabel ?? t("Save")}
-        </Button>
+        </div>
+      )}
+      <div className={cx("photo-editor-bar photo-editor-tools", styles.tools)}>
+        <div className={styles.track} role="group" aria-label={t("Draw with")}>
+          {MARKUP_TOOLS.map((m) => (
+            <button key={m.tool} type="button" className="photo-editor-tool" aria-pressed={tool === m.tool} aria-label={t(m.label)} title={t(m.label)} onClick={() => setTool(m.tool)}>
+              <Icon name={TOOL_ICONS[m.tool]} size={20} />
+            </button>
+          ))}
+        </div>
+        <div className={styles.swatches} role="group" aria-label={t("Colour")}>
+          {MARKUP_COLORS.map((c) => (
+            <button key={c.color} type="button" className="photo-editor-swatch" aria-pressed={color === c.color} aria-label={t(c.label)} title={t(c.label)} style={{ background: c.color }} onClick={() => setColor(c.color)} />
+          ))}
+        </div>
+        <div className={styles.track} role="group" aria-label={t("Line")}>
+          {(["thin", "thick"] as const).map((w) => (
+            <button key={w} type="button" className="photo-editor-tool" aria-pressed={width === w} aria-label={w === "thin" ? t("Thin line") : t("Thick line")} title={w === "thin" ? t("Thin") : t("Thick")} onClick={() => setWidth(w)}>
+              <span aria-hidden="true" style={{ display: "block", width: 20, height: w === "thin" ? 2 : 6, borderRadius: 3, background: "currentColor" }} />
+            </button>
+          ))}
+        </div>
       </div>
     </dialog>
   );

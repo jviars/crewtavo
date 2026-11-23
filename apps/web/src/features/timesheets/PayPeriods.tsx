@@ -8,21 +8,28 @@
 import { breakPay, SHORT_BREAK_MINUTES, type BreakPay } from "@crewtavo/core/breaks";
 import { mondayOf, STATE_OVERTIME_NOTE } from "@crewtavo/core/pay";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Icon } from "@/components/ui/Icon";
+import { RowPerson } from "@/components/ui/InboxList";
+import { Menu } from "@/components/ui/Menu";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { api } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { addDaysIso, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { owedFor, PAY_COLUMNS, payRows, pieceJobs, waitingFor, type PayPerson } from "./payCsv";
 import { inEnglish } from "@/lib/i18n";
+import styles from "./Timesheets.module.css";
+import { Select } from "@/components/ui/Select";
 
 type PersonPay = PayPerson;
 interface Summary { from: string; to: string; period_id: string | null; status: string; people: PersonPay[]; hours: number; hourly_amount: number; piece_amount: number; amount: number; overtime_hours: number; overtime_note: string | null; unapproved_hours: number; running_clocks: number }
@@ -45,7 +52,7 @@ const METHODS = [
 const methodLabel = (m: string | null) => METHODS.find(([k]) => k === m)?.[1] ?? m ?? "";
 const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-export function PayPeriods() {
+export function PayPeriods({ header }: { header: (actions: ReactNode) => ReactNode }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const tz = session.company.timezone;
@@ -74,99 +81,141 @@ export function PayPeriods() {
   });
 
   const d = summary.data;
-  const unpaid = d ? d.people.filter((p) => owedFor(p) && !p.paid) : [];
+  // Your own pay is an owner's to mark paid, as your pay rate is (the server and the database hold to it).
+  const mine = (p: PersonPay) => p.user_id === session.userId && session.role !== "owner";
+  // Everyone still owed, your own pay included: what the period still has to pay.
+  const owed = d ? d.people.filter((p) => owedFor(p) && !p.paid) : [];
+  // Those you can mark paid yourself.
+  const unpaid = owed.filter((p) => !mine(p));
+  const ownLeft = owed.some(mine);
   // Marking paid is refused while anyone it marks has time not approved (piece pay alone included).
   const waiting = waitingFor(unpaid);
   const piece = (d?.piece_amount ?? 0) > 0;
+  const anyPaid = Boolean(d?.people.some((p) => p.paid));
+  const stillOwed = owed.reduce((s, p) => s + p.amount, 0);
   const exportCsv = () => d && downloadCsv(`pay-${d.from}-to-${d.to}.csv`, inEnglish(() => toCsv(payRows(d.people, methodLabel), [...PAY_COLUMNS])));
+  const takeBack = async () => (await confirm({ title: "Take back the paid mark?", body: "Everyone in this period goes back to not paid, and their time can be changed again. Nothing is paid or refunded.", confirmLabel: "Take it back" })) && unmark.mutate();
+  const preset = presets.find((p) => p.from === range.from && p.to === range.to)?.label ?? "";
+
+  const actions = d && d.people.length > 0 && (
+    <>
+      <Menu
+        title="Pay"
+        items={[
+          { label: "Download as spreadsheet", icon: "download", onSelect: exportCsv },
+          { separator: true, hidden: !anyPaid },
+          { label: "Take back paid", icon: "undo", hidden: !anyPaid, disabled: unmark.isPending, onSelect: () => void takeBack() },
+        ]}
+      />
+      {unpaid.length > 0 && <Button variant="primary" icon="check" disabled={waiting.length > 0} onClick={() => setMarking(true)}>Mark paid</Button>}
+    </>
+  );
 
   return (
-    <div className="stack">
-      <div className="toolbar" style={{ flexWrap: "wrap" }}>
-        {/* A choice, not an action: the highlight slides to the period picked, and Mark paid stays the one green button. */}
-        <div className="segmented" role="group" aria-label="Period" style={{ flexWrap: "wrap", maxWidth: "100%" }}>
-          {presets.map((p) => (
-            <button key={p.label} type="button" aria-pressed={range.from === p.from && range.to === p.to} onClick={() => setRange({ from: p.from, to: p.to })}>{p.label}</button>
-          ))}
-        </div>
-        <div className="row" style={{ gap: 6 }}>
-          <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && setRange({ ...range, from: e.target.value })} aria-label="From" style={{ width: 150 }} />
+    <>
+      {header(actions)}
+      <div className={styles.periodBar}>
+        <FilterTabs label="Period" value={preset} onChange={(label) => { const p = presets.find((x) => x.label === label); if (p) setRange({ from: p.from, to: p.to }); }} options={presets.map((p) => ({ value: p.label, label: p.label }))} />
+        <div className={styles.dates}>
+          <input className="input" type="date" value={range.from} max={range.to} onChange={(e) => e.target.value && setRange({ ...range, from: e.target.value })} aria-label="From" />
           <span className="muted">to</span>
-          <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} aria-label="To" style={{ width: 150 }} />
+          <input className="input" type="date" value={range.to} min={range.from} onChange={(e) => e.target.value && setRange({ ...range, to: e.target.value })} aria-label="To" />
         </div>
       </div>
 
-      {summary.isPending && <Loading><CardSkeleton lines={5} /></Loading>}
-      {summary.error && <div className="card"><ErrorState error={summary.error} onRetry={() => summary.refetch()} /></div>}
-      {d && !d.people.length && <div className="card"><EmptyState icon="clock" title="No time or piece pay in this period" /></div>}
-      {d && d.people.length > 0 && (
-        <section className="card">
-          <div className="card-head" style={{ flexWrap: "wrap", gap: 10 }}>
-            <strong className="grow">{dayLabel(d.from)} – {dayLabel(d.to)}</strong>
-            <span className="tabular"><strong>{d.hours.toFixed(2)}</strong> h{piece ? <> · <strong>{formatMoney(d.piece_amount)}</strong> piece</> : null} · <strong>{formatMoney(d.amount)}</strong></span>
-            {d.overtime_hours > 0 && <span className="chip chip-amber">{d.overtime_hours.toFixed(1)} h over 40</span>}
-            <Button size="sm" icon="download" onClick={exportCsv}>Download</Button>
-            {unpaid.length > 0 && <Button size="sm" variant="primary" icon="check" disabled={waiting.length > 0} onClick={() => setMarking(true)}>Mark paid</Button>}
-            {d.people.some((p) => p.paid) && (
-              <Button size="sm" variant="ghost" loading={unmark.isPending} onClick={async () => (await confirm({ title: "Take back the paid mark?", body: "Everyone in this period goes back to not paid, and their time can be changed again. Nothing is paid or refunded.", confirmLabel: "Take it back" })) && unmark.mutate()}>Take back paid</Button>
+      <div className="stack-lg m-grouped">
+        {summary.isPending && <Loading className="stack-lg"><StatsSkeleton count={3} /><SectionSkeleton rows={4} /></Loading>}
+        {summary.error && <ErrorState error={summary.error} onRetry={() => summary.refetch()} />}
+        {d && !d.people.length && <EmptyState icon="clock" title="No time or piece pay in this period" />}
+        {d && d.people.length > 0 && (
+          <>
+            <StatStrip label={`Pay for ${dayLabel(d.from)} – ${dayLabel(d.to)}`}>
+              <Stat label="Approved hours" value={`${d.hours.toFixed(2)} h`} note={d.overtime_hours > 0 ? `${d.overtime_hours.toFixed(1)} h over 40` : `${dayLabel(d.from)} – ${dayLabel(d.to)}`} />
+              <Stat label="Pay" value={formatMoney(d.amount)} note={piece ? `${formatMoney(d.piece_amount)} of it piece pay` : "At each person's rate"} />
+              <Stat label="Still to pay" value={formatMoney(stillOwed)} note={owed.length ? `${owed.length} ${owed.length === 1 ? "person" : "people"}` : "Everyone's paid"} />
+            </StatStrip>
+            {ownLeft && (
+              <div className="callout callout-info">
+                <Icon name="info" size={16} />
+                <div className="grow">An owner marks your own pay paid.</div>
+              </div>
             )}
-          </div>
-          {waiting.length > 0 && (
-            <div className="callout callout-warning" style={{ margin: 12 }}>
-              <span className="grow small">Approve everyone's time before marking the period paid: {waiting.map((p) => `${p.name} (${p.running ? "a clock is running" : `${p.unapproved_hours.toFixed(2)} h not approved`})`).join(", ")}.</span>
-            </div>
-          )}
-          {d.people.map((p) => (
-            <div key={p.user_id} className="card-row" style={{ flexWrap: "wrap" }}>
-              <span className="grow" style={{ minWidth: 140 }}>
-                <strong>{p.name}</strong>
-                {p.piece.length > 0 && <span className="muted small" style={{ display: "block" }}>{pieceJobs(p, formatMoneyCents)}</span>}
-              </span>
-              <span className="tabular">{p.hours.toFixed(2)} h</span>
-              {p.overtime_hours > 0 && <span className="muted small tabular">{p.overtime_hours.toFixed(1)} over 40</span>}
-              {(p.already_paid_hours ?? 0) > 0 && <span className="muted small tabular">{p.already_paid_hours!.toFixed(2)} h already paid</span>}
-              {p.break_hours > 0 && <span className="muted small tabular">{p.break_hours.toFixed(1)} h unpaid breaks</span>}
-              {piece && (
-                <span className="muted small tabular" style={{ minWidth: 150, textAlign: "right" }}>
-                  {formatMoney(p.hourly_amount)} hourly · {p.piece_amount > 0 ? `${formatMoney(p.piece_amount)} piece pay` : "no piece pay"}
-                </span>
-              )}
-              <span className="tabular strong" style={{ minWidth: 90, textAlign: "right" }}>{formatMoney(p.amount)}</span>
-              {p.paid ? (
-                <span title={[methodLabel(p.paid.method), p.paid.reference].filter(Boolean).join(" · ")}><StatusPill label={`Paid ${formatMoney(p.paid.paid_amount)}`} tone="good" /></span>
-              ) : p.unapproved_hours > 0 || p.running ? (
-                <StatusPill label={p.running ? "Clock running" : `${p.unapproved_hours.toFixed(1)} h to approve`} tone="warning" />
-              ) : owedFor(p) ? (
-                <StatusPill label="Not paid yet" tone="muted" />
-              ) : (p.already_paid_hours ?? 0) > 0 ? (
-                <StatusPill label="Already paid" tone="good" />
-              ) : null}
-            </div>
-          ))}
-          <p className="muted small" style={{ margin: 12 }}>
-            Approved time at each person's pay rate{piece ? ", plus piece pay for work done on jobs in this period" : ""}. {BREAK_RULE[breakPay(session.company.settings)]}{" "}
-            {d.overtime_note ?? "Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time."}{" "}
-            {STATE_OVERTIME_NOTE}
-            {d.people.some((p) => (p.already_paid_hours ?? 0) > 0) && " Hours already paid with another period aren't counted again."}
-          </p>
-        </section>
-      )}
+            {waiting.length > 0 && (
+              <div className="callout callout-warning">
+                <Icon name="alert" size={16} />
+                <div className="grow">
+                  <div>Approve everyone's time before marking the period paid.</div>
+                  {waiting.map((p) => `${p.name} (${p.running ? "a clock is running" : `${p.unapproved_hours.toFixed(2)} h not approved`})`).join(", ")}.
+                </div>
+              </div>
+            )}
+            <Section title="People" count={d.people.length}>
+              <RelatedList>
+                {d.people.map((p) => (
+                  <RelatedRow
+                    key={p.user_id}
+                    lead={<RowPerson name={p.name} />}
+                    title={p.name}
+                    sub={[
+                      `${p.hours.toFixed(2)} h`,
+                      p.overtime_hours > 0 && `${p.overtime_hours.toFixed(1)} over 40`,
+                      (p.already_paid_hours ?? 0) > 0 && `${p.already_paid_hours!.toFixed(2)} h already paid`,
+                      p.break_hours > 0 && `${p.break_hours.toFixed(1)} h unpaid breaks`,
+                      piece && `${formatMoney(p.hourly_amount)} hourly · ${p.piece_amount > 0 ? `${formatMoney(p.piece_amount)} piece pay` : "no piece pay"}`,
+                      p.piece.length > 0 && pieceJobs(p, formatMoneyCents),
+                    ]}
+                    end={
+                      <>
+                        {p.paid ? (
+                          <span title={[methodLabel(p.paid.method), p.paid.reference].filter(Boolean).join(" · ")}><StatusPill label={`Paid ${formatMoney(p.paid.paid_amount)}`} tone="good" /></span>
+                        ) : p.unapproved_hours > 0 || p.running ? (
+                          <StatusPill label={p.running ? "Clock running" : `${p.unapproved_hours.toFixed(1)} h to approve`} tone="warning" />
+                        ) : owedFor(p) ? (
+                          <StatusPill label="Not paid yet" tone="muted" />
+                        ) : (p.already_paid_hours ?? 0) > 0 ? (
+                          <StatusPill label="Already paid" tone="good" />
+                        ) : null}
+                        <b>{formatMoney(p.amount)}</b>
+                      </>
+                    }
+                  />
+                ))}
+              </RelatedList>
+              <p className={styles.note}>
+                Approved time at each person's pay rate{piece ? ", plus piece pay for work done on jobs in this period" : ""}. {BREAK_RULE[breakPay(session.company.settings)]}{" "}
+                {d.overtime_note ?? "Hours over 40 in a week are shown for your payroll service; the amounts here are at straight time."}{" "}
+                {STATE_OVERTIME_NOTE}
+                {d.people.some((p) => (p.already_paid_hours ?? 0) > 0) && " Hours already paid with another period aren't counted again."}
+              </p>
+            </Section>
+          </>
+        )}
 
-      {Boolean(history.data?.length) && (
-        <section className="card">
-          <div className="card-head"><strong>Paid periods</strong></div>
-          {history.data!.map((p) => (
-            <button key={p.id} type="button" className="card-row" style={{ width: "100%", textAlign: "left", background: "none", border: 0, cursor: "pointer" }} onClick={() => setRange({ from: p.starts_on, to: p.ends_on })}>
-              <span className="grow">{dayLabel(p.starts_on)} – {dayLabel(p.ends_on)} <span className="muted small">· {p.lines.length} {p.lines.length === 1 ? "person" : "people"}</span></span>
-              <span className="tabular strong">{formatMoney(p.paid_total)}</span>
-              <StatusPill label={p.status === "paid" ? "Paid" : "Partly paid"} tone={p.status === "paid" ? "good" : "warning"} />
-            </button>
-          ))}
-        </section>
-      )}
+        {Boolean(history.data?.length) && (
+          <Section title="Paid periods" count={history.data!.length}>
+            <RelatedList>
+              {history.data!.map((p) => (
+                <RelatedRow
+                  key={p.id}
+                  onClick={() => setRange({ from: p.starts_on, to: p.ends_on })}
+                  current={p.starts_on === range.from && p.ends_on === range.to}
+                  title={`${dayLabel(p.starts_on)} – ${dayLabel(p.ends_on)}`}
+                  detail={`${p.lines.length} ${p.lines.length === 1 ? "person" : "people"}`}
+                  end={
+                    <>
+                      <StatusPill label={p.status === "paid" ? "Paid" : "Partly paid"} tone={p.status === "paid" ? "good" : "pending"} />
+                      <b>{formatMoney(p.paid_total)}</b>
+                    </>
+                  }
+                />
+              ))}
+            </RelatedList>
+          </Section>
+        )}
+      </div>
 
       {marking && d && <MarkPaidDialog summary={d} people={unpaid} onClose={() => setMarking(false)} onSaved={refresh} />}
-    </div>
+    </>
   );
 }
 

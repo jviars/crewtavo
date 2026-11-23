@@ -179,7 +179,9 @@ describe("words and numbers on the page", () => {
     expect(hub).toContain('import { inkOn } from "@/features/documents/words";');
     // The Hub's own rule put white on colors as light as mid-grey (2.1:1).
     expect(hub).not.toContain("function inkOn(");
-    expect(readFileSync(new URL("../src/features/public/ShowcasePage.tsx", import.meta.url), "utf8")).toContain('["--on-brand" as string]: inkOn(brand)');
+    // The showcase (and every page in the client kit) takes its brand colors from brandStyle.
+    expect(readFileSync(new URL("../src/features/public/ShowcasePage.tsx", import.meta.url), "utf8")).toContain("<ClientPage color={d?.company.color}>");
+    expect(readFileSync(new URL("../src/features/public/ClientKit.tsx", import.meta.url), "utf8")).toContain('["--on-brand" as string]: inkOn(brand)');
   });
 
   it("keeps words readable on the template's color", () => {
@@ -929,6 +931,22 @@ describe("contract sections without a browser", () => {
     expect(sanitizeContractHtml("<p>Unclosed <img src=x onerror=alert(1)")).toBe("Unclosed");
     // Headings and boxes a contract doesn't use still end their line, so no words run together.
     expect(sanitizeContractHtml("<h2>Big heading</h2><div>div text</div><section>More</section>")).toBe("Big heading\ndiv text\nMore");
+  });
+
+  it("leaves out what a browser doesn't show, closed or never closed", () => {
+    expect(sanitizeContractHtml("<p>Before</p><STYLE>p { color: red }</style ><p>After</p><template><p>Hidden</p></template><p>End</p>")).toBe("Before\nAfter\nEnd");
+    expect(sanitizeContractHtml("<p>Kept</p><iframe src=x></iframe><p>Also kept</p><style>never closed <p>so it runs to the end</p>")).toBe("Kept\nAlso kept");
+    // A tag that only starts like one of them isn't one.
+    expect(sanitizeContractHtml("<p>A <scripted>word</scripted></p>")).toBe("A word");
+  });
+
+  it("reads a section in time with its length, however its tags are left open", () => {
+    // Each of these took a long time per section before (every unclosed tag searched to the end).
+    for (const html of ["<style".repeat(50_000), "<script>".repeat(40_000), "<style></style ".repeat(20_000) + "<style", "<a".repeat(150_000), "&#x".repeat(100_000) + "1", "<br".repeat(100_000) + " ".repeat(100_000)]) {
+      const started = performance.now();
+      sanitizeContractHtml(html);
+      expect(performance.now() - started, html.slice(0, 12)).toBeLessThan(500);
+    }
   });
 
   it("prints a section's body as one block of its words", () => {

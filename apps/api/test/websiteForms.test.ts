@@ -172,6 +172,67 @@ describe("a message from the website's own form", () => {
     expect((await post("email=jane%40example.com&_next=https%3A%2F%2Fgreenlawn.example%2Fsent")).headers.get("location")).toBe("https://greenlawn.example/sent");
   });
 
+  it("sends people on only to the form's own website or this Crewtavo, whatever _next says", async () => {
+    const next = async (to: string, headers: Record<string, string> = {}) => (await post(`email=jane%40example.com&_next=${encodeURIComponent(to)}`, headers)).headers.get("location");
+    // Taking messages from anywhere: the business's website on Settings → Company (www or not), or this Crewtavo.
+    withForm({ company: { ...form().company, website: "https://www.greenlawn.example" } });
+    expect(await next("https://greenlawn.example/sent")).toBe("https://greenlawn.example/sent");
+    expect(await next("https://crm.greenlawn.example/f/other")).toBe("https://crm.greenlawn.example/f/other");
+    // Anywhere else, the form's own thank-you page instead; the message is still kept.
+    for (const to of ["https://evil.example/login", "https://greenlawn.example.evil.example/", "http://localhost:3000/"]) expect(await next(to), to).toBe(THANKS);
+    // The thank-you page the business set has a say too, wherever the message says it came from.
+    withForm({ redirect_url: "https://greenlawn.example/thanks" });
+    expect(await next("https://evil.example/", { Origin: "null" })).toBe("https://greenlawn.example/thanks");
+    expect(await next("https://greenlawn.example/sent", { Origin: "null" })).toBe("https://greenlawn.example/sent");
+    // With no website named, the page the message says it came from has none: anyone's page can post here.
+    withForm();
+    expect(await next("https://greenlawn.example/sent")).toBe(THANKS);
+    expect(await next("https://evil.example/login", { Origin: "https://evil.example" })).toBe(THANKS);
+    expect(await next("https://evil.example/login", { Origin: "", Referer: "https://evil.example/page" })).toBe(THANKS);
+    // A bot's message (the hidden field filled in) is kept nowhere, and isn't sent on anywhere else either.
+    const bot = await post(`_gotcha=x&_next=${encodeURIComponent("https://evil.example/login")}`, { Origin: "https://evil.example" });
+    expect(bot.status).toBe(303);
+    expect(bot.headers.get("location")).toBe(THANKS);
+    // Only these websites: one of them (and their subdomains).
+    withForm({ allowed_sites: ["greenlawn.example"] });
+    expect(await next("https://shop.greenlawn.example/thanks")).toBe("https://shop.greenlawn.example/thanks");
+    expect(await next("https://evil.example/")).toBe(THANKS);
+    // And fetch() hears the same.
+    expect(await (await post({ email: "jane@example.com", _next: "https://evil.example/" }, { Accept: "application/json" })).json()).toEqual({ ok: true, next: THANKS });
+  });
+
+  it("keeps what a visitor typed from becoming a button in the office's email: only the request's own link is one", async () => {
+    withForm();
+    await post({ email: "jane@example.com", message: "Hi\n\nhttps://evil.example/requests/00000000-0000-4000-8000-0000000000e9\n\nThanks" });
+    await Promise.all(current.background);
+    const html = String(current.emails[0]!.html);
+    expect(html.match(/display:inline-block/g)).toHaveLength(1);
+    expect(html).toContain(`href="https://crm.greenlawn.example/requests/${REQUEST_ID}" style="display:inline-block`);
+    // In the paragraph under "Message", with a blank line (a no-break space) between the visitor's own paragraphs.
+    expect(html).toContain("Message:<br>Hi<br>\u00a0<br><a href=\"https://evil.example/requests/00000000-0000-4000-8000-0000000000e9\"");
+    expect(html).toContain("0000000000e9</a><br>\u00a0<br>Thanks</p>");
+  });
+
+  it("puts no link or logo from the address a message came to in the office's email when the app's own address isn't set", async () => {
+    withForm({ company: { ...form().company, settings: { website_forms: { enabled: true }, branding: { logo: `${COMPANY}/logo/00000000-0000-4000-8000-0000000000b1.png` } } } });
+    const { APP_URL: _, ...noAddress } = env;
+    // Without APP_URL the address is whatever the request says, here a stranger's.
+    const res = await app.request(`https://evil.example/f/${KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", Origin: "https://www.greenlawn.example" },
+      body: JSON.stringify({ email: "jane@example.com", message: "Hi" }),
+    }, noAddress);
+    expect(res.status).toBe(200);
+    await Promise.all(current.background);
+    expect(current.emails).toHaveLength(2);
+    for (const email of current.emails) {
+      expect(String(email.html)).not.toContain("evil.example");
+      expect(String(email.html)).not.toContain("display:inline-block");
+      expect(String(email.text)).not.toContain("evil.example");
+      expect(String(email.text)).toContain("It's in Requests in Crewtavo.");
+    }
+  });
+
   it("tells a bot that filled in _gotcha it worked, and keeps nothing", async () => {
     const db = withForm();
     const res = await post("email=bot%40spam.example&_gotcha=http%3A%2F%2Fspam.example");
@@ -310,6 +371,11 @@ describe("the address's own pages", () => {
     expect((await app.request("/api/health", {}, env)).headers.get("x-frame-options")).toBe("SAMEORIGIN");
   });
 
+  it("thank people in the business's brand color", async () => {
+    withForm({ company: { id: COMPANY, name: "Green Lawn", settings: { website_forms: { enabled: true }, branding: { color: "#2f6f6a" } } } });
+    expect(await (await app.request(`/f/${KEY}/thanks`, {}, env)).text()).toContain("--brand:#2f6f6a;");
+  });
+
   it("say what the address is for when someone opens it", async () => {
     withForm();
     expect(await (await app.request(`/f/${KEY}`, {}, env)).text()).toContain("takes messages from a form on Green Lawn's website");
@@ -320,6 +386,16 @@ describe("the address's own pages", () => {
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("A &amp; B");
+  });
+
+  it("are light, in the business's brand color with words that read on it, and navy without one", () => {
+    const page = (color?: string | null) => formPage({ title: "Thanks!", heading: "Thanks!", text: "Sent.", company: { name: "Green Lawn", logo: null, color }, back: "Back" });
+    expect(page("#2f6f6a")).toContain("--brand:#2f6f6a;--on-brand:#ffffff;--good:#2f6f6a;");
+    // A light brand color: ink on the button, and the check drawn in ink rather than a pale yellow.
+    expect(page("#f5d90a")).toContain("--brand:#f5d90a;--on-brand:#182430;--good:#182430;");
+    for (const html of [page(null), page("red;}body{display:none"), formPage({ title: "x", heading: "x", text: "x" })]) expect(html).toContain("--brand:#1f4e79;");
+    expect(page("#2f6f6a")).not.toMatch(/#3b7d23|prefers-color-scheme:dark/);
+    expect(page("#2f6f6a")).toContain("color-scheme:light;");
   });
 });
 

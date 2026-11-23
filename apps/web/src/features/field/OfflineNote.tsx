@@ -60,8 +60,8 @@ export function OfflineNote() {
     <>
       {(!online || (updates > 0 && late)) && (
         <div className="callout callout-info" role="status">
-          <Icon name="wifiOff" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="wifiOff" size={16} />
+          <div className="grow">
             <div>{online ? t("Sending your updates…") : t("No signal")}</div>
             {waiting ? t.plural(waiting, { one: "{count} update is saved on this phone and will send when you have signal.", other: "{count} updates are saved on this phone and will send when you have signal." }) : unsavedUpdates ? t("Your updates send when you have signal.") : t("You can keep working: your updates are saved on this phone and sent when you have signal.")}
           </div>
@@ -69,8 +69,8 @@ export function OfflineNote() {
       )}
       {unsavedUpdates > 0 && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="alert" size={16} />
+          <div className="grow">
             <div>{t("This phone is out of room")}</div>
             {t.plural(unsavedUpdates, {
               one: "Your last update isn't saved on it. Keep Crewtavo open until you have signal and it has sent, or it will be lost.",
@@ -81,8 +81,8 @@ export function OfflineNote() {
       )}
       {unsaved.length > 0 && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="alert" size={16} />
+          <div className="grow">
             <div>{t.plural(unsaved.length, { one: "This phone couldn't save {count} photo", other: "This phone couldn't save {count} photos" })}</div>
             {unsaved.length === 1 ? t("Keep Crewtavo open until you have signal, or it will be lost.") : t("Keep Crewtavo open until you have signal, or they will be lost.")}
           </div>
@@ -90,11 +90,11 @@ export function OfflineNote() {
       )}
       {refused.length > 0 && (
         <div className="callout callout-danger" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow small stack-sm" style={{ fontWeight: 400 }}>
+          <Icon name="alert" size={16} />
+          <div className="grow geofence-ask">
             <div>{t.plural(refused.length, { one: "{count} photo didn't upload", other: "{count} photos didn't upload" })}</div>
             <span>{refused[0]!.problem} {refused.length === 1 ? t("The office may have changed the visit. It's still on this phone.") : t("The office may have changed the visit. They're still on this phone.")}</span>
-            <span className="row" style={{ gap: 8 }}>
+            <span className="field-ask-acts">
               <Button size="sm" icon="refresh" onClick={() => retryPhonePhotos(userId)}>{t("Try again")}</Button>
               <Button size="sm" variant="ghost" onClick={() => void removeRefused()}>{t("Remove")}</Button>
             </span>

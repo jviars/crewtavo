@@ -36,8 +36,8 @@ export function VisitStep({ quote, extras, salesperson, current, canSell, onSend
   const rep = firstName(salesperson);
 
   if (state === "signed") return <SignedView quote={quote} extras={extras} salesperson={salesperson} canSell={canSell} />;
-  if (!quote.lines.length) return <span className="muted small">Price the estimate first; the iPad shows the same list.</span>;
-  if (state === "closed") return <span className="muted small">This estimate was marked {quote.status === "lost" ? "lost" : "archived"}. Reopen it from the quote to visit.</span>;
+  if (!quote.lines.length) return <p className={styles.note}>Price the estimate first; the iPad shows the same list.</p>;
+  if (state === "closed") return <p className={styles.note}>This estimate was marked {quote.status === "lost" ? "lost" : "archived"}. Reopen it from the quote to visit.</p>;
 
   // Only a price set on the iPad counts as priced on site; the office sending the exact price
   // instead of the range (exact_sent_at) means nobody has been out yet.
@@ -60,7 +60,7 @@ export function VisitStep({ quote, extras, salesperson, current, canSell, onSend
           <Button icon="send" onClick={() => onSend("exact")}>Send it to sign online</Button>
         </div>
       )}
-      <p className={`muted small ${styles.note}`}>On the iPad: the same list, bigger. Check it on the roof, add what's found, set the exact price, then sign together.</p>
+      <p className={styles.note}>On the iPad: the same list, bigger. Check it on the roof, add what's found, set the exact price, then sign together.</p>
     </div>
   );
 }
@@ -88,67 +88,64 @@ function SignedView({ quote, extras, salesperson, canSell }: { quote: EstimateQu
 
   return (
     <div className={styles.signed}>
-      <div className={styles.banner} role="status">
-        <span className={styles.bannerIcon} aria-hidden="true"><Icon name="check" size={20} bold /></span>
-        <div className={styles.bannerText}>
-          <strong>{signedHeadline(approval, quote.total)}</strong>
-          <p>
-            {signedSentence(approval, quote.approved_at, company.name, company.timezone)}
-            {copy ? ` ${copy}` : ""}
-          </p>
-          {canCopy && (
-            <div className={styles.bannerActions}>
-              <Button size="sm" icon="mail" loading={sendCopy.isPending} onClick={() => sendCopy.mutate("email")}>Email {who} a copy</Button>
-            </div>
-          )}
+      <div className="callout callout-good" role="status">
+        <Icon name="check" size={16} />
+        <div className="grow">
+          <div>{signedHeadline(approval, quote.total)}</div>
+          {signedSentence(approval, quote.approved_at, company.name, company.timezone)}
+          {copy ? ` ${copy}` : ""}
         </div>
+        {canCopy && <Button size="sm" icon="mail" loading={sendCopy.isPending} onClick={() => sendCopy.mutate("email")}>Email {who} a copy</Button>}
       </div>
 
-      <section className={styles.panel} aria-labelledby={changedId}>
-        <h3 id={changedId}>{changedTitle}</h3>
-        <div className={styles.compare}>
-          {ranged && (
-            <>
-              <div className={`${styles.compareRow} ${styles.compareMuted}`}>
-                <span>The range you sent{quote.range_accepted_at ? `, ${who} said yes ${dayText(quote.range_accepted_at, company.timezone)}` : ""}</span>
-                <span>{rangeWords({ low: quote.range_low!, high: quote.range_high! })}</span>
+      <div className={styles.signedGrid}>
+        <div className={styles.main}>
+          <section className={styles.panel} aria-labelledby={changedId}>
+            <h3 id={changedId} className={styles.subhead}>{changedTitle}</h3>
+            <div className={styles.compare}>
+              {ranged && (
+                <>
+                  <div className={`${styles.compareRow} ${styles.compareMuted}`}>
+                    <span>The range you sent{quote.range_accepted_at ? `, ${who} said yes ${dayText(quote.range_accepted_at, company.timezone)}` : ""}</span>
+                    <span>{rangeWords({ low: quote.range_low!, high: quote.range_high! })}</span>
+                  </div>
+                  <div className={styles.changes}>
+                    <ChangeList changes={changes} empty={<p className={styles.note}>Nothing changed. It was signed just as the estimate went out.</p>} />
+                  </div>
+                </>
+              )}
+              {discount > 0 && (
+                <div className={styles.compareRow}>
+                  <span>Discount</span>
+                  <span>{signedMoney(-discount)}</span>
+                </div>
+              )}
+              <div className={styles.compareTotal}>
+                <span>
+                  <strong>Signed price</strong>
+                  {pill && <StatusPill label={pill.label} tone={pill.tone} />}
+                </span>
+                <strong>{money(quote.total)}</strong>
               </div>
-              <div className={styles.changes}>
-                <ChangeList changes={changes} empty={<p className={styles.note}>Nothing changed. It was signed just as the estimate went out.</p>} />
-              </div>
-            </>
-          )}
-          {discount > 0 && (
-            <div className={styles.compareRow}>
-              <span>Discount</span>
-              <span>{signedMoney(-discount)}</span>
+              {figures?.margin != null && (
+                <p className={styles.marginLine} data-low={figures.margin < LOW_MARGIN || undefined}>
+                  {figures.pricedAt && <AbcBadge />}
+                  <span>
+                    <strong>{figures.margin}% margin</strong>
+                    {figures.pricedAt ? " at the ABC Supply prices it was signed with" : " at your price list's costs"}
+                    {figures.costPartial ? ". Some lines have no cost, so it's really lower." : ""}
+                  </span>
+                </p>
+              )}
             </div>
-          )}
-          <div className={styles.compareTotal}>
-            <span>
-              <strong>Signed price</strong>
-              {pill && <StatusPill label={pill.label} tone={pill.tone} />}
-            </span>
-            <strong>{money(quote.total)}</strong>
-          </div>
-          {figures?.margin != null && (
-            <p className={styles.marginLine} data-low={figures.margin < LOW_MARGIN || undefined}>
-              {figures.pricedAt && <AbcBadge />}
-              <span>
-                <strong>{figures.margin}% margin</strong>
-                {figures.pricedAt ? " at the ABC Supply prices it was signed with" : " at your price list's costs"}
-                {figures.costPartial ? ". Some lines have no cost, so it's really lower." : ""}
-              </span>
-            </p>
-          )}
+          </section>
+
+          <NotesThread quoteId={quote.id} composer="office" title="Notes" placeholder="Add a note for the crew: where the dumpster goes, the gate code…" bare />
         </div>
-      </section>
-
-      <section className={styles.panel}>
-        <NotesThread quoteId={quote.id} composer="office" title="Notes" placeholder="Add a note for the crew: where the dumpster goes, the gate code…" bare />
-      </section>
-
-      <SignedEstimate quote={quote} extras={extras} />
+        <aside className={styles.aside} aria-label="The signed estimate">
+          <SignedEstimate quote={quote} extras={extras} />
+        </aside>
+      </div>
     </div>
   );
 }

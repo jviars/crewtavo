@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { ADMIN_PASSWORD, WRONG_PASSWORD } from "../src/lib/auth";
+import { encryptJson } from "../src/lib/crypto";
+import { forgetMailbox } from "../src/lib/notify";
 import type { Db } from "../src/lib/supabase";
 import { ADMIN_FROM_TEAM_PAGE, invitePerson } from "../src/services/team";
 
@@ -256,5 +258,100 @@ describe("links into an admin's account", () => {
     expect((await app.request(`/api/team/${SAM}/invite-link`, { method: "POST", headers }, env)).status).toBe(200);
     expect(s.passwordChecks).toBe(1);
     expect(wrote(s)).toEqual(["link recovery", "link recovery"]);
+  });
+});
+
+describe("an admin's links and the company's mailbox", () => {
+  /** The company's own Resend key, connected by `connectedBy`; the emails that went, by who they came from. */
+  async function withMailbox(s: ReturnType<typeof supabase>, connectedBy: string) {
+    forgetMailbox(CO);
+    const ciphertext = await encryptJson(env, { api_key: "re_company" });
+    const inner = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const table = url.pathname.replace("/rest/v1/", "");
+      if (table === "integrations") return Response.json([{ status: "connected", settings: { preset: "resend", kind: "resend", from_email: "office@greenlawn.example" }, connected_by: connectedBy }]);
+      if (table === "integration_secrets") return Response.json([{ ciphertext }]);
+      // Whether whoever connected it is an owner now.
+      const who = url.searchParams.get("user_id")?.replace(/^eq\./, "");
+      if (table === "memberships" && url.searchParams.get("role") === "eq.owner" && who) return Response.json(s.members[who]?.role === "owner" ? [{ user_id: who }] : []);
+      return inner(input, init);
+    });
+    return () => s.emails.map((e) => (e as unknown as { from: string }).from);
+  }
+
+  it("go through it only when an owner connected it, and through the server's email otherwise", async () => {
+    let s = supabase();
+    let from = await withMailbox(s, ADA);
+    expect(await (await send("POST", `/team/${ADA}/password-link`, { current_password: "right" })).json()).toEqual({ emailed: true, link: null });
+    expect(from()).toEqual(["Crewtavo <hello@crewtavo.example>"]);
+
+    s = supabase();
+    from = await withMailbox(s, PAT);
+    expect((await send("POST", `/team/${ADA}/password-link`, { current_password: "right" })).status).toBe(200);
+    expect(from()).toEqual(['"Green Lawn" <office@greenlawn.example>']);
+  });
+
+  it("aren't emailed at all when it's the only email and an owner didn't connect it: the link comes back to hand over", async () => {
+    const s = supabase();
+    await withMailbox(s, ADA);
+    const res = await app.request(`/api/team/${ADA}/password-link`, { method: "POST", headers, body: JSON.stringify({ current_password: "right" }) }, { ...env, RESEND_API_KEY: undefined, EMAIL_FROM: undefined });
+    expect(await res.json()).toEqual({ emailed: false, link: "https://ops.example.com/?token_hash=hash123&type=recovery&welcome=1" });
+    expect(s.emails).toEqual([]);
+  });
+
+  it("leave the crew's links to it, whoever connected it", async () => {
+    const s = supabase();
+    const from = await withMailbox(s, ADA);
+    expect((await app.request(`/api/team/${SAM}/invite-link`, { method: "POST", headers }, { ...env, RESEND_API_KEY: undefined, EMAIL_FROM: undefined })).status).toBe(200);
+    expect(from()).toEqual(['"Green Lawn" <office@greenlawn.example>']);
+  });
+});
+
+describe("access given back", () => {
+  it("to someone with admin access asks for the password first, as giving it does, and tells the owners", async () => {
+    const s = supabase();
+    s.members[ADA]!.active = false;
+    const missing = await send("POST", `/team/${ADA}/restore`);
+    expect(missing.status).toBe(400);
+    expect(await errorOf(missing)).toBe(ADMIN_PASSWORD);
+    expect(await errorOf(await send("POST", `/team/${ADA}/restore`, { current_password: "guess" }))).toBe(WRONG_PASSWORD);
+    expect(s.log).toEqual([]);
+
+    const res = await send("POST", `/team/${ADA}/restore`, { current_password: "right" });
+    expect(res.status).toBe(200);
+    expect(s.log).toEqual([
+      { what: "grant", body: { p_user: PAT, p_company: CO, p_target: ADA } },
+      { what: "memberships PATCH", body: { active: true } },
+    ]);
+    await vi.waitFor(() => expect(s.tables.activity).toHaveLength(1));
+    expect(s.tables.activity[0]).toMatchObject({ verb: "team.admin_access", summary: "Pat Owner gave Ada Admin their access back, as Admin" });
+  });
+
+  it("goes by their role as it is now", async () => {
+    const s = supabase();
+    s.members[SAM]!.active = false;
+    s.members[SAM]!.role_id = GM;
+    expect(await errorOf(await send("POST", `/team/${SAM}/restore`))).toBe(ADMIN_PASSWORD);
+    expect(s.log).toEqual([]);
+  });
+
+  it("to anyone else needs no password, and someone with access already is left as they are", async () => {
+    const s = supabase();
+    s.members[SAM]!.active = false;
+    expect((await send("POST", `/team/${SAM}/restore`)).status).toBe(200);
+    expect(s.log).toEqual([{ what: "memberships PATCH", body: { active: true } }]);
+    expect((await send("POST", `/team/${ADA}/restore`)).status).toBe(200);
+    expect(s.log).toHaveLength(1);
+    expect(s.passwordChecks).toBe(0);
+  });
+
+  it("keeps the rules for who acts for an owner", async () => {
+    const s = supabase();
+    s.members[PAT]!.role = "admin";
+    s.members[SAM]!.role = "owner";
+    s.members[SAM]!.active = false;
+    expect(await errorOf(await send("POST", `/team/${SAM}/restore`, { current_password: "right" }))).toBe("Only an owner can do that for another owner.");
+    expect(s.log).toEqual([]);
   });
 });

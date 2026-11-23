@@ -5,7 +5,10 @@
  * nobody changes their own role. The owners hear about every change an assistant makes (the
  * assistant_more_areas migration). An invite's link is emailed, never handed to the assistant.
  * Admin-level access (adminLevel) is never given here: it asks for the person's password, on the
- * Settings → People page (the database refuses it from an assistant too).
+ * Settings → People page (the database refuses it from an assistant too). Nor is office or estimator
+ * access: they see every client, the prices and the money, so text an assistant reads (a client's
+ * note, a website form) can't have it hand those to someone. An assistant invites, moves and gives
+ * back crew leads and field crew only (the assistant_prices_are_money migration holds it to that).
  */
 import { ADMINS, adminLevel, OFFICE, PERMISSIONS, ROLE_LABELS, STAFF, type Role } from "@crewtavo/core";
 import { z } from "zod";
@@ -18,6 +21,22 @@ const permissionKeys = PERMISSIONS.map((p) => p.key) as [string, ...string[]];
 
 /** The team's levels (not Subcontractor: subs' sign-ins are given on their page under Subs). */
 const LEVELS = STAFF as [Role, ...Role[]];
+
+/** The levels an assistant may give someone. */
+const ASSISTANT_GIVES: readonly string[] = ["crew_lead", "field_crew"];
+
+/** Giving office or estimator access from an assistant. */
+export const OFFICE_FROM_TEAM_PAGE = "An AI assistant only gives crew lead or field crew access. Give office or estimator access from Settings → People in Crewtavo.";
+
+/**
+ * Refuses giving more than crew lead access, as a level or a custom role (whose base role is its
+ * level). Admin-level access says where it's given, with the password.
+ */
+async function requireCrewLevel(ctx: ToolContext, role: string, roleId?: string | null) {
+  if (await adminAccess(ctx.db, ctx.companyId, role, roleId)) throw new Error(ADMIN_FROM_TEAM_PAGE);
+  const level = roleId ? (await one(ctx.db.from("company_roles").select("base_role").eq("id", roleId).eq("company_id", ctx.companyId).maybeSingle(), "That role")).base_role : role;
+  if (!ASSISTANT_GIVES.includes(level)) throw new Error(OFFICE_FROM_TEAM_PAGE);
+}
 
 /** Everyone on the team, with their role and, for the office with job costs, their pay rate. Not subs. */
 export async function teamList(ctx: ToolContext, includeInactive = false) {
@@ -56,7 +75,7 @@ export const teamTools = {
   }),
   invite_person: tool({
     description:
-      "Invite someone to the team by email, with a role (a level, or a custom role_id from list_team). Crewtavo emails them a link to set up their account; someone who already has an account just gets access. Not as an owner or admin (or a custom role with the apps, settings or team area): that's done in Crewtavo, which asks for the person's password. Confirm the email and role with the person first.",
+      "Invite someone to the team by email as a crew lead or field crew (a level, or a custom role_id from list_team based on one). Crewtavo emails them a link to set up their account; someone who already has an account just gets access. Office, estimator, admin and owner access are given in Crewtavo, under Settings → People. Confirm the email and role with the person first.",
     input: z.object({
       email: z.email(),
       full_name: z.string().trim().max(120).optional(),
@@ -67,6 +86,8 @@ export const teamTools = {
     area: "team",
     run: async (ctx, a) => {
       requireRole(ctx, ADMINS, "team");
+      // Before any account is made for them.
+      await requireCrewLevel(ctx, a.role, a.role_id);
       const { link: _, ...result } = await invitePerson(
         { db: ctx.db, env: ctx.env, companyId: ctx.companyId, userId: ctx.userId, role: ctx.role, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, "") },
         { email: a.email, full_name: a.full_name, role: a.role, role_id: a.role_id },
@@ -75,14 +96,17 @@ export const teamTools = {
     },
   }),
   change_role: tool({
-    description: "Change someone's role: a level (office, estimator, crew_lead, field_crew) or a custom role (role_id). Nobody can be given more access than you have; you can't change your own role. Owner and admin access (or a custom role with the apps, settings or team area) is given in Crewtavo, which asks for the person's password.",
+    description: "Change someone's role to crew lead or field crew: a level (crew_lead, field_crew) or a custom role (role_id) based on one. Nobody can be given more access than you have; you can't change your own role. Office, estimator, admin and owner access are given in Crewtavo, under Settings → People.",
     input: z.object({ user_id: z.uuid(), role: z.enum(LEVELS).optional(), role_id: z.uuid().nullable().optional(), ...companyArg }),
     area: "team",
     run: async (ctx, a) => {
       if (!a.role && a.role_id === undefined) throw new Error("Give a role or a role_id.");
-      if (await adminAccess(ctx.db, ctx.companyId, a.role ?? "", a.role_id)) throw new Error(ADMIN_FROM_TEAM_PAGE);
+      // role_id null with no role takes them off their custom role, at the level they have now: that
+      // level is what they're left with, so it's the one checked.
+      const level = a.role ?? (a.role_id ? "" : (await one(ctx.db.from("memberships").select("role").eq("company_id", ctx.companyId).eq("user_id", a.user_id).maybeSingle(), "That person")).role);
+      await requireCrewLevel(ctx, level, a.role_id);
       // A custom role decides the level itself (its base role).
-      const patch = a.role_id ? { role_id: a.role_id } : { role: a.role!, role_id: null };
+      const patch = a.role_id ? { role_id: a.role_id } : { ...(a.role && { role: a.role }), role_id: null };
       const { data, error } = await ctx.db.from("memberships").update(patch).eq("company_id", ctx.companyId).eq("user_id", a.user_id).select("user_id, role");
       if (error) throw new Error(friendly(error.message));
       if (!data?.length) throw new Error("That person not found (or you can't change them).");
@@ -102,10 +126,13 @@ export const teamTools = {
     },
   }),
   restore_person: tool({
-    description: "Give someone whose access was taken away their access back, with the role they had.",
+    description: "Give a crew lead or field crew whose access was taken away their access back, with the role they had. Anyone else's (office, estimator, admin or owner) is given back in Crewtavo, under Settings → People.",
     input: z.object({ user_id: z.uuid(), ...companyArg }),
     area: "team",
     run: async (ctx, a) => {
+      // Giving access back is giving it (the database refuses more than crew lead from an assistant too).
+      const member = await one(ctx.db.from("memberships").select("role, role_id").eq("company_id", ctx.companyId).eq("user_id", a.user_id).maybeSingle(), "That person");
+      await requireCrewLevel(ctx, member.role, member.role_id);
       const { data, error } = await ctx.db.from("memberships").update({ active: true }).eq("company_id", ctx.companyId).eq("user_id", a.user_id).select("user_id");
       if (error) throw new Error(friendly(error.message));
       if (!data?.length) throw new Error("That person not found (or you can't change them).");

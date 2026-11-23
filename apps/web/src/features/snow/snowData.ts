@@ -2,6 +2,7 @@
 import { visitPrice } from "@crewtavo/core/promos";
 import { snowBands, type SnowRules, type SnowTier } from "@crewtavo/core/snow";
 import { supabase, unwrap } from "@/lib/api";
+import { loadSettings } from "@/lib/companySettings";
 
 export { inchesText as inches } from "@crewtavo/core/snow";
 
@@ -43,11 +44,11 @@ export const tiersOf = (s: Pick<Site, "tiers">): SnowTier[] =>
 /** The business's standard storm prices (core snowBands), which a customer's own are filled from. */
 export const bandsKey = (companyId: string) => ["snow", companyId, "standard-prices"] as const;
 export const loadBands = async (companyId: string) =>
-  snowBands(unwrap(await supabase().from("companies").select("bands:settings->snow_storm_prices").eq("id", companyId).single()).bands);
+  snowBands((await loadSettings(companyId)).snow_storm_prices);
 /** Whether storms schedule themselves (settings.snow_auto_schedule, set_snow_auto_schedule): off until someone turns it on. */
 export const autoKey = (companyId: string) => ["snow", companyId, "auto-schedule"] as const;
 export const loadAuto = async (companyId: string) =>
-  unwrap(await supabase().from("companies").select("auto:settings->snow_auto_schedule").eq("id", companyId).single()).auto === true;
+  (await loadSettings(companyId)).snow_auto_schedule === true;
 /** What one push bills a job: its own lines, as a visit of it costs (core visitPrice). */
 export const loadPushPrice = async (jobId: string) => {
   const job = unwrap(await supabase().from("jobs").select("financials:job_financials(contract_total), lines:job_line_items(quantity, unit_price, discount_billing)").eq("id", jobId).single());

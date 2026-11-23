@@ -97,6 +97,8 @@ vi.mock("../src/lib/supabase", () => {
   const client = () => ({
     auth: { getClaims: async () => ({ data: { claims: { sub: "viewer" } }, error: null }) },
     rpc: async (name: string, args: Row = {}) => {
+      // The company's settings as the person reads them (lib/companySettings.ts settingsAs): all of them, for the office.
+      if (name === "company_settings") return { data: t("companies").find((c) => c.id === args.p_company)?.settings ?? null, error: null };
       const meanwhile = state.meanwhile;
       state.meanwhile = null;
       meanwhile?.();

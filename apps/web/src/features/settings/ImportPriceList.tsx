@@ -94,16 +94,17 @@ export function ImportPriceListDialog({ existing, onClose }: { existing: string[
         {!rows.length ? (
           <>
             <label className="dropzone">
-              <Icon name="upload" size={28} />
+              <Icon name="upload" size={22} />
               <strong>Choose a spreadsheet (.csv)</strong>
               <span className="small">Column names in the first row: name, description, unit, price, cost, taxable, category.</span>
               <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) load(f); }} />
             </label>
-            <span className="muted small">From Jobber: Settings → Products & Services → Export, then choose that file here.</span>
+            <p className="set-note">From Jobber: Settings → Products & Services → Export, then choose that file here.</p>
           </>
         ) : (
           <>
-            <div className="form-grid">
+            <p className="set-note">Which column holds each detail. Columns you don't need can stay as Don't import.</p>
+            <div className="set-grid">
               {COLUMNS.map((c) => (
                 <label key={c.key} className="field">
                   <span>{c.label}</span>
@@ -114,7 +115,7 @@ export function ImportPriceListDialog({ existing, onClose }: { existing: string[
                 </label>
               ))}
             </div>
-            <p className="muted small" style={{ margin: 0 }}>{items.length} new {items.length === 1 ? "item" : "items"}. Names already in your price list are skipped.</p>
+            <p className="set-note"><strong>{items.length} new {items.length === 1 ? "item" : "items"}.</strong> Names already in your price list are skipped.</p>
           </>
         )}
         <FormError error={error ?? run.error} />

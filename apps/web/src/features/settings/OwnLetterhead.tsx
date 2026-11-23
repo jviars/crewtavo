@@ -47,9 +47,9 @@ export function OwnLetterhead({ header, footer, onChange }: { header: Letterhead
         </Button>
         {/* Cut before letterheads filled the sheet (inside the margins, blank edges trimmed): it prints as it always has until it's uploaded again. */}
         {(header || footer) && !printsFullSheet({ header, footer }) && (
-          <span className="small">Upload it again to print it edge to edge, right where it sits on your stationery.</span>
+          <span className="set-note"><strong>Upload it again to print it edge to edge, right where it sits on your stationery.</strong></span>
         )}
-        <span className="muted small">A PDF of a blank page of your letterhead prints cleanest: in Word, choose File → Save as PDF. A scan or photo of a printed page works too.</span>
+        <span className="set-note">A PDF of a blank page of your letterhead prints cleanest: in Word, choose File → Save as PDF. A scan or photo of a printed page works too.</span>
       </div>
       <FormError error={read.error} />
       <input

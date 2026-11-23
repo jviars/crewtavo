@@ -27,13 +27,11 @@ export function WebsitePage() {
     return (
       <div className="content">
         <PageHeader title="Website" />
-        <div className="card">
-          <EmptyState icon="globe" title="Edit your website here" action={canInstall ? <Link className="btn btn-primary" to="/apps/sveltia">Install Sveltia CMS</Link> : undefined}>
-            {canInstall
-              ? "If your website has Sveltia CMS, install it from Apps and add your website's address. Its editor then opens right here."
-              : "Ask an owner or admin to install Sveltia CMS from Apps. Your website's editor then opens right here."}
-          </EmptyState>
-        </div>
+        <EmptyState icon="globe" title="Edit your website here" action={canInstall ? <Link className="btn btn-primary" to="/apps/sveltia">Install Sveltia CMS</Link> : undefined}>
+          {canInstall
+            ? "If your website has Sveltia CMS, install it from Apps and add your website's address. Its editor then opens right here."
+            : "Ask an owner or admin to install Sveltia CMS from Apps. Your website's editor then opens right here."}
+        </EmptyState>
       </div>
     );
   }
@@ -49,13 +47,13 @@ function Editor({ site }: { site: WebsiteSite }) {
   return (
     <div className={s.page}>
       <div className={s.bar}>
-        <Icon name="globe" size={16} />
+        <span className={s.icon} aria-hidden="true"><Icon name="globe" size={16} /></span>
         <strong className={s.name}>{name}</strong>
         <span className={s.cms}>{site.cms ? CMS_NAMES[site.cms] : "Website editor"}</span>
         <span className="grow" />
         <button
           type="button"
-          className="icon-btn"
+          className="btn btn-sm btn-ghost btn-icon"
           aria-label="Reload the editor"
           title="Reload the editor"
           onClick={() => {
@@ -65,9 +63,9 @@ function Editor({ site }: { site: WebsiteSite }) {
         >
           <Icon name="refresh" size={16} />
         </button>
-        <a className="btn btn-sm" href={site.admin_url} target="_blank" rel="noreferrer" aria-label="Open in a new tab" title="Open in a new tab">
-          <span className="hide-mobile">Open in a new tab</span>
+        <a className="btn btn-sm btn-ghost" href={site.admin_url} target="_blank" rel="noreferrer" aria-label="Open in a new tab" title="Open in a new tab">
           <Icon name="external" size={14} />
+          <span className="hide-mobile">Open in a new tab</span>
         </a>
       </div>
       <div className={s.frameArea}>
@@ -95,16 +93,14 @@ function OpensInTab({ site, canInstall }: { site: WebsiteSite; canInstall: boole
   return (
     <div className="content">
       <PageHeader title="Website" />
-      <div className="card">
-        <EmptyState
-          icon="globe"
-          title={`${name} opens in its own tab`}
-          action={<a className="btn btn-primary" href={site.admin_url} target="_blank" rel="noreferrer">Open {site.cms ? CMS_NAMES[site.cms] : "the editor"} <Icon name="external" size={14} /></a>}
-        >
-          Your website doesn't let other sites show it, so its editor can't open inside Crewtavo.
-          {canInstall && <> <Link to="/apps/sveltia">See how to change that</Link>.</>}
-        </EmptyState>
-      </div>
+      <EmptyState
+        icon="globe"
+        title={`${name} opens in its own tab`}
+        action={<a className="btn btn-primary" href={site.admin_url} target="_blank" rel="noreferrer">Open {site.cms ? CMS_NAMES[site.cms] : "the editor"} <Icon name="external" size={14} /></a>}
+      >
+        Your website doesn't let other sites show it, so its editor can't open inside Crewtavo.
+        {canInstall && <> <Link to="/apps/sveltia">See how to change that</Link>.</>}
+      </EmptyState>
     </div>
   );
 }

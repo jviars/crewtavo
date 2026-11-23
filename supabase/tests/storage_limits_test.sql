@@ -245,11 +245,11 @@ select public.storage_set_limit(:'co', 'default') as stored \gset
 select tsl.check(not (:'stored'::jsonb ? 'limit_bytes') and (public.storage_overview(:'co') ->> 'limit_bytes')::bigint = 50000
     and public.storage_overview(:'co') ->> 'limit_mode' = 'default', 'and goes back to the default');
 -- A page saving other settings, with what it read before, or trying to set the limit itself.
-update public.companies set settings = settings || '{"maps": {"style": "satellite"}}' || '{"storage": {"limit_bytes": 1}}' where id = :'co';
-select tsl.check((select settings -> 'maps' ->> 'style' = 'satellite' and settings -> 'storage' = :'stored'::jsonb from public.companies where id = :'co'),
+update public.companies set settings = public.company_settings(id) || '{"maps": {"style": "satellite"}}' || '{"storage": {"limit_bytes": 1}}' where id = :'co';
+select tsl.check((select public.company_settings(id) -> 'maps' ->> 'style' = 'satellite' and public.company_settings(id) -> 'storage' = :'stored'::jsonb from public.companies where id = :'co'),
   'the company''s other settings save, and the limit stays as it was when someone signed in writes it');
-update public.companies set settings = settings - 'storage' where id = :'co';
-select tsl.check((select settings -> 'storage' = :'stored'::jsonb from public.companies where id = :'co'), 'or leaves it out');
+update public.companies set settings = public.company_settings(id) - 'storage' where id = :'co';
+select tsl.check((select public.company_settings(id) -> 'storage' = :'stored'::jsonb from public.companies where id = :'co'), 'or leaves it out');
 commit;
 begin;
 select set_config('request.jwt.claims', '', true);

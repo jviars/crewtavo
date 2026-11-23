@@ -1,22 +1,25 @@
 /**
- * Under a guide: "Was this helpful?" and "Suggest a change" for everyone reading it, and for the
- * office the suggestions still to look at and how this revision's votes went. Sent through
+ * Under a guide: "Was this guide helpful?" with Yes and No, and "Suggest a change", for everyone
+ * reading it (KB-Guide.dc.html). In the guide's rail, for the office: how this revision's votes went
+ * and the suggestions still to look at, each marked done once handled. Sent through
  * public.guide_feedback, which tells the guide's reviewer (or the office) about a suggestion.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Face } from "@/components/ui/Avatar";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { personHue } from "@/components/ui/InboxList";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
+import s from "./kb.module.css";
 
 interface Person { name: string; photo?: string | null }
 
-export function GuideFeedback({ page, editor, person }: { page: { id: string; revision: number }; editor: boolean; person: (id: string | null) => Person }) {
+export function GuideFeedback({ page }: { page: { id: string; revision: number } }) {
   const { company, userId } = useSession();
   const queryClient = useQueryClient();
   const [writing, setWriting] = useState(false);
@@ -51,40 +54,35 @@ export function GuideFeedback({ page, editor, person }: { page: { id: string; re
   };
 
   return (
-    <>
-      <section className="card card-pad guide-feedback no-print" aria-labelledby="guide-feedback-title">
-        <div className="guide-feedback-ask">
-          <strong id="guide-feedback-title">{suggest.isSuccess ? t("Thanks. The office will take a look.") : voted === null ? t("Was this guide helpful?") : voted ? t("Thanks. Glad it helped.") : t("Thanks. What would make it better?")}</strong>
-          <div className="row" style={{ gap: 8 }}>
-            <Button size="sm" aria-pressed={voted === true} disabled={mine.isPending} onClick={() => vote.mutate(true)}><Icon name="thumbsUp" size={16} />{t("Yes")}</Button>
-            <Button size="sm" aria-pressed={voted === false} disabled={mine.isPending} onClick={() => vote.mutate(false)}><span className="icon-flip"><Icon name="thumbsUp" size={16} /></span>{t("No")}</Button>
-          </div>
+    <section className={cx(s.help, "no-print")} aria-labelledby="guide-feedback-title">
+      <div className={s.helpRow}>
+        <h2 id="guide-feedback-title" className={s.helpAsk}>{suggest.isSuccess ? t("Thanks. The office will take a look.") : voted === null ? t("Was this guide helpful?") : voted ? t("Thanks. Glad it helped.") : t("Thanks. What would make it better?")}</h2>
+        <div className={s.helpVotes}>
+          <Button size="sm" aria-pressed={voted === true} disabled={mine.isPending} onClick={() => vote.mutate(true)}><Icon name="thumbsUp" size={14} />{t("Yes")}</Button>
+          <Button size="sm" aria-pressed={voted === false} disabled={mine.isPending} onClick={() => vote.mutate(false)}><span className={s.flip}><Icon name="thumbsUp" size={14} /></span>{t("No")}</Button>
         </div>
-        {writing ? (
-          <form className="stack-sm" onSubmit={send}>
-            <Field label={t("What's wrong or missing?")} hint={t("The office sees this with your name, and the guide it's about.")}>
-              <textarea className="textarea" rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("e.g. Step 3 says 20 gallons, but we use 30 now.")} autoFocus />
-            </Field>
-            <FormError error={suggest.error ?? vote.error} />
-            <div className="row" style={{ gap: 8 }}>
-              <Button type="submit" size="sm" variant="primary" loading={suggest.isPending} disabled={!text.trim()}>{t("Send to the office")}</Button>
-              <Button size="sm" variant="ghost" onClick={() => { setWriting(false); suggest.reset(); }}>{t("Cancel")}</Button>
-            </div>
-          </form>
-        ) : (
-          <>
-            <FormError error={vote.error} />
-            <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setWriting(true)}>{t("Suggest a change")}</button>
-          </>
-        )}
-      </section>
-      {editor && <OfficeFeedback page={page} person={person} />}
-    </>
+        {!writing && <button type="button" className={cx("link-btn", s.suggest)} onClick={() => setWriting(true)}><Icon name="edit" size={14} />{t("Suggest a change")}</button>}
+      </div>
+      {writing ? (
+        <form className={s.suggestForm} onSubmit={send}>
+          <Field label={t("What's wrong or missing?")} hint={t("The office sees this with your name, and the guide it's about.")}>
+            <textarea className="textarea" rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder={t("e.g. Step 3 says 20 gallons, but we use 30 now.")} autoFocus />
+          </Field>
+          <FormError error={suggest.error ?? vote.error} />
+          <div className={s.suggestActions}>
+            <Button type="submit" variant="primary" loading={suggest.isPending} disabled={!text.trim()}>{t("Send to the office")}</Button>
+            <Button onClick={() => { setWriting(false); suggest.reset(); }}>{t("Cancel")}</Button>
+          </div>
+        </form>
+      ) : (
+        <FormError error={vote.error} />
+      )}
+    </section>
   );
 }
 
-/** For the office: suggestions still to look at, each marked done once handled, and this revision's votes. */
-function OfficeFeedback({ page, person }: { page: { id: string; revision: number }; person: (id: string | null) => Person }) {
+/** For the office, in the guide's rail: this revision's votes, and the suggestions still to look at. */
+export function OfficeFeedback({ page, person }: { page: { id: string; revision: number }; person: (id: string | null) => Person }) {
   const { company, userId } = useSession();
   const queryClient = useQueryClient();
   const feedback = useQuery({
@@ -104,31 +102,34 @@ function OfficeFeedback({ page, person }: { page: { id: string; revision: number
   if (feedback.isPending || (!rows.length && !feedback.error)) return null;
 
   return (
-    <section className="card no-print" aria-labelledby="office-feedback-title">
-      <div className="card-head row-between">
-        <strong id="office-feedback-title">{t("Feedback")}</strong>
-        <span className="muted small">{votes.length ? t("{done} of {count} found this revision helpful", { done: helpful, count: votes.length }) : t("No votes on this revision yet")}</span>
-      </div>
+    <section className={s.railSec} aria-labelledby="office-feedback-title">
+      <div className={s.railRow}><h2 id="office-feedback-title" className={s.railHead}>{t("Feedback")}</h2><span className={s.railCount}>{t("Revision {number}", { number: page.revision })}</span></div>
+      <p className={s.railNote}>{votes.length ? t("{done} of {count} found this revision helpful", { done: helpful, count: votes.length }) : t("No votes on this revision yet")}</p>
+      {votes.length > 0 && <span className={s.bar} data-tone={helpful / votes.length < 0.5 ? "danger" : undefined}><b style={{ width: `${(helpful / votes.length) * 100}%` }} /></span>}
       <FormError error={feedback.error ?? done.error} />
       {open.length === 0 ? (
-        <p className="muted small card-pad" style={{ margin: 0 }}>{handled ? t("No suggestions to look at ({count} done).", { count: handled }) : t("No suggestions to look at.")}</p>
+        <p className={s.railNote}>{handled ? t("No suggestions to look at ({count} done).", { count: handled }) : t("No suggestions to look at.")}</p>
       ) : (
-        open.map((f) => {
-          const who = person(f.user_id);
-          return (
-            <div key={f.id} className="card-row" style={{ alignItems: "flex-start" }}>
-              <span className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}><Face name={who.name} photo={who.photo} /></span>
-              <span className="grow stack-sm" style={{ gap: 2, minWidth: 0 }}>
-                <span className="small">
-                  <strong>{who.name}</strong>
-                  <span className="muted" title={formatDateTime(f.created_at)}> · {timeAgo(f.created_at)}{f.revision !== page.revision ? ` · ${t("about revision {number}", { number: f.revision })}` : ""}</span>
-                </span>
-                <span className="pre-wrap">{f.message}</span>
-              </span>
-              <Button size="sm" icon="check" loading={done.isPending && done.variables === f.id} onClick={() => done.mutate(f.id)}>{t("Done")}</Button>
-            </div>
-          );
-        })
+        <>
+          <p className={s.toLook}>{t("{count} to look at", { count: open.length })}</p>
+          <ul className={s.suggestions}>
+            {open.map((f) => {
+              const who = person(f.user_id);
+              return (
+                <li key={f.id} className={s.suggestion}>
+                  <div className={s.suggestionWho}>
+                    <span className={cx("avatar", s.face)} style={{ background: personHue(who.name) }}><Face name={who.name} photo={who.photo} /></span>
+                    <b>{who.name}</b>
+                    <span title={formatDateTime(f.created_at)}>{timeAgo(f.created_at)}</span>
+                  </div>
+                  <p className={s.suggestionText}>{f.message}</p>
+                  {f.revision !== page.revision && <p className={s.railNote}>{t("about revision {number}", { number: f.revision })}</p>}
+                  <Button size="sm" icon="check" loading={done.isPending && done.variables === f.id} aria-label={t("Done with {name}'s suggestion", { name: who.name })} onClick={() => done.mutate(f.id)}>{t("Done")}</Button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </section>
   );

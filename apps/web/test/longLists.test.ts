@@ -69,12 +69,12 @@ describe("a list with more than it first shows", () => {
   it("loads clients past the first 1,000, where Load more used to stall", async () => {
     // As it was: one request with a bigger limit, which the database cuts at 1,000 every time.
     expect((await db.from("clients").select("id").eq("company_id", COMPANY).order("display_name").limit(1050)).data).toHaveLength(MAX_ROWS);
-    const clients = await loadClients({ companyId: COMPANY, filter: "all", term: "", tag: "", sort: "name" }, 1050);
+    const clients = await loadClients({ companyId: COMPANY, filter: "all", term: "", tags: [], sort: "name" }, 1050);
     expect(clients.total).toBe(COUNT);
     expect(clients.rows).toHaveLength(1050);
     expect(new Set(ids(clients.rows)).size).toBe(1050);
     expect(clients.rows.map((c) => c.display_name)).toEqual(clients.rows.map((c) => c.display_name).sort());
-    expect((await loadClients({ companyId: COMPANY, filter: "all", term: "", tag: "", sort: "newest" }, 1300)).rows).toHaveLength(COUNT);
+    expect((await loadClients({ companyId: COMPANY, filter: "all", term: "", tags: [], sort: "newest" }, 1300)).rows).toHaveLength(COUNT);
     expect(db.requests.at(-1)!.order).toBe("created_at.desc,id.asc");
   });
 });

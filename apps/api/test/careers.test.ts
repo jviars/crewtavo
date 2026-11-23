@@ -185,6 +185,27 @@ describe("an application from the website's careers form", () => {
     expect(db.rpcs.some((r) => r.name === "job_application")).toBe(false);
   });
 
+  it("counts an application's files against the visitor's and the business's day of strangers' files, and keeps none past it", async () => {
+    const db = withCareersForm();
+    expect((await apply({ email: "a@x.test", resume: resume("cv.pdf", 2048), cover_letter: resume("letter.pdf", 4096) })).status).toBe(303);
+    expect(db.rpcs.filter((r) => r.name === "rate_limit_spend").map((r) => [r.args.p_key, r.args.p_amount, r.args.p_window_seconds])).toEqual([
+      ["upload-bytes:ip:unknown", 7, 86_400],
+      [`upload-bytes:company:${COMPANY}`, 7, 86_400],
+    ]);
+    // Without files there's nothing to count.
+    const plain = withCareersForm();
+    expect((await apply({ email: "a@x.test" })).status).toBe(303);
+    expect(plain.rpcs.some((r) => r.name === "rate_limit_spend")).toBe(false);
+
+    // The business's day is used up: turned away before anything is stored or kept, and the applicant hears why.
+    const full = withCareersForm({}, { rate_limit_spend: (args: { p_key: string }) => !args.p_key.startsWith("upload-bytes:company:") });
+    const res = await apply({ email: "a@x.test", resume: resume() }, { Accept: "application/json" });
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toBe("This form has taken in a lot of files today, so it can't take more until tomorrow. Try again tomorrow, or email your application.");
+    expect(full.uploads).toEqual([]);
+    expect(full.rpcs.some((r) => r.name === "job_application")).toBe(false);
+  });
+
   it("removes stored files when the rest can't be stored or the applicant isn't kept", async () => {
     const half = fakeDb({ tables: { website_forms: () => careersForm() }, uploadFails: true });
     expect((await apply({ email: "a@x.test", resume: resume("cv.pdf"), cover_letter: resume("letter.docx", 100, "") })).status).toBe(500);

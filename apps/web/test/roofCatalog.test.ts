@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_CATEGORIES, swatchOf } from "../src/features/materials/data";
 import { listed, packagesUsing, usesOf } from "../src/features/roofing/catalog/uses";
@@ -33,5 +34,11 @@ describe("the roofing catalog", () => {
     expect(usesOf([link], services, packages)).toEqual([{ link, service: services[0], amount: "3 bundles per square", packages: ["Good", "Better"] }]);
     expect(listed(["Good", "Better", "Best"])).toBe("Good, Better and Best");
     expect(listed(["Good"])).toBe("Good");
+  });
+
+  it("heads the Add step with the item's picture and its name over its details, as the next step does", () => {
+    const dialog = readFileSync(new URL("../src/features/roofing/catalog/CatalogItemDialog.tsx", import.meta.url), "utf8");
+    const head = dialog.slice(dialog.indexOf('<div className="material-picked">'));
+    expect(head).toMatch(/^<div className="material-picked">\s*<AbcPicture item=\{item\} \/>\s*<span className="grow">\s*<strong>\{item\.name\}<\/strong>/);
   });
 });

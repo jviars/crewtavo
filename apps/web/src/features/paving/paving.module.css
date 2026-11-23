@@ -1,0 +1,326 @@
+/*
+ * Paving (features/paving): the projects list (App-Paving.dc.html), a project's page, the paving
+ * calculator, its setup and the worksheet. Flat and quiet: hairlines, not boxes; the app's tokens, so
+ * dark mode follows. The pieces Roofing shares (a project's step strip and step sections, the swatches)
+ * stay in styles/features.css under "Paving and roofing".
+ */
+
+/* ---------- The projects list ---------- */
+
+/* How a paving job moves, on a hairline above and below: five numbered steps with chevrons between. */
+.steps { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 0; list-style: none; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); font-size: var(--fs-12); color: var(--text-3); }
+.step { display: flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; }
+.step:last-child { flex-grow: 0.8; }
+.stepNumber { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: var(--radius-pill); background: var(--fill-2); font-size: var(--fs-11); font-weight: 700; color: var(--text-2); }
+.stepText { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+.stepLabel { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.stepChevron { display: inline-flex; flex: none; margin-left: auto; color: var(--quiet); }
+
+/* The price book: one quiet line on a hairline under the list. */
+.nudge { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 42px; padding: 6px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); color: var(--text-2); }
+.nudge > svg { flex: none; color: var(--quiet); }
+.nudgeText { flex: 1 1 260px; min-width: 0; }
+.nudgeAction, .nudgeLink { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.nudgeAction { color: var(--green); }
+.nudgeAction:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.nudgeAction:disabled { cursor: default; opacity: 0.7; }
+.nudgeLink { color: var(--text-3); }
+.nudgeLink:hover { color: var(--ink); text-decoration: none; }
+
+@media (max-width: 900px) {
+  /*
+   * The phone list starts right under its title (Mobile-Apps.dc.html, Paving): no lede, no steps.
+   * A row says who it's for, what's measured and the price; the group heading says the stage.
+   */
+  :global(.page-lede):has(> .ledeWide) { display: none; }
+  .steps { display: none; }
+  .wide { display: none; }
+  .nudge { gap: 0 10px; padding: 12px 0 4px; font-size: var(--fs-14); }
+  .nudgeText { flex-basis: calc(100% - 26px); }
+  .nudgeAction, .nudgeLink { min-height: 44px; }
+  .nudgeAction { margin-left: 25px; }
+  .nudgeLink { margin-left: 8px; }
+}
+
+/* ---------- A project's page (ProjectFlow, PavingProjectPage) ---------- */
+
+/* The measured lot: the takeoff sheet, and what's on it as hairline rows with each item's swatch. */
+.takeoff { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 20px; align-items: start; }
+.takeoffPicture { display: block; overflow: hidden; border: 1px solid var(--divider); border-radius: 10px; background: var(--fill-2); }
+.takeoffPicture img { display: block; width: 100%; height: auto; }
+a.takeoffPicture:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.takeoffEmpty { display: grid; place-items: center; min-height: 160px; padding: 16px; text-align: center; font-size: var(--fs-13); color: var(--text-3); }
+.quantities { display: grid; margin: -9px 0 0; font-size: var(--fs-13); }
+.quantities > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; padding: 9px 0; border-bottom: 1px solid var(--row-divider); }
+.quantities dt { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text-2); }
+.quantities dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The estimate: what the asphalt gets, the calculator's lead, the price list's extras and the lines. */
+.work { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; }
+.workField { display: grid; gap: 6px; }
+.fieldLabel { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.calcLead { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); border-bottom: 1px solid var(--row-divider); }
+.calcLead > :global(.rel-icon) { flex: none; }
+.calcLeadText { display: grid; flex: 1; gap: 2px; min-width: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.calcLeadTitle { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.calcLead > :global(.btn) { flex: none; }
+.extras { display: grid; gap: 8px; }
+.subhead { display: flex; align-items: center; gap: 12px; min-height: 28px; }
+.subheadTitle { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-13); font-weight: 650; color: var(--ink); }
+.subheadAction { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.subheadAction:hover { color: var(--ink); }
+.subheadAction:disabled { cursor: default; opacity: 0.6; }
+.subheadAction > svg { color: var(--quiet); }
+.place { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: var(--fs-13); color: var(--text-3); }
+.place :global(.segmented) { max-width: 100%; }
+.services { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--row-divider); }
+.service { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 9px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); cursor: pointer; }
+.service:has(input:disabled) { cursor: default; }
+.service input { flex: none; margin: 0; }
+.serviceText { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.serviceName { font-weight: 600; color: var(--ink); }
+.serviceSub { font-size: var(--fs-12); color: var(--text-3); }
+.serviceAmount { flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.service[data-on] .serviceAmount { font-weight: 600; color: var(--ink); }
+.lines { display: grid; gap: 14px; min-width: 0; }
+.estimate td { vertical-align: top; }
+.estimate :is(th, td):first-child { padding-left: 0; }
+.estimate :is(th, td):last-child { padding-right: 0; }
+.estimate tr[data-optional] td { color: var(--text-3); }
+.estimateName { font-weight: 500; color: var(--ink); }
+.estimate tr[data-optional] .estimateName { color: var(--text-2); }
+.lines :global(.tag) { margin-left: 8px; vertical-align: 1px; }
+.lineNote { display: block; margin-top: 1px; font-size: var(--fs-12); color: var(--text-3); }
+
+/* The proposal's switch: its words in ink and a quiet line under them. */
+.switchRow { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--row-divider); cursor: pointer; }
+.switchRow > :global(.switch) { flex: none; margin-top: 1px; }
+.switchText { display: grid; gap: 2px; min-width: 0; }
+.switchLabel { font-size: var(--fs-13); font-weight: 500; color: var(--ink); }
+.switchHint { font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+
+/* The worksheets behind a quote (WorksheetsCard). */
+.worksheetsTitle { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.office { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: 500; letter-spacing: normal; color: var(--quiet); }
+.worksheetSub { display: grid; gap: 2px; }
+.worksheetNotes { color: var(--text-2); white-space: pre-wrap; }
+
+@media (max-width: 900px) {
+  .takeoff { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .quantities { margin-top: 0; font-size: var(--fs-15); }
+  .quantities > div { min-height: 48px; }
+  .quantities > div:last-child { border-bottom: 0; }
+  .calcLead { flex-wrap: wrap; }
+  .calcLead > :global(.btn) { flex: 1 1 100%; height: var(--control); font-size: var(--fs-14); }
+  .service { min-height: 60px; font-size: var(--fs-15); }
+  .serviceSub { font-size: var(--fs-13); }
+  .subheadTitle { font-size: var(--fs-15); }
+  .subheadAction { min-height: 44px; font-size: var(--fs-14); color: var(--green); }
+  .switchLabel { font-size: var(--fs-15); }
+  .switchHint { font-size: var(--fs-13); }
+  .estimate td, .estimate th { padding-inline: 4px; }
+}
+
+/* ---------- The paving calculator (PavingCalculatorPage) ---------- */
+/*
+ * The bid's sections on hairlines on the left, the estimate beside them (sticky on a desktop). On a
+ * phone the estimate follows the sections, and its total and way forward are pinned over the tab bar.
+ */
+.calc { max-width: 1440px; display: grid; grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 320px); gap: 36px; align-items: start; }
+.calcMain { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; min-width: 0; }
+.unit { font-size: var(--fs-13); color: var(--text-3); white-space: nowrap; }
+.grow { flex: 1; min-width: 0; }
+.addLink { display: inline-flex; align-items: center; gap: 5px; justify-self: start; padding: 0; border: 0; background: none; color: var(--green); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.addLink:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.addLink > svg { flex: none; }
+.big { height: 44px; font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+
+/* The job: picked from photo tiles (a chosen one ringed in ink), then the area. */
+.jobArea { display: grid; gap: 20px; }
+.jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 10px; }
+.job { position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 0; border: 0; border-radius: 10px; background: var(--page); color: var(--text-2); font: inherit; font-size: var(--fs-13); font-weight: 600; text-align: left; cursor: pointer; transition: color var(--dur-fast); }
+.job::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--border); pointer-events: none; transition: box-shadow var(--dur-fast); }
+.job:hover { color: var(--ink); }
+.job:hover::after { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.job:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.job[aria-pressed="true"] { color: var(--ink); }
+.job[aria-pressed="true"]::after { box-shadow: inset 0 0 0 2px var(--ink); }
+.jobPicture { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; background: var(--fill-2); color: var(--quiet); }
+.jobPicture img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-slow) var(--ease-out); }
+.job:hover .jobPicture img { transform: scale(1.04); }
+.jobCheck { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-pill); background: var(--solid); color: var(--on-solid); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+.jobName { padding: 8px 10px 9px; line-height: 1.3; }
+.area { display: grid; gap: 10px; }
+.areaHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.areaRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sides { display: grid; gap: 8px; }
+.sideTotal { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.areaNote { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.areaNote strong { font-weight: 600; color: var(--text-2); }
+
+/* A bid's lines: what it's worked out from, its amount, its price and its total, on hairlines. */
+.line, .lineHead { display: grid; grid-template-columns: minmax(0, 1fr) 150px 170px 96px; gap: 12px; align-items: center; }
+.lineHead { margin-top: -12px; padding: 8px 0 2px; font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+.lineHead > :last-child { text-align: right; }
+.line { min-height: 56px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.lineWhat { display: grid; gap: 6px; justify-items: start; min-width: 0; }
+.lineWhat :global(.select) { width: auto; max-width: 100%; }
+.lineName { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.lineCheck { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-2); cursor: pointer; }
+.lineCheck input { margin: 0; }
+.lineCell { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
+.inline > :global(.select) { max-width: 100%; }
+.reset { padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.reset:hover { color: var(--ink); text-decoration-color: currentColor; }
+.warn { font-size: var(--fs-12); font-weight: 600; color: var(--warning); }
+.lineTotal { font-size: var(--fs-13); font-weight: 600; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; transition: color var(--dur-fast); }
+.line[data-off] .lineTotal { font-weight: 500; color: var(--quiet); }
+
+/* Profit and the minimum charge. */
+.profit { display: grid; gap: 14px; }
+.profitRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+
+/* The estimate beside the bid: the total, how it splits, the notes and the way forward. */
+.summary { position: sticky; top: calc(var(--topbar-height) + 20px); display: grid; gap: 18px; min-width: 0; }
+.sum { display: grid; gap: 14px; }
+.sumHead { display: grid; gap: 2px; padding-bottom: 14px; border-bottom: 1px solid var(--divider); }
+.sumLabel { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+.total { font-size: var(--fs-30); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sumNote { font-size: var(--fs-12); color: var(--text-3); }
+.split { display: flex; gap: 2px; height: 8px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-2); }
+.split span { min-width: 4px; transition: flex-grow var(--dur) var(--ease-out); }
+.calc [data-part="materials"] { background: var(--chat-blue); }
+.calc [data-part="work"] { background: var(--chat-amber); }
+.calc [data-part="profit"] { background: var(--green-solid); }
+.calc [data-part="minimum"] { background: var(--green-dark); }
+.sums { display: grid; margin: 0; font-size: var(--fs-13); }
+.sums > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; border-bottom: 1px solid var(--row-divider); }
+.sums dt { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+.sums dt i { width: 8px; height: 8px; flex: none; border-radius: 2px; }
+.sums dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sumPct { font-weight: 500; color: var(--text-3); }
+.summaryForm { display: grid; gap: 10px; }
+.summaryPrimary { display: grid; }
+.summaryPrimary :global(.btn) { width: 100%; height: 40px; }
+.summaryNote { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.startOver { display: inline-flex; align-items: center; gap: 5px; justify-self: center; padding: 4px 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text-3); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.startOver:hover { color: var(--ink); }
+.startOver > svg { color: var(--quiet); }
+.barTotal { display: grid; flex: 1 1 auto; min-width: 0; line-height: 1.2; font-size: var(--fs-12); color: var(--text-3); }
+.barTotal strong { font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.property { display: grid; gap: 8px; }
+
+@media (max-width: 1100px) {
+  .line, .lineHead { grid-template-columns: minmax(0, 1fr) 130px 150px 84px; }
+}
+@media (max-width: 900px) {
+  .calc { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .summary { position: static; }
+  .lineHead { display: none; }
+  /* Its name and total on top, the amount and price side by side under them. */
+  .line { position: relative; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); row-gap: 10px; padding: 14px 0; }
+  .lineWhat { grid-column: 1 / -1; padding-right: 96px; }
+  .line > .lineTotal { position: absolute; top: 14px; right: 0; line-height: 1.5; }
+  .lineTotal { font-size: var(--fs-15); }
+  .profitRow > .areaNote { flex-basis: 100%; }
+  .summary { padding-top: 20px; border-top: 1px solid var(--divider); }
+  .lineName, .lineCheck, .unit, .fieldLabel { font-size: var(--fs-15); }
+  .areaNote, .summaryNote, .sumNote { font-size: var(--fs-13); }
+  .sums { font-size: var(--fs-15); }
+  .sums > div { min-height: 44px; }
+  .reset, .addLink, .startOver { min-height: 44px; font-size: var(--fs-14); }
+  .lineCheck { min-height: 44px; }
+  .jobName { font-size: var(--fs-14); }
+  /* The small fields (a choice, a depth) read at 16px on a phone, so the phone doesn't zoom in on them. */
+  :is(.calc, .setup) :global(.input-sm) { font-size: var(--fs-16); }
+}
+
+/* ---------- Calculator setup (CalculatorSetupPage) ---------- */
+/*
+ * One hairline row per item under one row of column names (each row's own words show on a phone),
+ * its extras quiet beneath it, and a More menu for moving or taking it out. The save bar stays at the
+ * foot of the screen while there's something to save, over the tab bar on a phone.
+ */
+.setup { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; max-width: 1080px; min-width: 0; }
+.itemHead, .itemRow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.4fr) 170px 36px; gap: 10px 12px; align-items: center; }
+.itemHead { margin-top: -12px; padding: 8px 0 6px; font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+.items { margin: 0; padding: 0; list-style: none; }
+.item { display: grid; gap: 8px; padding: 10px 0 12px; border-bottom: 1px solid var(--row-divider); }
+.cell { display: grid; gap: 4px; min-width: 0; }
+.cellLabel { display: none; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.itemTools { display: flex; justify-content: flex-end; }
+.extras2 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.extras2:empty { display: none; }
+.choices { display: grid; flex-basis: 100%; gap: 6px; padding-left: 12px; border-left: 2px solid var(--divider); }
+.choices .addLink { color: var(--text-3); }
+.choices .addLink:hover { color: var(--ink); }
+.choices .addLink > svg { color: var(--quiet); }
+.hint { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.hint strong { font-weight: 600; color: var(--text-2); }
+.setRows { display: grid; margin-top: -12px; }
+.setRow { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 52px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.setLabel { font-size: var(--fs-13); color: var(--text-3); }
+.setControl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.jobTypes { margin: -12px 0 10px; padding: 0; list-style: none; }
+.jobType { display: grid; grid-template-columns: minmax(160px, 260px) minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 52px; padding: 8px 0; border-bottom: 1px solid var(--row-divider); }
+.jobTypeValues { min-width: 0; font-size: var(--fs-12); color: var(--text-3); overflow-wrap: anywhere; }
+.saveBar { position: sticky; bottom: 0; z-index: 4; display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: -8px; padding: 12px 0; border-top: 1px solid var(--divider); background: color-mix(in srgb, var(--page) 94%, transparent); backdrop-filter: blur(8px); }
+.saveNote { font-size: var(--fs-12); font-weight: 500; color: var(--text-3); }
+.saveNote:empty { display: none; }
+
+@media (max-width: 1100px) {
+  .itemHead, .itemRow { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) 150px 36px; }
+}
+@media (max-width: 900px) {
+  .itemHead { display: none; }
+  .itemRow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: end; }
+  .itemRow > .cell:first-child { grid-column: 1 / -1; }
+  .itemTools { align-self: end; }
+  .item { padding: 14px 0 16px; }
+  .cellLabel { display: block; font-size: var(--fs-14); }
+  .extras2 > label { min-height: 44px; }
+  .hint { font-size: var(--fs-13); }
+  .setRow { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .setLabel { font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+  .jobType { grid-template-columns: minmax(0, 1fr) auto; }
+  .jobTypeValues { grid-column: 1 / -1; grid-row: 2; font-size: var(--fs-13); }
+  .saveBar { bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); margin-inline: -16px; padding: 10px 16px; }
+  .saveBar :global(.btn) { flex: 1 1 auto; height: 48px; border-radius: 12px; font-size: var(--fs-16); }
+  .saveNote { flex: 1 1 100%; }
+  .saveBar:has(.saveNote:empty) .saveNote { display: none; }
+}
+
+/* ---------- A worksheet to print (WorksheetPage): the screen's bar over the paper ---------- */
+.sheetBar { display: grid; gap: 10px; max-width: 820px; }
+.sheetTools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sheetNote { display: inline-flex; flex: 1 1 260px; align-items: center; gap: 6px; font-size: var(--fs-13); color: var(--text-3); }
+.sheetNote > svg { flex: none; color: var(--quiet); }
+/* Each section's table has the same columns, so they line up down the paper (on screen and printed). */
+.sheetItems { table-layout: fixed; }
+.sheetItems th:nth-child(1) { width: 27%; }
+.sheetItems th:nth-child(2) { width: 31%; }
+.sheetItems th:nth-child(3) { width: 15%; }
+.sheetItems th:nth-child(4) { width: 13%; }
+.sheetItems th:nth-child(5) { width: 15%; }
+.sheetFigured { display: none; }
+@media screen and (max-width: 640px) {
+  /* A narrow phone: four columns, what each is figured from under its name, and the widths its words need. */
+  .sheetItems { table-layout: auto; }
+  .sheetItems th:nth-child(n) { width: auto; }
+  .sheetItems :is(th, td):nth-child(2) { display: none; }
+  .sheetItems :is(th, td) { padding-inline: 4px; }
+  .sheetFigured { display: block; margin-top: 2px; font-size: 12px; color: #5c6b72; }
+}
+@media (max-width: 900px) {
+  .sheetNote { flex-basis: 100%; font-size: var(--fs-14); }
+  .sheetTools > :global(.btn) { flex: 1 1 0; }
+}
+
+/* A record-style header's lede and a callout's button, on a phone: the lede under the title, the button under the words. */
+@media (max-width: 900px) {
+  .headLede { order: 3; }
+  .callout { flex-wrap: wrap; }
+  .callout > :global(.grow) { flex: 1 1 calc(100% - 30px); }
+  .callout > :global(.btn) { flex: 1 1 100%; height: 44px; margin-left: 26px; font-size: var(--fs-14); }
+}

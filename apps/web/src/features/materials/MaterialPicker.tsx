@@ -10,12 +10,14 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
+import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { AbcPicture } from "./AbcPicture";
 import { searchFor, type CatalogItem, type CatalogUom } from "./data";
 import { MaterialSearch } from "./MaterialSearch";
+import { Select } from "@/components/ui/Select";
 
 export interface PickerService { id: string; name: string; unit: string }
 
@@ -65,8 +67,11 @@ export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { 
   return (
     <form onSubmit={submit}>
       <div className="material-picked">
-        <strong>{item.name}</strong>
-        <span className="muted small">{[item.item_number, item.color, price !== null ? `${formatMoneyCents(price)} / ${unit.name.toLowerCase()}` : (note ?? (detail.isPending ? "Getting the price…" : null))].filter(Boolean).join(" · ")}</span>
+        <AbcPicture item={item} />
+        <span className="grow">
+          <strong>{item.name}</strong>
+          <span className="muted">{[item.item_number, item.color, price !== null ? `${formatMoneyCents(price)} / ${unit.name.toLowerCase()}` : (note ?? (detail.isPending ? "Getting the price…" : null))].filter(Boolean).join(" · ")}</span>
+        </span>
       </div>
       <div className="row wrap" style={{ gap: 12, alignItems: "flex-end" }}>
         {units.length > 1 && (
@@ -88,9 +93,10 @@ export function AddMaterial({ service, item, lineQuantity, onBack, onAdded }: { 
       <HowMany perUnit={perUnit} onChange={setPerUnit} uom={unit} serviceUnit={service.unit} />
       {order !== null && order > 0 && (
         <div className="callout" role="status">
+          <Icon name="calculator" size={16} />
           <span className="grow">
-            For this estimate: <strong>{formatNumber(order)} {unit.name.toLowerCase()}{order === 1 ? "" : "s"}</strong>
-            {price !== null ? <> × {formatMoneyCents(price)} = <strong>{formatMoney(lineTotal(order, price))}</strong></> : null}
+            <span style={{ fontWeight: 400 }}>For this estimate: <strong>{formatNumber(order)} {unit.name.toLowerCase()}{order === 1 ? "" : "s"}</strong>
+            {price !== null ? <> × {formatMoneyCents(price)} = <strong className="tabular">{formatMoney(lineTotal(order, price))}</strong></> : null}</span>
             <span className="muted small" style={{ display: "block" }}>{formatNumber(lineQuantity!, 1)} {service.unit} × {describePerUnit(perUnit, unit.name, service.unit)}, rounded up to whole ones.</span>
           </span>
         </div>
@@ -127,7 +133,7 @@ export function HowMany({ perUnit, onChange, uom, serviceUnit }: { perUnit: numb
     if (n > 0) set(String(round(1 / n)), next);
   };
   return (
-    <Field label="How many?" requiredMessage="Type how many." hint={perUnit > 0 ? `Kept as ${describePerUnit(perUnit, uom.name, serviceUnit)}.` : "Type how many."}>
+    <Field className="material-howmany" label="How many?" requiredMessage="Type how many." hint={perUnit > 0 ? `Kept as ${describePerUnit(perUnit, uom.name, serviceUnit)}.` : "Type how many."}>
       <div className="row wrap" style={{ gap: 8 }}>
         <div className="segmented" role="group" aria-label="How to say it">
           <button type="button" aria-pressed={!covers} onClick={() => switchMode(false)}>Per {serviceUnit}</button>

@@ -3,28 +3,30 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { ClientPreview } from "@/components/ui/ClientPreview";
 import { confirm } from "@/components/ui/Confirm";
-import { RowMenu } from "@/components/ui/ContextMenu";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot, type GroupTone } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { SelectAllCell, SelectCell, SelectionBar, useHoldToPick, useSelection } from "@/components/ui/Selection";
-import { ListPageSkeleton } from "@/components/ui/Skeleton";
+import { SelectionBar, useSelection } from "@/components/ui/Selection";
+import { InboxPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
+import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { BULK_CHUNK, inChunks, reportBulk, type BulkResult } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
-import { addDaysIso, formatDate, formatMoney, todayIn } from "@/lib/format";
+import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
+import { intlLocale } from "@/lib/i18n";
 import { useStatusCounts } from "@/lib/listing";
 import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
-import { AutopayAttention, ChargeCardsDialog, InvoiceSummary, ReadyToInvoice, RemindAllButton } from "./InvoiceTools";
+import { ChargeCardsDialog, InvoiceNudges, InvoiceSummary, RemindAllButton } from "./InvoiceTools";
+import styles from "./invoices.module.css";
 
 // Each filter is named for its status ("open" is everything still owed, under the sent status's name).
 const FILTERS = [
@@ -36,9 +38,12 @@ const FILTERS = [
   { key: "void", label: statusText("invoice", "void"), statuses: ["void"] },
 ] as const;
 type FilterKey = (typeof FILTERS)[number]["key"];
+/** The filters whose counts are worth a look: what's owed and what's waiting to go out. Settled ones are history. */
+const COUNTED: readonly FilterKey[] = ["open", "overdue", "draft"];
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 /** Sent and still owed: what a payment reminder is for (services/sales.ts remindInvoices). */
 const OWED = ["sent", "partially_paid", "overdue"];
+const DAY = 86_400_000;
 
 type Remindable = { id: string; number: number | null; status: string; balance_due: number };
 
@@ -77,7 +82,7 @@ export async function remindInChunks(
 
 /** How many invoices the list shows at first, and how many more each "Load more" brings. */
 const PAGE = 300;
-const LIST_COLUMNS = "id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(id, display_name)";
+const LIST_COLUMNS = "id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name)";
 
 /** The invoices a tab shows: its statuses, narrowed by what was typed. `settled`: paid, written off or void. */
 export interface Showing { companyId: string; statuses: readonly string[]; term: string; settled: boolean }
@@ -130,6 +135,57 @@ export async function invoiceTotals(showing: Showing) {
     return q;
   });
   return { billed: rows.reduce((s, i) => s + Number(i.total), 0), owed: rows.reduce((s, i) => s + Number(i.balance_due), 0) };
+}
+
+type ListedInvoice = { status: string; due_on: string | null; issued_on: string; total: number | string; balance_due: number | string };
+
+/** How many days past its due date an invoice still owed is today (in the company's time zone); 0 when it isn't late. */
+export function daysLate(i: Pick<ListedInvoice, "status" | "due_on" | "balance_due">, today: string): number {
+  if (!i.due_on || Number(i.balance_due) <= 0 || !OWED.includes(i.status) || i.due_on >= today) return 0;
+  return Math.round((Date.parse(today) - Date.parse(i.due_on)) / DAY);
+}
+
+/** "9 days late", "2 weeks late", "3 months late": how long a list row's wait has been, short. */
+export function lateWords(days: number): string {
+  if (days < 14) return plural(days, "day") + " late";
+  if (days < 60) return `${Math.floor(days / 7)} weeks late`;
+  return `${Math.floor(days / 30)} months late`;
+}
+
+/** "Nov 12", with the year when it isn't this one. */
+const shortDate = (iso: string, today: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString(intlLocale(), iso.slice(0, 4) === today.slice(0, 4) ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+
+/** The words a kind other than a plain invoice gets beside its number. */
+const KIND_TAGS: Record<string, string> = { deposit: "Deposit", progress: "Progress", retainage: "Retainage", visits: "Visits" };
+
+type Group<T> = { key: string; label: string; tone?: GroupTone; icon?: IconName; rows: T[] };
+
+/**
+ * The rows of a tab, grouped by what needs doing (in the list's order inside each group): still owed,
+ * the past due first, then the rest awaiting payment; drafts, the ones ready to send first; and
+ * settled ones by the month they were issued. Empty groups are left out.
+ */
+export function groupInvoices<T extends ListedInvoice>(rows: readonly T[], filter: FilterKey, today: string): Group<T>[] {
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = addDaysIso(`${thisMonth}-01`, -1).slice(0, 7);
+  const order: Array<Omit<Group<T>, "rows">> =
+    filter === "open" || filter === "overdue"
+      ? [{ key: "late", label: statusText("invoice", "overdue"), tone: "danger", icon: "clock" }, { key: "owed", label: statusText("invoice", "sent") }]
+      : filter === "draft"
+        ? [{ key: "ready", label: "Ready to send", tone: "good", icon: "send" }, { key: "empty", label: "No line items yet" }]
+        : [{ key: "this", label: "This month" }, { key: "last", label: "Last month" }, { key: "earlier", label: "Earlier" }];
+  const groups = new Map(order.map((g) => [g.key, { ...g, rows: [] as T[] }]));
+  for (const r of rows) {
+    const key =
+      filter === "open" || filter === "overdue"
+        ? daysLate(r, today) > 0 || r.status === "overdue" ? "late" : "owed"
+        : filter === "draft"
+          ? Number(r.total) !== 0 ? "ready" : "empty"
+          : r.issued_on.slice(0, 7) === thisMonth ? "this" : r.issued_on.slice(0, 7) === lastMonth ? "last" : "earlier";
+    groups.get(key)!.rows.push(r);
+  }
+  return [...groups.values()].filter((g) => g.rows.length);
 }
 
 export function InvoicesPage() {
@@ -198,7 +254,6 @@ function InvoicesPageScreen() {
   });
 
   const selection = useSelection(selectable ? rows.map((i) => i.id) : [], `${filter}|${term}`);
-  const hold = useHoldToPick(selection);
   const words = (verb: string, one = "invoice") => {
     const numbers = new Map(rows.map((i) => [i.id, i.number]));
     return { verb, one, many: `${one}s`, name: (id: string) => `#${numbers.get(id) ?? "?"}` };
@@ -238,9 +293,11 @@ function InvoicesPageScreen() {
     },
   });
 
-  if (invoices.isPending) return <ListPageSkeleton columns={6} tabs={FILTERS.length} />;
+  if (invoices.isPending) return <InboxPageSkeleton tabs={FILTERS.length} groups={2} />;
   // Of every invoice in the tab: added up here once they're all loaded, else as read apart (nothing until that's in).
   const figures = partial ? sums.data : { billed: rows.reduce((s, i) => s + Number(i.total), 0), owed: rows.reduce((s, i) => s + Number(i.balance_due), 0) };
+  // What the foot's right side adds up: what's owed, or written off. Drafts, paid and void ones owe nothing yet or any more.
+  const owedWord = filter === "open" || filter === "overdue" ? "owed" : filter === "written_off" ? "written off" : null;
 
   return (
     <>
@@ -249,11 +306,12 @@ function InvoicesPageScreen() {
         actions={
           <>
             <Menu
+              title="Invoices"
               items={[
-                { label: "Stripe deposits", icon: "dollar", onSelect: () => navigate("/payouts") },
-                { label: exportCsv.isPending ? "Exporting…" : "Download as spreadsheet", icon: "download", onSelect: () => exportCsv.mutate(), disabled: !rows.length || exportCsv.isPending },
-                { separator: true, hidden: !chargesCards },
                 { label: "Charge cards", icon: "card", onSelect: () => setCharging(true), hidden: !chargesCards },
+                { separator: true, hidden: !chargesCards },
+                { label: "Stripe deposits", icon: "bank", onSelect: () => navigate("/payouts") },
+                { label: exportCsv.isPending ? "Exporting…" : "Download as spreadsheet", icon: "download", onSelect: () => exportCsv.mutate(), disabled: !rows.length || exportCsv.isPending },
               ]}
             />
             <Button variant="primary" icon="plus" onClick={() => setParams({ new: "1" }, { replace: true })}>New invoice</Button>
@@ -261,45 +319,38 @@ function InvoicesPageScreen() {
         }
       />
       <InvoiceSummary onPick={setFilter} />
-      <ReadyToInvoice />
-      {seesMoney && <AutopayAttention />}
-      <div className="toolbar">
-        <div className="input-group">
-          <span className="addon"><Icon name="search" size={16} /></span>
-          <input className="input" type="search" placeholder="Search by client, subject or #number" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search invoices" />
-        </div>
-        <div className="tabs" role="group" aria-label="Filter invoices">
-          {FILTERS.map((f) => (
-            <button key={f.key} type="button" className="tab" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
-              {f.label}
-              {counts.data && <span className={`badge${f.key === "overdue" && counts.data[f.key] ? " badge-red" : ""}`}>{counts.data[f.key]}</span>}
-            </button>
-          ))}
-        </div>
-        {filter === "overdue" && <RemindAllButton ids={rows.filter((r) => Number(r.balance_due) > 0).map((r) => r.id)} />}
-      </div>
+      <InvoiceNudges autopay={seesMoney} />
+      <Toolbar
+        filters={
+          <FilterTabs
+            label="Filter invoices"
+            value={filter}
+            onChange={setFilter}
+            options={FILTERS.map((f) => ({ value: f.key, label: f.label, count: COUNTED.includes(f.key) ? counts.data?.[f.key] : undefined, countTone: f.key === "overdue" ? "danger" : undefined }))}
+          />
+        }
+        search={<SearchField value={search} onChange={setSearch} placeholder="Search client, subject or #" label="Search invoices" />}
+      />
       {invoices.error && !invoices.data ? (
-        <div className="card"><ErrorState error={invoices.error} onRetry={() => invoices.refetch()} /></div>
+        <ErrorState error={invoices.error} onRetry={() => invoices.refetch()} />
       ) : rows.length === 0 ? (
-        <div className="card">
-          {term ? (
-            <EmptyState icon="search" title="No invoices match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
-          ) : (
-            <EmptyState icon="invoice" title={filter === "open" ? "Nothing awaiting payment" : filter === "overdue" ? "Nothing past due" : "Nothing here"} action={filter === "open" && <Link className="btn" to="/jobs">Find jobs to invoice</Link>}>
-              {filter === "open"
-                ? "Invoice finished jobs from the job page, or create a standalone invoice."
-                : filter === "overdue"
-                  ? "Every sent invoice is within its terms."
-                  : filter === "written_off"
-                    ? "When a client is never going to pay, open the invoice and choose Write off from its menu."
-                    : "No invoices have this status."}
-            </EmptyState>
-          )}
-        </div>
+        term ? (
+          <EmptyState icon="search" title="No invoices match" action={<Button onClick={() => setSearch("")}>Clear search</Button>} />
+        ) : (
+          <EmptyState icon="invoice" title={filter === "open" ? "Nothing awaiting payment" : filter === "overdue" ? "Nothing past due" : "Nothing here"} action={filter === "open" && <Link className="btn" to="/jobs">Find jobs to invoice</Link>}>
+            {filter === "open"
+              ? "Invoice finished jobs from the job page, or create a standalone invoice."
+              : filter === "overdue"
+                ? "Every sent invoice is within its terms."
+                : filter === "written_off"
+                  ? "When a client is never going to pay, open the invoice and choose Write off from its menu."
+                  : "No invoices have this status."}
+          </EmptyState>
+        )
       ) : (
-        <div className={`card${invoices.isPlaceholderData ? " is-stale" : ""}`}>
+        <>
           {selectable && (
-            <SelectionBar selection={selection} noun="invoices">
+            <SelectionBar selection={selection} noun="invoices" always>
               {filter === "draft" ? (
                 <Button
                   size="sm"
@@ -330,42 +381,73 @@ function InvoicesPageScreen() {
               )}
             </SelectionBar>
           )}
-          <table className="table table-stack">
-            <thead><tr>{selectable && <SelectAllCell selection={selection} label="Select all invoices on this page" />}<th>#</th><th>Client</th><th>Due</th><th className="num">Total</th><th className="num">Balance</th><th>Status</th></tr></thead>
-            <RowMenu href={(id) => `/invoices/${id}`} selection={selection} {...(selectable ? hold : {})}>
-              {rows.map((i) => {
-                const late = i.due_on && Number(i.balance_due) > 0 && i.status !== "draft" && i.status !== "written_off" && i.due_on < today;
-                return (
-                  <tr key={i.id} className="row-link" data-row={i.id} data-selected={selection.has(i.id) || undefined} onClick={() => navigate(`/invoices/${i.id}`)}>
-                    {selectable && <SelectCell selection={selection} id={i.id} label={`Select invoice #${i.number}`} />}
-                    <td className="muted tabular" style={{ width: 56 }}>#{i.number}</td>
-                    <td>
-                      {i.client ? (
-                        <ClientPreview id={i.client.id}>
-                          <Link className="cell-link" to={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()}>{i.client.display_name}</Link>
-                        </ClientPreview>
-                      ) : (
-                        <Link className="cell-link" to={`/invoices/${i.id}`} onClick={(e) => e.stopPropagation()} />
-                      )}
-                      <div className="muted small">{i.subject}{i.kind !== "standard" ? ` · ${i.kind === "visits" ? "visits" : i.kind}` : ""}</div>
-                    </td>
-                    <td className={late ? "text-danger strong" : undefined}>{i.due_on ? formatDate(i.due_on) : <span className="muted">On receipt</span>}</td>
-                    <td className="num">{formatMoney(i.total)}</td>
-                    <td className="num strong">{formatMoney(i.balance_due)}</td>
-                    <td><EntityStatus kind="invoice" status={i.status} /></td>
-                  </tr>
-                );
-              })}
-            </RowMenu>
-          </table>
-          <div className="list-foot">
-            <div className="row" style={{ gap: 12 }}>
-              <span>{partial ? `Showing ${rows.length} of ${total}` : plural(rows.length, "invoice")}{figures ? ` · ${formatMoney(figures.billed)} billed` : ""}</span>
-              {partial && <Button size="sm" loading={invoices.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>}
-            </div>
-            {figures && <strong className="tabular" style={{ color: "var(--ink)" }}>{formatMoney(figures.owed)} {filter === "written_off" ? "written off" : "owed"}</strong>}
-          </div>
-        </div>
+          <InboxList
+            label="Invoices"
+            className="il-plain"
+            stale={invoices.isPlaceholderData}
+            foot={
+              <ListFoot
+                end={figures && owedWord ? <><b>{formatMoney(figures.owed)}</b> {owedWord}</> : undefined}
+                more={partial ? { onClick: () => setLimit((l) => l + PAGE), loading: invoices.isFetching } : undefined}
+              >
+                {partial ? `Showing ${rows.length} of ${total}` : plural(rows.length, "invoice")}{figures ? ` · ${formatMoney(figures.billed)} ${filter === "draft" ? "not sent yet" : filter === "void" ? "voided" : "billed"}` : ""}
+              </ListFoot>
+            }
+          >
+            {groupInvoices(rows, filter, today).map((g) => (
+              <InboxGroup
+                key={g.key}
+                label={g.label}
+                count={g.rows.length}
+                tone={g.tone}
+                icon={g.icon}
+                // The past due all at once: a reminder to each, by email, as on an invoice's page.
+                end={g.key === "late" ? <RemindAllButton ids={g.rows.filter((r) => Number(r.balance_due) > 0).map((r) => r.id)} /> : undefined}
+              >
+                {g.rows.map((i) => {
+                  const late = daysLate(i, today);
+                  const balance = Number(i.balance_due);
+                  const owed = OWED.includes(i.status);
+                  const shown = owed || i.status === "written_off" ? balance : Number(i.total);
+                  return (
+                    <InboxRow
+                      key={i.id}
+                      to={`/invoices/${i.id}`}
+                      title={i.client?.display_name ?? `Invoice #${i.number}`}
+                      number={i.number}
+                      badge={KIND_TAGS[i.kind] ? <span className={`tag ${styles.kind}`}>{KIND_TAGS[i.kind]}</span> : undefined}
+                      subject={i.subject}
+                      meta={
+                        owed
+                          ? [
+                              late > 0 ? (
+                                <span className={styles.late}><Icon name="clock" size={13} /><span>{i.due_on && <span className="hide-mobile">Due {shortDate(i.due_on, today)} · </span>}{lateWords(late)}</span></span>
+                              ) : (
+                                <span><Icon name="clock" size={13} />{i.due_on ? `Due ${shortDate(i.due_on, today)}` : "Due on receipt"}</span>
+                              ),
+                              i.status === "partially_paid" && <EntityStatus kind="invoice" status={i.status} />,
+                            ]
+                          : [
+                              `Issued ${shortDate(i.issued_on, today)}`,
+                              i.status === "draft" && (i.due_on ? `Due ${shortDate(i.due_on, today)}` : "Due on receipt"),
+                            ]
+                      }
+                      aside={
+                        <>
+                          <span className={i.status === "void" ? `il-money ${styles.voided}` : "il-money"}>{formatMoney(shown)}</span>
+                          {(owed || i.status === "written_off") && Math.abs(shown - Number(i.total)) >= 0.005 && <span className="il-sub">of {formatMoney(i.total)}</span>}
+                        </>
+                      }
+                      selection={selectable ? selection : undefined}
+                      id={i.id}
+                      selectLabel={`Select invoice #${i.number}`}
+                    />
+                  );
+                })}
+              </InboxGroup>
+            ))}
+          </InboxList>
+        </>
       )}
       {charging && <ChargeCardsDialog onClose={() => setCharging(false)} />}
       <NewInvoiceDialog open={params.get("new") === "1"} onClose={() => setParams({}, { replace: true })} onCreated={(id) => navigate(`/invoices/${id}`)} />

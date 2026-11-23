@@ -39,8 +39,10 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { LazySparkline } from "@/components/ui/LazySparkline";
-import { CardSkeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
+import { EmptyState, ErrorState } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useSession, type Session } from "@/lib/session";
@@ -48,6 +50,7 @@ import { RailwayConnect } from "./RailwayConnect";
 import { bucketTipDismissed, dismissBucketTip, managesStorage, STORAGE_SETTINGS } from "./storage";
 import { ExternalButton, RailwayAccess, useRailwayReturn, WEB_ADDRESS_KEY } from "./WebAddressSettings";
 import styles from "./HostingSettings.module.css";
+import { loadSettings } from "@/lib/companySettings";
 
 export const HOSTING_KEY = ["hosting"];
 export const FILES_STORAGE_KEY = ["hosting", "files-storage"];
@@ -80,23 +83,22 @@ export function HostingSettings() {
   });
   useRailwayReturn();
 
-  if (address.isPending) return <CardSkeleton lines={4} />;
-  if (!address.data) return <div className="card"><ErrorState error={address.error} onRetry={() => address.refetch()} /></div>;
-  if (!railway) return <div className="card card-pad muted">This Crewtavo doesn't run on Railway, so there's nothing to show here.</div>;
+  if (address.isPending) return <Loading label="Loading hosting"><SectionSkeleton rows={4} /></Loading>;
+  if (!address.data) return <ErrorState error={address.error} onRetry={() => address.refetch()} />;
+  if (!railway) return <EmptyState inline icon="cloud" title="Nothing to show here">This Crewtavo doesn't run on Railway, so there's nothing to show here.</EmptyState>;
   if (!connected) {
     return (
-      <section className={`card card-pad stack ${styles.page}`} aria-labelledby="hosting-connect">
-        <h2 id="hosting-connect" className={styles.title}>{railway.error ? "Connect Railway again" : "Connect Railway"}</h2>
+      <Section level={3} title={railway.error ? "Connect Railway again" : "Connect Railway"}>
         <RailwayConnect railway={railway} returnTo="hosting" />
-      </section>
+      </Section>
     );
   }
-  if (hosting.isPending) return <CardSkeleton lines={6} />;
-  if (!hosting.data) return <div className="card"><ErrorState error={hosting.error} onRetry={() => hosting.refetch()} /></div>;
+  if (hosting.isPending) return <Loading label="Loading what Railway charges"><div className="settings-body"><SectionSkeleton rows={3} /><SectionSkeleton rows={4} /></div></Loading>;
+  if (!hosting.data) return <ErrorState error={hosting.error} onRetry={() => hosting.refetch()} />;
 
   const o = hosting.data;
   return (
-    <div className={`stack ${styles.page}`}>
+    <>
       {o.warnings.filter((w) => w.level !== "tip").map((w) => <Warning key={w.key} warning={w} links={o.links} />)}
       <SpendingLimit o={o} />
       {o.warnings.filter((w) => w.level === "tip" && !(w.key === "bucket" && bucketTipDismissed(session.company.settings))).map((w) => (
@@ -108,8 +110,8 @@ export function HostingSettings() {
       {o.disks.length > 0 && <Disks disks={o.disks} />}
       <FilesStorage plan={o.plan} />
       <Plan o={o} />
-      <div className={`row wrap muted small ${styles.footer}`}>
-        <span className="grow">
+      <div className={styles.footer}>
+        <span className={styles.footerText}>
           From Railway, {new Date(o.checkedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}. Crewtavo works out the cost at Railway's prices, so these are close estimates;
           Railway's bill is the final word.
         </span>
@@ -118,7 +120,7 @@ export function HostingSettings() {
       </div>
       <FormError error={check.error} />
       <RailwayAccess overview={address.data} />
-    </div>
+    </>
   );
 }
 
@@ -137,10 +139,10 @@ export function Warning({ warning, links, onAside, asiding }: { warning: Hosting
   const tone = warning.level === "urgent" ? "callout-danger" : warning.level === "tip" ? "callout-info" : "callout-warning";
   return (
     <div className={`callout ${tone}`} role={warning.level === "urgent" ? "alert" : undefined}>
-      <Icon name={warning.level === "tip" ? "info" : "alert"} size={20} />
+      <Icon name={warning.level === "tip" ? "info" : "alert"} size={16} />
       <div className="grow">
         <div>{warning.title}</div>
-        <div style={{ fontWeight: 400 }}>{warning.body}</div>
+        <div>{warning.body}</div>
         {href && action && <div style={{ marginTop: 10 }}><ExternalButton href={href} primary>{action.label}</ExternalButton></div>}
         {(warning.action === "files" || onAside) && (
           <div className="row wrap" style={{ gap: 8, marginTop: 10 }}>
@@ -174,7 +176,7 @@ export function suggestedLimit(o: Pick<HostingOverview, "plan" | "project">): nu
 
 /** Notes that the owner set Railway's hard limit, reading the settings fresh so every other setting stays as it is now. */
 async function noteUsageLimit(session: Pick<Session, "company" | "userId">) {
-  const current = (unwrap(await supabase().from("companies").select("settings").eq("id", session.company.id).single()).settings ?? {}) as Record<string, unknown>;
+  const current = await loadSettings(session.company.id);
   const next = { ...current, railway_usage_limit: { set_at: new Date().toISOString(), set_by: session.userId } };
   unwrap(await supabase().from("companies").update({ settings: next as never }).eq("id", session.company.id));
 }
@@ -194,14 +196,14 @@ export function SpendingLimit({ o }: { o: HostingOverview }) {
   if (session.role !== "owner" || (o.plan !== "hobby" && o.plan !== "pro") || usageLimitSetAt(session.company.settings)) return null;
   return (
     <div className="callout callout-info">
-      <Icon name="dollar" size={20} />
+      <Icon name="dollar" size={16} />
       <div className="grow stack-sm">
         <div>Set a spending limit in Railway</div>
-        <span style={{ fontWeight: 400 }}>
+        <span>
           Crewtavo warns you when usage climbs, but only Railway can stop the bill: its hard limit takes your project offline once the month reaches an amount you choose, so nothing can run
           it past that. Crewtavo can't set it for you, since it never sees your Railway billing.
         </span>
-        <ol className={styles.steps} style={{ fontWeight: 400 }}>
+        <ol className={styles.steps}>
           <li>Open Railway's usage page and press <strong>Set Usage Limits</strong>.</li>
           <li>
             Under compute usage, set a <strong>Hard limit</strong> well above a normal month, like ${suggestedLimit(o)}: Crewtavo stops too when it's reached. Railway's lowest is $10. Add an
@@ -227,21 +229,15 @@ function Summary({ o }: { o: HostingOverview }) {
   const included = plan && o.plan !== "trial" ? plan.included : null;
   const over = included !== null && forecast !== null ? forecast - included : 0;
   return (
-    <section className="card card-pad stack" aria-labelledby="hosting-summary">
-      <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-        <div className="stack-sm" style={{ gap: 2 }}>
-          <h2 id="hosting-summary" className={styles.title}>Railway</h2>
-          <span className="muted small">This month so far, since {day(o.period.start)}</span>
-        </div>
-        {plan && <span className={`chip ${o.plan === "trial" || o.plan === "free" ? "chip-amber" : "chip-green"}`}>{plan.name}</span>}
-      </div>
+    <Section level={3} title="This month" action={plan ? <StatusPill label={plan.name} tone={o.plan === "trial" || o.plan === "free" ? "pending" : "good"} /> : undefined}>
+      <p className="set-note">On Railway, so far, since {day(o.period.start)}</p>
       {!o.project ? (
-        <span className="muted">Railway didn't share this project's usage just now. Check again in a few minutes.</span>
+        <p className={`set-note ${styles.gap}`}>Railway didn't share this project's usage just now. Check again in a few minutes.</p>
       ) : (
         <>
-          <div className="stack-sm" style={{ gap: 2 }}>
-            <span className="hero-number">{usd(spent)}</span>
-            <span className="muted small">
+          <div className={styles.figure}>
+            <span className={styles.big}>{usd(spent)}</span>
+            <span className={styles.of}>
               so far{o.project.perDay !== null ? `, about ${usd(o.project.perDay)} a day lately` : ""}.{forecast !== null ? ` About ${usd(forecast)} by ${day(o.period.end)} at that rate.` : ""}
             </span>
           </div>
@@ -254,24 +250,24 @@ function Summary({ o }: { o: HostingOverview }) {
         </>
       )}
       {plan && (o.plan === "hobby" || o.plan === "pro") && forecast !== null && (
-        <span className="small">
+        <span className={`set-note ${styles.line}`}>
           Railway's bill for the month: the {usd(plan.price)} plan{over >= 0.01 ? `, plus about ${usd(over)} of usage over what it includes` : ", with your usage included"}.
         </span>
       )}
-      {o.sent && o.sent.soFar > 0 && <span className="muted small">{sentLine(o.sent)}</span>}
+      {o.sent && o.sent.soFar > 0 && <span className={`set-note ${styles.line}`}>{sentLine(o.sent)}</span>}
       {o.trial && (
-        <div className="stack-sm" style={{ gap: 6 }}>
-          <span className="small">
+        <div className={styles.trial}>
+          <span className={styles.lead}>
             Railway's trial: about <strong>{days(o.trial.daysLeft)}</strong> or <strong>{usd(o.trial.creditLeft)}</strong> of its {usd(RAILWAY_TRIAL.credit)} credit left, whichever runs out first. Crewtavo
             stops then, unless you choose a plan.
           </span>
           <div className="progress" role="img" aria-label={`${usd(o.trial.creditLeft)} of ${usd(RAILWAY_TRIAL.credit)} left`}>
             <span style={{ width: `${(o.trial.creditLeft / RAILWAY_TRIAL.credit) * 100}%` }} />
           </div>
-          <span className="muted small">Counted from when this Crewtavo was set up. Railway's dashboard has the exact figures.</span>
+          <span className="set-note">Counted from when this Crewtavo was set up. Railway's dashboard has the exact figures.</span>
         </div>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -298,22 +294,21 @@ function Meter({ spent, forecast, included }: { spent: number; forecast: number 
 function Services({ services }: { services: NonNullable<HostingOverview["project"]>["services"] }) {
   const most = Math.max(...services.map((s) => s.cost), 0.01);
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="hosting-services">
-      <h2 id="hosting-services" className={styles.title}>What it's used for</h2>
-      <span className="muted small">This Crewtavo's parts on Railway, so far this month.</span>
+    <Section level={3} title="What it's used for">
+      <p className="set-note">This Crewtavo's parts on Railway, so far this month.</p>
       <ul className={styles.services}>
         {services.map((s) => (
           <li key={s.id}>
-            <span className="stack-sm" style={{ gap: 0, minWidth: 0 }}>
-              <strong className="small">{serviceLabel(s.name)}</strong>
-              {serviceLabel(s.name) !== s.name && <span className="muted small">{s.name}</span>}
+            <span className={styles.service}>
+              <strong>{serviceLabel(s.name)}</strong>
+              {serviceLabel(s.name) !== s.name && <span>{s.name}</span>}
             </span>
             <span className={styles.bar}><span style={{ width: `${(s.cost / most) * 100}%` }} /></span>
             <span className={styles.amount}>{usd(s.cost)}</span>
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   );
 }
 
@@ -322,66 +317,57 @@ function Week({ week }: { week: HostingOverview["week"] }) {
   const last = week[week.length - 1]!;
   const average = (key: "memory" | "cpu") => week.reduce((sum, p) => sum + p[key], 0) / week.length;
   return (
-    <section className="stack-sm" aria-labelledby="hosting-week">
-      <h2 id="hosting-week" className={styles.title}>The last 7 days</h2>
-      <div className="stat-row">
-        <div className="card stat">
-          <div className="label">Memory</div>
-          <div className="value">{gb(last.memory)}</div>
-          <div className="hint">Averaged {gb(average("memory"))}. Railway charges $10 per GB a month.</div>
+    <Section level={3} title="The last 7 days">
+      <div className={styles.figures}>
+        <div className={styles.figureBlock}>
+          <span className={styles.label}>Memory</span>
+          <span className={styles.value}>{gb(last.memory)}</span>
+          <span className={styles.note}>Averaged {gb(average("memory"))}. Railway charges $10 per GB a month.</span>
           <LazySparkline data={rows} height={48} format={gb} config={{ memory: { label: "Memory", color: "var(--green)" } }} />
         </div>
-        <div className="card stat">
-          <div className="label">Processor</div>
-          <div className="value">{last.cpu.toFixed(2)} vCPU</div>
-          <div className="hint">Averaged {average("cpu").toFixed(2)} vCPU. Railway charges $20 per vCPU a month.</div>
+        <div className={styles.figureBlock}>
+          <span className={styles.label}>Processor</span>
+          <span className={styles.value}>{last.cpu.toFixed(2)} vCPU</span>
+          <span className={styles.note}>Averaged {average("cpu").toFixed(2)} vCPU. Railway charges $20 per vCPU a month.</span>
           <LazySparkline data={rows} height={48} format={(n) => `${n.toFixed(2)} vCPU`} config={{ cpu: { label: "Processor", color: "var(--info)" } }} />
         </div>
       </div>
-    </section>
+    </Section>
   );
 }
 
 function Disks({ disks }: { disks: HostingOverview["disks"] }) {
   const session = useSession();
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="hosting-disks">
-      <div className="row-between wrap" style={{ gap: 8 }}>
-        <h2 id="hosting-disks" className={styles.title}>Storage</h2>
-        {managesStorage(session) && (
-          <Link className="small" to={STORAGE_SETTINGS}>
-            Storage limit and who's using it <Icon name="chevronRight" size={12} />
-          </Link>
-        )}
-      </div>
+    <Section level={3} title="Storage" action={managesStorage(session) ? <Link to={STORAGE_SETTINGS}>Storage limit and who's using it</Link> : undefined}>
+      <ul className={styles.disks}>
       {disks.map((d) => {
         // A bucket grows as it fills: what it holds, and what keeping that costs.
         if (d.kind === "bucket" || d.sizeGb === null) {
           return (
-            <div key={`bucket:${d.service}`} className="row-between small" style={{ gap: 12 }}>
+            <li key={`bucket:${d.service}`} className={styles.disk}>
               <strong>{serviceLabel(d.service)}</strong>
-              <span className="muted" style={{ textAlign: "right" }}>
+              <span className={styles.diskSize}>
                 {gb(d.usedGb)}
                 {d.objects !== undefined ? ` in ${d.objects.toLocaleString()} file${d.objects === 1 ? "" : "s"}` : ""}
                 {d.monthly !== undefined ? `, ${d.monthly >= 0.01 ? `about ${usd(d.monthly)}` : "under a cent"} a month` : ""}
               </span>
-            </div>
+            </li>
           );
         }
         const full = d.sizeGb > 0 ? d.usedGb / d.sizeGb : 0;
         return (
-          <div key={d.service} className="stack-sm" style={{ gap: 4 }}>
-            <div className="row-between small">
-              <strong>{serviceLabel(d.service)}</strong>
-              <span className="muted">{gb(d.usedGb)} of {gb(d.sizeGb)}</span>
-            </div>
-            <div className="progress" role="img" aria-label={`${Math.round(full * 100)}% full`}>
+          <li key={d.service} className={styles.disk}>
+            <strong>{serviceLabel(d.service)}</strong>
+            <span className={styles.diskSize}>{gb(d.usedGb)} of {gb(d.sizeGb)}</span>
+            <div className={`progress ${styles.diskBar}`} role="img" aria-label={`${Math.round(full * 100)}% full`}>
               <span style={{ width: `${Math.min(100, full * 100)}%`, background: full >= 0.95 ? "var(--danger)" : full >= 0.85 ? "var(--warning)" : undefined }} />
             </div>
-          </div>
+          </li>
         );
       })}
-    </section>
+      </ul>
+    </Section>
   );
 }
 
@@ -419,8 +405,8 @@ export function FilesStorage({ plan }: { plan: RailwayPlan | null }) {
     if (step === "done") void queryClient.invalidateQueries({ queryKey: HOSTING_KEY, exact: true });
   }, [step, queryClient]);
 
-  if (storage.isPending) return <CardSkeleton lines={3} />;
-  if (!storage.data) return <div className="card"><ErrorState error={storage.error} onRetry={() => storage.refetch()} /></div>;
+  if (storage.isPending) return <SectionSkeleton rows={2} />;
+  if (!storage.data) return <ErrorState error={storage.error} onRetry={() => storage.refetch()} />;
   const s = storage.data;
   const move = s.move;
   const moving = storageMoving(move);
@@ -429,34 +415,30 @@ export function FilesStorage({ plan }: { plan: RailwayPlan | null }) {
   const ready = !moving && !s.unavailable;
 
   return (
-    <section className="card card-pad stack" aria-labelledby="hosting-files">
-      <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-        <div className="stack-sm" style={{ gap: 2 }}>
-          <h2 id="hosting-files" className={styles.title}>Files storage</h2>
-          <span className="muted small">{whereFiles(s)}</span>
-        </div>
-        {s.backend && <span className={`chip ${s.backend === "bucket" ? "chip-blue" : ""}`}>{s.backend === "bucket" ? "Bucket" : "Volume"}</span>}
-      </div>
+    <Section level={3} title="Files storage" id="hosting-files" action={s.backend ? <span className={styles.where}>{s.backend === "bucket" ? "Bucket" : "Volume"}</span> : undefined}>
+      <div className={styles.body}>
+      <p className="set-note">{whereFiles(s)}</p>
       {move && <MoveState move={move} storage={s} carrying={start.isPending} onCarryOn={() => start.mutate(move.direction)} />}
-      {s.unavailable && !moving && <span className="muted small">{s.unavailable}</span>}
+      {s.unavailable && !moving && <p className="set-note">{s.unavailable}</p>}
       {ready && s.backend === "volume" && !unfinished && (
-        <div className="stack-sm">
-          <span className="small">
+        <div className={styles.body}>
+          <span className={styles.lead}>
             A Railway bucket costs a tenth of what the volume does for each GB, and grows as it fills, so it never runs out of room. Railway doesn't back buckets up, though.
           </span>
-          <div className="row wrap"><Button icon="cloud" onClick={() => setAsking("to_bucket")}>Move files to a bucket</Button></div>
+          <div className={styles.actions}><Button icon="cloud" onClick={() => setAsking("to_bucket")}>Move files to a bucket</Button></div>
         </div>
       )}
       {ready && unfinished && (
-        <div className="row wrap"><Button variant="primary" icon="refresh" loading={start.isPending} onClick={() => start.mutate("to_volume")}>Finish moving back</Button></div>
+        <div className={styles.actions}><Button variant="primary" icon="refresh" loading={start.isPending} onClick={() => start.mutate("to_volume")}>Finish moving back</Button></div>
       )}
       {ready && s.backend === "bucket" && (
-        <div className="row wrap"><Button icon="hardDrive" onClick={() => setAsking("to_volume")}>Move back to the volume</Button></div>
+        <div className={styles.actions}><Button icon="hardDrive" onClick={() => setAsking("to_volume")}>Move back to the volume</Button></div>
       )}
       {!asking && <FormError error={start.error} />}
       {asking === "to_bucket" && <MoveToBucket storage={s} plan={plan} busy={start.isPending} error={start.error} onMove={() => start.mutate("to_bucket")} onClose={() => setAsking(null)} />}
       {asking === "to_volume" && <MoveBack storage={s} busy={start.isPending} error={start.error} onMove={() => start.mutate("to_volume")} onClose={() => setAsking(null)} />}
-    </section>
+      </div>
+    </Section>
   );
 }
 
@@ -488,34 +470,34 @@ function MoveState({ move, storage, carrying, onCarryOn }: { move: StorageMove; 
   return (
     <div className="stack-sm" aria-live="polite">
       {moving && (
-        <div className={`stack-sm ${styles.panel}`}>
-          <strong className="small">{STEPS[move.step](move)}…</strong>
+        <div className={styles.panel}>
+          <strong className={styles.minor}>{STEPS[move.step](move)}…</strong>
           {move.files > 0 && (
             <>
               <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={move.files} aria-valuenow={move.copied} aria-label="Files copied">
                 <span style={{ width: `${share * 100}%` }} />
               </div>
-              <span className="muted small">
+              <span className="set-note">
                 {move.copied.toLocaleString()} of {count(move.files, "file")}
                 {move.bytes > 0 ? ` (${bytesGb(move.copiedBytes)} of ${bytesGb(move.bytes)})` : ""}
               </span>
             </>
           )}
           {move.step === "switching" && !move.byHand && (
-            <span className="muted small">
+            <span className="set-note">
               {toBucket ? "Storage restarts with the bucket's settings, which takes about a minute. Anyone uploading then is asked to try again in a minute." : "Storage restarts on the volume, which takes about a minute."}
             </span>
           )}
-          <span className="muted small">You can leave this page: Crewtavo carries on by itself.</span>
+          <span className="set-note">You can leave this page: Crewtavo carries on by itself.</span>
         </div>
       )}
       {move.byHand && <ByHand byHand={move.byHand} carrying={carrying} onCarryOn={move.step === "by_hand" ? onCarryOn : undefined} />}
       {move.step === "failed" && (
         <div className="callout callout-danger" role="alert">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             <div>{toBucket ? "Files didn't move to the bucket" : "Files didn't all move back"}</div>
-            <div style={{ fontWeight: 400 }}>{move.error}</div>
+            <div>{move.error}</div>
             {toBucket && storage.backend === "volume" && !storage.unavailable && (
               <div style={{ marginTop: 10 }}><Button size="sm" icon="refresh" loading={carrying} onClick={onCarryOn}>Try again</Button></div>
             )}
@@ -524,10 +506,10 @@ function MoveState({ move, storage, carrying, onCarryOn }: { move: StorageMove; 
       )}
       {move.step === "done" && (
         <div className="callout callout-good">
-          <Icon name="check" size={18} />
+          <Icon name="check" size={16} />
           <div className="grow">
             <div>{toBucket ? `Files moved to the bucket${move.finishedAt ? ` on ${on(move.finishedAt)}` : ""}` : `Files moved back to the volume${move.finishedAt ? ` on ${on(move.finishedAt)}` : ""}`}</div>
-            <div style={{ fontWeight: 400 }}>
+            <div>
               {toBucket
                 ? "The volume still has every file from before the move, so you can move back from here any time."
                 : "The bucket still has its copy. Once you're sure everything opens, delete the bucket in Railway to stop paying for it."}
@@ -537,23 +519,23 @@ function MoveState({ move, storage, carrying, onCarryOn }: { move: StorageMove; 
       )}
       {move.stranded > 0 && move.step === "done" && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             <div>{count(move.stranded, "file")} didn't make it to the bucket</div>
-            <div style={{ fontWeight: 400 }}>
+            <div>
               {move.stranded === 1 ? "It was" : "They were"} uploaded while storage switched over, so {move.stranded === 1 ? "it's" : "they're"} still on the volume and won't open now. Moving back to the volume brings {move.stranded === 1 ? "it" : "them"} back.
             </div>
           </div>
         </div>
       )}
       {move.missing > 0 && (
-        <span className="muted small">
+        <span className="set-note">
           {count(move.missing, "file")} {move.missing === 1 ? "was" : "were"} already missing from {toBucket ? "the volume" : "the bucket"}, so there was nothing to copy. {move.missing === 1 ? "It didn't" : "They didn't"} open before the move either.
         </span>
       )}
       {move.problems.length > 0 && move.step !== "done" && (
         <div className="stack-sm" style={{ gap: 2 }}>
-          <span className="small">Files that didn't copy:</span>
+          <span className={styles.minor}>Files that didn't copy:</span>
           <ul className={styles.problems}>{move.problems.map((p) => <li key={p}>{p}</li>)}</ul>
         </div>
       )}
@@ -566,10 +548,10 @@ function ByHand({ byHand, carrying, onCarryOn }: { byHand: StorageByHand; carryi
   const lines = byHand.lines?.join("\n") ?? "";
   return (
     <div className="callout callout-info">
-      <Icon name="info" size={18} />
+      <Icon name="info" size={16} />
       <div className="grow stack-sm">
         <div>{byHand.title}</div>
-        <span style={{ fontWeight: 400 }}>Railway didn't let Crewtavo do this step itself, so it's yours to do in Railway:</span>
+        <span>Railway didn't let Crewtavo do this step itself, so it's yours to do in Railway:</span>
         <ol className={styles.steps}>{byHand.steps.map((step) => <li key={step}>{step}</li>)}</ol>
         {lines && (
           <div className="stack-sm">
@@ -581,7 +563,7 @@ function ByHand({ byHand, carrying, onCarryOn }: { byHand: StorageByHand; carryi
           {byHand.link && <ExternalButton href={byHand.link} primary={!onCarryOn}>Open Railway</ExternalButton>}
           {onCarryOn && <Button size="sm" variant="primary" loading={carrying} onClick={onCarryOn}>Carry on</Button>}
         </div>
-        {byHand.watching && <span className="small" style={{ fontWeight: 400 }}>Crewtavo checks for the change every few seconds and carries on by itself.</span>}
+        {byHand.watching && <span>Crewtavo checks for the change every few seconds and carries on by itself.</span>}
       </div>
     </div>
   );
@@ -592,13 +574,13 @@ function MoveToBucket({ storage, plan, busy, error, onMove, onClose }: { storage
   return (
     <Dialog open onClose={onClose} title="Move files to a Railway bucket" size="sm">
       <div className="dialog-body stack">
-        <p style={{ margin: 0 }}>
+        <p className={styles.lead} style={{ margin: 0 }}>
           Crewtavo makes a bucket called <strong>files</strong> in your Railway project and copies every photo and file into it{used !== null ? ` (${gb(used)})` : ""}. Once they're all there and
           checked, it switches storage over and restarts it, which takes about a minute; uploads pause for that minute, and files still open. Copying takes a while for a lot of files, and you can leave the page.
         </p>
         <div className="stack-sm" style={{ gap: 4 }}>
-          <strong className="small">What it costs</strong>
-          <span className="small">
+          <strong className={styles.minor}>What it costs</strong>
+          <span className="set-note">
             A bucket costs {usd(STORAGE_PRICES.bucket)} per GB a month, a tenth of the volume's {usd(STORAGE_PRICES.volume)}
             {used !== null && used > 0 ? `: about ${usd(used * STORAGE_PRICES.bucket)} a month for your ${gb(used)}, instead of about ${usd(used * STORAGE_PRICES.volume)}` : ""}. Railway counts
             files sent into the bucket as outbound traffic, {usd(STORAGE_PRICES.network)} per GB{used !== null && used > 0 ? `, so copying costs about ${usd(used * STORAGE_PRICES.network)} once` : ""}, and
@@ -606,24 +588,24 @@ function MoveToBucket({ storage, plan, busy, error, onMove, onClose }: { storage
           </span>
         </div>
         <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             <div>Railway doesn't back up buckets</div>
-            <div style={{ fontWeight: 400 }}>
+            <div>
               A volume can have backups on Railway's Pro plan; a bucket has none, and a file deleted from it is gone for good. Crewtavo's <Link to="/drive/trash" onClick={onClose}>Trash</Link> keeps deleted
               files for 30 days, so mistakes can be undone; for anything you can't lose, keep a copy of your own too.
             </div>
           </div>
         </div>
         {plan === "trial" && (
-          <span className="small">
+          <span className="set-note">
             Railway's Limited Trial doesn't include buckets. If Railway says no, choose a plan on Railway first, then try again.
           </span>
         )}
-        <span className="muted small">The volume stays exactly as it is, with every file from before the move, so you can move back from here any time.</span>
+        <span className="set-note">The volume stays exactly as it is, with every file from before the move, so you can move back from here any time.</span>
         <FormError error={error} />
         <div className="form-actions">
-          <Button onClick={onClose}>Not now</Button>
+          <Button variant="ghost" onClick={onClose}>Not now</Button>
           <Button variant="primary" icon="cloud" loading={busy} onClick={onMove}>Move files</Button>
         </div>
       </div>
@@ -638,20 +620,20 @@ function MoveBack({ storage, busy, error, onMove, onClose }: { storage: StorageO
   return (
     <Dialog open onClose={onClose} title="Move files back to the volume" size="sm">
       <div className="dialog-body stack">
-        <p style={{ margin: 0 }}>
+        <p className={styles.lead} style={{ margin: 0 }}>
           Crewtavo switches storage back to the volume, which still has every file from before the move, and restarts it (about a minute). Then it copies back the files added since the move;
           until each is back, it doesn't open.
         </p>
         {volume && (
-          <span className="small">
+          <span className="set-note">
             The volume holds {gb(volume.usedGb)} of {gb(volume.sizeGb)}{held !== null ? `, and the bucket ${gb(held)}` : ""}.
             {tight ? " The files added since might not fit: make the volume bigger in Railway first." : ""}
           </span>
         )}
-        <span className="muted small">The bucket keeps its copy. Delete it in Railway once you're sure, to stop paying for it.</span>
+        <span className="set-note">The bucket keeps its copy. Delete it in Railway once you're sure, to stop paying for it.</span>
         <FormError error={error} />
         <div className="form-actions">
-          <Button onClick={onClose}>Not now</Button>
+          <Button variant="ghost" onClick={onClose}>Not now</Button>
           <Button variant="primary" icon="hardDrive" loading={busy} onClick={onMove}>Move back</Button>
         </div>
       </div>
@@ -672,24 +654,23 @@ function Plan({ o }: { o: HostingOverview }) {
   const setAt = usageLimitSetAt(session.company.settings);
   const upgradeFirst = o.plan === "trial" || o.plan === "free";
   return (
-    <section className="card card-pad stack" aria-labelledby="hosting-plan">
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="hosting-plan" className={styles.title}>Plan{o.plan ? `: ${RAILWAY_PLANS[o.plan].name}` : ""}</h2>
-        {o.plan && <span className="muted">{PLAN_WORDS[o.plan]}</span>}
-      </div>
-      <div className="row wrap" style={{ gap: 8 }}>
+    <Section level={3} title={`Plan${o.plan ? `: ${RAILWAY_PLANS[o.plan].name}` : ""}`}>
+      <div className={styles.body}>
+      {o.plan && <p className="set-note">{PLAN_WORDS[o.plan]}</p>}
+      <div className={styles.actions}>
         {upgradeFirst ? <ExternalButton href={o.links.upgrade} primary>Choose a plan on Railway</ExternalButton> : <ExternalButton href={o.links.plans}>Change plan</ExternalButton>}
         {o.plan !== "trial" && <ExternalButton href={o.links.billing}>Card and credit</ExternalButton>}
       </div>
-      <div className={`stack-sm ${styles.divided}`}>
-        <strong className="small">Usage limit</strong>
-        <span className="muted small">
+      <div className={`${styles.body} ${styles.divided}`}>
+        <strong className={styles.minor}>Usage limit</strong>
+        <span className="set-note">
           Railway can stop your projects when usage reaches an amount you choose, so a busy month never surprises you. Set it well above what Crewtavo normally uses: when it's reached, Crewtavo
           stops too.{setAt ? ` You noted setting one on ${on(setAt)}.` : ""}
         </span>
         <ExternalButton href={o.links.usage}>{setAt ? "Change the limit on Railway" : "Set a limit on Railway"}</ExternalButton>
       </div>
-      <span className="muted small">Railway takes payments and changes plans itself, so these open Railway's pages.</span>
-    </section>
+      <span className="set-note">Railway takes payments and changes plans itself, so these open Railway's pages.</span>
+      </div>
+    </Section>
   );
 }

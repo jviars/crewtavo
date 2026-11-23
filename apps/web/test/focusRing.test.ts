@@ -49,8 +49,8 @@ function token(theme: "light" | "dark", name: string): Rgb {
   return hex(step ? radixValue(step[1]!) : value);
 }
 
-/** Everything a button sits on: the page, cards and menus, the sidebar, and the fills behind rows and hovers. */
-const SURFACES = ["page", "surface", "ground", "fill", "fill-2", "fill-3", "green-tint"];
+/** Everything a button sits on: the page, cards, menus and the phone's sheets, the sidebar, and the fills behind rows and hovers. */
+const SURFACES = ["page", "surface", "ground", "fill", "fill-2", "fill-3", "green-tint", "menu", "menu-hi", "m-sheet"];
 
 describe("the keyboard focus outline", () => {
   it("is the app's green, 2px wide and set off from the control, unless a screen gives its own colour", () => {
@@ -64,8 +64,8 @@ describe("the keyboard focus outline", () => {
         expect(ratio, `--green on --${surface} (${theme}): ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
       }
     }
-    // The figure the audit gives for the light theme.
-    expect(contrast(token("light", "green"), hex("#ffffff"))).toBeCloseTo(5.07, 1);
+    // The light theme's green on white (a shade darker than the audit's 5.07, for green words on the phone's ground).
+    expect(contrast(token("light", "green"), hex("#ffffff"))).toBeCloseTo(5.2, 1);
   });
 
   it("replaces a glow that was far too faint to count", () => {
@@ -112,7 +112,7 @@ describe("the keyboard focus outline", () => {
 
   it("is drawn inside a control that sits in something that clips its edges", () => {
     expect(base).toContain(".menu-item:focus-visible, .imagery-option:focus-visible, .thumb :focus-visible { outline-offset: -2px; }");
-    expect(components).toContain(".menu-item:hover, .menu-item:focus-visible { background: var(--fill-2); color: var(--ink); }");
+    expect(components).toContain(".menu-item:hover, .menu-item:focus-visible { background: var(--menu-hi); color: var(--ink); }");
   });
 });
 

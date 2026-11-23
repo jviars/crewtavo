@@ -1,21 +1,165 @@
-/* Collected by week: a bar a week with its date under it, the latest week's amount over its bar and
-   another week's on hover. A bar's height is --h (0 to 1) of the tallest. */
-.bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; margin: 6px 0 4px; }
-.week { display: grid; gap: 6px; justify-items: center; min-width: 0; }
-.track { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; width: 100%; height: 84px; }
+/*
+ * Home (Page-Home.dc.html, Setup-Flow.dc.html, Mobile-Work.dc.html, Setup-Phone.dc.html): the date
+ * over the greeting, the workflow strip, then what needs someone and today's visits, with setup and
+ * the money in the side column. Flat: hairlines, no cards. On a phone the screen is the kit's grey
+ * ground with each section an inset card (DetailColumns grouped).
+ */
+.date { order: -1; flex-basis: 100%; margin: 0 0 -10px; font-size: var(--fs-13); font-weight: 500; color: var(--text-3); }
+.contents { display: contents; }
+.fadeIn { animation: fade-in var(--dur-enter) var(--ease-enter); }
+.narrow { max-width: 780px; }
+.skeleton { display: grid; gap: 24px; }
+
+/* ---------- Needs attention: inbox rows whose avatar is the shared round quiet icon (.rel-icon), its glyph in the tone ---------- */
+.attention :global(.il-avatar) { background: none; }
+.attention :global(.il-avatar svg) { color: inherit; }
+.attention :global(.il-aside) { align-self: center; }
+.go { display: inline-flex; color: var(--quiet); }
+@media (min-width: 901px) {
+  /* The icons line up with the section's heading (Page-Home.dc.html). */
+  .attention :global(.il-row) { padding-left: 4px; }
+}
+
+/* ---------- Today: a time, the crew's color, the visit and where, its status ---------- */
+.today :global(.rel-lead) { display: flex; align-items: center; gap: 10px; width: 96px; min-width: 0; color: var(--text-3); font-size: var(--fs-13); }
+.crew { width: 8px; height: 8px; flex: none; border-radius: 2px; background: var(--fill-3); }
+.hold { display: inline-flex; align-items: center; gap: 5px; color: var(--warning); font-weight: 600; }
+.hold svg { color: inherit !important; }
+@media (min-width: 901px) {
+  /* One line: the visit, then where in quiet words, cut short before the visit is. */
+  .today :global(.rel-body) { display: flex; align-items: baseline; gap: 6px; }
+  .today :global(.rel-link) { flex: none; max-width: 60%; }
+  .today :global(.rel-sub) { display: block; flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); color: var(--quiet); }
+  .today :global(.rel-sub)::before { content: "· "; }
+  .today :global(.rel-sub > span) { display: inline; }
+  .today :global(.rel-sub > .meta-dot) { margin: 0 6px; }
+  .today :global(.rel-sub) > .hold { display: inline-flex; vertical-align: -2px; }
+}
+
+/* ---------- Receivables: who owes, in plain words, and how much (Page-Home.dc.html) ---------- */
+.owing :global(.rel-title) { font-weight: 500; }
+
+/* ---------- The side column's figures ---------- */
+.panel { display: grid; min-width: 0; }
+.figure { display: flex; }
+.big { font-size: var(--fs-30); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums; }
+.delta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 2px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+.delta :global(.chip) { height: auto; padding: 0; font-size: var(--fs-12); }
+.spark { display: grid; gap: 4px; margin: 10px 0 2px; }
+.lines { margin: 8px 0 0; }
+.lines > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 8px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.lines dt { min-width: 0; color: var(--text-3); }
+.lines dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Collected by week: a bar a week with its date under it, the latest week's amount over its green bar
+   and another week's on hover. A bar's height is --h (0 to 1) of the tallest. */
+.bars { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; margin: 14px 0 0; }
+.week { display: grid; gap: 5px; min-width: 0; }
+.track { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; height: 74px; }
 .amount { font-size: var(--fs-11); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0; transition: opacity var(--dur-fast); }
-.bar { width: 100%; max-width: 40px; height: calc(64px * var(--h, 0)); min-height: 2px; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: color-mix(in srgb, var(--green) 32%, transparent); transition: height var(--dur-slow) var(--ease-out), background var(--dur-fast); }
-.label { font-size: var(--fs-11); color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bar { width: 100%; max-width: 64px; height: calc(56px * var(--h, 0)); min-height: 2px; border-radius: 3px 3px 0 0; background: var(--fill-3); transition: height var(--dur-slow) var(--ease-out), background var(--dur-fast); }
+.label { font-size: var(--fs-11); color: var(--quiet); text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .week[data-latest] .amount, .week:hover .amount { opacity: 1; }
-.week[data-latest] .bar, .week:hover .bar { background: var(--green); }
+.week[data-latest] .bar { background: var(--green-solid); }
+.week:not([data-latest]):hover .bar { background: color-mix(in srgb, var(--green-solid) 45%, var(--fill-3)); }
 /* Pointing at another week trades the latest week's amount for that one's. */
 .bars:hover .week[data-latest]:not(:hover) .amount { opacity: 0; }
-.bars:hover .week[data-latest]:not(:hover) .bar { background: color-mix(in srgb, var(--green) 32%, transparent); }
 
-/* Set up Crewtavo: each step a row, a ring that fills with a check when it's done. */
-.step { align-items: center; }
-.mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); color: #fff; flex: none; transition: background var(--dur), border-color var(--dur); }
-.step[data-done] .mark { background: var(--green); border-color: var(--green); }
-.stepTitle { display: block; font-weight: 600; }
-.step[data-done] .stepTitle { color: var(--text-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 50%, transparent); }
-@media (prefers-reduced-motion: reduce) { .bar { transition: background var(--dur-fast); } }
+/* ---------- Set up Crewtavo (Setup-Flow.dc.html) ---------- */
+.setup { display: grid; min-width: 0; }
+:global(.sec-body) > .setup { margin-top: -12px; }
+.progress { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; font-size: var(--fs-13); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.meter { flex: 1 1 auto; max-width: 260px; height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--green-solid); transition: width var(--dur-slow) var(--ease-out); }
+.steps { margin: 0; padding: 0; list-style: none; }
+.step {
+  position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "ring text end"; column-gap: 12px; align-items: center;
+  min-height: 44px; padding: 10px 4px; border-bottom: 1px solid var(--row-divider); color: inherit; font-size: var(--fs-13); text-decoration: none; transition: background var(--dur-fast);
+}
+.step:hover { background: var(--fill); color: inherit; text-decoration: none; }
+.ring { grid-area: ring; box-sizing: border-box; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-pill); box-shadow: inset 0 0 0 1.5px var(--check-edge); color: #fff; transition: background var(--dur), box-shadow var(--dur); }
+.step[data-done] .ring { background: var(--green-solid); box-shadow: none; }
+.stepText { grid-area: text; min-width: 0; }
+.stepTitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--ink); }
+.step[data-done] .stepTitle { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--border-strong); }
+.stepDetail { display: block; margin-top: 1px; font-size: var(--fs-13); color: var(--text-3); }
+.stepEnd { grid-area: end; font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stepChevron { display: none; }
+/* The step up next: a quiet filled block with what it's for and its button. */
+.next {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-areas: "ring text" ". button"; column-gap: 12px; row-gap: 10px; align-items: start;
+  margin: 6px 0; padding: 12px; border-radius: 12px; background: var(--fill); color: inherit; text-decoration: none; transition: background var(--dur-fast);
+}
+.next:hover { background: var(--fill-2); color: inherit; text-decoration: none; }
+.next .ring { box-shadow: inset 0 0 0 2px var(--green); }
+.next .stepTitle { font-weight: 600; white-space: normal; }
+.upNext { display: inline-flex; align-items: center; height: 20px; margin-left: 8px; padding: 0 7px; border-radius: var(--radius-pill); background: var(--green-tint); font-size: var(--fs-11); font-weight: 700; color: var(--green-dark); vertical-align: 1px; white-space: nowrap; }
+.nextButton { grid-area: button; justify-self: start; }
+.step:focus-visible, .next:focus-visible { outline-offset: -2px; }
+/* The first visit's: bigger, with what each step is for. */
+.setup[data-full] .step { grid-template-columns: 26px minmax(0, 1fr) auto; padding: 13px 4px; }
+.setup[data-full] .next { grid-template-columns: 26px minmax(0, 1fr) auto; grid-template-areas: "ring text button"; align-items: center; padding: 14px; }
+.setup[data-full] .ring { width: 22px; height: 22px; }
+.setup[data-full] .stepTitle { font-size: var(--fs-14); font-weight: 600; white-space: normal; }
+.setup[data-full] .step[data-done] .stepTitle { font-weight: 600; }
+.setup[data-full] .nextButton { justify-self: end; }
+
+@media (max-width: 900px) {
+  .date { margin-bottom: -14px; }
+  /* Setup-Phone.dc.html: done, up next and the rest as three inset cards. */
+  .setup { gap: 10px; }
+  :global(.sec-body) > .setup { margin-top: 0; }
+  .progress { margin: 0 4px; }
+  .meter { max-width: none; }
+  .steps { overflow: hidden; border-radius: 14px; background: var(--m-card); }
+  .step, .setup[data-full] .step {
+    grid-template-columns: 26px minmax(0, 1fr) 16px; grid-template-areas: "ring text chev" "ring end chev"; column-gap: 14px;
+    min-height: 52px; padding: 11px 16px; border-bottom: 0; font-size: var(--fs-16);
+  }
+  .step::after { content: ""; position: absolute; left: 56px; right: 0; bottom: 0; height: 1px; background: var(--row-divider); }
+  .steps > li:last-child > .step::after { content: none; }
+  .step:hover { background: none; }
+  .step:active { background: var(--fill-2); }
+  .ring, .setup[data-full] .ring { width: 26px; height: 26px; }
+  .stepTitle, .setup[data-full] .stepTitle { font-size: var(--fs-16); font-weight: 500; }
+  .steps .stepDetail { display: none; }
+  .stepEnd { font-size: var(--fs-13); color: var(--text-3); }
+  .step[data-done] .stepEnd { display: none; }
+  .stepChevron { grid-area: chev; display: flex; color: var(--quiet); }
+  .next, .setup[data-full] .next {
+    grid-template-columns: 26px minmax(0, 1fr); grid-template-areas: "ring text" "button button"; column-gap: 12px; row-gap: 12px; align-items: start;
+    margin: 0; padding: 14px 16px; border-radius: 14px; background: var(--m-card);
+  }
+  .next:hover { background: var(--m-card); }
+  .next .stepTitle, .setup[data-full] .next .stepTitle { font-size: var(--fs-16); font-weight: 600; }
+  .next .stepDetail { font-size: var(--fs-14); }
+  .nextButton, .setup[data-full] .nextButton { justify-self: stretch; height: 46px; border-radius: 12px; font-size: var(--fs-16); }
+  .next .ring { margin-top: -2px; }
+
+  /* A section's figures sit in the inset card. */
+  .lines > div { min-height: 48px; font-size: var(--fs-15); }
+  .lines > div:last-child { border-bottom: 0; }
+  .today :global(.rel-lead) { align-self: flex-start; width: 72px; padding-top: 2px; font-size: var(--fs-14); color: var(--text-2); }
+  .crew { display: none; }
+  /* The visit can take two lines; where it is takes one, under a weather hold on its own line. */
+  .today :global(.rel-link) { white-space: normal; }
+  .today :global(.rel-sub) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .today :global(.rel-sub > span) { display: inline; }
+  .today :global(.rel-sub > .meta-dot) { margin: 0 6px; }
+  .today :global(.rel-sub) > .hold { display: flex; align-items: flex-start; white-space: normal; }
+  .today :global(.rel-sub) > .hold svg { margin-top: 0.2em; }
+  .today .hold + :global(.meta-dot) { display: none; }
+  /* Mobile-Work.dc.html: a 32px round icon and 15px words, tighter than a list page's rows. What needs
+     attention says it in its title, so the title wraps rather than being cut short. */
+  .attention :global(.il-rows > .il-row) { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; min-height: 56px; padding-top: 10px; padding-bottom: 10px; }
+  .attention :global(.il-rows > .il-row)::before { left: 60px; }
+  .attention :global(.il-avatar) { width: 32px; height: 32px; }
+  .attention :global(.il-avatar svg) { width: 17px; height: 17px; }
+  .attention :global(.il-l1) { font-size: var(--fs-15); }
+  .attention :global(.il-title) { white-space: normal; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar { transition: background var(--dur-fast); }
+  .meter > span { transition: none; }
+}

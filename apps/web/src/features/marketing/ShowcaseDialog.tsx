@@ -12,12 +12,11 @@ import { MAX_SHOWCASE_PHOTOS, ROLE_LABELS, SHOWCASE_ROLES, showcaseCaption, show
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -26,6 +25,8 @@ import { formatDate } from "@/lib/format";
 import { photoLinks } from "@/lib/photoMarkup";
 import { useSession } from "@/lib/session";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
+import styles from "./Presence.module.css";
+import { Select } from "@/components/ui/Select";
 
 interface Pick {
   attachment_id: string;
@@ -175,35 +176,35 @@ export function ShowcaseDialog({ jobId, visitId = null, showcaseId = null, onClo
         <form className="stack" onSubmit={(e) => { e.preventDefault(); if (!problem) publish.mutate(); }}>
           {published && token && (
             <div className="callout callout-good">
-              <Icon name="globe" size={20} />
+              <Icon name="globe" size={16} />
               <div className="grow stack-sm">
                 <strong>Published</strong>
-                <span className="small" style={{ overflowWrap: "anywhere" }}>{showcaseLink(token)}</span>
-                <div className="row wrap" style={{ gap: 8 }}>
+                <span className={styles.linkText}>{showcaseLink(token)}</span>
+                <div className={styles.inline}>
                   <Button size="sm" icon="copy" onClick={() => copyText(showcaseLink(token), "Link copied")}>Copy link</Button>
                   <a className="btn btn-sm" href={showcaseLink(token)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>
                   <Button size="sm" icon="share" onClick={() => navigate(socialPostPath({ title, description, token }, picks.map((p) => p.attachment_id)))}>Post to Facebook or Instagram</Button>
                 </div>
-                <span className="muted small">Unpublish it to change what it shows.</span>
+                <span className={styles.fine}>Unpublish it to change what it shows.</span>
               </div>
             </div>
           )}
-          {opted && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{CLIENT_OPT_OUT} Their photos can't go on a showcase.</div></div>}
+          {opted && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{CLIENT_OPT_OUT} Their photos can't go on a showcase.</div></div>}
 
-          <div className="stack-sm">
-            <div className="row-between wrap">
-              <strong>Photos</strong>
-              {visitId && <label className="check-row small"><input type="checkbox" checked={!onlyVisit} onChange={(e) => setOnlyVisit(!e.target.checked)} />Show all of the job's photos</label>}
+          <section className={styles.dialogPart} aria-labelledby="showcase-photos">
+            <div className={styles.dialogHead}>
+              <h3 id="showcase-photos" className={styles.dialogLabel}>Photos{picks.length > 0 && <span className={styles.dialogCount}>{picks.length} picked</span>}</h3>
+              {visitId && <label className="checkbox"><input type="checkbox" checked={!onlyVisit} onChange={(e) => setOnlyVisit(!e.target.checked)} />Show all of the job's photos</label>}
             </div>
             {!shown.length ? (
-              <EmptyState icon="image" title="No photos yet">{onlyVisit ? "This visit has no photos. Show all of the job's photos, or add some first." : "Add photos to the job or its visits first."}</EmptyState>
+              <EmptyState inline icon="image" title="No photos yet">{onlyVisit ? "This visit has no photos. Show all of the job's photos, or add some first." : "Add photos to the job or its visits first."}</EmptyState>
             ) : (
               <div className="thumbs" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
                 {shown.map((p) => {
                   const pick = pickOf(p.id);
                   const blocked = p.cant_share === "client_opt_out" || p.cant_share === "format";
                   return (
-                    <div key={p.id} className="stack-sm" style={{ gap: 4 }}>
+                    <div key={p.id} className={styles.thumbCell}>
                       <div className="thumb">
                         {p.url ? <img src={(pick && !pick.use_marked ? p.originalUrl : p.url) ?? ""} alt="" loading="lazy" /> : <Skeleton height={130} radius={8} />}
                         <button type="button" className="thumb-pick" aria-pressed={Boolean(pick)} disabled={published || blocked || (!pick && picks.length >= MAX_SHOWCASE_PHOTOS)} aria-label={`Photo from ${formatDate(p.visit_on ?? p.created_at)}`} onClick={() => toggle(p)}>
@@ -212,20 +213,20 @@ export function ShowcaseDialog({ jobId, visitId = null, showcaseId = null, onClo
                       </div>
                       {pick ? (
                         <>
-                          <Select className="select" style={{ minHeight: 32, padding: "2px 8px" }} value={pick.role} disabled={published} onChange={(e) => setPick(p.id, { role: e.target.value as ShowcaseRole })} aria-label="Before or after">
+                          <Select className={cx("select", styles.roleSelect)} value={pick.role} disabled={published} onChange={(e) => setPick(p.id, { role: e.target.value as ShowcaseRole })} aria-label="Before or after">
                             {SHOWCASE_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                           </Select>
-                          {p.marked_path && <label className="check-row small"><input type="checkbox" checked={pick.use_marked} disabled={published} onChange={(e) => setPick(p.id, { use_marked: e.target.checked })} />Drawn-on copy</label>}
+                          {p.marked_path && <label className={cx("checkbox", styles.thumbCheck)}><input type="checkbox" checked={pick.use_marked} disabled={published} onChange={(e) => setPick(p.id, { use_marked: e.target.checked })} />Drawn-on copy</label>}
                         </>
                       ) : (
-                        <span className="muted small">{p.cant_share === "format" ? "Not a JPEG or PNG" : p.shareable ? "OK to share" : p.marked_path ? "Drawn on" : " "}</span>
+                        <span className={styles.thumbNote}>{p.cant_share === "format" ? "Not a JPEG or PNG" : p.shareable ? "OK to share" : p.marked_path ? "Drawn on" : " "}</span>
                       )}
                     </div>
                   );
                 })}
               </div>
             )}
-          </div>
+          </section>
 
           <Field label="Title">
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} disabled={published} placeholder="Driveway resealed and restriped" />
@@ -241,9 +242,9 @@ export function ShowcaseDialog({ jobId, visitId = null, showcaseId = null, onClo
               {aiWrote && <span className="muted small" role="status">Written by AI from the job's services. It can be wrong: check it says what you did before you publish.</span>}
             </div>
           )}
-          <label className="check-row">
+          <label className="checkbox">
             <input type="checkbox" checked={showTown} disabled={published || !town} onChange={(e) => setShowTown(e.target.checked)} />
-            <span>Show the town{town ? ` (${town})` : ""}<span className="muted small" style={{ display: "block" }}>{town ? "Never the street or the client's name." : "The job has no property with a town."}</span></span>
+            <span>Show the town{town ? ` (${town})` : ""}<span className={styles.checkNote}>{town ? "Never the street or the client's name." : "The job has no property with a town."}</span></span>
           </label>
 
           <FormError error={save.error ?? publish.error ?? unpublish.error} />

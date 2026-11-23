@@ -1,9 +1,11 @@
 /**
  * Weather rules (Settings → Weather rules): the work that needs good weather, and how good. Saved
- * all at once with set_weather_rules, which checks them, as a change to the price list.
+ * all at once with set_weather_rules, which checks them, as a change to the schedule: they warn
+ * about visits, and change no price (the price list is money, which they aren't).
  */
 import { namedWeatherRules, PAVING_WORK_IDS, weatherRuleSummary, type WeatherRule } from "@crewtavo/core";
 import { z } from "zod";
+import { adminClient } from "../lib/supabase";
 import { companyArg, friendly, one, tool } from "./tool";
 
 const rule = z.object({
@@ -24,7 +26,8 @@ export const weatherTools = {
     input: z.object({ ...companyArg }),
     run: async (ctx) => {
       const [c, services] = await Promise.all([
-        one(ctx.db.from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company"),
+        // With the server's key: the browser's role doesn't read the settings (lib/companySettings.ts).
+        one(adminClient(ctx.env).from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company"),
         ctx.db.from("services").select("id, name").eq("company_id", ctx.companyId),
       ]);
       const list = (c.settings as { weather_rules?: unknown } | null)?.weather_rules;
@@ -37,7 +40,7 @@ export const weatherTools = {
     description:
       "Replace the company's weather rules with this list (read them first with list_weather_rules and send the whole list, changed). Each needs at least one limit. [] removes them all.",
     input: z.object({ rules: z.array(rule).max(50), ...companyArg }),
-    area: "prices",
+    area: "schedule",
     run: async (ctx, a) => {
       const { data, error } = await ctx.db.rpc("set_weather_rules", { p_company: ctx.companyId, p_rules: a.rules as never });
       if (error) throw new Error(friendly(error.message));

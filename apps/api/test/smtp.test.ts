@@ -1,11 +1,13 @@
 /**
  * The SMTP client against a small mail server on localhost that speaks real TLS, so the switch to
- * a secure connection and each step's time limit work as they do with Gmail or Microsoft 365.
+ * a secure connection and each step's time limit work as they do with Gmail or Microsoft 365. Those
+ * tests let the client reach this machine ("any"); a mailbox's own settings never can.
  */
+import dns from "node:dns";
 import net from "node:net";
 import tls from "node:tls";
 import { describe, expect, it, vi } from "vitest";
-import { smtpSend, SmtpError, type SmtpTimeouts } from "../src/lib/smtp";
+import { privateServer, smtpReach, smtpSend, SmtpError, type SmtpReach, type SmtpTimeouts } from "../src/lib/smtp";
 
 // The client trusts the test certificate below (and only it), so certificates are still checked.
 // Each connection is given it, which works on every Node version (setting the default ones needs 22.19).
@@ -88,11 +90,12 @@ async function mailServer(options: { afterStartTls?: string; authDelayMs?: numbe
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as net.AddressInfo).port;
-  const send = (timeouts?: SmtpTimeouts) =>
+  const send = (timeouts?: SmtpTimeouts, reach: SmtpReach = "any") =>
     smtpSend(
       { host: "localhost", port, security: "starttls", username: "office@acme.example", password: "app-password" },
       { from: { name: "Acme", email: "office@acme.example" }, to: "ana@example.com", subject: "Your quote", text: "Hello" },
       timeouts,
+      reach,
     ).finally(() => server.close());
   return { state, send };
 }
@@ -130,5 +133,100 @@ describe("SMTP", () => {
     const slowSignIn = await mailServer({ authDelayMs: 800 });
     await expect(slowSignIn.send({ stepMs: 300, sentMs: 5_000 })).rejects.toBeInstanceOf(SmtpError);
     expect(slowSignIn.state.messages).toBe(0);
+  });
+});
+
+describe("which mail servers a mailbox reaches", () => {
+  const settings = (host: string, port = 465) => ({ host, port, security: "tls" as const, username: "office@acme.example", password: "app-password" });
+
+  it("never this server, its private network or a cloud's metadata service, by name or by address", async () => {
+    // Something listening here, which must never be reached.
+    let reached = 0;
+    const server = net.createServer((socket) => {
+      reached++;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as net.AddressInfo).port;
+    try {
+      for (const host of ["localhost", "127.0.0.1", "0x7f.1", "10.0.0.5", "172.18.0.4", "192.168.1.10", "169.254.169.254", "metadata.google.internal", "auth.railway.internal", "db.local"]) {
+        const error = await smtpSend(settings(host, port), null).catch((e: unknown) => e);
+        expect(error, host).toBeInstanceOf(SmtpError);
+        expect((error as SmtpError).message, host).toBe(privateServer(host));
+      }
+      expect(reached).toBe(0);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("checks a name as it's looked up for the connection: one that leads inside is refused before connecting", async () => {
+    // The instance's own services by their names on its network (docker compose's "db", "auth"...).
+    const lookup = vi.spyOn(dns, "lookup").mockImplementation(((_host: string, _options: unknown, callback: (error: null, addresses: Array<{ address: string; family: number }>) => void) =>
+      callback(null, [{ address: "172.18.0.3", family: 4 }])) as unknown as typeof dns.lookup);
+    try {
+      const error = await smtpSend(settings("db"), null).catch((e: unknown) => e);
+      expect((error as SmtpError).message).toBe(privateServer("db"));
+      expect(lookup).toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
+  it("reads the private mail servers the server allows exactly as listed, and none when unset", () => {
+    expect(smtpReach({})).toBe("public");
+    expect(smtpReach({ CREWTAVO_SMTP_PRIVATE_HOSTS: " , " })).toBe("public");
+    expect(smtpReach({ CREWTAVO_SMTP_PRIVATE_HOSTS: " 192.168.1.10, Mail.Office.LAN.\n[fd00::25] " })).toEqual({ privateHosts: ["192.168.1.10", "mail.office.lan", "fd00::25"] });
+  });
+
+  it("sends through a private mail server the server allows (CREWTAVO_SMTP_PRIVATE_HOSTS)", async () => {
+    const { state, send } = await mailServer();
+    // Written as someone might type it; the mailbox says "localhost".
+    expect((await send(undefined, smtpReach({ CREWTAVO_SMTP_PRIVATE_HOSTS: "mail.office.lan, LOCALHOST." }))).id).toMatch(/@acme\.example>$/);
+    expect(state.messages).toBe(1);
+  });
+
+  it("still refuses every other private server when some are allowed, by name, by address, or by where a name leads", async () => {
+    const reach = smtpReach({ CREWTAVO_SMTP_PRIVATE_HOSTS: "192.168.1.10,localhost" });
+    let reached = 0;
+    const server = net.createServer((socket) => {
+      reached++;
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as net.AddressInfo).port;
+    try {
+      // localhost is allowed, but not its address written out, nor the rest of the network.
+      for (const host of ["127.0.0.1", "10.0.0.5", "192.168.1.11", "169.254.169.254", "auth.railway.internal"]) {
+        const error = await smtpSend(settings(host, port), null, undefined, reach).catch((e: unknown) => e);
+        expect((error as SmtpError).message, host).toBe(privateServer(host));
+      }
+      expect(reached).toBe(0);
+    } finally {
+      server.close();
+    }
+    const lookup = vi.spyOn(dns, "lookup").mockImplementation(((_host: string, _options: unknown, callback: (error: null, addresses: Array<{ address: string; family: number }>) => void) =>
+      callback(null, [{ address: "192.168.1.10", family: 4 }])) as unknown as typeof dns.lookup);
+    try {
+      // A name that isn't listed is checked as it's looked up, even when it leads to an allowed address.
+      const error = await smtpSend(settings("db"), null, undefined, reach).catch((e: unknown) => e);
+      expect((error as SmtpError).message).toBe(privateServer("db"));
+      expect(lookup).toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
+  it("still tries a real provider's server, wherever its name leads on the internet", async () => {
+    // A public address that doesn't answer here: the attempt is made, and fails as an unreachable server does.
+    const lookup = vi.spyOn(dns, "lookup").mockImplementation(((_host: string, _options: unknown, callback: (error: null, addresses: Array<{ address: string; family: number }>) => void) =>
+      callback(null, [{ address: "203.0.113.10", family: 4 }])) as unknown as typeof dns.lookup);
+    try {
+      const error = await smtpSend(settings("smtp.gmail.com"), null, { stepMs: 300, sentMs: 300 }).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(SmtpError);
+      expect((error as SmtpError).message).toMatch(/^Couldn't connect to smtp\.gmail\.com on port 465/);
+    } finally {
+      lookup.mockRestore();
+    }
   });
 });

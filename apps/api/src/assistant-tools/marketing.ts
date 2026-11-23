@@ -15,6 +15,7 @@ import { sendReferralAsk } from "../services/referrals";
 import { sendReviewRequest } from "../services/reviews";
 import { checkPost, MARKETING_OFF_POSTS, postBody } from "../services/social";
 import { changed, companyArg, friendly, one, requireRole, rows, tool, type ToolContext } from "./tool";
+import { settingsAs } from "../lib/companySettings";
 
 /** The Marketing screens are the office's, with the Marketing area of their role. */
 const marketer = (ctx: ToolContext) => requireRole(ctx, OFFICE, "marketing");
@@ -22,8 +23,7 @@ const baseUrl = (ctx: ToolContext) => (ctx.env.APP_URL ?? ctx.origin).replace(/\
 
 /** Uninstalled, Marketing sends, posts and replies nothing. */
 async function requireOn(ctx: ToolContext, message: string) {
-  const company = await one(ctx.db.from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company");
-  if (!marketingOn(company.settings as Record<string, unknown> | null)) throw new Error(message);
+  if (!marketingOn(await settingsAs(ctx.db, ctx.companyId))) throw new Error(message);
 }
 
 const audience = z
@@ -48,11 +48,11 @@ export const marketingTools = {
     run: async (ctx) => {
       marketer(ctx);
       const [company, summary, reviews] = await Promise.all([
-        one(ctx.db.from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company"),
+        settingsAs(ctx.db, ctx.companyId),
         ctx.db.rpc("marketing_summary", { p_company_id: ctx.companyId }),
         ctx.db.rpc("review_stats", { p_company: ctx.companyId }),
       ]);
-      return { installed: marketingOn(company.settings as Record<string, unknown> | null), summary: summary.data, reviews: reviews.data };
+      return { installed: marketingOn(company), summary: summary.data, reviews: reviews.data };
     },
   }),
 
@@ -97,12 +97,12 @@ export const marketingTools = {
   }),
   send_campaign: tool({
     description:
-      "Send a draft campaign to everyone in its audience now (it starts going out within a minute), or at scheduled_at. This emails clients: tell the person how many it reaches (save_campaign says) and confirm first. Up to 5,000 recipients.",
+      "Send a draft campaign to everyone in its audience now (it starts going out within a minute), or at scheduled_at. This emails clients: tell the person how many it reaches (save_campaign says) and confirm first. Up to 5,000 recipients. Clients whose email an AI assistant put on file aren't sent it (the answer says how many): the person sends to them from Crewtavo.",
     input: z.object({ campaign_id: z.uuid(), scheduled_at: z.iso.datetime({ offset: true }).optional(), ...companyArg }),
     area: "marketing",
     run: async (ctx, a) => {
       marketer(ctx);
-      return startCampaign(ctx.env, ctx.db, ctx.companyId, a.campaign_id, a.scheduled_at);
+      return startCampaign(ctx.env, ctx.db, ctx.companyId, a.campaign_id, a.scheduled_at, { assistant: true });
     },
   }),
   cancel_campaign: tool({

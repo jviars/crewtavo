@@ -10,10 +10,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
+import { RelatedRow, Section } from "@/components/ui/Section";
+import { EmptyState } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { downloadBlob } from "@/lib/csv";
 import { formatDateTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./settings.module.css";
 
 export const BACKUPS_KEY = ["backups"] as const;
 const PASSWORD_HINT = "To make sure it's you. No password yet? Set one under Settings → Profile.";
@@ -85,62 +90,59 @@ export function BackupsCard() {
   const s = status.data;
   const problem = s ? backupProblem(s) : null;
   return (
-    <div className="card card-pad stack-sm" style={{ gap: 12 }}>
-      <div className="stack-sm" style={{ gap: 2 }}>
-        <strong>Database backups</strong>
-        <span className="muted small">
+    <Section level={3} title="Database backups" action={s?.available ? <StatusPill tone={problem ? "danger" : s.lastGoodAt ? "good" : "muted"} label={problem ? "Needs a look" : s.lastGoodAt ? "Working" : "None yet"} /> : undefined}>
+      <div className="set-stack">
+        <p className="set-note">
           Every night Crewtavo saves a copy of its whole database: clients, quotes, jobs, invoices, payments, the team and everyone&apos;s sign-in. It keeps the last {BACKUP_KEEP.daily} days and the last {BACKUP_KEEP.weekly} weeks. A backup is what a new Crewtavo is restored from if this one is ever lost.
-        </span>
+        </p>
+        {s && !s.available && <p className="set-note">{s.unavailable}</p>}
+        {s?.available && <span className="set-figure">{backupLine(s)}</span>}
+        {problem && <div className="callout callout-danger" role="alert"><Icon name="alert" size={16} /><div className="grow">{problem}</div></div>}
+        <ul className="app-steps">
+          <li><strong>Photos and files aren&apos;t in it.</strong> Visit photos, receipts, plans and documents are only covered if the files volume or bucket is backed up separately. A restore without them shows them as missing.</li>
+          <li><strong>Download one now and then.</strong> The backups are kept on {place}, so if that&apos;s lost, they go with it. A backup you&apos;ve downloaded and put somewhere else is your copy.</li>
+        </ul>
+        <p className="set-note"><strong>Keep your secrets with it.</strong> {secretsNote(session.config.platform)}</p>
+        {s?.available && (
+          <form
+            className={styles.backupForm}
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              show.mutate();
+            }}
+          >
+            <Field label="Your Crewtavo password" hint={PASSWORD_HINT}>
+              <input className="input" type="password" value={password} onChange={(e) => { setPassword(e.target.value); show.reset(); backUp.reset(); download.reset(); }} autoComplete="current-password" maxLength={200} />
+            </Field>
+            <FormError error={show.error ?? backUp.error ?? download.error} />
+            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+              <Button type="submit" disabled={!password} loading={show.isPending}>{list ? "Refresh the list" : "Show backups"}</Button>
+              <Button variant="ghost" icon="download" disabled={!password || running} loading={backUp.isPending || running} slowHint={false} onClick={() => backUp.mutate()}>
+                {running ? "Making a backup…" : "Back up now"}
+              </Button>
+            </div>
+          </form>
+        )}
+        {list && <BackupList backups={list} busy={download.isPending ? download.variables?.id ?? null : null} onDownload={(b) => download.mutate(b)} />}
+        <p className="set-note">A backup holds everything, pay rates and clients&apos; details included, so keep a downloaded one somewhere safe. Restoring one into a new Crewtavo is in docs/deploy.md, under Restoring a backup.</p>
       </div>
-      {s && !s.available && <span className="muted small">{s.unavailable}</span>}
-      {s?.available && <span>{backupLine(s)}</span>}
-      {problem && <span className="form-error" role="alert">{problem}</span>}
-      <ul className="app-steps">
-        <li><strong>Photos and files aren&apos;t in it.</strong> Visit photos, receipts, plans and documents are only covered if the files volume or bucket is backed up separately. A restore without them shows them as missing.</li>
-        <li><strong>Download one now and then.</strong> The backups are kept on {place}, so if that&apos;s lost, they go with it. A backup you&apos;ve downloaded and put somewhere else is your copy.</li>
-      </ul>
-      <span className="small"><strong>Keep your secrets with it.</strong> {secretsNote(session.config.platform)}</span>
-      {s?.available && (
-        <form
-          className="stack-sm"
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            show.mutate();
-          }}
-        >
-          <Field label="Your Crewtavo password" hint={PASSWORD_HINT}>
-            <input className="input" type="password" value={password} onChange={(e) => { setPassword(e.target.value); show.reset(); backUp.reset(); download.reset(); }} autoComplete="current-password" maxLength={200} style={{ maxWidth: 320 }} />
-          </Field>
-          <FormError error={show.error ?? backUp.error ?? download.error} />
-          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-            <Button type="submit" variant="primary" disabled={!password} loading={show.isPending}>{list ? "Refresh the list" : "Show backups"}</Button>
-            <Button icon="download" disabled={!password || running} loading={backUp.isPending || running} slowHint={false} onClick={() => backUp.mutate()}>
-              {running ? "Making a backup…" : "Back up now"}
-            </Button>
-          </div>
-        </form>
-      )}
-      {list && <BackupList backups={list} busy={download.isPending ? download.variables?.id ?? null : null} onDownload={(b) => download.mutate(b)} />}
-      <span className="muted small">A backup holds everything, pay rates and clients&apos; details included, so keep a downloaded one somewhere safe. Restoring one into a new Crewtavo is in docs/deploy.md, under Restoring a backup.</span>
-    </div>
+    </Section>
   );
 }
 
 /** The backups there are, newest first: when, how big, and whether each worked. */
 export function BackupList({ backups, busy, onDownload }: { backups: BackupEntry[]; busy: string | null; onDownload: (backup: BackupEntry) => void }) {
-  if (!backups.length) return <span className="muted small">No backups yet.</span>;
+  if (!backups.length) return <EmptyState inline title="No backups yet" />;
   return (
-    <ul className="stack-sm" style={{ gap: 8, listStyle: "none", padding: 0, margin: 0 }}>
+    <ul className={`rel ${styles.backups}`} role="list">
       {backups.map((b) => (
-        <li key={b.id} className="row-between" style={{ gap: 12, alignItems: "flex-start" }}>
-          <div className="stack-sm" style={{ gap: 2 }}>
-            <span>{formatDateTime(b.startedAt)}{b.kind === "manual" ? " (made by hand)" : ""}</span>
-            <span className="muted small">
-              {b.status === "ok" ? `Good, ${formatBytes(b.bytes ?? 0)}` : b.status === "running" ? "Being made…" : `Didn't work. ${b.error ?? ""}`}
-            </span>
-          </div>
-          {b.status === "ok" && <Button size="sm" icon="download" loading={busy === b.id} slowHint={false} onClick={() => onDownload(b)}>Download</Button>}
-        </li>
+        <RelatedRow
+          key={b.id}
+          lead={<span className="rel-icon" data-tone={b.status === "ok" ? "good" : b.status === "running" ? undefined : "danger"}><Icon name={b.status === "ok" ? "check" : b.status === "running" ? "clock" : "alert"} size={15} /></span>}
+          title={`${formatDateTime(b.startedAt)}${b.kind === "manual" ? " (made by hand)" : ""}`}
+          sub={b.status === "ok" ? `Good, ${formatBytes(b.bytes ?? 0)}` : b.status === "running" ? "Being made…" : `Didn't work. ${b.error ?? ""}`}
+          actions={b.status === "ok" && <Button size="sm" icon="download" loading={busy === b.id} slowHint={false} onClick={() => onDownload(b)}>Download</Button>}
+        />
       ))}
     </ul>
   );

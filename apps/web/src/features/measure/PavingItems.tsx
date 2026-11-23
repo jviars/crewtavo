@@ -63,10 +63,10 @@ export function PavingItemsCard({
         </div>
       </div>
       {finder && <div className="card-row paving-find">{finder}</div>}
-      <div className="paving-item-hint muted small" role="status" aria-live="polite">
+      <div className="paving-item-hint" role="status" aria-live="polite">
         {activeItem ? (
           <>
-            <strong style={{ color: "var(--ink)" }}>Drawing {activeItem.name.toLowerCase()}.</strong> {activeItem.hint}{" "}
+            <strong>Drawing {activeItem.name.toLowerCase()}.</strong> {activeItem.hint}{" "}
             <button type="button" className="link-btn small" onClick={() => onPick(null)}>Stop</button>
           </>
         ) : (
@@ -94,16 +94,16 @@ export function PavingItemsCard({
                 >
                   <ItemSwatch item={item} />
                   <span className="grow">{item.name}</span>
-                  <span className="paving-item-kind muted small">{item.geometry === "area" ? "Area" : item.geometry === "line" ? "Line" : "Count"}</span>
-                  <strong className="num" data-zero={total ? undefined : true}>{total ? <ItemTotal sections={sections} item={item} unit={unit} /> : "—"}</strong>
+                  {/* Nothing drawn yet: its kind of shape, quiet. Once drawn: its running total. */}
+                  {total ? <span className="num"><ItemTotal sections={sections} item={item} unit={unit} /></span> : <span className="paving-item-kind">{item.geometry === "area" ? "Area" : item.geometry === "line" ? "Line" : "Count"}</span>}
                 </button>
               );
             })}
           </div>
         );
       })}
-      <button type="button" className="link-btn small paving-more" onClick={() => setShowAll(!showAll)}>
-        <Icon name={showAll ? "chevronUp" : "chevronDown"} size={14} /> {showAll ? "Fewer items" : "All items: curb, bollards, drains, red lines and more"}
+      <button type="button" className="link-btn small paving-more" aria-expanded={showAll} onClick={() => setShowAll(!showAll)}>
+        <Icon name={showAll ? "chevronUp" : "chevronDown"} size={14} />{showAll ? "Fewer items" : "All items: curb, bollards, drains, red lines and more"}
       </button>
     </div>
   );

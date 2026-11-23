@@ -8,16 +8,17 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { PrivacyLine } from "./AppKeysCard";
 import type { AppRow } from "./catalog";
+import { kit, Row, RowsSkeleton } from "./PanelKit";
 
 interface MetaPageChoice {
   id: string;
@@ -94,58 +95,62 @@ export function MetaPanel({ app, onChanged }: { app: AppRow; onChanged: () => vo
   if (!m || app.status === "disconnected") return null;
   const by = signInBy(m.data_access_expires_at);
   const pick = app.status === "connected" && !m.user_token_expired && (picking || m.problem === "pick");
+  const canChange = app.status === "connected" && !m.user_token_expired;
 
   return (
-    <section id="app-setup" className="card card-pad stack" aria-labelledby="meta-panel">
-      <h2 id="meta-panel" className="section-title" style={{ fontSize: 16 }}>Your Page</h2>
+    <Section id="app-setup" title="Your Page" className={kit.panel}>
       {!m.marketing_on && (
         <div className="callout callout-warning">
-          <Icon name="pause" size={20} />
+          <Icon name="pause" size={16} />
           <div className="grow">Marketing is off, so nothing posts. Posts already made stay. <Link to="/apps/marketing">Install Marketing</Link></div>
         </div>
       )}
       {app.status === "error" && (
         <div className="callout callout-danger" role="alert">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Your Page's sign-in stopped working, so posts don't go. Reconnect as the Page's admin.</span>
-            <Button size="sm" variant="primary" icon="refresh" style={{ justifySelf: "start" }} loading={signIn.isPending} onClick={() => signIn.mutate({})}>Reconnect</Button>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Your Page's sign-in stopped working, so posts don't go.</div>
+            <span>Reconnect as the Page's admin.</span>
+            <div className={kit.actions}><Button size="sm" variant="primary" icon="refresh" loading={signIn.isPending} onClick={() => signIn.mutate({})}>Reconnect</Button></div>
           </div>
         </div>
       )}
       {app.status === "connected" && m.user_token_expired && (
         <div className="callout callout-info">
-          <Icon name="info" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Meta's sign-in ran out. Sign in again to change the Page or its permissions. Posts keep going meanwhile.</span>
-            <Button size="sm" style={{ justifySelf: "start" }} loading={signIn.isPending} onClick={() => signIn.mutate({})}>Sign in again</Button>
+          <Icon name="info" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Meta's sign-in ran out.</div>
+            <span>Sign in again to change the Page or its permissions. Posts keep going meanwhile.</span>
+            <div className={kit.actions}><Button size="sm" loading={signIn.isPending} onClick={() => signIn.mutate({})}>Sign in again</Button></div>
           </div>
         </div>
       )}
       {app.status === "connected" && by && !m.user_token_expired && (
         <div className="callout callout-warning">
-          <Icon name="clock" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Meta asks you to sign in again by {by}, so posts keep going.</span>
-            <Button size="sm" style={{ justifySelf: "start" }} loading={signIn.isPending} onClick={() => signIn.mutate({})}>Reconnect</Button>
+          <Icon name="clock" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Meta asks you to sign in again by {by}, so posts keep going.</div>
+            <div className={kit.actions}><Button size="sm" loading={signIn.isPending} onClick={() => signIn.mutate({})}>Reconnect</Button></div>
           </div>
         </div>
       )}
       {m.missing.length > 0 && app.status === "connected" && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Meta wasn't given {m.missing.length === 1 ? "this permission" : "these permissions"}: {m.missing.map((p, i) => <span key={p}>{i ? ", " : ""}<strong>{p}</strong></span>)}. Add {m.missing.length === 1 ? "it" : "them"} to your Meta app's use case if {m.missing.length === 1 ? "it isn't" : "they aren't"} there, then reconnect and allow {m.missing.length === 1 ? "it" : "them"}.</span>
-            <Button size="sm" style={{ justifySelf: "start" }} loading={signIn.isPending} onClick={() => signIn.mutate({ again: true })}>Reconnect</Button>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Meta wasn't given {m.missing.length === 1 ? "this permission" : "these permissions"}: {m.missing.map((p, i) => <span key={p}>{i ? ", " : ""}<code className={kit.code}>{p}</code></span>)}.</div>
+            <span>Add {m.missing.length === 1 ? "it" : "them"} to your Meta app's use case if {m.missing.length === 1 ? "it isn't" : "they aren't"} there, then reconnect and allow {m.missing.length === 1 ? "it" : "them"}.</span>
+            <div className={kit.actions}><Button size="sm" loading={signIn.isPending} onClick={() => signIn.mutate({ again: true })}>Reconnect</Button></div>
           </div>
         </div>
       )}
       {m.needs_business_permissions && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Your Page is in a business portfolio, so Meta needs <strong>ads_management</strong> and <strong>ads_read</strong> too before Instagram posts go. Add them to your Meta app, then reconnect.</span>
-            <Button size="sm" style={{ justifySelf: "start" }} loading={signIn.isPending} onClick={() => signIn.mutate({ ads: true })}>Reconnect with business Page permissions</Button>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Your Page is in a business portfolio, so Meta needs <code className={kit.code}>ads_management</code> and <code className={kit.code}>ads_read</code> too before Instagram posts go.</div>
+            <span>Add them to your Meta app, then reconnect.</span>
+            <div className={kit.actions}><Button size="sm" loading={signIn.isPending} onClick={() => signIn.mutate({ ads: true })}>Reconnect with business Page permissions</Button></div>
           </div>
         </div>
       )}
@@ -161,36 +166,42 @@ export function MetaPanel({ app, onChanged }: { app: AppRow; onChanged: () => vo
           signingIn={signIn.isPending}
         />
       ) : m.page ? (
-        <div className="row wrap" style={{ gap: 10 }}>
-          {m.page.picture ? <img src={m.page.picture} alt="" width={36} height={36} style={{ borderRadius: 8 }} /> : <Icon name="globe" size={18} />}
+        <div className={kit.rows}>
           {/* A basis for the name, so on a phone the buttons wrap under it rather than squeezing it to a word a line. */}
-          <span style={{ flex: `1 1 ${NAME_BASIS}`, minWidth: 0 }}>
-            <strong style={{ display: "block" }}>{m.page.name ?? "Your Page"}</strong>
-            <span className="muted small">
-              {m.instagram ? `Instagram: @${m.instagram.username ?? m.instagram.id}` : m.page_instagram ? `Instagram @${m.page_instagram.username ?? ""} is linked, but posts don't go to it` : "No Instagram account linked to this Page"}
-            </span>
-          </span>
-          <span className="row wrap" style={{ gap: 8 }}>
-            {app.status === "connected" && !m.user_token_expired && <Button size="sm" onClick={() => setPicking(true)}>Change Page</Button>}
-            <Button size="sm" variant="ghost" icon="refresh" loading={check.isPending} onClick={() => check.mutate()}>Check again</Button>
-          </span>
+          <Row
+            basis={NAME_BASIS}
+            lead={m.page.picture ? <img className={kit.thumb} src={m.page.picture} alt="" width={36} height={36} /> : <span className={kit.roundIcon}><Icon name="globe" size={16} /></span>}
+            title={m.page.name ?? "Your Page"}
+            sub={m.instagram ? `Instagram: @${m.instagram.username ?? m.instagram.id}` : m.page_instagram ? `Instagram @${m.page_instagram.username ?? ""} is linked, but posts don't go to it` : "No Instagram account linked to this Page"}
+            end={
+              <>
+                {canChange && <Button size="sm" onClick={() => setPicking(true)}>Change Page</Button>}
+                <Button size="sm" variant="ghost" icon="refresh" loading={check.isPending} onClick={() => check.mutate()}>Check again</Button>
+              </>
+            }
+          />
         </div>
       ) : null}
 
       {m.page && app.status === "connected" && (
         m.live_confirmed_at ? (
-          <label className="checkbox">
-            <input type="checkbox" checked disabled={live.isPending} onChange={() => live.mutate(false)} />
-            <span>My Meta app is Live<span className="muted small" style={{ display: "block", fontWeight: 400 }}>Posts show to everyone who follows your Page.</span></span>
-          </label>
+          <div className={kit.rows}>
+            <label className={cx(kit.row, kit.tick)}>
+              <input type="checkbox" checked disabled={live.isPending} onChange={() => live.mutate(false)} />
+              <span className={kit.rowText}>
+                <span className={kit.rowTitle}><span>My Meta app is Live</span></span>
+                <span className={kit.rowSub}>Posts show to everyone who follows your Page.</span>
+              </span>
+            </label>
+          </div>
         ) : (
           <div className="callout callout-warning">
-            <Icon name="alert" size={20} />
-            <div className="grow stack-sm" style={{ gap: 8 }}>
-              <strong>Last step: switch your Meta app to Live, or only you can see the posts.</strong>
-              <span style={{ fontWeight: 400 }}>In your app's dashboard, fill in the privacy page under <strong>App settings → Basic</strong>, then use the <strong>App mode</strong> switch at the top. Meta's API can't tell Crewtavo when it's Live, so tick the box once you've switched it.</span>
-              <div style={{ fontWeight: 400 }}><PrivacyLine /></div>
-              <label className="checkbox" style={{ fontWeight: 400 }}>
+            <Icon name="alert" size={16} />
+            <div className={cx("grow", kit.calloutBody)}>
+              <div>Last step: switch your Meta app to Live, or only you can see the posts.</div>
+              <span>In your app's dashboard, fill in the privacy page under <strong>App settings → Basic</strong>, then use the <strong>App mode</strong> switch at the top. Meta's API can't tell Crewtavo when it's Live, so tick the box once you've switched it.</span>
+              <div className={kit.calloutWide}><PrivacyLine /></div>
+              <label className="checkbox">
                 <input type="checkbox" checked={false} disabled={live.isPending} onChange={() => live.mutate(true)} />
                 <span>I switched my app to Live</span>
               </label>
@@ -199,7 +210,7 @@ export function MetaPanel({ app, onChanged }: { app: AppRow; onChanged: () => vo
         )
       )}
       <FormError error={check.error ?? live.error ?? signIn.error} />
-    </section>
+    </Section>
   );
 }
 
@@ -226,36 +237,38 @@ function PagePicker({ current, instagramOn, onDone, onCancel, onBusiness, onSign
     e.preventDefault();
     if (chosen) save.mutate();
   };
-  if (list.isPending) return <CardSkeleton lines={3} title={false} />;
+  if (list.isPending) return <RowsSkeleton rows={2} />;
   if (list.error) return <ErrorState compact error={list.error} onRetry={() => list.refetch()} />;
   const pages = list.data.pages;
-  const another = <Button size="sm" style={{ justifySelf: "start" }} loading={signingIn} onClick={onSignIn}>Sign in with another Facebook account</Button>;
+  const another = <Button loading={signingIn} onClick={onSignIn}>Sign in with another Facebook account</Button>;
   if (!pages.length) {
     return (
-      <div className="stack-sm">
-        <span className="muted small">The Facebook account you signed in with doesn't manage a Page, or its Page wasn't picked when you signed in. Sign in with the Page's admin, and pick the Page.</span>
-        {another}
+      <div className={kit.form}>
+        <p className={kit.note}>The Facebook account you signed in with doesn't manage a Page, or its Page wasn't picked when you signed in. Sign in with the Page's admin, and pick the Page.</p>
+        <div className={kit.actions}>{another}</div>
       </div>
     );
   }
   const page = pages.find((p) => p.id === chosen);
   const none = !pages.some((p) => p.can_post);
   return (
-    <form className="stack-sm" onSubmit={submit}>
-      <strong className="small">Pick your Page</strong>
-      {pages.map((p) => {
-        const on = chosen === p.id;
-        return (
-          <label key={p.id} className={`card-row choice-row${on ? " picked" : ""}`} style={{ cursor: p.can_post ? "pointer" : "not-allowed" }}>
-            <input type="radio" name="meta-page" checked={on} disabled={!p.can_post} onChange={() => setChosen(p.id)} />
-            {p.picture ? <img src={p.picture} alt="" width={32} height={32} style={{ borderRadius: 6 }} /> : <Icon name="globe" size={16} />}
-            <span className="grow" style={{ minWidth: 0 }}>
-              <strong style={{ display: "block" }}>{p.name}</strong>
-              <span className="muted small">{p.instagram ? `Instagram @${p.instagram.username ?? p.instagram.id}` : "No Instagram account linked"}{p.can_post ? "" : " · You can't post as this Page"}</span>
-            </span>
-          </label>
-        );
-      })}
+    <form className={kit.form} onSubmit={submit}>
+      <fieldset className={kit.choices}>
+        <legend className={kit.label}>Pick your Page</legend>
+        {pages.map((p) => {
+          const on = chosen === p.id;
+          return (
+            <label key={p.id} className={kit.choice}>
+              <input type="radio" name="meta-page" checked={on} disabled={!p.can_post} onChange={() => setChosen(p.id)} />
+              {p.picture ? <img className={kit.thumb} src={p.picture} alt="" width={36} height={36} /> : <span className={kit.roundIcon}><Icon name="globe" size={16} /></span>}
+              <span className={kit.rowText}>
+                <span className={kit.rowTitle}><span>{p.name}</span></span>
+                <span className={kit.rowSub}>{p.instagram ? `Instagram @${p.instagram.username ?? p.instagram.id}` : "No Instagram account linked"}{p.can_post ? "" : " · You can't post as this Page"}</span>
+              </span>
+            </label>
+          );
+        })}
+      </fieldset>
       {page?.instagram && (
         <label className="checkbox">
           <input type="checkbox" checked={instagram} onChange={(e) => setInstagram(e.target.checked)} />
@@ -264,16 +277,17 @@ function PagePicker({ current, instagramOn, onDone, onCancel, onBusiness, onSign
       )}
       {page?.business && instagram && page.instagram && (
         <div className="callout callout-info">
-          <Icon name="info" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>This Page is in a business portfolio, so Instagram needs two more permissions, ads_management and ads_read. Save the Page, then reconnect with them.</span>
-            <Button size="sm" style={{ justifySelf: "start" }} onClick={onBusiness}>Reconnect with business Page permissions</Button>
+          <Icon name="info" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>This Page is in a business portfolio, so Instagram needs two more permissions, ads_management and ads_read.</div>
+            <span>Save the Page, then reconnect with them.</span>
+            <div className={kit.actions}><Button size="sm" onClick={onBusiness}>Reconnect with business Page permissions</Button></div>
           </div>
         </div>
       )}
-      {none && <span className="muted small">You can't post as any of these Pages. Ask the Page's admin to give you full control of it, or sign in with their Facebook account.</span>}
+      {none && <p className={kit.note}>You can't post as any of these Pages. Ask the Page's admin to give you full control of it, or sign in with their Facebook account.</p>}
       <FormError error={save.error} />
-      <div className="row wrap" style={{ gap: 8 }}>
+      <div className={kit.actions}>
         <Button type="submit" variant="primary" loading={save.isPending} disabled={!chosen || !page?.can_post}>Use this Page</Button>
         {none && another}
         {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}

@@ -52,7 +52,8 @@ describe("the assistant putting extra work on a visit", () => {
     });
     expect(writes(sent)).toEqual(["POST visit_extras"]);
     expect(result).toMatchObject({ added: true, id: EXTRA, extra_work: [{ name: "Mulch", visit_date: "2026-11-20", added_by_crew: false, state: "Billed when the visit is done" }] });
-    expect(jobTools.add_extra_work.area).toBe("jobs");
+    // What a visit bills is a price: "Full access, no money" doesn't add it.
+    expect(jobTools.add_extra_work.area).toBe("prices");
   });
 
   it("takes a typed line with its price, and says what's missing from one without", async () => {
@@ -69,6 +70,7 @@ describe("the assistant putting extra work on a visit", () => {
     expect(sent.find((s) => s.method === "PATCH")).toMatchObject({ path: "visit_extras", body: { visit_id: VISIT } });
     expect(await jobTools.delete_extra_work.run(ctx, jobTools.delete_extra_work.input.parse({ extra_id: EXTRA }))).toEqual({ deleted: true });
     expect(jobTools.delete_extra_work.destructive).toBe(true);
+    expect(jobTools.delete_extra_work.area).toBe("prices");
   });
 
   it("reads a job's or a visit's, each with where it stands", async () => {
@@ -106,7 +108,8 @@ describe("the assistant changing prices across repeating jobs", () => {
     expect(applied[0].p_lines[0]).toEqual({ line_id: "line-1", old_price: 45, new_price: 47 });
     expect(applied[0].p_change).toEqual({ kind: "percent", value: 5, round: "dollar" });
     expect(result).toMatchObject({ changed: true, jobs: 150, lines: 150, old_price: 6750, new_price: 7050, price_change_id: applied[0].p_id });
-    expect(jobTools.change_prices.area).toBe("jobs");
+    expect(jobTools.change_prices.area).toBe("prices");
+    expect(jobTools.undo_price_change.area).toBe("prices");
   });
 
   it("changes nothing when the preview has moved on from what the person agreed to", async () => {

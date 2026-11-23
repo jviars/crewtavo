@@ -38,21 +38,21 @@ export const isStaff = (role: unknown): role is Role => typeof role === "string"
  * supabase/migrations, which enforces the same rules in the database.
  */
 export const PERMISSIONS = [
-  { key: "sales", label: "Quotes and sales" },
-  { key: "invoices", label: "Invoices and payments" },
-  { key: "job_costs", label: "Job costs and profit" },
-  { key: "reports", label: "Finance and metrics" },
-  { key: "marketing", label: "Marketing" },
-  { key: "automations", label: "Automations" },
-  { key: "schedule", label: "Schedule the whole team" },
-  { key: "timesheets", label: "Approve timesheets (crew leads: their crew's)" },
-  { key: "settings", label: "Price list, checklists, crews and booking forms" },
-  { key: "kb_edit", label: "Write and edit guides" },
-  { key: "team", label: "Manage people and roles" },
-  { key: "apps", label: "Connect apps" },
-  { key: "equipment", label: "Manage equipment and maintenance" },
-  { key: "subs", label: "Subcontractors, their paperwork and pay" },
-  { key: "hiring", label: "Job applicants and hiring" },
+  { key: "sales", group: "Sales and money", label: "Quotes and sales", hint: "Requests, quotes and the prices on them" },
+  { key: "invoices", group: "Sales and money", label: "Invoices and payments", hint: "Send invoices, take payments and give refunds" },
+  { key: "job_costs", group: "Sales and money", label: "Job costs and profit", hint: "What each job costs and makes, including people's pay rates" },
+  { key: "reports", group: "Sales and money", label: "Finance and metrics", hint: "The Finance and Metrics pages: revenue, what's owed, how the business is doing" },
+  { key: "schedule", group: "Jobs and crews", label: "Schedule the whole team", hint: "Put anyone on any visit. Without it, a crew lead plans only their own crew" },
+  { key: "timesheets", group: "Jobs and crews", label: "Approve timesheets", hint: "Check and approve hours. A crew lead approves only their own crew's" },
+  { key: "equipment", group: "Jobs and crews", label: "Manage equipment and maintenance", hint: "Add equipment, log maintenance and hand it out to crews" },
+  { key: "subs", group: "Jobs and crews", label: "Subcontractors, their paperwork and pay", hint: "Offer subs jobs, keep their insurance on file and pay them" },
+  { key: "marketing", group: "Growing the business", label: "Marketing", hint: "Campaigns, reviews, postcards, the website and social posts" },
+  { key: "automations", group: "Growing the business", label: "Automations", hint: "Rules that run on their own, like follow-up texts and review requests" },
+  { key: "hiring", group: "Growing the business", label: "Job applicants and hiring", hint: "The careers page and the people who apply" },
+  { key: "settings", group: "Running the business", label: "Business setup", hint: "Price list, packages, checklists, crews and booking forms" },
+  { key: "kb_edit", group: "Running the business", label: "Write and edit guides", hint: "The team's how-to guides and job descriptions" },
+  { key: "team", group: "Running the business", label: "Manage people and roles", hint: "Invite people, change their roles and pay, and reset their passwords" },
+  { key: "apps", group: "Running the business", label: "Connect apps", hint: "Stripe, email, texting, Google and the other connections" },
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number]["key"];
 
@@ -96,6 +96,11 @@ export function memberPermissions(role: Role, customPermissions?: readonly strin
 export function seesPayRates(role: string, permissions: readonly string[]): boolean {
   if (role === "owner") return true;
   return (OFFICE as readonly string[]).includes(role) && (permissions.includes("job_costs") || ((ADMINS as readonly string[]).includes(role) && permissions.includes("team")));
+}
+
+/** Who sees a client's invoices and payments: the office with Invoices and payments (the database's rule for them). */
+export function seesInvoices(role: string, permissions: readonly string[]): boolean {
+  return (OFFICE as readonly string[]).includes(role) && permissions.includes("invoices");
 }
 
 /** The areas behind the Stripe key, the company's email (Apps or Settings) and the team. */

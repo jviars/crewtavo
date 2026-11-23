@@ -24,7 +24,7 @@
 .picker-positioner { z-index: 60; outline: none; }
 .picker-popup {
   min-width: var(--anchor-width); max-width: min(var(--available-width), 480px); max-height: min(var(--available-height), 360px); overflow-y: auto; overscroll-behavior: contain;
-  padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); outline: none;
+  padding: 4px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); outline: none;
   transform-origin: var(--transform-origin); transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 .picker-popup[data-starting-style], .picker-popup[data-ending-style] { opacity: 0; transform: scale(0.97); }
@@ -45,18 +45,18 @@
 
 /* One choice: a check by the one picked, the highlighted one filled, like a menu's items. */
 .picker-item {
-  display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; column-gap: 8px; min-height: 34px; padding: 6px 12px 6px 8px;
-  border-radius: var(--radius-control); font-size: var(--fs-14); font-weight: 500; color: var(--ink); cursor: pointer; user-select: none; -webkit-user-select: none; outline: none;
+  display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; column-gap: 8px; min-height: 32px; padding: 6px 12px 6px 8px;
+  border-radius: 6px; font-size: var(--fs-13); font-weight: 500; color: var(--ink); cursor: pointer; user-select: none; -webkit-user-select: none; outline: none;
 }
 .picker-item[data-selected] { font-weight: 650; }
 .picker-item[data-disabled] { opacity: 0.45; cursor: not-allowed; }
 .picker-check { grid-column: 1; display: grid; place-items: center; color: var(--green-dark); }
 .picker-item-text { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 .picker-group:not(:first-child) { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--divider); }
-.picker-group-label { padding: 6px 12px 4px 32px; font-size: var(--fs-11); font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: var(--tracking-caps); cursor: default; }
+.picker-group-label { padding: 6px 12px 4px 32px; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); cursor: default; }
 /* Any row a picker draws its own way (a client with their address, a service with its price) fills the same when highlighted. */
 .picker-option { cursor: pointer; user-select: none; -webkit-user-select: none; }
-.picker-item[data-highlighted], .picker-option[data-highlighted] { background: var(--fill-2); }
+.picker-item[data-highlighted], .picker-option[data-highlighted] { background: var(--menu-hi); }
 .picker-option[data-disabled] { cursor: progress; }
 /* A list that stays open in a card (ClientPicker): its first row has no line above it, like a card's. */
 .picker-rows [role="listbox"] > .card-row:first-child { border-top: 0; }

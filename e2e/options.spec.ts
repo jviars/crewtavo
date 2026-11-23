@@ -62,16 +62,17 @@ test("two options → the client picks the second, initials and signs → a job 
     await portal.goto(`/hub/${token}`);
     const hub = portal.locator("#root");
     await expect(hub.getByRole("heading", { name: "Choose your option" })).toBeVisible();
-    await expect(hub.getByRole("heading", { name: "Sealcoat only" })).toBeVisible();
-    await expect(hub.getByRole("heading", { name: "Sealcoat and crack fill" })).toBeVisible();
+    await expect(hub.getByRole("heading", { name: "Sealcoat only", exact: true })).toBeVisible();
+    await expect(hub.getByRole("heading", { name: "Sealcoat and crack fill", exact: true })).toBeVisible();
     await expectAccessible(portal, "choosing an option in the customer portal");
     await hub.getByRole("button", { name: "Choose this one (Sealcoat and crack fill)" }).click();
     await expect(hub.getByRole("button", { name: "Your choice (Sealcoat and crack fill)" })).toHaveAttribute("aria-pressed", "true");
-    const included = hub.getByRole("region", { name: "What's included" });
+    const included = hub.getByRole("region", { name: "What's in Sealcoat and crack fill" });
     await expect(included).toContainText("Two coats and crack fill");
     await expect(included).toContainText("Edge and clean");
     await expect(included).not.toContainText("One coat of sealer");
-    await expect(included).toContainText("$1,100.00");
+    // Its price is in the summary beside the steps.
+    await expect(hub.getByRole("complementary", { name: "Summary" })).toContainText("$1,100.00");
 
     // The agreement, with the section that asks for initials: drawn once, then added to it.
     await hub.getByRole("button", { name: "Review the agreement" }).click();

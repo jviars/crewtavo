@@ -33,7 +33,8 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
@@ -46,6 +47,7 @@ import { templatesKey, templatesQuery } from "../documents/data";
 import { packagesKey } from "../roofing/packages";
 import type { DocumentData } from "../documents/types";
 import styles from "./ContractSettings.module.css";
+import { SettingsActions, SwitchRow } from "./SettingsKit";
 
 const RichTextEditor = lazy(() => import("@/components/ui/RichTextEditor").then((m) => ({ default: m.RichTextEditor })));
 
@@ -345,14 +347,11 @@ export function ContractSettings() {
   if (sections.isPending) {
     return (
       <Loading label="Loading your contract terms">
-        <div className="stack">
-          <CardSkeleton lines={2} />
-          <CardSkeleton lines={6} />
-        </div>
+        <SectionSkeleton rows={5} />
       </Loading>
     );
   }
-  if (sections.error) return <div className="card"><ErrorState error={sections.error} onRetry={() => sections.refetch()} /></div>;
+  if (sections.error) return <ErrorState error={sections.error} onRetry={() => sections.refetch()} />;
   const rows = sections.data;
   const examples = exampleIds(rows, company.trade_preset, lateFeeLineOf(company.settings));
   // Examples this library doesn't have, like one added to Crewtavo after the business took the rest.
@@ -377,91 +376,92 @@ export function ContractSettings() {
     });
 
   return (
-    <div className="stack">
-      <div className={`card card-pad ${styles.intro}`}>
-        <div className={styles.introText}>
-          <h2>Contract terms</h2>
-          <p>Your contract's wording, a section at a time: payment, changes to the work, your warranty, the right to cancel. Each one prints above the signatures or on the terms pages after the estimate.</p>
-          <p>
-            {canEdit ? (
-              <>Pick the ones every estimate and invoice prints in <Link to="/settings?tab=templates">Settings → Document style</Link>, which prints them in this order. </>
-            ) : (
-              "Your document style picks the ones every estimate and invoice prints, and prints them in this order. "
-            )}
-            A package can bring its own and a quote can add more for one job; those come after the style's.
-          </p>
-        </div>
-        {canEdit && rows.length > 0 && (
-          <div className="row wrap" style={{ gap: 8 }}>
-            {missing.length > 0 && (
-              <Menu
-                label="Add an example section"
-                triggerClassName="btn"
-                trigger={<>Add an example</>}
-                items={missing.map((s) => ({ label: s.title, disabled: addStarter.isPending, onSelect: () => addStarter.mutate(s) }))}
-              />
-            )}
-            <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a section</Button>
-          </div>
-        )}
+    <>
+      {canEdit && rows.length > 0 && (
+        <SettingsActions>
+          {missing.length > 0 && (
+            <Menu
+              label="Add an example section"
+              title="Add an example"
+              triggerClassName="btn"
+              trigger={<><Icon name="file" size={16} />Add an example</>}
+              items={missing.map((s) => ({ label: s.title, disabled: addStarter.isPending, onSelect: () => addStarter.mutate(s) }))}
+            />
+          )}
+          <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a section</Button>
+        </SettingsActions>
+      )}
+
+      <div className={styles.intro}>
+        <p>
+          {canEdit ? (
+            <>Pick the ones every estimate and invoice prints in <Link to="/settings?tab=templates">Settings → Document style</Link>, which prints them in this order. </>
+          ) : (
+            "Your document style picks the ones every estimate and invoice prints, and prints them in this order. "
+          )}
+          A package can bring its own and a quote can add more for one job; those come after the style's.
+        </p>
       </div>
 
       {!canEdit && (
         <div className="callout">
-          <Icon name="lock" size={20} />
+          <Icon name="lock" size={16} />
           <span className="grow">Only people in the office who manage Settings can change these.</span>
         </div>
       )}
 
       {canEdit && examples.size > 0 && (
-        <div className="callout">
-          <Icon name="info" size={20} />
+        <div className="callout callout-info">
+          <Icon name="info" size={16} />
           <span className="grow">{STARTER_NOTE}</span>
         </div>
       )}
 
       {rows.length ? (
-        <ol className={`card ${styles.list}`} ref={listRef} aria-label="Contract sections, in order">
-          {rows.map((row, i) => (
-            <SectionRow
-              key={row.id}
-              row={row}
-              number={i + 1}
-              example={examples.has(row.id)}
-              canEdit={canEdit}
-              first={i === 0}
-              last={i === rows.length - 1}
-              moving={move.isPending}
-              arrowIds={[arrowId(row.id, -1), arrowId(row.id, 1)]}
-              onEdit={() => setEditing(row)}
-              onMove={(by) => moveRow(row.id, by)}
-              onRemove={() => removeRow(row)}
-            />
-          ))}
-        </ol>
+        <Section level={3} title="Sections, in the order they print" count={rows.length} flush>
+          <ol className={styles.list} ref={listRef} aria-label="Contract sections, in order">
+            {rows.map((row, i) => (
+              <SectionRow
+                key={row.id}
+                row={row}
+                number={i + 1}
+                example={examples.has(row.id)}
+                canEdit={canEdit}
+                first={i === 0}
+                last={i === rows.length - 1}
+                moving={move.isPending}
+                arrowIds={[arrowId(row.id, -1), arrowId(row.id, 1)]}
+                onEdit={() => setEditing(row)}
+                onMove={(by) => moveRow(row.id, by)}
+                onRemove={() => removeRow(row)}
+              />
+            ))}
+          </ol>
+        </Section>
       ) : canEdit ? (
-        <div className="card">
+        <div className={styles.empty}>
           <EmptyState
             inline
+            icon="file"
             title="No contract sections yet"
             action={
               <>
                 <Button loading={addStarters.isPending} onClick={() => addStarters.mutate()}>Add example sections</Button>
-                <Button onClick={() => setEditing("new")}>Write your own</Button>
+                <Button variant="ghost" onClick={() => setEditing("new")}>Write your own</Button>
               </>
             }
           />
           <p className={styles.starterNote}>
-            <Icon name="info" size={16} />
+            <Icon name="info" size={14} />
             {STARTER_NOTE}
           </p>
         </div>
       ) : (
-        <div className="card"><EmptyState inline title="No contract sections yet">Someone in the office who manages Settings can add them here.</EmptyState></div>
+        <EmptyState inline icon="file" title="No contract sections yet">Someone in the office who manages Settings can add them here.</EmptyState>
       )}
 
       {editing && <SectionDialog section={editing === "new" ? null : editing} sort={nextSort(rows)} onClose={() => setEditing(null)} />}
-    </div>
+    </>
   );
 }
 
@@ -489,21 +489,21 @@ function SectionRow({ row, number, example, canEdit, first, last, moving, arrowI
     <>
       <strong className={styles.title}>{row.title}</strong>
       <span id={metaId} className={styles.meta}>
-        {placeLabel(row.place)}
+        <span>{placeLabel(row.place)}</span>
         {row.initials && (
           <span className={styles.initials}>
             <Icon name="pen" size={12} />
             The customer initials it
           </span>
         )}
-        {example && <span className="chip chip-amber">Example</span>}
+        {example && <span className={styles.example}>Example</span>}
       </span>
       <span className={styles.snippet}>{snippet || "No words yet."}</span>
     </>
   );
   return (
     <li className={styles.row}>
-      <span className={styles.number} aria-hidden="true">{number}</span>
+      <span className={styles.number} aria-hidden="true">{number}.</span>
       {canEdit ? (
         <button type="button" className={styles.open} aria-label={`Edit “${row.title}”`} aria-describedby={metaId} onClick={onEdit}>
           {words}
@@ -513,13 +513,16 @@ function SectionRow({ row, number, example, canEdit, first, last, moving, arrowI
       )}
       {canEdit && (
         <div className={styles.actions}>
-          <Button size="sm" variant="ghost" icon="chevronUp" id={arrowIds[0]} aria-label={`Move “${row.title}” up`} disabled={first} aria-disabled={moving || undefined} onClick={() => onMove(-1)} />
-          <Button size="sm" variant="ghost" icon="chevronDown" id={arrowIds[1]} aria-label={`Move “${row.title}” down`} disabled={last} aria-disabled={moving || undefined} onClick={() => onMove(1)} />
+          <Button size="sm" variant="ghost" icon="chevronUp" className={styles.arrow} id={arrowIds[0]} aria-label={`Move “${row.title}” up`} disabled={first} aria-disabled={moving || undefined} onClick={() => onMove(-1)} />
+          <Button size="sm" variant="ghost" icon="chevronDown" className={styles.arrow} id={arrowIds[1]} aria-label={`Move “${row.title}” down`} disabled={last} aria-disabled={moving || undefined} onClick={() => onMove(1)} />
           <Menu
             label={`More for “${row.title}”`}
+            title={row.title}
             triggerClassName="btn btn-sm btn-ghost btn-icon"
             items={[
-              { label: "Edit", icon: "edit", onSelect: onEdit },
+              { label: "Edit", icon: "edit", kbd: "E", onSelect: onEdit },
+              { label: "Move up", icon: "chevronUp", hidden: first, disabled: moving, onSelect: () => onMove(-1) },
+              { label: "Move down", icon: "chevronDown", hidden: last, disabled: moving, onSelect: () => onMove(1) },
               { separator: true },
               { label: "Delete section", icon: "trash", danger: true, onSelect: onRemove },
             ]}
@@ -608,17 +611,15 @@ function SectionDialog({ section, sort, onClose }: { section: ContractSectionRow
               <button key={p.id} type="button" aria-pressed={place === p.id} onClick={() => setPlace(p.id)}>{p.label}</button>
             ))}
           </div>
-          <span className="hint">
+          <span className="set-note">
             {place === "signatures"
               ? "Right above where the customer signs, for what they must read first."
               : "On the pages after the estimate, under “Terms and conditions”."}{" "}
             Invoices print every section after their totals.
           </span>
         </div>
-        <label className="switch-row">
-          <input type="checkbox" className="switch" checked={initials} onChange={(e) => setInitials(e.target.checked)} />
-          The customer initials this section
-        </label>
+        {/* On its own, with no hairline under it: the dialog's footer has its own. */}
+        <SwitchRow label="The customer initials this section" checked={initials} onChange={setInitials} />
         <FormError error={save.error} />
         <div className="form-actions">
           <Button onClick={() => void close()}>Cancel</Button>

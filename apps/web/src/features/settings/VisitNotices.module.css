@@ -1,0 +1,8 @@
+/* The one-time note about visit messages (VisitNotices.tsx): a quiet tinted callout, its words in text-2 under the first line, small hairline buttons under them. */
+.text { margin: 2px 0 0; max-width: 78ch; color: var(--text-2); font-weight: 400; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+@media (max-width: 900px) {
+  /* A finger's 44px for each answer; they stack full width under the words. */
+  .actions { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .actions > :global(.btn) { height: 44px; justify-content: center; }
+}

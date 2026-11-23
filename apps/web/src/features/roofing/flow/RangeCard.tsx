@@ -9,7 +9,7 @@
 import { rangeSettings } from "@crewtavo/core/estimates";
 import { useId, useState, type FormEvent } from "react";
 import { AnimatedNumber, MONEY } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
+import { Button, Spinner } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -53,15 +53,23 @@ export type SendChannel = "email" | "sms" | "link";
  * it as they were told it, without sending them anything. The team is told to book the visit, and a
  * note on the estimate says who marked it.
  */
-export function SaidYesButton({ quote, disabled }: { quote: EstimateQuote; disabled?: boolean }) {
+export function SaidYesButton({ quote, disabled, quiet }: { quote: EstimateQuote; disabled?: boolean; /** Quiet words with an icon, under the range card's button. */ quiet?: boolean }) {
   const [open, setOpen] = useState(false);
   if (!canMarkAgreed(quote)) return null;
   const unsent = rangeState(quote) === "unsent";
+  const words = `${capital(homeownerName(quote.client?.display_name))} said yes ${unsent ? "on the phone" : "another way"}`;
   return (
     <>
-      <Button variant="ghost" icon="check" disabled={disabled || !isPriced(quote)} onClick={() => setOpen(true)}>
-        {capital(homeownerName(quote.client?.display_name))} said yes {unsent ? "on the phone" : "another way"}
-      </Button>
+      {quiet ? (
+        <button type="button" className={styles.linkBtn} disabled={disabled || !isPriced(quote)} onClick={() => setOpen(true)}>
+          <Icon name="check" size={14} />
+          {words}
+        </button>
+      ) : (
+        <Button icon="check" disabled={disabled || !isPriced(quote)} onClick={() => setOpen(true)}>
+          {words}
+        </Button>
+      )}
       {open && <SaidYesDialog quote={quote} unsent={unsent} onClose={() => setOpen(false)} />}
     </>
   );
@@ -192,19 +200,16 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
   if (state === "signed" || state === "closed") return null;
 
   const sees = (
-    <Button icon="eye" loading={preview.isPending} disabled={!priced} onClick={() => preview.mutate(blankTab())}>
+    <button type="button" className={styles.linkBtn} disabled={!priced || preview.isPending} aria-busy={preview.isPending || undefined} onClick={() => preview.mutate(blankTab())}>
+      {preview.isPending ? <Spinner size={14} /> : <Icon name="eye" size={14} />}
       See what {Who} sees
-    </Button>
+    </button>
   );
-  const sitePrice = (
-    <div className="callout callout-info">
-      <Icon name="info" size={20} />
-      <span className="grow" style={{ fontWeight: 400 }}>{rep ? `${rep} sets` : "Whoever goes out sets"} the exact price on site, after checking this list on the roof.</span>
-    </div>
-  );
+  const sitePrice = <p className={styles.smallPrint}>{rep ? `${rep} sets` : "Whoever goes out sets"} the exact price on site, after checking this list on the roof.</p>;
   const assign = <SalespersonSelect quoteId={quote.id} value={quote.salesperson_id} disabled={!canSell} />;
   const exactInstead = canSell && (
-    <button type="button" className={`${styles.linkBtn} ${styles.quiet}`} disabled={!priced || busy} onClick={() => onSend("exact")}>
+    <button type="button" className={styles.linkBtn} disabled={!priced || busy} onClick={() => onSend("exact")}>
+      <Icon name="arrowRight" size={14} />
       Send the exact price instead
     </button>
   );
@@ -213,15 +218,14 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
     return (
       <section id="range-card" className={styles.rangeCard} data-state="accepted" aria-labelledby={titleId}>
         <div>
-          <p className={styles.eyebrow} id={titleId}>{Who} said yes</p>
+          <h3 className={styles.subhead} id={titleId}>{Who} said yes</h3>
           <p className={styles.rangeBig}>{money(quote.range_low)} <span className={styles.rangeTo}>to</span> {money(quote.range_high)}</p>
           {across}
           <p className={styles.when}>On {dayText(quote.range_accepted_at!, tz)}. Book {rep ? `${rep}'s` : "the"} visit.</p>
         </div>
         {sitePrice}
         {assign}
-        {canSell && <div className={styles.cardActions}>{sees}</div>}
-        {exactInstead}
+        {canSell && <div className={styles.cardLinks}>{sees}{exactInstead}</div>}
       </section>
     );
   }
@@ -233,7 +237,7 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
     return (
       <section id="range-card" className={styles.rangeCard} data-state="exact" aria-labelledby={titleId}>
         <div>
-          <p className={styles.eyebrow} id={titleId}>{quote.priced_on_site_at ? "Priced on site" : choosing ? `The ${prices.length} options ${who} has` : `The price ${who} has`}</p>
+          <h3 className={styles.subhead} id={titleId}>{quote.priced_on_site_at ? "Priced on site" : choosing ? `The ${prices.length} options ${who} has` : `The price ${who} has`}</h3>
           {choosing ? (
             <p className={styles.rangeBig}><span className={styles.rangeTo}>from</span> {money(Math.min(...prices.map((p) => p.total)))}</p>
           ) : (
@@ -254,7 +258,7 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
           </div>
         )}
         {assign}
-        {canSell && <div className={styles.cardActions}>{sees}</div>}
+        {canSell && <div className={styles.cardLinks}>{sees}</div>}
       </section>
     );
   }
@@ -264,29 +268,36 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
     return (
       <section id="range-card" className={styles.rangeCard} data-state="waiting" aria-labelledby={titleId}>
         <div>
-          <p className={styles.eyebrow} id={titleId}>The range {who} was sent</p>
+          <h3 className={styles.subhead} id={titleId}>The range {who} was sent</h3>
           <p className={styles.rangeBig}>{money(quote.range_low)} <span className={styles.rangeTo}>to</span> {money(quote.range_high)}</p>
           {across}
           <p className={styles.when}>{quote.range_sent_at ? `Sent ${dayText(quote.range_sent_at, tz)}. ` : ""}Waiting for their answer.</p>
         </div>
         {outdated && priced && (
-          <p className={styles.changedNote}>
+          <div className="callout callout-warning" role="note">
             <Icon name="alert" size={16} />
-            <span>The estimate changed since. Send it again and {who} sees {rangeWordsFor(now, quote)}.</span>
-          </p>
+            <div className="grow">
+              <div>The estimate changed since.</div>
+              Send it again and {who} sees {rangeWordsFor(now, quote)}.
+            </div>
+          </div>
         )}
         {sitePrice}
         {assign}
         {canSell && (
-          <div className={styles.cardActions}>
-            <Button variant={outdated ? "primary" : undefined} icon="send" disabled={!priced || busy} onClick={() => onSend("range")}>
-              {outdated ? "Send the new range" : "Send it again"}
-            </Button>
-            {sees}
-            <SaidYesButton quote={quote} />
-          </div>
+          <>
+            <div className={styles.cardActions}>
+              <Button variant={outdated ? "primary" : undefined} icon="send" disabled={!priced || busy} onClick={() => onSend("range")}>
+                {outdated ? "Send the new range" : "Send it again"}
+              </Button>
+            </div>
+            <div className={styles.cardLinks}>
+              {sees}
+              <SaidYesButton quote={quote} quiet />
+              {exactInstead}
+            </div>
+          </>
         )}
-        {exactInstead}
       </section>
     );
   }
@@ -297,7 +308,7 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
   return (
     <section id="range-card" className={styles.rangeCard} data-state="unsent" aria-labelledby={titleId}>
       <div>
-        <p className={styles.eyebrow} id={titleId}>The range {who} will see</p>
+        <h3 className={styles.subhead} id={titleId}>The range {who} will see</h3>
         {priced ? (
           // Rolls to the new range as the estimate changes beside it.
           <p className={styles.rangeBig}><AnimatedNumber value={now.low} format={MONEY} /> <span className={styles.rangeTo}>to</span> <AnimatedNumber value={now.high} format={MONEY} /></p>
@@ -323,18 +334,22 @@ export function RangeCard({ quote, salesperson, canSell, busy, onSend }: {
       {assign}
       {canSell && (
         <div className={styles.cardActions}>
-          <Button variant="primary" size="lg" className={styles.bigButton} icon="send" disabled={!priced || busy} onClick={() => onSend("range")}>
+          <Button variant={priced ? "primary" : undefined} icon="send" disabled={!priced || busy} onClick={() => onSend("range")}>
             Send the range to {Who}
           </Button>
-          {sees}
-          <SaidYesButton quote={quote} disabled={busy} />
         </div>
       )}
       <p className={styles.smallPrint}>
         {Who} gets a link to see the range and {offered ? "the options" : "what's included"}. When they say yes, you get a note to book {rep || "the visit"}.
         {busy ? " Saving your changes first…" : ""}
       </p>
-      {exactInstead}
+      {canSell && (
+        <div className={styles.cardLinks}>
+          {sees}
+          <SaidYesButton quote={quote} disabled={busy} quiet />
+          {exactInstead}
+        </div>
+      )}
     </section>
   );
 }

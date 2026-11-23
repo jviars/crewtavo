@@ -285,8 +285,8 @@ begin;
 set local role authenticated;
 select tautopay.as_user(:'ada');
 select public.autopay_set_settings(:'co', tautopay.settings()) as saved \gset
-update public.companies set settings = (settings - 'autopay') || '{"payment_terms_days": 30, "hub_tips": true}' where id = :'co';
-update public.companies set settings = jsonb_set(settings, '{autopay,enabled}', 'false') where id = :'co';
+update public.companies set settings = (public.company_settings(id) - 'autopay') || '{"payment_terms_days": 30, "hub_tips": true}' where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{autopay,enabled}', 'false') where id = :'co';
 commit;
 select tautopay.check((select settings -> 'autopay' from public.companies where id = :'co') = :'saved'::jsonb
     and (select settings -> 'hub_tips' from public.companies where id = :'co') = 'true',
@@ -308,7 +308,7 @@ update public.outbox set done_at = now() where company_id = :'co' and done_at is
 begin;
 set local role authenticated;
 select tautopay.as_user(:'ada');
-update public.companies set settings = jsonb_set(settings, '{hub_tips}', 'false') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{hub_tips}', 'false') where id = :'co';
 commit;
 select tautopay.check((select count(*) from public.outbox where company_id = :'co' and topic = 'stripe.invoice' and done_at is null and payload ->> 'invoice_id' = :'tipped') = 1
     and (select count(*) from public.outbox where company_id = :'co' and topic = 'stripe.invoice' and done_at is null and payload ->> 'invoice_id' = :'untipped') = 0,
@@ -316,8 +316,8 @@ select tautopay.check((select count(*) from public.outbox where company_id = :'c
 begin;
 set local role authenticated;
 select tautopay.as_user(:'ada');
-update public.companies set settings = jsonb_set(settings, '{hub_tips}', 'true') where id = :'co';
-update public.companies set settings = jsonb_set(settings, '{hub_tips}', 'false') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{hub_tips}', 'true') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{hub_tips}', 'false') where id = :'co';
 commit;
 select tautopay.check((select count(*) from public.outbox where company_id = :'co' and topic = 'stripe.invoice' and done_at is null and payload ->> 'invoice_id' = :'tipped') = 1,
   'and only one is waiting for it, however often tips go off');
@@ -607,7 +607,8 @@ commit;
 
 -- ===== Reopened visits and work called off ====================================================
 
--- The only finished visit reopened (Cy taps it back) calls the charge off; one of two doesn't.
+-- The only finished visit reopened (the office reopens it: field crew only move a visit forward)
+-- calls the charge off; one of two doesn't.
 select tautopay.ready_client(:'co', 'Ria Reopen') as c_ria \gset
 select tautopay.job(:'co', :'c_ria') as j_ria \gset
 select tautopay.visit(:'co', :'j_ria') as ra \gset
@@ -620,7 +621,7 @@ commit;
 select tautopay.charge_of(:'j_ria') as ria1 \gset
 begin;
 set local role authenticated;
-select tautopay.as_user(:'cy');
+select tautopay.as_user(:'otto');
 update public.visits set status = 'in_progress' where id = :'ra';
 commit;
 select tautopay.check(tautopay.state(:'ria1') = 'called_off: The visit was reopened', 'reopening the only finished visit calls its charge off');
@@ -628,6 +629,7 @@ begin;
 set local role authenticated;
 select tautopay.as_user(:'cy');
 update public.visits set status = 'completed' where id in (:'ra', :'rb');
+select tautopay.as_user(:'otto');
 update public.visits set status = 'in_progress' where id = :'rb';
 commit;
 select tautopay.check(tautopay.state(tautopay.charge_of(:'j_ria')) = 'waiting'
@@ -649,7 +651,7 @@ select tautopay.due(:'max');
 select tautopay.check(public.autopay_bill(:'max', tautopay.claim_one(:'co', :'max')) ->> 'outcome' = 'needs_approval', 'a $600 visit is over the $500 limit');
 begin;
 set local role authenticated;
-select tautopay.as_user(:'cy');
+select tautopay.as_user(:'otto');
 update public.visits set status = 'in_progress' where id = :'vmax';
 commit;
 select tautopay.check(tautopay.state(:'max') = 'called_off: A visit on it was reopened'
@@ -743,7 +745,7 @@ commit;
 select tautopay.charge_of(:'j_rhea') as rhea2 \gset
 begin;
 set local role authenticated;
-select tautopay.as_user(:'cy');
+select tautopay.as_user(:'otto');
 update public.visits set status = 'scheduled' where id = :'rhb';
 commit;
 select tautopay.check(tautopay.state(:'rhea2') = 'called_off: The visit was reopened' and tautopay.state(:'rhea1') like 'failed: %',

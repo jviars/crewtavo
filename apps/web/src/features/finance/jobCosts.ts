@@ -34,7 +34,8 @@ export async function loadProfit({ companyId, range, costs }: { companyId: strin
   const db = supabase();
   const [jobs, settings] = await Promise.all([
     everyRow(() => db.from("jobs").select("id, number, title, status, financials:job_financials(contract_total), client:clients(display_name), lines:job_line_items(quantity, unit_cost, unit_labor_cost, service_id, unit, parts)").eq("company_id", companyId).in("status", ["requires_invoicing", "completed"]).gte("updated_at", range.start).lt("updated_at", range.end)),
-    db.from("companies").select("settings").eq("id", companyId).single(),
+    // The target margin is kept apart from the settings crews read (company_private_settings).
+    db.from("company_private_settings").select("settings").eq("company_id", companyId).maybeSingle(),
   ]);
   const ids = jobs.map((j) => j.id);
   const [time, expenses, materials, rates, crewPay] = await Promise.all([
@@ -46,7 +47,7 @@ export async function loadProfit({ companyId, range, costs }: { companyId: strin
     // Sub and crew pay that's agreed, done or paid: for those with job costs, nothing for anyone else.
     costs ? byJobs(ids, (lot) => db.rpc("job_pay_costs", { p_jobs: lot }).then(unwrap)) : Promise.resolve([]),
   ]);
-  const target = Number(((unwrap(settings).settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
+  const target = Number(((unwrap(settings)?.settings ?? {}) as Record<string, unknown>).margin_target ?? 0) || null;
   // Costed as AI assistants' job_profit costs it (packages/core/src/reports.ts).
   const costed = jobProfit(jobs, time, expenses, (t) => Number(rates[t.id] ?? 0), target, crewPay, materials).jobs.map((j) => ({ ...j, margin: j.margin_percent }));
   return { jobs: costed, target };

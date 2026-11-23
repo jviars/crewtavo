@@ -3,6 +3,13 @@
  * invoice, measurement, guide, campaign, automation, price list service, file, piece of equipment (the
  * company's or at a client's property), subcontractor, applicant, chat channel, promo code and app, jump to
  * any screen or section of Settings, or start something new. "/" also opens it when you're not typing in a field.
+ *
+ * Outside a field, G then a screen's key goes there and N then a Create item's key starts it (nav.ts
+ * shortcutTarget); search shows each one's keys beside it.
+ *
+ * Opened empty, it starts on what you opened recently (lib/recent.ts), then a few things to start and
+ * screens. Typing groups what it finds by kind, with the letters that matched in bold and, for a row
+ * found by its hidden keywords, the words that found it (paletteMatch.ts).
  */
 import { kindLabel } from "@crewtavo/core/equipment";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
@@ -17,8 +24,9 @@ import { getRecents } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { Spinner } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
-import { createItems, NAV_GROUPS, navVisible, OTHER_SCREENS } from "./nav";
-import { english, msg, t } from "@/lib/i18n";
+import { createItems, NAV_GROUPS, navVisible, OTHER_SCREENS, shortcutTarget } from "./nav";
+import { keywordHint, marks } from "./paletteMatch";
+import { english, getLocale, msg, t } from "@/lib/i18n";
 
 let opener: (() => void) | null = null;
 export const openPalette = () => opener?.();
@@ -30,6 +38,8 @@ interface Item {
   title: string;
   subtitle?: string;
   keywords?: string;
+  /** The keys that do it from anywhere ("G then S"), shown on the right. */
+  kbd?: string;
   run: () => void;
 }
 
@@ -60,12 +70,20 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
   asset: (r) => `/clients/${r.client_id}`,
   promo: () => "/marketing?tab=promos",
 };
-const KIND_LABEL: Record<string, string> = {
-  client: msg("Client"), property: msg("Property"), request: msg("Request"), quote: msg("Quote"), job: msg("Job"), invoice: msg("Invoice"), equipment: msg("Equipment"),
-  measurement: msg("Measurement"), kb: msg("Guide"), campaign: msg("Campaign"), rule: msg("Automation"), service: msg("Price list"), sub: msg("Subcontractor"), file: msg("File"),
-  applicant: msg("Applicant"), channel: msg("Team chat"), asset: msg("Property equipment"), promo: msg("Promo code"),
+/** The group each kind of record is listed under. */
+const KIND_GROUP: Record<string, string> = {
+  client: msg("Clients"), property: msg("Properties"), request: msg("Requests"), quote: msg("Quotes"), job: msg("Jobs"), invoice: msg("Invoices"), equipment: msg("Equipment"),
+  measurement: msg("Measurements"), kb: msg("Guides"), campaign: msg("Campaigns"), rule: msg("Automations"), service: msg("Price list"), sub: msg("Subcontractors"), file: msg("Files"),
+  applicant: msg("Applicants"), channel: msg("Team chat"), asset: msg("Property equipment"), promo: msg("Promo codes"),
 };
+/** A two-key shortcut as it reads: "G then S". */
+const keys = (first: string, second: string) => t("{first} then {second}", { first, second });
 const SCREENS = [...NAV_GROUPS.flat(), ...OTHER_SCREENS];
+/** Screens with single-key tools of their own (Measure's, the trade apps' maps), where G and N stay theirs. */
+const OWN_KEYS = /^\/(measure|paving|roofing)(\/|$)/;
+/** How long after G or N the second key still counts. */
+const SEQUENCE_MS = 1500;
+
 /** Kinds that live in an app or area someone may not have: shown only to whoever sees that screen. */
 const KIND_SCREEN: Record<string, string> = { applicant: "/applicants", channel: "/chat", promo: "/marketing?tab=promos", campaign: "/marketing" };
 
@@ -96,9 +114,21 @@ export function CommandPalette() {
   // Two letters before it looks, except a number: "#7" or "7" is job, quote or invoice 7, and a small
   // business's numbers start at 1.
   const searchable = term.length >= 2 || /^#?\d+$/.test(typed);
+  // For the shortcuts, which listen from the first render on.
+  const latest = useRef({ session, navigate });
+  latest.current = { session, navigate };
 
   useEffect(() => {
     opener = () => setOpen(true);
+    let pending: { key: string; at: number } | null = null;
+    const somethingOpen = () => {
+      try {
+        // A dialog, or a menu or panel (not a toast or banner, which are popover="manual").
+        return Boolean(document.querySelector('dialog[open], [popover="auto"]:popover-open'));
+      } catch {
+        return Boolean(document.querySelector("dialog[open]"));
+      }
+    };
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
       // Not when something on the screen already used it (⌘K adds a link in the guide editor).
@@ -108,6 +138,19 @@ export function CommandPalette() {
       } else if (e.key === "/" && !typing && !document.querySelector("dialog[open]")) {
         e.preventDefault();
         setOpen(true);
+      } else if (!typing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat && !e.defaultPrevented && e.key.length === 1 && !somethingOpen() && !OWN_KEYS.test(window.location.pathname)) {
+        // G S, N R: the second key within a moment of the first.
+        const key = e.key.toLowerCase();
+        if (pending && e.timeStamp - pending.at < SEQUENCE_MS) {
+          const to = shortcutTarget(latest.current.session, pending.key, key);
+          pending = null;
+          if (to) {
+            e.preventDefault();
+            latest.current.navigate(to);
+          }
+          return;
+        }
+        pending = key === "g" || key === "n" ? { key, at: e.timeStamp } : null;
       }
     };
     window.addEventListener("keydown", onKey);
@@ -181,10 +224,13 @@ export function CommandPalette() {
     navigate(path);
   };
 
+  const q = query.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+
   const items = useMemo<Item[]>(() => {
     const isOffice = hasRole(session, "admin", "office");
     // i18n-ignore: words to find it by, never shown
-    const creates: Item[] = createItems(session).map((c) => ({ id: `new-${c.to}`, group: msg("Create"), icon: c.icon, title: c.newLabel, keywords: `add new ${english(c.label)} ${c.keywords}`, run: () => go(c.to) }));
+    const creates: Item[] = createItems(session).map((c) => ({ id: `new-${c.to}`, group: msg("Create"), icon: c.icon, title: c.newLabel, keywords: `add new ${english(c.label)} ${c.keywords}`, kbd: keys("N", c.key), run: () => go(c.to) }));
     const actions: Item[] = [
       ...creates,
       ...(isOffice && can(session, "kb_edit") ? [{ id: "new-guide", group: msg("Create"), icon: "book" as IconName, title: t("New guide"), keywords: "add knowledge base sop procedure page", run: () => go("/kb/new") }] : []),
@@ -194,43 +240,46 @@ export function CommandPalette() {
     const screens: Item[] = SCREENS
       .filter((n) => navVisible(session, n))
       // Found by its name in either language ("agenda" or "schedule").
-      .map((n) => ({ id: `go-${n.to}`, group: msg("Go to"), icon: n.icon, title: t(n.label), keywords: `${english(n.label)} ${n.to} ${n.keywords ?? ""}`, run: () => go(n.to) }));
+      .map((n) => ({ id: `go-${n.to}`, group: msg("Go to"), icon: n.icon, title: t(n.label), keywords: `${english(n.label)} ${n.to} ${n.keywords ?? ""}`, kbd: n.go ? keys("G", n.go) : undefined, run: () => go(n.to) }));
     screens.push({ id: "go-settings", group: msg("Go to"), icon: "settings", title: t("Settings"), keywords: "preferences options setup", run: () => go("/settings") });
+    // Their section's name and "Settings" go last, after commas, so the words that found a row are its own (paletteMatch.ts).
     const settings: Item[] = settingsGroups(session).flatMap((g) =>
       g.items.map((s) => {
         const to = "tab" in s ? `/settings?tab=${s.tab}` : s.to;
-        return { id: `go-${to}`, group: msg("Go to"), icon: s.icon, title: t(s.label), subtitle: t("Settings"), keywords: `${g.title} ${s.keywords}`, run: () => go(to) };
+        return { id: `go-${to}`, group: msg("Settings"), icon: s.icon, title: t(s.label), keywords: `${s.keywords}, ${g.title}, ${t("Settings")}`, run: () => go(to) };
       }),
     );
     const appItems: Item[] = (apps.data?.apps ?? []).map((a) => ({
-      id: `app-${a.id}`, group: msg("Go to"), icon: "apps", title: a.name, subtitle: `Apps · ${categoryName(a.category)}`,
+      id: `app-${a.id}`, group: msg("Apps"), icon: "apps", title: a.name, subtitle: categoryName(a.category),
       // i18n-ignore: words to find it by, never shown
-      keywords: `app integration ${a.id.replace(/_/g, " ")} ${infoFor(a).tagline}`, run: () => go(`/apps/${a.id}`),
+      keywords: `app integration ${a.id.replace(/_/g, " ")} ${infoFor(a).tagline}, ${t("Apps")}`, run: () => go(`/apps/${a.id}`),
     }));
 
-    const q = query.trim().toLowerCase();
     if (!q) {
+      // What you opened lately first (up to 8, lib/recent.ts), then a few to start: the Create menu has them all.
       const recents: Item[] = getRecents(session.company.id).map((r) => ({
         id: `recent-${r.kind}-${r.id}`, group: msg("Recent"), icon: KIND_ICON[r.kind] ?? "file", title: r.title, subtitle: r.subtitle, run: () => go(r.path),
       }));
-      return [...creates, ...recents, ...screens.slice(0, 6)];
+      return [...recents, ...creates.slice(0, 2), ...screens.slice(0, 3)];
     }
     // Every word has to appear somewhere; a screen or action whose name starts with what was typed
     // comes first, so "measure" or "price" opens the screen before records that mention it.
-    const words = q.split(/\s+/);
     const local = [...actions, ...screens, ...settings, ...appItems].filter((i) => {
       const text = `${i.title} ${i.subtitle ?? ""} ${i.keywords ?? ""}`.toLowerCase();
       return words.every((w) => text.includes(w));
     });
-    const best = local.filter((i) => i.title.toLowerCase().startsWith(q)).map((i) => ({ ...i, group: msg("Best match") }));
+    // Out of its group, a section of Settings says so.
+    const best = local.filter((i) => i.title.toLowerCase().startsWith(q)).map((i) => ({ ...i, group: msg("Best match"), subtitle: i.subtitle ?? (i.group === msg("Settings") ? t("Settings") : undefined) }));
+    // Grouped by kind, the kinds in the order they were found.
     // What the last search found stays up while the next one runs, but not once too little is typed
     // to search at all (back to one letter): those results were for something else.
-    const records: Item[] = (searchable ? (results.data ?? []) : []).map((r) => ({
+    const found = searchable ? (results.data ?? []) : [];
+    const records: Item[] = [...new Set(found.map((r) => r.kind))].flatMap((kind) => found.filter((r) => r.kind === kind)).map((r) => ({
       id: `${r.kind}-${r.id}`,
-      group: msg("Results"),
+      group: KIND_GROUP[r.kind],
       icon: KIND_ICON[r.kind] ?? "file",
       title: r.number ? `${r.title} · #${r.number}` : r.title,
-      subtitle: [KIND_LABEL[r.kind] && t(KIND_LABEL[r.kind]), r.subtitle].filter(Boolean).join(" · "),
+      subtitle: r.subtitle,
       run: () => go(KIND_PATH[r.kind](r)),
     }));
     return [...best, ...records, ...local.filter((i) => !best.some((b) => b.id === i.id))];
@@ -257,6 +306,9 @@ export function CommandPalette() {
 
   let lastGroup = "";
   const searching = searchable && results.isFetching;
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item.group, (counts.get(item.group) ?? 0) + 1);
+  const bold = (text: string) => marks(text, words).map(([part, hit], k) => (hit ? <b key={k}>{part}</b> : part));
 
   return (
     <dialog
@@ -273,36 +325,44 @@ export function CommandPalette() {
       {(open || leaving) && (
         <>
           <div className="palette-input">
-            {searching ? <Spinner size={20} /> : <Icon name="search" size={20} />}
-            <input
-              ref={input}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder={t("Search anything: clients, jobs, files, apps, settings… or type a command")}
-              aria-label={t("Search")}
-              role="combobox"
-              aria-expanded="true"
-              aria-controls="palette-list"
-              aria-activedescendant={items[index] ? `palette-${items[index].id}` : undefined}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button type="button" className="kbd" onClick={() => setOpen(false)} style={{ cursor: "pointer" }}>{t("Esc")}</button>
+            <label className="palette-field">
+              {searching ? <Spinner size={16} /> : <Icon name="search" size={16} />}
+              <input
+                ref={input}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder={t("Search anything: clients, jobs, files, apps, settings… or type a command")}
+                aria-label={t("Search")}
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="palette-list"
+                aria-activedescendant={items[index] ? `palette-${items[index].id}` : undefined}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <button type="button" className="kbd palette-esc" onClick={() => setOpen(false)}>{t("Esc")}</button>
+            <button type="button" className="palette-cancel" onClick={() => setOpen(false)}>{t("Cancel")}</button>
           </div>
-          <div className="palette-list" id="palette-list" role="listbox" ref={list}>
+          <div className="palette-list" id="palette-list" role="listbox" aria-label={t("Search")} ref={list}>
             {items.length === 0 && (
-              <div className="empty-state empty-state-sm">
-                <span className="empty-icon"><Icon name="search" size={20} /></span>
-                <h3>{!searchable ? t("Keep typing…") : results.isFetching ? t("Searching…") : t("No results for “{query}”", { query: query.trim() })}</h3>
-                
+              <div className="palette-empty">
+                {!searchable ? t("Keep typing…") : results.isFetching ? t("Searching…") : t("No results for “{query}”", { query: query.trim() })}
               </div>
             )}
             {items.map((item, i) => {
-              const header = item.group !== lastGroup ? <div className="palette-group" key={`g-${item.group}`}>{t(item.group)}</div> : null;
+              const header = item.group !== lastGroup ? (
+                <div className="palette-group" key={`g-${item.group}`} aria-hidden="true">
+                  {t(item.group)}
+                  {q && item.group !== msg("Best match") && item.group !== msg("Create") && <span className="p-count">{counts.get(item.group)}</span>}
+                </div>
+              ) : null;
               lastGroup = item.group;
+              // The hidden search words are English, so the hint only shows in English.
+              const hint = getLocale() === "en" ? keywordHint(`${item.title} ${item.subtitle ?? ""}`, item.keywords, words) : undefined;
               return (
-                <div key={item.id}>
+                <div key={item.id} role="none">
                   {header}
                   <button
                     type="button"
@@ -315,20 +375,20 @@ export function CommandPalette() {
                     onClick={item.run}
                   >
                     <span className="p-icon"><Icon name={item.icon} size={16} /></span>
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span className="p-title ellipsis" style={{ display: "block" }}>{item.title}</span>
-                      {item.subtitle && <span className="p-sub ellipsis" style={{ display: "block" }}>{item.subtitle}</span>}
+                    <span className="p-text">
+                      <span className="p-title">{bold(item.title)}</span>
+                      {hint ? <span className="p-sub">{bold(hint)}</span> : item.subtitle && <span className="p-sub">{item.subtitle}</span>}
                     </span>
-                    {i === index && <Icon name="arrowRight" size={14} />}
+                    {item.kbd && <span className="p-keys" aria-hidden="true">{item.kbd}</span>}
                   </button>
                 </div>
               );
             })}
           </div>
-          <div className="palette-foot hide-mobile">
-            <span><kbd className="kbd">↑</kbd> <kbd className="kbd">↓</kbd> {t("to move")}</span>
-            <span><kbd className="kbd">{t("Enter")}</kbd> {t("to open")}</span>
-            <span><kbd className="kbd">{t("Esc")}</kbd> {t("to close")}</span>
+          <div className="palette-foot hide-mobile" aria-hidden="true">
+            <kbd className="kbd">↑</kbd><kbd className="kbd">↓</kbd><span>{t("to move")}</span>
+            <kbd className="kbd">↵</kbd><span>{t("to open")}</span>
+            <kbd className="kbd">{t("Esc")}</kbd><span>{t("to close")}</span>
           </div>
         </>
       )}

@@ -73,7 +73,7 @@ export function useAnswerChange(id: string | undefined, onAnswered: () => void) 
   });
 }
 
-/** The request on a visit, at the top of its dialog: what the client asked, and Approve or Decline. */
+/** The request on a visit, at the top of its dialog: what the client asked, and Approve or Decline (plain buttons: the dialog's Save is its one green one). */
 export function ChangeRequestPanel({ request, onAnswered }: { request: ChangeRequest; onAnswered: () => void }) {
   const session = useSession();
   const [declining, setDeclining] = useState(false);
@@ -83,7 +83,7 @@ export function ChangeRequestPanel({ request, onAnswered }: { request: ChangeReq
   return (
     <div className="callout callout-info">
       <Icon name="calendar" size={16} />
-      <div className="grow stack-sm" style={{ fontWeight: 400 }}>
+      <div className="grow stack-sm">
         <strong>Change requested</strong>
         <span>{request.client?.display_name ?? "The client"} asked {askedFor(request, session.company.timezone, session.company.settings)}.</span>
         {request.message && <span className="pre-wrap">“{request.message}”</span>}
@@ -92,14 +92,14 @@ export function ChangeRequestPanel({ request, onAnswered }: { request: ChangeReq
         {declining ? (
           <>
             <textarea className="textarea" rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} placeholder="A note for them (optional)" aria-label="A note for the client" autoFocus />
-            <div className="row" style={{ gap: 8 }}>
-              <Button size="sm" variant="primary" loading={answer.isPending} onClick={() => answer.mutate({ approve: false, note: note.trim() || undefined })}>Decline</Button>
+            <div className="row">
+              <Button size="sm" loading={answer.isPending} onClick={() => answer.mutate({ approve: false, note: note.trim() || undefined })}>Send decline</Button>
               <Button size="sm" onClick={() => setDeclining(false)}>Back</Button>
             </div>
           </>
         ) : (
-          <div className="row" style={{ gap: 8 }}>
-            {timed && <Button size="sm" variant="primary" icon="check" loading={answer.isPending} onClick={() => answer.mutate({ approve: true })}>{request.kind === "cancel" ? "Approve and cancel it" : "Approve"}</Button>}
+          <div className="row">
+            {timed && <Button size="sm" icon="check" loading={answer.isPending} onClick={() => answer.mutate({ approve: true })}>{request.kind === "cancel" ? "Approve and cancel it" : "Approve"}</Button>}
             <Button size="sm" onClick={() => setDeclining(true)}>Decline</Button>
           </div>
         )}

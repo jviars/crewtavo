@@ -17,6 +17,7 @@ import { useSession } from "@/lib/session";
 import { otherWork, priceDrafts, priceLines, priceTotal, reachWords, REPLY_BY_CHOICES, replyByAt, replyByProblem, replyByWords, samePrice, type PickedTime, type PriceDraft, type ReplyBy } from "../subs/offers";
 import { draftAmount, quantityWords } from "../subs/pay";
 import { changeOffer, refreshPay, sendOffer, type JobPay } from "../subs/payData";
+import styles from "./jobs.module.css";
 
 /** The time to answer by: none, in 2 hours, end of today, tomorrow at noon, or a day and time picked (the company's clock). */
 function useReplyBy() {
@@ -65,9 +66,9 @@ function InsuranceCallout({ items, subId }: { items: readonly InsuranceWarningIt
   if (!items.length) return null;
   return (
     <div className="callout callout-warning">
-      <Icon name="alert" size={20} />
-      <div className="grow small" style={{ fontWeight: 400 }}>
-        <div style={{ fontWeight: 600 }}>Check their insurance</div>
+      <Icon name="alert" size={16} />
+      <div className="grow">
+        <div>Check their insurance</div>
         {items.map((i) => <div key={`${i.requirement}-${i.problem}`}>{insuranceWarningText(i, "office")}</div>)}
         <div>You can still send it. The offer notes this, and work given without current certificates may cost you at your workers' comp audit. <Link to={`/subs/${subId}`}>Their paperwork</Link></div>
       </div>
@@ -109,16 +110,18 @@ export function SendOfferDialog({ pay, name, jobTitle, dates, warning, onClose }
           if (!replyBy.problem && !nothing) send.mutate();
         }}
       >
-        <div className="card card-pad stack-sm">
-          <span className="muted small">What they'll see</span>
-          <strong>{preview}</strong>
-          <span className="muted small">Before they take it they see the town, the days, the work and their price, not the address or the client.</span>
+        {/* The offer as it reaches them: a quiet block, like the message it is. */}
+        <div className={styles.preview}>
+          <span className={styles.previewLabel}>What they'll see</span>
+          <p className={styles.previewText}>{preview}</p>
+          <span className={styles.previewNote}>Before they take it they see the town, the days, the work and their price, not the address or the client.</span>
         </div>
         {noVisits && (
           <div className="callout callout-warning">
-            <Icon name="alert" size={20} />
-            <div className="grow small" style={{ fontWeight: 400 }}>
-              This offer doesn't cover any visits, so they won't be put on the job when they accept it. To fix that, close this and tick the visits it covers.
+            <Icon name="alert" size={16} />
+            <div className="grow">
+              <div>This offer doesn't cover any visits</div>
+              They won't be put on the job when they accept it. To fix that, close this and tick the visits it covers.
             </div>
           </div>
         )}
@@ -178,12 +181,12 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
           if (!problem && !replyBy.problem) send.mutate();
         }}
       >
-        <div className="card">
+        <div className={styles.priceLines}>
           {drafts.map((d) => {
             const unit = d.basis === "per_unit" ? d.unit : d.basis === "per_day" ? "day" : "job";
             const amount = draftAmount(d);
             return (
-              <div key={d.key} className="card-row" style={{ flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div key={d.key} className={styles.priceLine}>
                 <input className="input input-sm grow" style={{ minWidth: 200 }} value={d.description} maxLength={200} aria-label="Description" disabled={send.isPending} onChange={(e) => update(d.key, { description: e.target.value })} />
                 <span className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 260px", justifyContent: "flex-end", minWidth: 0 }}>
                   <input className="input input-sm tabular" style={{ flex: "1 1 64px", maxWidth: 96, minWidth: 0, textAlign: "right" }} inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${d.description}`} disabled={send.isPending} onChange={(e) => update(d.key, { quantity: e.target.value.replace(/[^0-9.]/g, "") })} />
@@ -200,7 +203,7 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
               </div>
             );
           })}
-          <div className="card-row">
+          <div className={styles.priceLine}>
             <Button size="sm" variant="ghost" icon="plus" disabled={drafts.length >= 50 || send.isPending} onClick={() => { setDrafts((all) => [...all, otherWork(`new-${next}`)]); setNext(next + 1); }}>Add a line</Button>
             <span className="grow" style={{ textAlign: "right" }}>
               <strong>New price</strong>

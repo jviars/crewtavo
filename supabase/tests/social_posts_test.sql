@@ -450,13 +450,13 @@ commit;
 begin;
 set local role authenticated;
 select tsp.as_user(:'mia');
-update public.companies set settings = settings || '{"social": {"auto": {"enabled": false, "networks": []}}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"social": {"auto": {"enabled": false, "networks": []}}}' where id = :'co';
 commit;
 select tsp.check((select settings #>> '{social,auto,enabled}' = 'true' from public.companies where id = :'co'), 'and a plain settings save can''t turn them off without cancelling them');
 begin;
 set local role authenticated;
 select tsp.as_user(:'mia');
-update public.companies set settings = settings - 'social' where id = :'co';
+update public.companies set settings = public.company_settings(id) - 'social' where id = :'co';
 commit;
 select tsp.check((select settings #>> '{social,auto,enabled}' = 'true' from public.companies where id = :'co'), 'nor can one saved from a copy without them');
 

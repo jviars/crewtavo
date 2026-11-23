@@ -22,7 +22,8 @@ vi.mock("../src/integrations/stripe", async (original) => ({
   stripeAccess: async () => (stripe.key ? { key: stripe.key, own: true } : null),
 }));
 // The server's own client, which reads who a client's message goes to: their contacts, the
-// company's switch and the numbers that texted STOP (services/recipients.ts).
+// company's switch and the numbers that texted STOP (services/recipients.ts); and the company and
+// its settings, which the browser's role doesn't read (deliver in services/sales.ts).
 const server = vi.hoisted(() => ({ tables: {} as Record<string, unknown> }));
 vi.mock("../src/lib/supabase", async (original) => ({
   ...(await original<typeof import("../src/lib/supabase")>()),
@@ -78,6 +79,7 @@ describe("a payment reminder", () => {
       invoices: [invoice("inv-early", 4, "2026-12-15"), invoice("inv-today", 5, "2026-11-30"), invoice("inv-late", 6, "2026-11-29")],
       stripe_invoices: [],
     });
+    server.tables = { companies: company };
 
     const result = await remindInvoices({ db, env, companyId: CO, baseUrl: "https://ops.example.com" }, ["inv-early", "inv-today", "inv-late"]);
 
@@ -91,6 +93,7 @@ describe("a payment reminder", () => {
   it("says to pay online only when the business takes payments online", async () => {
     const db = stubDb({ companies: company, invoices: [invoice("inv-1", 7, "2026-12-15")], stripe_invoices: [] });
     const scope = { db, env, companyId: CO, baseUrl: "https://ops.example.com" };
+    server.tables = { companies: company };
 
     await remindInvoices(scope, ["inv-1"]);
     stripe.key = "rk_live_own";
@@ -112,7 +115,7 @@ describe("a payment reminder", () => {
     const tables = { invoices: [invoice("inv-1", 7, "2026-12-15")], stripe_invoices: [], clients: { id: "client-1", ...client, sms_opt_out_at: null } };
     const scope = { db: stubDb({ ...tables, companies: company }), env, companyId: CO, baseUrl: "https://ops.example.com" };
 
-    server.tables = { client_contacts: contacts };
+    server.tables = { companies: company, client_contacts: contacts };
     expect(await remindInvoices(scope, ["inv-1"])).toEqual({ sent: 1, skipped: [] });
     expect(sent.map((m) => m.to)).toEqual(["pat@example.com", "mo@example.com"]);
     // One message on the timeline, saying who got it.
@@ -121,8 +124,8 @@ describe("a payment reminder", () => {
 
     // A company that had contacts before the ticks did anything: nobody new until it says yes.
     sent.length = 0;
-    const held = stubDb({ ...tables, companies: { ...company, settings: { contact_messages: { enabled: false, pending: true } } } });
-    await remindInvoices({ ...scope, db: held }, ["inv-1"]);
+    server.tables = { ...server.tables, companies: { ...company, settings: { contact_messages: { enabled: false, pending: true } } } };
+    await remindInvoices(scope, ["inv-1"]);
     expect(sent.map((m) => m.to)).toEqual(["pat@example.com"]);
   });
 });

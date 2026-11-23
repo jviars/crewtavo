@@ -19,6 +19,7 @@ import { supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoneyCents } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { useSession } from "@/lib/session";
+import styles from "./invoices.module.css";
 
 const qty = (n: number) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(n);
 
@@ -119,9 +120,9 @@ export function AddWorkDialog({ invoiceId, jobId, onClose, skipEmpty = false }: 
         {work.isPending && <Skeleton height={120} radius={8} />}
         {data && empty && <p className="muted">{billable ? "Nothing logged on this job is waiting to be billed." : "Logged work goes on a draft invoice for the job's work."}</p>}
         {data && !empty && data.hours.length > 0 && (
-          <section className="stack-sm">
-            <div className="row-between wrap" style={{ gap: 8 }}>
-              <strong>Hours</strong>
+          <section className={styles.pickGroup} aria-labelledby={`${invoiceId}-hours`}>
+            <div className={styles.pickHead}>
+              <h3 id={`${invoiceId}-hours`} className={styles.pickTitle}>Hours</h3>
               {data.rates.length > 0 && (
                 <Select className="select input-sm" style={{ width: "auto" }} value={rate?.id ?? ""} onChange={(e) => setRateId(e.target.value)} aria-label="Bill hours at">
                   {data.rates.map((r) => <option key={r.id} value={r.id}>{r.name} · {formatMoneyCents(Number(r.unit_price))}/{r.unit}</option>)}
@@ -129,33 +130,36 @@ export function AddWorkDialog({ invoiceId, jobId, onClose, skipEmpty = false }: 
               )}
             </div>
             {!data.rates.length && <span className="muted small">To bill hours, add an item sold by the hour (unit hr), like Labor, to your price list.</span>}
-            <div className="card" style={{ boxShadow: "none", maxHeight: 240, overflowY: "auto" }}>
+            <ul className={styles.picks} role="list" aria-labelledby={`${invoiceId}-hours`} style={{ maxHeight: 240 }}>
               {data.hours.map((t) => (
-                <label key={t.id} className="card-row" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={shownHours.includes(t.id)} onChange={(e) => setHours(toggle(shownHours, t.id, e.target.checked))} />
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    <strong>{data.names.get(t.user_id) ?? "Someone"}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{formatDate(localDate(new Date(t.started_at), company.timezone))}{t.approved_at ? "" : " · not approved yet"}</span>
-                  </span>
-                  <span className="tabular">{qty(entryHours(t))} hr</span>
-                </label>
+                <li key={t.id}>
+                  <label className={styles.pick}>
+                    <input type="checkbox" checked={shownHours.includes(t.id)} onChange={(e) => setHours(toggle(shownHours, t.id, e.target.checked))} />
+                    <span className={styles.pickText}>
+                      <span className={styles.pickName}>{data.names.get(t.user_id) ?? "Someone"}</span>
+                      <span className={styles.pickSub}>{formatDate(localDate(new Date(t.started_at), company.timezone))}{t.approved_at ? "" : " · not approved yet"}</span>
+                    </span>
+                    <span className={styles.pickEnd}>{qty(entryHours(t))} hr</span>
+                  </label>
+                </li>
               ))}
-            </div>
+            </ul>
           </section>
         )}
         {data && !empty && data.materials.length > 0 && (
-          <section className="stack-sm">
-            <strong>Materials</strong>
-            <div className="card" style={{ boxShadow: "none", maxHeight: 240, overflowY: "auto" }}>
+          <section className={styles.pickGroup} aria-labelledby={`${invoiceId}-materials`}>
+            <div className={styles.pickHead}><h3 id={`${invoiceId}-materials`} className={styles.pickTitle}>Materials</h3></div>
+            <ul className={styles.picks} role="list" aria-labelledby={`${invoiceId}-materials`} style={{ maxHeight: 240 }}>
               {data.materials.map((m) => (
-                <label key={m.key} className="card-row" style={{ cursor: "pointer" }}>
+                <li key={m.key}>
+                <label className={styles.pick}>
                   <input type="checkbox" checked={shownPicked.includes(m.key)} onChange={(e) => setPicked(toggle(shownPicked, m.key, e.target.checked))} />
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    <strong>{m.name}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{qty(m.quantity)} {m.unit}{m.unit_price === null ? " · not on your price list" : ""}</span>
+                  <span className={styles.pickText}>
+                    <span className={styles.pickName}>{m.name}</span>
+                    <span className={styles.pickSub}>{qty(m.quantity)} {m.unit}{m.unit_price === null ? " · not on your price list" : ""}</span>
                   </span>
                   {m.unit_price !== null ? (
-                    <span className="tabular">{formatMoneyCents(lineTotal(m.quantity, m.unit_price))}</span>
+                    <span className={styles.pickEnd}>{formatMoneyCents(lineTotal(m.quantity, m.unit_price))}</span>
                   ) : (
                     <input
                       className="input input-sm"
@@ -171,8 +175,9 @@ export function AddWorkDialog({ invoiceId, jobId, onClose, skipEmpty = false }: 
                     />
                   )}
                 </label>
+                </li>
               ))}
-            </div>
+            </ul>
           </section>
         )}
         <FormError error={add.error ?? work.error} />

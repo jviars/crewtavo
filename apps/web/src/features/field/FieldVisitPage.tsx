@@ -12,27 +12,30 @@
  */
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import { onlineManager, useIsMutating, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type ChangeEvent, type RefObject } from "react";
+import { forwardRef, Fragment, useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type ChangeEvent, type RefObject } from "react";
 import { Link, useParams } from "react-router-dom";
 import { canDrawOn, DrawOnPhoto, OriginalLink } from "@/components/DrawOnPhoto";
 import { PhotoEditor, type MarksFor } from "@/components/PhotoEditor";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
+import { Button, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine } from "@/components/ui/InboxList";
 import { MapsLink } from "@/components/ui/MapsLink";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Note } from "@/components/ui/Note";
-import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
+import { BackLink, Crumb, useDocumentTitle } from "@/components/ui/PageHeader";
 import { SaveStatus, useSaveStatus, type SaveState } from "@/components/ui/SaveStatus";
+import { Facts, Section } from "@/components/ui/Section";
 import { Select } from "@/components/ui/Select";
-import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { DetailSkeleton, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
 import { errorMessage, isAuthError } from "@/lib/errors";
 import { photoLinks } from "@/lib/photoMarkup";
-import { addressLine, formatDateTime, timeAgo } from "@/lib/format";
+import { addressLine, formatDateTime, formatTime, timeAgo, todayIn } from "@/lib/format";
 import { visitPlace } from "@/lib/maps";
 import { useListAnimation } from "@/lib/motion";
 import { FIELD_SCOPE } from "@/lib/offline";
@@ -43,10 +46,10 @@ import { IN_TRASH } from "../drive/trash";
 import { ShareToggle, shareToggleState } from "../marketing/ShareToggle";
 import { galleryOf, usePhotoGallery } from "../files/PhotoGallery";
 import { undoable } from "@/lib/undo";
-import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
+import { CustomFieldFacts, useCustomFields } from "../customFields/CustomFields";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
 import { MaterialsCard } from "../jobs/JobMaterials";
-import { ScopeOfWork } from "../jobs/ScopeOfWork";
+import { useJobScope } from "../jobs/ScopeOfWork";
 import { FieldPlans } from "../plans/FieldPlans";
 import { PropertyEquipment } from "../clients/PropertyEquipment";
 import { guideQuery } from "../kb/kbData";
@@ -59,7 +62,8 @@ import { SignaturePad } from "./SignaturePad";
 import { visitChecklists, type VisitChecklist } from "./visitChecklists";
 import { AddWork, VisitInvoice } from "./FieldBilling";
 import { addsToVisit, addsWork, fieldInvoiceKind, takesMoney, takesWork } from "./fieldMoney";
-import { VisitExtraScope } from "./FieldExtras";
+import { VisitExtraScope, WorkLines } from "./FieldExtras";
+import { dayOrder, useMyDay } from "./myDay";
 import { YourPrice } from "./YourPrice";
 import { LocationNotice } from "./LocationNoticeDialog";
 import { msg, t, T } from "@/lib/i18n";
@@ -91,6 +95,8 @@ export function FieldVisitPage() {
   // The required item an early Complete visit last pointed at: tapped again, it offers to go without.
   const pointedAt = useRef<string | null>(null);
   const online = useSignal();
+  // Where it is on today's route (Stop 3 of 5), from My day's list, kept on the phone.
+  const day = useMyDay();
 
   const visit = useQuery({
     queryKey: ["field-visit", id],
@@ -198,6 +204,7 @@ export function FieldVisitPage() {
   }
 
   const place = visitPlace(v);
+  const propertyId = v.property?.id ?? v.job?.property_id ?? null;
   const client = visitContact((v.job?.client ?? v.request?.client) as { display_name: string; phone: string | null } | null, contact.data);
   const codes = access.data;
   const minutes = (myTime.data ?? []).reduce((s, t) => s + ((t.ended_at ? Date.parse(t.ended_at) : Date.now()) - Date.parse(t.started_at)), 0);
@@ -218,151 +225,173 @@ export function FieldVisitPage() {
     checklist.current?.finish();
     setStatus("completed");
   };
+  const scheduled = v.status === "scheduled";
   const commit =
-    v.status === "scheduled" ? (
+    scheduled ? (
       <>
-        <Button icon="navigation" className="big-action" loading={going === "en_route"} onClick={() => setStatus("en_route")}>{t("On my way")}</Button>
-        <Button variant="primary" icon="play" className="big-action" loading={going === "in_progress"} onClick={() => setStatus("in_progress")}>{t("Start visit")}</Button>
+        <Button loading={going === "en_route"} onClick={() => setStatus("en_route")}>{t("On my way")}</Button>
+        <Button variant="primary" loading={going === "in_progress"} onClick={() => setStatus("in_progress")}>{t("Start visit")}</Button>
       </>
     ) : v.status === "en_route" ? (
-      <Button variant="primary" icon="play" className="big-action" loading={going !== null} onClick={() => setStatus("in_progress")}>{t("Start visit")}</Button>
+      <Button variant="primary" loading={going !== null} onClick={() => setStatus("in_progress")}>{t("Start visit")}</Button>
     ) : v.status === "in_progress" ? (
-      // Green once nothing required is missing; until then it says how much is left.
-      <Button variant={left ? "secondary" : "primary"} icon={left ? undefined : "check"} className="big-action" loading={going !== null} onClick={() => void complete()}>
-        {progress && left > 0 && going === null && <ProgressRing value={(progress.required - left) / progress.required} />}
-        {t("Complete visit")}
-        {left > 0 && (
-          <>
-            <span className="sr-only">, </span>
-            <span className="field-commit-left"><T text={left === 1 ? msg("{count} required left", "one") : "{count} required left"} count={<AnimatedNumber value={left} />} /></span>
-          </>
-        )}
-      </Button>
+      // What's still required is said over it, and read with it.
+      <Button variant="primary" loading={going !== null} aria-describedby={left > 0 ? "visit-left" : undefined} onClick={() => void complete()}>{t("Complete visit")}</Button>
     ) : null;
+  const contacts = contactLinks(client);
+  const quiet = [
+    ...contacts.map((link) => <a key={link.label} className="btn" href={link.href}><Icon name={link.label === "Call" ? "phone" : "messages"} size={18} />{link.label === "Call" ? t("Call") : t("Text", { context: "message" })}</a>),
+    ...(place ? [<MapsLink key="maps" className="btn" place={place}><Icon name="navigation" size={18} />{t("Directions")}</MapsLink>] : []),
+  ];
+  const rows = (v.status === "in_progress" && left > 0 ? 1 : 0) + (commit ? 2 : 0) + (quiet.length ? 4 : 0);
+  // Stop 3 of 5: where it is on today's route.
+  const todays = [...(day.data?.today ?? [])].sort(dayOrder);
+  const at = todays.findIndex((d) => d.id === v.id);
+  const stopText = at >= 0 && todays.length > 1 ? t("Stop {number} of {count}", { number: todays[at]!.route_order ?? at + 1, count: todays.length }) : null;
+  const when = v.starts_at ? (v.scheduled_on === todayIn(session.company.timezone) ? formatTime(v.starts_at, session.company.timezone) : formatDateTime(v.starts_at)) : v.scheduled_on ? t("Anytime today") : t("Not scheduled");
+  const more: MenuEntry[] = [
+    { label: t("Add photos"), icon: "camera", onSelect: () => document.getElementById("visit-add-photos")?.click() },
+    { label: t("Draw on a photo"), icon: "pen", onSelect: () => document.getElementById("visit-draw-photo")?.click() },
+    { label: t("Add a receipt"), icon: "receipt", hidden: !(v.job && !sub), onSelect: () => setExpense(true) },
+  ];
 
   return (
-    <div className="field-app">
-      <BackLink to="/field">{t("My day")}</BackLink>
-      <div className="stack-sm">
+    <div className="field-app m-grouped field-narrow visit-page">
+      <div className="page-header detail-head visit-head">
+        <div className="detail-crumb"><Crumb to="/field">{t("My day")}</Crumb></div>
+        {stopText && <span className="visit-stop">{stopText}</span>}
         <h1 className="page-title">{v.title}</h1>
-        <div className="row wrap">
-          <EntityStatus kind="visit" status={v.status} />
-          <span className="muted">{v.starts_at ? formatDateTime(v.starts_at) : v.scheduled_on ? t("Anytime today") : t("Not scheduled")}</span>
-          {v.series_total && v.series_total > 1 && <span className="chip chip-blue">{t("Day {day} of {days}", { day: v.series_day, days: v.series_total })}</span>}
-          {clocks && minutes > 0 && <span className="chip"><Icon name="clock" size={12} />{t("You: {time}", { time: formatDuration(minutes) })}</span>}
-          {/* i18n-ignore: test/invoices.test.ts reads this chip as written, so it stays in English */}
-          {!sub && autopay.data && <span className="chip" title={t("The client is charged automatically after the visit")}><Icon name="card" size={12} />Autopay</span>}
-        </div>
+        <div className="page-actions"><Menu items={more} title={v.title} /></div>
+        <MetaLine
+          className="detail-meta"
+          parts={[
+            <EntityStatus key="status" kind="visit" status={v.status} />,
+            <span key="when" className="tabular">{when}</span>,
+            stopText && <span key="stop" className="visit-meta-stop">{stopText}</span>,
+            v.series_total && v.series_total > 1 && <span key="series" className="chip">{t("Day {day} of {days}", { day: v.series_day, days: v.series_total })}</span>,
+            clocks && minutes > 0 && <span key="you" className="tabular">{t("You: {time}", { time: formatDuration(minutes) })}</span>,
+            /* i18n-ignore: test/invoices.test.ts reads this chip as written, so it stays in English */
+            <Fragment key="autopay">{!sub && autopay.data && <span className="chip" title={t("The client is charged automatically after the visit")}><Icon name="card" size={12} />Autopay</span>}</Fragment>,
+          ]}
+        />
       </div>
       <OfflineNote />
       {/* What's saved about where they are, said once before a tap here would save it. */}
       <LocationNotice />
       {/* The clock at the property: Complete visit goes through the checklist check, as the button below does. */}
       <GeofenceCard visitId={v.id} onStatus={(_visit, status) => (status === "completed" ? void complete() : setStatus(status))} />
-      {v.status === "completed" && v.completed_at && <div className="callout callout-good"><Icon name="check" size={20} /><div className="grow">{t("Completed {when}.", { when: timeAgo(v.completed_at) })}</div></div>}
-      {/* Autopay bills the visit itself; with no signal, whether it does may not be on the phone. */}
-      {v.status === "completed" && v.job && invoiceKind && takesMoney(session) && (autopay.isSuccess ? !autopay.data : !online) && <VisitInvoice visitId={v.id} jobId={v.job.id} kind={invoiceKind} />}
+      {v.status === "completed" && v.completed_at && <div className="callout callout-good"><Icon name="check" size={16} /><div className="grow">{t("Completed {when}.", { when: timeAgo(v.completed_at) })}</div></div>}
 
-      <div className="field-actions">
-        {commit && <div className="field-commit">{commit}</div>}
-        {contactLinks(client).map((link) => (
-          <a key={link.label} className="btn big-action" href={link.href}><Icon name={link.label === "Call" ? "phone" : "messages"} size={20} />{link.label === "Call" ? t("Call") : t("Text", { context: "message" })}</a>
-        ))}
-        {place && <MapsLink className="btn big-action" place={place}><Icon name="navigation" size={20} />{t("Directions")}</MapsLink>}
+      {/* The visit's next step and the ways to reach the client and get there. On a phone, pinned above the tab bar in thumb reach. */}
+      {(commit || quiet.length > 0) && (
+        <div className="visit-bar no-print" role="group" aria-label={t("Actions")} data-rows={rows}>
+          {v.status === "in_progress" && progress && left > 0 && (
+            <div className="visit-left" id="visit-left">
+              <ProgressRing value={(progress.required - left) / progress.required} />
+              <span><T text={left === 1 ? msg("{count} required left", "one") : "{count} required left"} count={<AnimatedNumber value={left} />} /></span>
+            </div>
+          )}
+          {commit && <div className="visit-commit">{commit}</div>}
+          {quiet.length > 0 && <div className="visit-quiet" data-count={quiet.length}>{quiet}</div>}
+        </div>
+      )}
+
+      <div className="visit-body">
+        <section className="visit-site" aria-label={t("Site")}>
+          <div className="visit-site-name">{client.name ?? t("Site")}</div>
+          {place && <MapsLink className="visit-site-address" place={place}>{v.property ? addressLine(v.property) : v.address}</MapsLink>}
+          {access.isPending && v.property ? <Skeleton width="40%" height={28} /> : (codes?.gate_code || codes?.lockbox_code || codes?.alarm_code) && (
+            <dl className="visit-codes">
+              {codes.gate_code && <div><dt>{t("Gate code")}</dt><dd>{codes.gate_code}</dd></div>}
+              {codes.lockbox_code && <div><dt>{t("Lockbox")}</dt><dd>{codes.lockbox_code}</dd></div>}
+              {codes.alarm_code && <div><dt>{t("Alarm")}</dt><dd>{codes.alarm_code}</dd></div>}
+            </dl>
+          )}
+          {codes?.instructions && <p className="visit-site-note pre-wrap">{codes.instructions}</p>}
+          {v.property?.notes && <p className="visit-site-note pre-wrap">{v.property.notes}</p>}
+          {v.hold_reason && <div className="visit-warn"><Icon name="cloud" size={15} />{t("Weather: {reason}", { reason: v.hold_reason })}</div>}
+        </section>
+
+        {(v.job?.instructions || v.request?.details) && (
+          <Section title={t("Instructions")} className="visit-instructions">
+            {v.job?.instructions && <Note text={v.job.instructions} />}
+            {v.request?.details && <p className="pre-wrap">{v.request.details}</p>}
+          </Section>
+        )}
+        {/* Autopay bills the visit itself; with no signal, whether it does may not be on the phone. */}
+        {v.status === "completed" && v.job && invoiceKind && takesMoney(session) && (autopay.isSuccess ? !autopay.data : !online) && <VisitInvoice visitId={v.id} jobId={v.job.id} kind={invoiceKind} />}
+        {v.job && (
+          <Section title={t("The work")}>
+            <ScopeLines jobId={v.job.id} />
+            {/* A repeating job's work is the same every visit; this is what's extra on this one. */}
+            {addsToVisit(v.job) && <VisitExtraScope visitId={v.id} />}
+            {/* Not once a repeating job's visit is on an invoice: the office adds to the invoice then. */}
+            {addsWork(session) && takesWork(v.job) && v.status !== "cancelled" && !(addsToVisit(v.job) && v.invoice_id) && <AddWork visitId={v.id} jobId={v.job.id} toVisit={addsToVisit(v.job)} />}
+          </Section>
+        )}
+
+        <VisitWork visitId={v.id} visitStatus={v.status} checklist={checklist} onProgress={setProgress} jobId={v.job?.id ?? null} materials={!sub}
+          clientOptOut={Boolean(v.job?.client?.social_photos_opt_out ?? v.request?.client?.social_photos_opt_out)} />
+
+        <Section title={<label htmlFor="visit-notes">{t("Notes for the office")}</label>} action={<AutoSaveStatus status={notesSave.status} waiting={notesSending > 0} />} className="visit-notes">
+          <textarea
+            id="visit-notes"
+            className="textarea"
+            value={notes}
+            maxLength={5000}
+            onChange={(e) => {
+              setNotes(e.target.value);
+              notesSave.change(e.target.value);
+            }}
+            onBlur={notesSave.flush}
+            placeholder={t("Extra work they asked about, damage you noticed, materials used…")}
+          />
+          <FormError error={saveNotes.error} />
+          {v.job && !sub && <button type="button" className="field-add" onClick={() => setExpense(true)}><Icon name="receipt" size={18} />{t("Add a receipt")}</button>}
+        </Section>
+
+        {(shownCustomFields(jobFields, v.job?.custom_fields).length > 0 || shownCustomFields(propertyFields, v.property?.custom_fields).length > 0) && (
+          <Section title={t("Details")}>
+            <Facts>
+              <CustomFieldFacts fields={jobFields} values={v.job?.custom_fields} />
+              <CustomFieldFacts fields={propertyFields} values={v.property?.custom_fields} />
+            </Facts>
+          </Section>
+        )}
+        {v.equipment.length > 0 && (
+          <Section title={t("Bring")} count={v.equipment.length}>
+            <ul className="visit-bring">
+              {v.equipment.map((e) => e.equipment && <li key={e.equipment.id}><span className="rel-icon"><Icon name="truck" size={15} /></span>{e.equipment.name}</li>)}
+            </ul>
+          </Section>
+        )}
+        {sub && <YourPrice visitId={v.id} />}
+        <FieldPlans visitId={v.id} jobId={v.job?.id ?? null} propertyId={propertyId} />
+        {/* The client's own equipment here is the team's to see, not a sub's: a section like the rest, Add equipment its last row. */}
+        {!sub && propertyId && <PropertyEquipment propertyId={propertyId} visitId={v.id} />}
       </div>
 
-      <section className="card card-pad stack-sm">
-        <strong style={{ fontSize: 16 }}>{client.name ?? t("Site")}</strong>
-        {place && <MapsLink className="address-link" place={place}>{v.property ? addressLine(v.property) : v.address}</MapsLink>}
-        {access.isPending && v.property ? <Skeleton width="40%" /> : (
-          <>
-            {codes?.gate_code && <span style={{ fontSize: 16 }}><Icon name="lock" size={16} /> {t("Gate code")} <strong style={{ fontSize: 20 }}>{codes.gate_code}</strong></span>}
-            {codes?.lockbox_code && <span><Icon name="lock" size={14} /> {t("Lockbox")} <strong>{codes.lockbox_code}</strong></span>}
-            {codes?.alarm_code && <span><Icon name="lock" size={14} /> {t("Alarm")} <strong>{codes.alarm_code}</strong></span>}
-            {codes?.instructions && <span className="muted pre-wrap">{codes.instructions}</span>}
-          </>
-        )}
-        {v.property?.notes && <span className="muted pre-wrap">{v.property.notes}</span>}
-        {v.hold_reason && <span style={{ color: "var(--warning)", fontWeight: 600 }}><Icon name="cloud" size={14} /> {t("Weather: {reason}", { reason: v.hold_reason })}</span>}
-      </section>
-
-      {(v.job?.instructions || v.request?.details) && (
-        <section className="card card-pad stack-sm" style={{ background: "var(--note)", borderColor: "var(--note-border)" }}>
-          <strong>{t("Instructions")}</strong>
-          {v.job?.instructions && <Note text={v.job.instructions} />}
-          {v.request?.details && <p className="pre-wrap" style={{ margin: 0 }}>{v.request.details}</p>}
-        </section>
-      )}
-      {(shownCustomFields(jobFields, v.job?.custom_fields).length > 0 || shownCustomFields(propertyFields, v.property?.custom_fields).length > 0) && (
-        <section className="card card-pad stack-sm">
-          <strong>{t("Details")}</strong>
-          <dl className="kv">
-            <CustomFieldList fields={jobFields} values={v.job?.custom_fields} />
-            <CustomFieldList fields={propertyFields} values={v.property?.custom_fields} />
-          </dl>
-        </section>
-      )}
-      {v.job && (
-        <section className="card card-pad stack-sm">
-          <ScopeOfWork jobId={v.job.id} title={t("The work")} bare />
-          {/* A repeating job's work is the same every visit; this is what's extra on this one. */}
-          {addsToVisit(v.job) && <VisitExtraScope visitId={v.id} />}
-          {/* Not once a repeating job's visit is on an invoice: the office adds to the invoice then. */}
-          {addsWork(session) && takesWork(v.job) && v.status !== "cancelled" && !(addsToVisit(v.job) && v.invoice_id) && <AddWork visitId={v.id} jobId={v.job.id} toVisit={addsToVisit(v.job)} />}
-        </section>
-      )}
-      {sub && <YourPrice visitId={v.id} />}
-      <FieldPlans visitId={v.id} jobId={v.job?.id ?? null} propertyId={v.property?.id ?? v.job?.property_id ?? null} />
-      {v.equipment.length > 0 && (
-        <section className="card card-pad stack-sm">
-          <strong>{t("Bring")}</strong>
-          <div className="row wrap" style={{ gap: 6 }}>
-            {v.equipment.map((e) => e.equipment && <span key={e.equipment.id} className="chip"><Icon name="truck" size={12} />{e.equipment.name}</span>)}
-          </div>
-        </section>
-      )}
-      {/* The client's own equipment here is the team's to see, not a sub's. */}
-      {!sub && <PropertyEquipment propertyId={v.property?.id ?? v.job?.property_id ?? null} visitId={v.id} />}
-
-      <VisitWork visitId={v.id} visitStatus={v.status} checklist={checklist} onProgress={setProgress} jobId={v.job?.id ?? null} materials={!sub}
-        clientOptOut={Boolean(v.job?.client?.social_photos_opt_out ?? v.request?.client?.social_photos_opt_out)} />
-
-      <section className="card card-pad stack-sm">
-        <div className="row-between">
-          <label htmlFor="visit-notes"><strong>{t("Notes for the office")}</strong></label>
-          <AutoSaveStatus status={notesSave.status} waiting={notesSending > 0} />
-        </div>
-        <textarea
-          id="visit-notes"
-          className="textarea"
-          value={notes}
-          maxLength={5000}
-          onChange={(e) => {
-            setNotes(e.target.value);
-            notesSave.change(e.target.value);
-          }}
-          onBlur={notesSave.flush}
-          placeholder={t("Extra work they asked about, damage you noticed, materials used…")}
-        />
-        <FormError error={saveNotes.error} />
-        {v.job && !sub && <Button variant="ghost" icon="receipt" style={{ justifySelf: "start" }} onClick={() => setExpense(true)}>{t("Add a receipt")}</Button>}
-      </section>
-
       {expense && v.job && !sub && <ExpenseDialog jobId={v.job.id} expense={null} onClose={() => setExpense(false)} onSaved={() => toast.success(t("Receipt sent to the office"), { tone: "job" })} />}
-      {/* Room at the bottom for the phone's bar, so nothing ends up behind it. */}
-      {commit && <div className="field-commit-room" aria-hidden="true" />}
     </div>
   );
 }
 
-/** The checklists, materials (not a sub's) and photos, sharing the visit's photos (a checklist item can ask for them). */
+/** The job's work as the crew sees it: names, notes and quantities, never prices (job_scope). */
+function ScopeLines({ jobId }: { jobId: string }) {
+  const scope = useJobScope(jobId);
+  if (scope.isPending) return <Skeleton height={44} radius={8} />;
+  if (!scope.data?.length) return null;
+  return <WorkLines lines={scope.data} />;
+}
+
+/** The checklists, photos and materials (not a sub's), sharing the visit's photos (a checklist item can ask for them). */
 function VisitWork({ visitId, visitStatus, checklist, onProgress, jobId, materials, clientOptOut }: { visitId: string; visitStatus: string; checklist: RefObject<ChecklistHandle>; onProgress: (p: ChecklistProgress | null | undefined) => void; jobId: string | null; materials: boolean; clientOptOut: boolean }) {
   const photos = useVisitPhotos(visitId);
   return (
     <>
       <Checklists ref={checklist} visitId={visitId} jobId={jobId} visitStatus={visitStatus} photos={photos} onProgress={onProgress} />
-      {jobId && materials && <MaterialsCard jobId={jobId} visitId={visitId} compact />}
       <Photos photos={photos} clientOptOut={clientOptOut} />
+      {jobId && materials && <MaterialsCard jobId={jobId} visitId={visitId} compact />}
     </>
   );
 }
@@ -543,7 +572,7 @@ const Checklists = forwardRef<ChecklistHandle, { visitId: string; jobId: string 
     },
   }));
 
-  if (data.isPending) return <section className="card card-pad"><Skeleton width="30%" /><div style={{ height: 10 }} /><Skeleton height={80} /></section>;
+  if (data.isPending) return <SectionSkeleton rows={3} />;
   const another = cards.some((c) => c.fixed);
   return cards.map((card) => (
     <Checklist
@@ -572,7 +601,7 @@ const Checklist = forwardRef<
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
-  const root = useRef<HTMLElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const flashing = useRef<number | undefined>(undefined);
   const showing = useShowing();
   const response = card.response;
@@ -697,58 +726,57 @@ const Checklist = forwardRef<
   });
 
   return (
-    <section ref={root} className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{card.fixed ? (template?.name ?? t("Checklist")) : another ? t("Another checklist") : t("Checklist")}</strong>
-        <span className="row" style={{ gap: 12 }}>
-          <AutoSaveStatus status={autosave.status} waiting={sending > 0} />
-          {done ? <StatusPill label={t("Done")} tone="good" /> : template && <span className="muted small tabular"><T text="{done} of {count}" done={<AnimatedNumber value={doneCount} />} count={countable} /></span>}
-        </span>
-      </div>
-      {template && !done && <div className="progress"><span style={{ width: `${countable ? (doneCount / countable) * 100 : 0}%` }} /></div>}
+    <Section
+      title={card.fixed ? (template?.name ?? t("Checklist")) : another ? t("Another checklist") : t("Checklist")}
+      count={template && !done ? t("{done} of {count}", { done: doneCount, count: countable }) : undefined}
+      action={<><AutoSaveStatus status={autosave.status} waiting={sending > 0} />{done && <StatusPill label={t("Done")} tone="good" />}</>}
+      className="visit-checklist"
+    >
       {!card.fixed && !done && (others.length > 1 || another) && (
-        <Select className="select" value={templateId} onChange={(e) => choose(e.target.value)} aria-label={t("Choose a checklist")}>
+        <Select className="select check-pick" value={templateId} onChange={(e) => choose(e.target.value)} aria-label={t("Choose a checklist")}>
           <option value="">{t("Choose a checklist…")}</option>
           {others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       )}
-      <div>
-        {items.map((item) => (
-          <div key={item.key} className="check-row" data-check={item.key} tabIndex={-1}>
-            {item.type === "check" ? (
-              // The whole row is the box's label, so a tap anywhere on it ticks it.
-              <label className="checkbox">
-                <input type="checkbox" checked={Boolean(answers[item.key])} disabled={done} onChange={(e) => set(item.key, e.target.checked)} />
-                <span>{item.label}{item.required && <Required />}</span>
-              </label>
-            ) : item.type === "photo" ? (
-              <>
-                <span className="grow check-photo"><Icon name="camera" size={16} />{item.label}</span>
-                {!done && <PhotoPicker photos={photos} />}
-              </>
-            ) : item.type === "choice" ? (
-              <label className="field" style={{ flex: 1 }}><span>{item.label}{item.required && <Required />}</span>
-                <Select className="select" value={String(answers[item.key] ?? "")} disabled={done} onChange={(e) => set(item.key, e.target.value)}>
-                  <option value="">{t("Choose…")}</option>
-                  {item.options?.map((o) => <option key={o}>{o}</option>)}
-                </Select>
-              </label>
-            ) : item.type === "signature" ? (
-              <SignatureAnswer label={item.label} required={item.required} value={answers[item.key]} disabled={done} onChange={(next) => set(item.key, next)} />
-            ) : (
-              <label className="field" style={{ flex: 1 }}><span>{item.label}{item.required && <Required />}</span>
-                <input className="input" inputMode={item.type === "number" ? "decimal" : undefined} value={String(answers[item.key] ?? "")} disabled={done} onChange={(e) => set(item.key, item.type === "number" ? e.target.value.replace(/[^0-9.\-]/g, "") : e.target.value)} onBlur={autosave.flush} />
-              </label>
-            )}
-            {guideFor(item) && <Link to={`/kb/${item.sop_page_id}`} className="check-guide" title={guideFor(item)!.title} aria-label={t("How to: {guide}", { guide: guideFor(item)!.title })}><Icon name="book" size={14} />{t("How to")}</Link>}
-          </div>
-        ))}
-      </div>
+      {items.length > 0 && (
+        <div ref={root} className="check-list">
+          {items.map((item) => (
+            <div key={item.key} className="check-row" data-check={item.key} data-type={item.type} tabIndex={-1}>
+              {item.type === "check" ? (
+                // The whole row is the box's label, so a tap anywhere on it ticks it.
+                <label className="checkbox">
+                  <input type="checkbox" checked={Boolean(answers[item.key])} disabled={done} onChange={(e) => set(item.key, e.target.checked)} />
+                  <span className="check-text">{item.label}{item.required && <Required />}</span>
+                </label>
+              ) : item.type === "photo" ? (
+                <>
+                  <span className="check-photo"><span className="check-mark" aria-hidden="true"><Icon name="camera" size={15} /></span><span className="check-text">{item.label}</span></span>
+                  {!done && <PhotoPicker photos={photos} compact />}
+                </>
+              ) : item.type === "choice" ? (
+                <label className="field check-field"><span>{item.label}{item.required && <Required />}</span>
+                  <Select className="select" value={String(answers[item.key] ?? "")} disabled={done} onChange={(e) => set(item.key, e.target.value)}>
+                    <option value="">{t("Choose…")}</option>
+                    {item.options?.map((o) => <option key={o}>{o}</option>)}
+                  </Select>
+                </label>
+              ) : item.type === "signature" ? (
+                <SignatureAnswer label={item.label} required={item.required} value={answers[item.key]} disabled={done} onChange={(next) => set(item.key, next)} />
+              ) : (
+                <label className="field check-field"><span>{item.label}{item.required && <Required />}</span>
+                  <input className="input" inputMode={item.type === "number" ? "decimal" : undefined} value={String(answers[item.key] ?? "")} disabled={done} onChange={(e) => set(item.key, item.type === "number" ? e.target.value.replace(/[^0-9.\-]/g, "") : e.target.value)} onBlur={autosave.flush} />
+                </label>
+              )}
+              {guideFor(item) && <Link to={`/kb/${item.sop_page_id}`} className="check-guide" title={guideFor(item)!.title} aria-label={t("How to: {guide}", { guide: guideFor(item)!.title })}><Icon name="book" size={14} />{t("How to")}</Link>}
+            </div>
+          ))}
+        </div>
+      )}
       <FormError error={saveMutation.error} />
       {/* Under way, Complete visit marks it done. Otherwise this does: completed on My day, by the office, or anyway with the rest done after. */}
-      {template && !done && !missing.length && visitStatus !== "in_progress" && <Button icon="check" style={{ justifySelf: "start" }} onClick={markDone}>{t("Mark done")}</Button>}
-      {done && hasRole(session, "admin", "office", "crew_lead") && <Button variant="ghost" icon="undo" style={{ justifySelf: "start" }} loading={reopen.isPending} onClick={() => reopen.mutate()}>{t("Reopen checklist")}</Button>}
-    </section>
+      {template && !done && !missing.length && visitStatus !== "in_progress" && <button type="button" className="field-add" onClick={markDone}><Icon name="check" size={18} />{t("Mark done")}</button>}
+      {done && hasRole(session, "admin", "office", "crew_lead") && <button type="button" className="field-add field-add-quiet" disabled={reopen.isPending} onClick={() => reopen.mutate()}>{reopen.isPending ? <Spinner size={16} /> : <Icon name="undo" size={18} />}{t("Reopen checklist")}</button>}
+    </Section>
   );
 });
 
@@ -847,18 +875,21 @@ function useVisitPhotos(visitId: string) {
 }
 
 /**
- * Take or choose photos for the visit: on the Photos card, and on checklist items that ask for them.
- * "Draw on a photo" takes or chooses one and opens it to draw on before it's added: the photo and
- * its drawing go through the phone's queue together, so it works with no signal.
+ * Take or choose photos for the visit: on the Photos section, and on checklist items that ask for
+ * them (`compact`: round buttons whose words are their names). "Draw on a photo" takes or chooses
+ * one and opens it to draw on before it's added: the photo and its drawing go through the phone's
+ * queue together, so it works with no signal. `ids` lets the visit's More menu open the same pickers.
  */
-function PhotoPicker({ photos }: { photos: VisitPhotos }) {
+function PhotoPicker({ photos, compact, ids }: { photos: VisitPhotos; compact?: boolean; ids?: { add: string; draw: string } }) {
   const [drawing, setDrawing] = useState<File | null>(null);
+  const words = (text: string) => (compact ? <span className="sr-only">{text}</span> : text);
   return (
-    <span className="row wrap" style={{ gap: 8 }}>
-      <label className="btn">
-        <Icon name="camera" size={16} />
-        {photos.uploading ? t("Uploading…") : t("Add photos")}
+    <span className={compact ? "photo-pick photo-pick-compact" : "photo-pick"}>
+      <label className={compact ? "btn btn-icon photo-pick-main" : "btn photo-pick-main"} title={compact ? t("Add photos") : undefined}>
+        {photos.uploading ? <Spinner size={18} /> : <Icon name="camera" size={compact ? 20 : 18} />}
+        {words(photos.uploading ? t("Uploading…") : t("Add photos"))}
         <input
+          id={ids?.add}
           type="file"
           accept="image/*"
           capture="environment"
@@ -871,10 +902,11 @@ function PhotoPicker({ photos }: { photos: VisitPhotos }) {
           }}
         />
       </label>
-      <label className="btn btn-ghost">
-        <Icon name="pen" size={16} />
-        {t("Draw on a photo")}
+      <label className={compact ? "btn btn-icon" : "btn"} title={compact ? t("Draw on a photo") : undefined}>
+        <Icon name="pen" size={compact ? 20 : 18} />
+        {words(t("Draw on a photo"))}
         <input
+          id={ids?.draw}
           type="file"
           accept="image/*"
           capture="environment"
@@ -907,19 +939,19 @@ function Photos({ photos, clientOptOut }: { photos: VisitPhotos; clientOptOut: b
   const grid = useListAnimation<HTMLDivElement>();
   // Tapping a photo opens it in the gallery with the others; the ones still on the phone aren't links.
   const gallery = usePhotoGallery();
-  const shown = galleryOf(photos.photos, (p) => p.caption ?? p.file_name);
+  const inGallery = galleryOf(photos.photos, (p) => p.caption ?? p.file_name);
   const count = photos.photos.length + photos.waiting.length;
   // OK to share is only offered while Marketing is installed, never to subs (ShareToggle).
   const sharing = photos.photos.some((p) => shareToggleState(session, p, clientOptOut) === "ready");
   const unsupported = photos.photos.filter((p) => shareToggleState(session, p, clientOptOut) === "unsupported").length;
+  const shown = photos.loading || count > 0 || photos.adding > 0;
   return (
-    <section className="card card-pad stack-sm">
-      <div className="row-between"><strong>{t("Photos")}</strong>{count > 0 && <span className="muted small tabular"><AnimatedNumber value={count} /></span>}</div>
-      <div ref={grid} className="thumbs">
-        {photos.loading && [0, 1, 2].map((i) => <Skeleton key={i} height={96} radius={8} />)}
+    <Section title={t("Photos")} count={count || undefined} className="visit-photos">
+      <div ref={grid} className="thumbs" hidden={!shown}>
+        {photos.loading && [0, 1, 2].map((i) => <Skeleton key={i} height={96} radius={10} />)}
         {photos.photos.map((p) => (
           <div key={p.id} className="thumb">
-            {p.url ? <a href={p.url} target="_blank" rel="noreferrer" onClick={gallery.opener(shown, p.id)}><img src={p.url} alt={p.caption ?? p.file_name} loading="lazy" /></a> : <span className="muted small">{t("Unavailable")}</span>}
+            {p.url ? <a href={p.url} target="_blank" rel="noreferrer" onClick={gallery.opener(inGallery, p.id)}><img src={p.url} alt={p.caption ?? p.file_name} loading="lazy" /></a> : <span className="muted small">{t("Unavailable")}</span>}
             {photos.canRemove(p) && <button type="button" className="thumb-x" aria-label={t("Remove photo")} onClick={() => photos.remove(p)}><Icon name="x" size={12} bold /></button>}
             <ShareToggle photo={p} clientOptOut={clientOptOut} onShown={(shareable) => photos.showShareable(p.id, shareable)} />
             {/* Drawn on: shown with the drawing, the photo as taken a tap away. */}
@@ -928,16 +960,16 @@ function Photos({ photos, clientOptOut }: { photos: VisitPhotos; clientOptOut: b
           </div>
         ))}
         {photos.waiting.map((p) => <WaitingPhoto key={p.id} photo={p} onRemove={() => void photos.removeWaiting(p)} />)}
-        {Array.from({ length: photos.adding }, (_, i) => <div key={`u${i}`} className="thumb" style={{ display: "grid", placeItems: "center" }}><span className="spinner" style={{ width: 20, height: 20, color: "var(--text-3)" }} /></div>)}
+        {Array.from({ length: photos.adding }, (_, i) => <div key={`u${i}`} className="thumb thumb-adding"><Spinner size={20} /></div>)}
       </div>
-      {sharing && <span className="muted small">{t("Tap the corner to mark photos OK to share, and the office can post them. Posts never show the client's name or address. Check the photo doesn't show a house number, a car plate or people's faces.")}</span>}
-      {unsupported > 0 && !clientOptOut && <span className="muted small">{unsupported === photos.photos.length
+      {sharing && <p className="field-hint">{t("Tap the corner to mark photos OK to share, and the office can post them. Posts never show the client's name or address. Check the photo doesn't show a house number, a car plate or people's faces.")}</p>}
+      {unsupported > 0 && !clientOptOut && <p className="field-hint">{unsupported === photos.photos.length
         ? unsupported === 1 ? t("This photo can't be marked OK to share: only JPEG and PNG photos can be posted.") : t("These photos can't be marked OK to share: only JPEG and PNG photos can be posted.")
-        : unsupported === 1 ? t("The photo marked Can't share can't be marked OK to share: only JPEG and PNG photos can be posted.") : t("The photos marked Can't share can't be marked OK to share: only JPEG and PNG photos can be posted.")}</span>}
-      {count > 0 && clientOptOut && shareToggleState(session, { content_type: "image/jpeg" }) !== "hidden" && <span className="muted small">{t("This client asked us not to post photos of their property.")}</span>}
-      <span style={{ justifySelf: "start" }}><PhotoPicker photos={photos} /></span>
+        : unsupported === 1 ? t("The photo marked Can't share can't be marked OK to share: only JPEG and PNG photos can be posted.") : t("The photos marked Can't share can't be marked OK to share: only JPEG and PNG photos can be posted.")}</p>}
+      {count > 0 && clientOptOut && shareToggleState(session, { content_type: "image/jpeg" }) !== "hidden" && <p className="field-hint">{t("This client asked us not to post photos of their property.")}</p>}
+      <PhotoPicker photos={photos} ids={{ add: "visit-add-photos", draw: "visit-draw-photo" }} />
       {gallery.dialog}
-    </section>
+    </Section>
   );
 }
 
@@ -966,7 +998,7 @@ function SignatureAnswer({ label, required, value, disabled, onChange }: { label
   const legacy = typeof value === "string" ? value : null;
   const current = value && typeof value === "object" ? (value as { name?: string; image?: string | null }) : null;
   return (
-    <div className="field" style={{ flex: 1 }}>
+    <div className="field check-field">
       <span>{label}{required && <Required />}</span>
       {legacy ? (
         <span style={{ fontFamily: "'Brush Script MT', cursive", fontSize: 24 }}>{legacy}</span>

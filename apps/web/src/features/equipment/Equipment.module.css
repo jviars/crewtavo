@@ -1,0 +1,58 @@
+/* Equipment (Page-Equipment.dc.html; on a phone Mobile-Business.dc.html, Equipment) and one machine's page. */
+
+/* What's overdue across the list: one quiet line between hairlines, its icon red, "Show them" on the right. */
+.warnline { display: flex; align-items: center; gap: 10px; min-height: 42px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); font-size: var(--fs-13); color: var(--text-2); }
+.warnline > svg { flex: none; color: var(--danger); }
+.warnline :global(.link-btn) { font-size: var(--fs-13); }
+
+/* A row's second line: what's next, red when it's overdue and amber when it's coming due. */
+.due[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.due[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+.dueNone { color: var(--text-3); }
+
+/* On a phone the group heading and the red or amber line already say where each one stands, so the
+   row gives that room to what's due (Mobile-Business, Equipment). */
+@media (max-width: 900px) {
+  .list :global(.il-aside) { display: none; }
+}
+
+/* The crew's colour as a small square before its name. */
+.crew { display: inline-flex; align-items: center; gap: 6px; }
+.crew i { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+
+/* A machine's page: the main photo at the top of the side column, rounded, no frame. */
+.cover { display: block; overflow: hidden; border-radius: 12px; background: var(--fill-2); }
+.cover img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+
+/* A schedule's or paper's state on the right: the dot and words, the date under them. */
+.when { display: grid; justify-items: end; gap: 2px; }
+.when small { font-size: var(--fs-12); color: var(--text-3); }
+
+/* History: who did what, with their notes in full under it. */
+.logNotes { margin: 4px 0 0; font-size: var(--fs-13); line-height: 1.45; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.logRow { align-items: flex-start; }
+.logRow :global(.rel-head) { white-space: normal; overflow-wrap: anywhere; }
+.logRow > :global(.rel-lead) { padding-top: 1px; }
+.logRow > :global(.rel-end), .logRow > :global(.rel-actions) { padding-top: 6px; }
+
+.foot { display: flex; align-items: center; gap: 12px; padding-top: 10px; font-size: var(--fs-12); color: var(--quiet); }
+.foot :global(.link-btn) { margin-left: auto; font-size: var(--fs-12); }
+
+@media (max-width: 900px) {
+  .cover { border-radius: 14px; }
+  .when small { font-size: var(--fs-13); }
+  .logNotes { font-size: var(--fs-14); }
+  .foot { padding: 12px 0; border-top: 1px solid var(--row-divider); font-size: var(--fs-13); }
+}
+
+/* On a phone a schedule's or paper's state and its buttons go under its name. */
+@media (max-width: 900px) {
+  .wrapRows :global(.rel-row), .wrapRows:global(.rel) > :global(.rel-row) { flex-wrap: wrap; row-gap: 6px; }
+  .wrapRows :global(.rel-body) { flex: 1 1 100%; }
+  .wrapRows :global(.rel-end) { flex: 1 1 auto; min-width: 0; justify-content: flex-start; white-space: normal; }
+  .wrapRows :global(.rel-actions) { margin-left: auto; }
+  .wrapRows .when { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+}
+
+/* A group of choices in a dialog (Maintenance to track, Tags and inspection): labelled like the form's fields. */
+.legend { margin-bottom: 6px; padding: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }

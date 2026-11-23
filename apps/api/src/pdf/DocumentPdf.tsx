@@ -38,7 +38,7 @@ export interface DocumentPdfProps {
   company: DocumentCompany;
   data: DocumentData;
   pictures: PdfPictures;
-  /** The registered fonts for the modern look, each tried in turn for a letter (services/documentPdf.ts); the classic look is Times first. */
+  /** The registered fonts for the modern look, each tried in turn for a letter (render.ts); the classic look is Times first. */
   font: string[];
   /** The business's currency ("USD"): money shows with its symbol, the numbers as in the US. */
   currency: string;

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { encryptJson, signToken } from "../src/lib/crypto";
+import { NO_APP_URL } from "../src/lib/http";
 import { clientLink, readClientLink } from "../src/lib/links";
 import { sendWithMailbox } from "../src/lib/notify";
 import { adminClient } from "../src/lib/supabase";
@@ -390,23 +391,37 @@ describe("calendar feed queries", () => {
 });
 
 describe("sign-in links", () => {
+  /** The calls made once the link's work after the answer has settled: none for 50 ms. */
+  async function settled(calls: Call[]) {
+    for (let seen = -1; seen !== calls.length; ) {
+      seen = calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return calls;
+  }
+
   /**
    * Ana is in one company, whose own mailbox is in `status`: Resend with the company's key, which
    * `companySends` says still works, or else the mail server on `smtpPort`. As in GoTrue, Supabase's
-   * mailer won't send to her right after a link was made. Returns the emails that went out.
+   * mailer won't send to her right after a link was made. `role`: hers there (none said: a team
+   * member's); `connectedBy`: whether an owner or an admin connected the mailbox. Returns the emails
+   * that went out.
    */
-  async function emailLink(options: { status: string; companySends?: boolean; smtpPort?: number; env?: Env }) {
+  async function emailLink(options: { status: string; companySends?: boolean; smtpPort?: number; env?: Env; role?: string; connectedBy?: "owner" | "admin" }) {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const companyId = crypto.randomUUID(); // mailboxes are cached by company
     const mailbox = options.smtpPort
       ? { settings: { preset: "custom", kind: "smtp", host: "127.0.0.1", port: options.smtpPort, security: "tls", username: "office@acme.example", from_email: "office@acme.example" }, secret: { password: "app-password" } }
       : { settings: { preset: "resend", kind: "resend", from_email: "office@acme.example" }, secret: { api_key: "re_company" } };
     const ciphertext = await encryptJson(env, mailbox.secret);
+    const connectedBy = options.connectedBy === "admin" ? "user-admin" : "user-owner";
     const calls = serve((call) => {
       if (call.path === "rpc/rate_limit_hit") return true;
       if (call.path === "rpc/user_id_for_email") return "user-1";
-      if (call.path === "memberships") return [{ company_id: companyId, company: { name: "Acme Lawn Care", email: "office@acme.example" } }];
-      if (call.method === "GET" && call.path === "integrations") return [{ status: options.status, settings: mailbox.settings }];
+      // Whether whoever connected the mailbox is an owner there now (lib/notify.ts mailboxOwnerSet).
+      if (call.path === "memberships" && call.url.searchParams.get("role") === "eq.owner") return call.url.searchParams.get("user_id") === "eq.user-owner" ? [{ user_id: "user-owner" }] : [];
+      if (call.path === "memberships") return [{ company_id: companyId, role: options.role ?? "field_crew", role_id: null, company: { name: "Acme Lawn Care", email: "office@acme.example" } }];
+      if (call.method === "GET" && call.path === "integrations") return [{ status: options.status, settings: mailbox.settings, connected_by: connectedBy }];
       if (call.path === "integration_secrets") return [{ ciphertext }];
       if (call.url.pathname === "/auth/v1/admin/generate_link") return { id: "user-1", email: "ana@example.com", hashed_token: "hashed-1", verification_type: "recovery" };
       if (call.url.pathname === "/auth/v1/recover") {
@@ -421,6 +436,7 @@ describe("sign-in links", () => {
     });
     const res = await app.request("/api/auth/email-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "ana@example.com", kind: "recovery" }) }, options.env ?? env);
     expect(await res.json()).toEqual({ sent: true });
+    await settled(calls);
     const emails = calls.filter((c) => c.url.host === "api.resend.com").map((c) => ({ from: c.body.from as string, link: (c.body.text as string).includes("token_hash=hashed-1") }));
     return { emails, calls };
   }
@@ -442,7 +458,7 @@ describe("sign-in links", () => {
   });
 
   it("without the server's email, check the mailbox signs in before making a link, and else use Supabase's mailer", async () => {
-    const closed = net.createServer(); // a mail server that's gone
+    const closed = net.createServer(); // a mail server that's gone (and on this machine, which isn't connected to anyway)
     await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
     const smtpPort = (closed.address() as net.AddressInfo).port;
     await new Promise((resolve) => closed.close(resolve));
@@ -459,13 +475,68 @@ describe("sign-in links", () => {
     expect(calls.some((c) => c.url.pathname === "/auth/v1/recover")).toBe(false);
     expect(calls.find((c) => c.method === "PATCH" && c.path === "integrations")?.body).toEqual({ status: "error", last_error: expect.stringContaining("Resend didn't accept this API key") });
   });
+
+  it("for an owner or an admin, go through the company's mailbox only when an owner connected it", async () => {
+    for (const role of ["owner", "admin"]) {
+      expect((await emailLink({ status: "connected", companySends: true, role, connectedBy: "owner" })).emails, role).toEqual([{ from: company, link: true }]);
+      // An admin connected it: the server's email sends it instead...
+      expect((await emailLink({ status: "connected", companySends: true, role, connectedBy: "admin" })).emails, role).toEqual([{ from: server, link: true }]);
+      // ...or with none, Supabase's own mailer, and the mailbox never gets the link.
+      const { emails, calls } = await emailLink({ status: "connected", companySends: true, role, connectedBy: "admin", env: noServerEmail });
+      expect(emails, role).toEqual([]);
+      expect(calls.some((c) => c.url.pathname === "/auth/v1/admin/generate_link")).toBe(false);
+      expect(calls.find((c) => c.url.pathname === "/auth/v1/recover")?.body).toMatchObject({ email: "ana@example.com" });
+    }
+    // Anyone else's still goes through it, whoever connected it: it may be all the email there is.
+    expect((await emailLink({ status: "connected", companySends: true, role: "office", connectedBy: "admin", env: noServerEmail })).emails).toEqual([{ from: company, link: true }]);
+  });
+
+  it("answer before anyone is looked up, so how long it takes says nothing about who has an account", async () => {
+    let release: () => void = () => undefined;
+    const lookedUp = new Promise<void>((resolve) => (release = resolve));
+    const looked: string[] = [];
+    const after: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/rpc/rate_limit_hit")) return Response.json(true);
+      if (url.pathname.endsWith("/rpc/user_id_for_email")) {
+        // The lookup waits until both answers are in.
+        looked.push(JSON.parse(String(init?.body)).p_email);
+        await lookedUp;
+        return Response.json(null);
+      }
+      after.push(url.href);
+      return Response.json([]);
+    });
+    for (const address of ["ana@example.com", "nobody@example.com"]) {
+      const res = await app.request("/api/auth/email-link", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: address, kind: "magiclink" }) }, env);
+      expect(await res.json()).toEqual({ sent: true });
+    }
+    await vi.waitFor(() => expect(looked).toEqual(["ana@example.com", "nobody@example.com"]));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Nobody has an account here, so nothing more was asked, and nothing was sent.
+    expect(after).toEqual([]);
+  });
+
+  it("aren't made without the instance's own address, whatever address the request came to", async () => {
+    const calls = serve((call) => (call.path === "rpc/rate_limit_hit" ? true : []));
+    const res = await app.request("https://evil.example/api/auth/email-link", { method: "POST", headers: { "Content-Type": "application/json", Host: "evil.example" }, body: JSON.stringify({ email: "ana@example.com", kind: "recovery" }) }, { ...env, APP_URL: undefined });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe(NO_APP_URL);
+    await settled(calls);
+    expect(calls.some((c) => c.path === "rpc/user_id_for_email")).toBe(false);
+  });
 });
 
 describe("public submissions", () => {
   /** The database for one company's forms; rate limits whose key matches `full` are used up. */
-  function database(options: { full?: RegExp; questions?: unknown[]; known?: boolean; zips?: string[] } = {}) {
+  function database(options: { full?: RegExp; questions?: unknown[]; known?: boolean; zips?: string[]; dayUsed?: boolean; recordsDown?: boolean } = {}) {
     const calls = serve((call) => {
       if (call.path === "rpc/rate_limit_hit") return !options.full?.test(call.body.p_key);
+      // The day's worth of strangers' files (lib/publicUploads.ts), and the records of upload links.
+      if (call.path === "rpc/rate_limit_spend") return !options.dayUsed;
+      if (call.path === "upload_links" && options.recordsDown) return Response.json({ message: "the database is busy" }, { status: 503 });
       if (call.path === "companies") return [{ id: "co-1", name: "Acme Lawn Care", phone: null, timezone: "America/New_York", settings: {} }];
       if (call.path === "intake_forms") return [{ id: "form-1", name: "Request a quote", kind: "request", questions: options.questions ?? [], service_area_zips: options.zips ?? [], lead_time_days: 0, slot_minutes: null }];
       // Storage: a link to upload each file, and what arrived, at the size it was stored.
@@ -590,6 +661,36 @@ describe("public submissions", () => {
     // A made-up path isn't recorded, and the link only works for this company.
     const forged = await post("/public/forms/acme/quote/files", { files_token: `${sent.files_token}x`, uploaded: [sent.uploads[0]!.path] });
     expect(forged.status).toBe(400);
+  });
+
+  it("keeps each upload link on record with the size given for its file, for the gateway to hold it to, until a little after it runs out", async () => {
+    const db = database({ questions: [plansQuestion] });
+    const before = Date.now();
+    const sent = await sendFiles([48 * MB, 2 * MB]);
+    const kept = db.calls.find((c) => c.method === "POST" && c.path === "upload_links")!.body as Array<{ path: string; company_id: string; kind: string; max_bytes: number; expires_at: string }>;
+    expect(kept.map(({ path, company_id, kind, max_bytes }) => ({ path, company_id, kind, max_bytes }))).toEqual(sent.uploads.map((u, i) => ({ path: u.path, company_id: "co-1", kind: "form", max_bytes: [48 * MB, 2 * MB][i] })));
+    // Kept until the files token runs out (3 hours), and ten minutes more.
+    const until = Date.parse(kept[0]!.expires_at) - before;
+    expect(until).toBeGreaterThan(3 * 3600_000 + 9 * 60_000);
+    expect(until).toBeLessThan(3 * 3600_000 + 11 * 60_000);
+    // Recorded before any link is made.
+    const order = db.calls.map((c) => (c.path === "upload_links" ? "record" : c.url.pathname.startsWith("/storage/v1/object/upload/sign/") ? "link" : null)).filter(Boolean);
+    expect(order).toEqual(["record", "link", "link"]);
+    // Only asks whether the business has room today: the bytes count where they arrive.
+    expect(db.calls.filter((c) => c.path === "rpc/rate_limit_spend").map((c) => [c.body.p_key, c.body.p_amount])).toEqual([["upload-bytes:company:co-1", 0]]);
+  });
+
+  it("takes the request but hands out no upload links once the business has taken its day's worth of files, or when their records can't be kept", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const options of [{ dayUsed: true }, { recordsDown: true }]) {
+      const db = database({ questions: [plansQuestion], ...options });
+      const res = await post("/public/forms/acme/quote", { ...lead, files: [{ question: "plans", name: "plan.pdf", size: MB }] });
+      expect(res.status, JSON.stringify(options)).toBe(201);
+      const sent = (await res.json()) as { reference: number; uploads: unknown[] };
+      // The page says the file didn't come through and to send it another way.
+      expect(sent).toMatchObject({ reference: 1042, uploads: [null] });
+      expect(db.calls.some((c) => c.url.pathname.startsWith("/storage/v1/object/upload/sign/"))).toBe(false);
+    }
   });
 
   it("takes files only for a form's file questions, and no more than ten", async () => {
@@ -764,6 +865,27 @@ describe("drawings in the Client Hub", () => {
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]));
     expect(calls.find((c) => c.path === "measurements")?.url.searchParams.get("company_id")).toBe("eq.co-1");
     expect(calls.some((c) => c.url.pathname === `/storage/v1/object/files/co-1/measurements/${DRAWING}.jpg`)).toBe(true);
+  });
+
+  it("counts a link's day by what it says, never by how it's spelled, and each visitor's address by the hour", async () => {
+    const keys: string[] = [];
+    const calls = serve((call) => {
+      if (call.path === "rpc/rate_limit_spend" || call.path === "rpc/rate_limit_hit") keys.push(call.body.p_key);
+      if (call.method === "GET" && call.path === "measurements") return [shown];
+      if (call.url.pathname.startsWith("/storage/v1/object/files/")) return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]), { headers: { "Content-Type": "image/jpeg" } });
+      return call.path.startsWith("rpc/") ? true : [];
+    });
+    const token = (await clientLink(env, "https://ops.example.com", { c: "co-1", t: "quote", id: "quote-1", at: 1_700_000_000_000 })).split("/hub/")[1]!;
+    expect((await app.request(`/api/hub/${token}/drawings/${DRAWING}.jpg`, {}, env)).status).toBe(200);
+    expect(keys).toEqual([`hub-drawings:ip:unknown`, `link-bytes:hub-drawings:co-1:quote:quote-1:1700000000000`]);
+    // The same link with more after it isn't another link with a day of its own: it doesn't open at all.
+    keys.length = 0;
+    calls.length = 0;
+    for (const spelled of [`${token}.1`, `${token}.2`]) expect((await app.request(`/api/hub/${spelled}/drawings/${DRAWING}.jpg`, {}, env)).status).toBe(404);
+    expect(calls.some((c) => c.url.pathname.startsWith("/storage/"))).toBe(false);
+    // Past an address's hour, nothing is read.
+    serve((call) => (call.path === "rpc/rate_limit_hit" ? false : []));
+    expect((await app.request(`/api/hub/${token}/drawings/${DRAWING}.jpg`, {}, env)).status).toBe(429);
   });
 
   it("shows nothing the office didn't choose to show on that quote or invoice", async () => {

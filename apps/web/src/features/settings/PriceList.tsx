@@ -6,15 +6,16 @@ import { usesDepth } from "@crewtavo/core/formulas";
 import { PAVING_SAMPLE, PAVING_VARIABLE_NAMES, PAVING_VARIABLES } from "@crewtavo/core/paving";
 import { ROOFING_SAMPLE, ROOFING_VARIABLE_NAMES, ROOFING_VARIABLES } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button, Spinner } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { MoneyInput } from "@/components/ui/MoneyInput";
+import { Menu } from "@/components/ui/Menu";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
-import { TableSkeleton } from "@/components/ui/Skeleton";
+import { InboxSkeleton, Loading } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
+import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { api, supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { base64Of, packagePicture } from "@/lib/files";
@@ -25,7 +26,9 @@ import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
 import { ServicePicture } from "../roofing/visit/ServicePicture";
 import { ImportPriceListDialog } from "./ImportPriceList";
+import { SettingsActions } from "./SettingsKit";
 import styles from "./PriceList.module.css";
+import { Select } from "@/components/ui/Select";
 
 /** A depth typed for an item: the inches, null for none, or undefined when it isn't a depth (services.default_depth_in takes over 0 up to 48). */
 export function itemDepth(text: string): number | null | undefined {
@@ -44,7 +47,8 @@ export function PriceList() {
   const linked = useSearchParams()[0].get("q") ?? "";
   const [term, setTerm] = useState(linked);
   useEffect(() => setTerm(linked), [linked]);
-  const [showInactive, setShowInactive] = useState(false);
+  // Which items show: the ones offered on quotes (as before), the hidden ones, or all of them.
+  const [show, setShow] = useState<"active" | "hidden" | "all">("active");
   const [importing, setImporting] = useState(false);
   const key = ["services", session.company.id, "all"];
   const services = useQuery({
@@ -103,121 +107,257 @@ export function PriceList() {
     change({ id, patch: { formula: value || null } });
   };
 
+  const all = services.data ?? [];
+  const counts = { active: all.filter((s) => s.active).length, hidden: all.filter((s) => !s.active).length, all: all.length };
   const rows = useMemo(
-    () => (services.data ?? []).filter((s) => (showInactive || s.active) && `${s.name} ${s.category ?? ""}`.toLowerCase().includes(term.trim().toLowerCase())),
-    [services.data, showInactive, term],
+    () => (services.data ?? []).filter((s) => (show === "all" || (show === "hidden" ? !s.active : s.active)) && `${s.name} ${s.category ?? ""}`.toLowerCase().includes(term.trim().toLowerCase())),
+    [services.data, show, term],
   );
+  const groups = useMemo(() => byCategory(rows), [rows]);
 
-  const body = useListAnimation<HTMLTableSectionElement>();
-  if (services.isPending) return <TableSkeleton columns={6} />;
-  if (services.error) return <div className="card"><ErrorState error={services.error} onRetry={() => services.refetch()} /></div>;
+  if (services.isPending) return <Loading label="Loading your price list"><InboxSkeleton rows={6} /></Loading>;
+  if (services.error) return <ErrorState error={services.error} onRetry={() => services.refetch()} />;
+
+  const download = () =>
+    downloadCsv(`price-list-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(all, [{ key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "unit", label: "Unit" }, { key: "unit_price", label: "Price" }, { key: "unit_cost", label: "Cost" }, { key: "taxable", label: "Taxable" }, { key: "formula", label: "Formula" }]));
 
   return (
-    <div className="stack">
-      <div className="toolbar">
-        <div className="input-group"><span className="addon"><Icon name="search" size={16} /></span><input className="input" type="search" placeholder="Search services" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Search services" /></div>
-        <label className="switch-row"><input type="checkbox" className="switch" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />Show hidden</label>
-        <SaveStatus status={saving.status} />
-        <span className="grow" />
-        <Button icon="download" onClick={() => downloadCsv(`price-list-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(services.data ?? [], [{ key: "name", label: "Name" }, { key: "category", label: "Category" }, { key: "unit", label: "Unit" }, { key: "unit_price", label: "Price" }, { key: "unit_cost", label: "Cost" }, { key: "taxable", label: "Taxable" }, { key: "formula", label: "Formula" }]))}>Download</Button>
-        {canEdit && <Button icon="upload" onClick={() => setImporting(true)}>Import</Button>}
+    <>
+      <SettingsActions>
+        <Menu
+          label="More for the price list"
+          title="Price list"
+          triggerClassName="btn btn-icon"
+          items={[
+            { label: "Download as a spreadsheet", icon: "download", onSelect: download },
+            { label: "Import from a spreadsheet", icon: "upload", hidden: !canEdit, onSelect: () => setImporting(true) },
+          ]}
+        />
         {canEdit && <Button variant="primary" icon="plus" loading={add.isPending} onClick={() => add.mutate()}>Add service</Button>}
+      </SettingsActions>
+      {importing && <ImportPriceListDialog existing={all.map((x) => x.name)} onClose={() => setImporting(false)} />}
+
+      <div className={styles.list}>
+        <Toolbar
+          filters={
+            <FilterTabs
+              label="Show services"
+              value={show}
+              onChange={setShow}
+              options={[
+                { value: "active", label: "On quotes", count: counts.active },
+                { value: "hidden", label: "Hidden", count: counts.hidden, hidden: !counts.hidden && show !== "hidden" },
+                { value: "all", label: "All", count: counts.all },
+              ]}
+            />
+          }
+          search={<SearchField value={term} onChange={setTerm} placeholder="Search services" label="Search services" />}
+          tools={<SaveStatus status={saving.status} />}
+        />
+
+        {!rows.length ? (
+          <EmptyState inline title={term ? "No services match" : show === "hidden" ? "No hidden services" : "No services yet"} action={canEdit && !term && show !== "hidden" && <Button onClick={() => add.mutate()}>Add a service</Button>} />
+        ) : (
+          <div className={styles.table}>
+            <div className={styles.head} aria-hidden="true">
+              <span className={styles.cellService}>Service</span>
+              <span className={styles.cellUnit}>Unit</span>
+              <span className={styles.cellPrice}>Price</span>
+              <span className={styles.cellCost}>Cost</span>
+              <span className={styles.cellFormula}>Formula</span>
+            </div>
+            {groups.map((g) => (
+              <Group key={g.label} label={g.label} count={groups.length > 1 ? g.rows.length : undefined}>
+                {g.rows.map((s) => (
+                  <ServiceRow key={s.id} service={s} canEdit={canEdit} onChange={change} onFormula={checkFormula} onDelete={() => deleteService(s)} />
+                ))}
+              </Group>
+            ))}
+          </div>
+        )}
+
+        <details className={styles.help}>
+          <summary>How formulas work</summary>
+          <div className={styles.helpBody}>
+            <p>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. One that uses only the area also prices a line on a job or a quote from a size you type there. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste, and for roofs eave_ft, rake_ft, ridge_ft, hip_ft and valley_ft (feet of lines marked as those edges on the map).</p>
+            <p>Roofs add their surface and squares, each section at its own pitch:</p>
+            <ul>
+              {ROOFING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {ROOFING_VARIABLES[name]}</li>)}
+            </ul>
+            <p>Paving takeoffs add a value for each item drawn on the map:</p>
+            <ul>
+              {PAVING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {PAVING_VARIABLES[name]}</li>)}
+            </ul>
+          </div>
+        </details>
       </div>
-      {importing && <ImportPriceListDialog existing={(services.data ?? []).map((x) => x.name)} onClose={() => setImporting(false)} />}
-      <details className="muted small">
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Using formulas</summary>
-        <p style={{ margin: "6px 0 0" }}>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. One that uses only the area also prices a line on a job or a quote from a size you type there. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste, and for roofs eave_ft, rake_ft, ridge_ft, hip_ft and valley_ft (feet of lines marked as those edges on the map).</p>
-        <p style={{ margin: "6px 0 0" }}>Roofs add their surface and squares, each section at its own pitch:</p>
-        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-          {ROOFING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {ROOFING_VARIABLES[name]}</li>)}
-        </ul>
-        <p style={{ margin: "6px 0 0" }}>Paving takeoffs add a value for each item drawn on the map:</p>
-        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-          {PAVING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {PAVING_VARIABLES[name]}</li>)}
-        </ul>
-      </details>
-      {!rows.length ? (
-        <div className="card"><EmptyState inline title={term ? "No services match" : "No services yet"} action={canEdit && !term && <Button onClick={() => add.mutate()}>Add a service</Button>} /></div>
-      ) : (
-        <div className="card table-scroll">
-          <table className="table table-stack">
-            <thead><tr><th style={{ width: 96 }}>Picture</th><th style={{ minWidth: 220 }}>Service</th><th style={{ width: 90 }}>Unit</th><th className="num" style={{ width: 130 }}>Price</th><th className="num" style={{ width: 130 }}>Cost</th><th style={{ width: 230 }}>Formula</th><th style={{ width: 120 }} /></tr></thead>
-            <tbody ref={body}>
-              {rows.map((s) => {
-                const margin = Number(s.unit_price) > 0 && s.unit_cost != null ? Math.round(((Number(s.unit_price) - Number(s.unit_cost)) / Number(s.unit_price)) * 100) : null;
-                return (
-                  <tr key={s.id} style={s.active ? undefined : { opacity: 0.55 }}>
-                    <td><PictureCell service={s} canEdit={canEdit} /></td>
-                    <td>
-                      <input className="input input-sm" defaultValue={s.name} disabled={!canEdit} maxLength={200} onBlur={(e) => { const v = e.target.value.trim(); if (!v) { e.target.value = s.name; toast.error("A service needs a name."); } else if (v !== s.name) change({ id: s.id, patch: { name: v } }); }} aria-label="Service name" style={{ fontWeight: 700 }} />
-                      <input className="input input-sm" defaultValue={s.category ?? ""} disabled={!canEdit} maxLength={60} placeholder="Category" onBlur={(e) => (e.target.value.trim() || null) !== s.category && change({ id: s.id, patch: { category: e.target.value.trim() || null } })} aria-label="Category" style={{ marginTop: 4, fontSize: 12 }} />
-                    </td>
-                    <td><input className="input input-sm" defaultValue={s.unit} disabled={!canEdit} maxLength={20} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== s.unit && change({ id: s.id, patch: { unit: e.target.value.trim() } })} aria-label="Unit" /></td>
-                    <td className="num">{canEdit ? <MoneyInput value={Number(s.unit_price)} width={120} label="Price" onSave={(v) => change({ id: s.id, patch: { unit_price: v } })} /> : formatMoneyCents(Number(s.unit_price))}</td>
-                    <td className="num">
-                      {canEdit ? <MoneyInput value={Number(s.unit_cost ?? 0)} width={120} label="Cost" onSave={(v) => change({ id: s.id, patch: { unit_cost: v || null } })} /> : s.unit_cost == null ? "—" : formatMoneyCents(Number(s.unit_cost))}
-                      {margin !== null && <div className={`small ${margin < 0 ? "text-danger" : "muted"}`} style={{ marginTop: 2 }}>{margin}% margin</div>}
-                    </td>
-                    <td>
-                      <input className="input input-sm" defaultValue={s.formula ?? ""} disabled={!canEdit} placeholder="None" maxLength={300} onBlur={(e) => checkFormula(s.id, e.target.value, s.formula)} aria-label="Formula" style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }} />
-                      {s.formula && (
-                        <Select className="select input-sm" style={{ marginTop: 4, fontSize: 12 }} value={s.formula_target} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { formula_target: e.target.value } })} aria-label="Formula sets">
-                          <option value="quantity">Sets the quantity</option>
-                          <option value="unit_price">Sets the price</option>
-                        </Select>
-                      )}
-                      {usesDepth(s.formula) && (
-                        <label className="row small" style={{ gap: 6, marginTop: 4 }} title="The depth this item's formula starts with when a drawing fills a quote. Each line's depth is shown to confirm then.">
-                          Depth
-                          <input
-                            key={s.default_depth_in ?? "none"}
-                            className="input input-sm"
-                            style={{ width: 64 }}
-                            inputMode="decimal"
-                            defaultValue={s.default_depth_in ?? ""}
-                            disabled={!canEdit}
-                            placeholder="Any"
-                            aria-label={`${s.name}: depth in inches`}
-                            onBlur={(e) => {
-                              const depth = itemDepth(e.target.value);
-                              if (depth === undefined) {
-                                toast.error("A depth is more than 0 and at most 48 inches.");
-                                e.target.value = s.default_depth_in == null ? "" : String(s.default_depth_in);
-                              } else if (depth !== (s.default_depth_in ?? null)) change({ id: s.id, patch: { default_depth_in: depth } });
-                            }}
-                          />
-                          in
-                        </label>
-                      )}
-                    </td>
-                    <td>
-                      <div className="stack-sm" style={{ justifyItems: "start" }}>
-                        <label className="checkbox small"><input type="checkbox" checked={s.taxable} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { taxable: e.target.checked } })} />Taxable</label>
-                        <label className="checkbox small"><input type="checkbox" checked={s.active} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { active: e.target.checked } })} />Show on quotes</label>
-                        {/* A trip charge, say: new jobs and quotes get it as a line (20261104000100_trip_fee_minimum.sql). */}
-                        <label className="checkbox small" title="New jobs and quotes get it as a line, once. Take it off one like any other line."><input type="checkbox" checked={s.add_to_every_job} disabled={!canEdit} onChange={(e) => change({ id: s.id, patch: { add_to_every_job: e.target.checked } })} />Add to every job</label>
-                        {canEdit && <button type="button" className="link-btn small" style={{ color: "var(--danger)" }} onClick={() => deleteService(s)}>Delete</button>}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    </>
+  );
+}
+
+/** A price list item as the list reads it. */
+type ServiceRowData = {
+  id: string;
+  name: string;
+  category: string | null;
+  unit: string;
+  unit_price: number | string;
+  unit_cost: number | string | null;
+  taxable: boolean;
+  formula: string | null;
+  formula_target: string;
+  default_depth_in: number | null;
+  active: boolean;
+  add_to_every_job: boolean;
+  picture: string | null;
+};
+
+/** The items under their categories, in the order the first of each comes; those with none last. */
+export function byCategory<T extends { category: string | null }>(rows: T[]): Array<{ label: string; rows: T[] }> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const label = row.category?.trim() || "";
+    groups.set(label, [...(groups.get(label) ?? []), row]);
+  }
+  const named = [...groups.entries()].filter(([label]) => label);
+  const none = groups.get("");
+  return [...named.map(([label, list]) => ({ label, rows: list })), ...(none ? [{ label: named.length ? "No category" : "Services", rows: none }] : [])];
+}
+
+/** One category: its heading and its items, which slide in and out as they're added and deleted. */
+function Group({ label, count, children }: { label: string; count?: number; children: ReactNode }) {
+  const list = useListAnimation<HTMLUListElement>();
+  const id = useId();
+  return (
+    <section className={styles.group} aria-labelledby={id}>
+      <div className="il-head">
+        <h3 className="il-head-label" id={id}>{label}</h3>
+        {count !== undefined && <span className="il-count">{count}</span>}
+      </div>
+      <ul className={styles.rows} role="list" ref={list}>{children}</ul>
+    </section>
   );
 }
 
 /**
- * An item's picture, as the salesperson sees it on the iPad's site visit: tapped to add or change it
- * (a JPEG made here from the photo, as a package's is), and Remove to go back to the drawing.
+ * One item, edited where it is: each field saves when it's left. Its picture (as the iPad's site
+ * visit shows it) changes when tapped; whether it's taxed, offered on quotes and added to every job
+ * are in its menu, and say so under its name when they're not the usual.
  */
-function PictureCell({ service, canEdit }: { service: { id: string; name: string; picture: string | null }; canEdit: boolean }) {
+function ServiceRow({ service: s, canEdit, onChange, onFormula, onDelete }: {
+  service: ServiceRowData;
+  canEdit: boolean;
+  onChange: (args: { id: string; patch: Record<string, unknown> }) => void;
+  onFormula: (id: string, formula: string, previous: string | null) => void;
+  onDelete: () => void;
+}) {
+  const picture = usePicture(s);
+  const margin = Number(s.unit_price) > 0 && s.unit_cost != null ? Math.round(((Number(s.unit_price) - Number(s.unit_cost)) / Number(s.unit_price)) * 100) : null;
+  const flags = [!s.active && "Hidden", !s.taxable && "Not taxed", s.add_to_every_job && "On every job"].filter(Boolean) as string[];
+  return (
+    <li className={styles.row} data-hidden={!s.active || undefined}>
+      <div className={styles.cellThumb}>
+        <button
+          type="button"
+          className={styles.thumb}
+          disabled={!canEdit || picture.busy}
+          aria-label={s.picture ? `Change the picture of ${s.name}` : `Add a picture of ${s.name}`}
+          title={canEdit ? (s.picture ? "Change the picture" : "Add a picture") : undefined}
+          onClick={picture.open}
+        >
+          <ServicePicture name={s.name} picture={s.picture} />
+          {picture.adding ? (
+            <span className={styles.thumbBusy}><Spinner size={16} /></span>
+          ) : (
+            canEdit && <span className={styles.thumbHint}><Icon name="camera" size={13} />{s.picture ? "Change" : "Add"}</span>
+          )}
+        </button>
+        {picture.input}
+      </div>
+      <div className={styles.cellService}>
+        <input className={`input input-sm ${styles.name}`} defaultValue={s.name} disabled={!canEdit} maxLength={200} onBlur={(e) => { const v = e.target.value.trim(); if (!v) { e.target.value = s.name; toast.error("A service needs a name."); } else if (v !== s.name) onChange({ id: s.id, patch: { name: v } }); }} aria-label="Service name" />
+        <div className={styles.under}>
+          <input className={`input input-sm ${styles.category}`} defaultValue={s.category ?? ""} disabled={!canEdit} maxLength={60} placeholder="Category" onBlur={(e) => (e.target.value.trim() || null) !== s.category && onChange({ id: s.id, patch: { category: e.target.value.trim() || null } })} aria-label="Category" />
+          {flags.map((f) => <span key={f} className={styles.flag}>{f}</span>)}
+        </div>
+      </div>
+      <label className={styles.cellUnit}>
+        <span className={styles.cellLabel}>Unit</span>
+        <input className="input input-sm" defaultValue={s.unit} disabled={!canEdit} maxLength={20} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== s.unit && onChange({ id: s.id, patch: { unit: e.target.value.trim() } })} aria-label="Unit" />
+      </label>
+      <div className={styles.cellPrice}>
+        <span className={styles.cellLabel} aria-hidden="true">Price</span>
+        {canEdit ? <MoneyInput value={Number(s.unit_price)} width={110} label="Price" onSave={(v) => onChange({ id: s.id, patch: { unit_price: v } })} /> : <span className={styles.money}>{formatMoneyCents(Number(s.unit_price))}</span>}
+      </div>
+      <div className={styles.cellCost}>
+        <span className={styles.cellLabel} aria-hidden="true">Cost</span>
+        {canEdit ? <MoneyInput value={Number(s.unit_cost ?? 0)} width={110} label="Cost" onSave={(v) => onChange({ id: s.id, patch: { unit_cost: v || null } })} /> : s.unit_cost != null && <span className={styles.money}>{formatMoneyCents(Number(s.unit_cost))}</span>}
+        {margin !== null && <span className={styles.margin} data-tone={margin < 0 ? "danger" : undefined}>{margin}% margin</span>}
+      </div>
+      <div className={styles.cellFormula}>
+        <span className={styles.cellLabel} aria-hidden="true">Formula</span>
+        <input className={`input input-sm ${styles.formula}`} defaultValue={s.formula ?? ""} disabled={!canEdit} placeholder="None" maxLength={300} onBlur={(e) => onFormula(s.id, e.target.value, s.formula)} aria-label="Formula" />
+        {s.formula && (
+          <Select className={`select input-sm ${styles.small}`} value={s.formula_target} disabled={!canEdit} onChange={(e) => onChange({ id: s.id, patch: { formula_target: e.target.value } })} aria-label="Formula sets">
+            <option value="quantity">Sets the quantity</option>
+            <option value="unit_price">Sets the price</option>
+          </Select>
+        )}
+        {usesDepth(s.formula) && (
+          <label className={styles.depth} title="The depth this item's formula starts with when a drawing fills a quote. Each line's depth is shown to confirm then.">
+            Depth
+            <input
+              key={s.default_depth_in ?? "none"}
+              className="input input-sm"
+              inputMode="decimal"
+              defaultValue={s.default_depth_in ?? ""}
+              disabled={!canEdit}
+              placeholder="Any"
+              aria-label={`${s.name}: depth in inches`}
+              onBlur={(e) => {
+                const depth = itemDepth(e.target.value);
+                if (depth === undefined) {
+                  toast.error("A depth is more than 0 and at most 48 inches.");
+                  e.target.value = s.default_depth_in == null ? "" : String(s.default_depth_in);
+                } else if (depth !== (s.default_depth_in ?? null)) onChange({ id: s.id, patch: { default_depth_in: depth } });
+              }}
+            />
+            in
+          </label>
+        )}
+      </div>
+      <div className={styles.cellMore}>
+        {canEdit && (
+          <Menu
+            label={`More for ${s.name}`}
+            title={s.name}
+            triggerClassName="btn btn-sm btn-ghost btn-icon"
+            items={[
+              { label: "Taxable", checkbox: true, checked: s.taxable, onSelect: () => onChange({ id: s.id, patch: { taxable: !s.taxable } }) },
+              { label: "Show on quotes", checkbox: true, checked: s.active, onSelect: () => onChange({ id: s.id, patch: { active: !s.active } }) },
+              // A trip charge, say: new jobs and quotes get it as a line (20261104000100_trip_fee_minimum.sql).
+              { label: "Add to every job", description: "New jobs and quotes get it as a line, once.", checkbox: true, checked: s.add_to_every_job, onSelect: () => onChange({ id: s.id, patch: { add_to_every_job: !s.add_to_every_job } }) },
+              { separator: true },
+              { label: s.picture ? "Change picture" : "Add a picture", icon: "camera", disabled: picture.busy, onSelect: picture.open },
+              { label: "Use the drawing", icon: "undo", hidden: !s.picture, disabled: picture.busy, onSelect: picture.remove },
+              { separator: true },
+              { label: "Delete service", icon: "trash", danger: true, onSelect: onDelete },
+            ]}
+          />
+        )}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * An item's picture, as the salesperson sees it on the iPad's site visit: chosen to add or change it
+ * (a JPEG made here from the photo, as a package's is), and removed to go back to the drawing.
+ */
+function usePicture(service: { id: string; name: string; picture: string | null }) {
   const { company } = useSession();
   const queryClient = useQueryClient();
-  const input = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLInputElement>(null);
   // The price list, the visit's price list and the packages' quick adds all show it.
   const saved = () => Promise.all([queryClient.invalidateQueries({ queryKey: ["services", company.id] }), queryClient.invalidateQueries({ queryKey: ["roof-packages", company.id] })]);
   // The thumbnail changing in place says it worked.
@@ -233,39 +373,18 @@ function PictureCell({ service, canEdit }: { service: { id: string; name: string
     mutationFn: () => api.delete<{ ok: true }>(`/services/${service.id}/picture`),
     onSuccess: saved,
   });
-  return (
-    <div className={styles.pictureCell}>
-      <button
-        type="button"
-        className={styles.thumb}
-        disabled={!canEdit || set.isPending || remove.isPending}
-        aria-label={service.picture ? `Change the picture of ${service.name}` : `Add a picture of ${service.name}`}
-        title={canEdit ? (service.picture ? "Change the picture" : "Add a picture") : undefined}
-        onClick={() => input.current?.click()}
-      >
-        <ServicePicture name={service.name} picture={service.picture} />
-        {set.isPending ? (
-          <span className={styles.thumbBusy}><Spinner size={16} /></span>
-        ) : (
-          canEdit && <span className={styles.thumbHint}><Icon name="camera" size={14} />{service.picture ? "Change" : "Add"}</span>
-        )}
-      </button>
-      {canEdit && service.picture && (
-        <button type="button" className="link-btn small" disabled={remove.isPending || set.isPending} onClick={() => remove.mutate()}>
-          Remove
-        </button>
-      )}
-      <input
-        ref={input}
-        type="file"
-        accept="image/*,.heic,.heif"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) set.mutate(file);
-        }}
-      />
-    </div>
+  const input = (
+    <input
+      ref={ref}
+      type="file"
+      accept="image/*,.heic,.heif"
+      hidden
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        e.target.value = "";
+        if (file) set.mutate(file);
+      }}
+    />
   );
+  return { input, open: () => ref.current?.click(), remove: () => remove.mutate(), adding: set.isPending, busy: set.isPending || remove.isPending };
 }

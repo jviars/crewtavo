@@ -46,6 +46,7 @@ import { readApplication } from "@crewtavo/core/careers";
 import { BOT_CHECKS, cleanFields, readSubmission, siteAllowed, siteHost, webAddress, type BotCheck } from "@crewtavo/core/websiteForms";
 import { emailKey } from "@crewtavo/core/email";
 import { privacyUrl } from "@crewtavo/core/privacyPolicy";
+import { brandColor } from "@crewtavo/core/social";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
@@ -60,7 +61,7 @@ import { adminClient } from "../lib/supabase";
 import { noteTextConsent } from "../services/textsOff";
 import { clientIp } from "../lib/visitor";
 import { bookingVisit } from "../services/analytics";
-import { checkFiles, emailApplication, removeFiles, storeFiles } from "../services/careers";
+import { checkFiles, emailApplication, FILES_PAUSED, removeFiles, roomForFiles, storeFiles } from "../services/careers";
 import { checkMessage, checkRefusal, checkScript, loadTurnstile, newCheckToken, saveTurnstile } from "../services/formBotCheck";
 import { logoImage } from "../services/logo";
 import { emailMessage, formPage, newFormKey, type FormCompany } from "../services/websiteForms";
@@ -100,7 +101,7 @@ async function findForm(c: Ctx, key = c.req.param("key") ?? ""): Promise<FoundFo
   if (!/^[a-z0-9]{8,32}$/.test(key)) return null;
   const { data, error } = await adminClient(c.env)
     .from("website_forms")
-    .select("id, key, kind, name, email_to, redirect_url, allowed_sites, bot_check, bot_check_armed_at, company:companies(id, name, settings)")
+    .select("id, key, kind, name, email_to, redirect_url, allowed_sites, bot_check, bot_check_armed_at, company:companies(id, name, settings, website)")
     .eq("key", key)
     .maybeSingle();
   if (error) throw dbError(error);
@@ -111,7 +112,7 @@ async function findForm(c: Ctx, key = c.req.param("key") ?? ""): Promise<FoundFo
   return { ...data, kind, bot_check: botCheck, bot_check_armed_at: data.bot_check_armed_at ?? null, company };
 }
 
-const branding = (c: Ctx, company: FormCompany) => ({ name: company.name, logo: logoImage(appUrl(c), company.id, company.settings), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null) });
+const branding = (c: Ctx, company: FormCompany) => ({ name: company.name, logo: logoImage(appUrl(c), company.id, company.settings), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null), color: brandColor(company.settings) });
 
 /** Formspree's rule: a form that asks for JSON (fetch with Accept: application/json, or a JSON body) gets JSON back. */
 const wantsJson = (c: Ctx) => /application\/json/i.test(c.req.header("accept") ?? "") || /application\/json/i.test(c.req.header("content-type") ?? "");
@@ -127,7 +128,36 @@ function refuse(c: Ctx, json: boolean, status: ContentfulStatusCode, message: st
 }
 
 /** Where people go after sending: the form's _next, its own thank-you page, or Crewtavo's. */
-const thanksPage = (c: Ctx, form: FoundForm, next: string | null) => next ?? form.redirect_url ?? `${appUrl(c)}/f/${form.key}/thanks`;
+const thanksPage = (c: Ctx, form: FoundForm, next: string | null) => ownNext(c, form, next) ?? form.redirect_url ?? `${appUrl(c)}/f/${form.key}/thanks`;
+
+/**
+ * A form's _next, when it goes to the form's own website or this Crewtavo; null otherwise. A form's
+ * own website is one the business named: one the form takes messages from (Only these websites), the
+ * site of the thank-you page it set, or its website on Settings → Company. Never the page a message
+ * says it came from: any page can post to the form and say so, and then send people anywhere from
+ * the business's own address.
+ */
+function ownNext(c: Ctx, form: FoundForm, next: string | null): string | null {
+  if (!next) return null;
+  const origin = (url: string | null | undefined) => {
+    try {
+      return url ? new URL(url).origin : null;
+    } catch {
+      return null;
+    }
+  };
+  if (origin(next) === origin(appUrl(c))) return next;
+  const sites = [...form.allowed_sites, siteHost(form.redirect_url), siteHost(form.company.website)].filter((host): host is string => Boolean(host));
+  return sites.length && siteAllowed(next, sites) ? next : null;
+}
+
+/**
+ * This Crewtavo's own address for the office's email about a message, or null without APP_URL: the
+ * address a message came to is whatever its sender wrote, so it never goes in that email as the way
+ * to the request (emailMessage).
+ */
+const ownAddress = (c: Ctx) => (c.env.APP_URL ? appUrl(c) : null);
+
 const sentOk = (c: Ctx, json: boolean, next: string) => (json ? c.json({ ok: true, next }, 200, CORS) : c.redirect(next, 303));
 
 const TOO_MANY = { contact: "Too many messages. Try again later, or call us.", careers: "Too many applications. Try again later, or call us." } as const;
@@ -272,7 +302,7 @@ formInbox.post("/f/:key", async (c) => {
     // Where their number came from, for the office: the business's own website form (which Crewtavo doesn't write, so it can't say what the form told them).
     if (message.phone && made.client_id) runInBackground(c, noteTextConsent(adminClient(c.env), company.id, made.client_id, message.phone, "website_form"));
     if (form.email_to.length) {
-      runInBackground(c, emailMessage(c.env, { base: appUrl(c), company, form, submission: message, requestId: made.request_id, promo }));
+      runInBackground(c, emailMessage(c.env, { base: ownAddress(c), company, form, submission: message, requestId: made.request_id, promo }));
     }
     return done();
   } catch (error) {
@@ -306,6 +336,8 @@ async function takeApplication(c: Ctx, json: boolean, form: FoundForm, sent: Arr
   const checked = await botCheck(c, json, form, sent);
   if (checked.refused) return checked.refused;
   if (!(await companyUnderLimit(c, company.id))) return refuse(c, json, 429, TOO_MANY.careers, company, "careers");
+  // Their files are kept, so they count against the business's day of strangers' files.
+  if (!(await roomForFiles(c.env, company.id, clientIp(c), files))) return refuse(c, json, 429, FILES_PAUSED, company, "careers");
 
   const admin = adminClient(c.env);
   const visit = await bookingVisit(c, company.id);
@@ -328,7 +360,7 @@ async function takeApplication(c: Ctx, json: boolean, form: FoundForm, sent: Arr
   }
   noteCheck(c, form, checked.note);
   if (form.email_to.length) {
-    runInBackground(c, emailApplication(c.env, { base: appUrl(c), company, form, application, files: stored, applicantId }));
+    runInBackground(c, emailApplication(c.env, { base: ownAddress(c), company, form, application, files: stored, applicantId }));
   }
   return done();
 }
@@ -400,7 +432,7 @@ websiteForms.get("/website-forms", requireUser, requireCompany(ADMINS, "apps"), 
   const { db, companyId } = c.var;
   const kind = kindOf(c.req.query("kind"));
   const [company, forms, codes, turnstile] = await Promise.all([
-    db.from("companies").select("settings").eq("id", companyId).maybeSingle(),
+    adminClient(c.env).from("companies").select("settings").eq("id", companyId).maybeSingle(),
     db.from("website_forms").select(FORM_COLUMNS).eq("company_id", companyId).eq("kind", kind).order("created_at"),
     // A contact form to paste has a promo code box only for a business with codes.
     kind === "contact" ? db.from("promo_codes").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("active", true) : null,

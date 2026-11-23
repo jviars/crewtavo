@@ -67,13 +67,13 @@ export function GeofenceCard({ visitId, onStatus }: { visitId?: string; onStatus
         const text = promptText(p);
         return (
           <div key={p.id} className="callout callout-good" role="alert">
-            <Icon name="pin" size={20} />
-            <div className="grow stack-sm" style={{ fontWeight: 400 }}>
+            <Icon name="pin" size={16} />
+            <div className="grow geofence-ask">
               <div>{text.title}</div>
               {shared(p) && <span className="small">{p.title}</span>}
               {p.done && <span>{p.done}.</span>}
               <span>{text.question}</span>
-              <span className="row wrap" style={{ gap: 8 }}>
+              <span className="field-ask-acts">
                 {p.kind === "start" && !p.clockOnly && <Button size="sm" variant="primary" icon="play" onClick={() => status(p, "in_progress")}>{t("Start visit")}</Button>}
                 {p.kind === "start" && p.clockOnly && <Button size="sm" variant="primary" icon="play" onClick={() => void tapClock(p, true)}>{t("Start my clock")}</Button>}
                 {p.kind === "finish" && p.complete && <Button size="sm" variant="primary" icon="check" onClick={() => status(p, "completed")}>{t("Complete visit")}</Button>}
@@ -86,21 +86,21 @@ export function GeofenceCard({ visitId, onStatus }: { visitId?: string; onStatus
       })}
       {watching && denied && (
         <div className="callout callout-warning" role="status">
-          <Icon name="pin" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="pin" size={16} />
+          <div className="grow">
             <div>{t("Location is off for Crewtavo")}</div>
             {mode === "clock" ? t("Your clock can't start at the property. Turn on location for Crewtavo in your phone's settings.") : t("Crewtavo can't remind you at the property. Turn on location for Crewtavo in your phone's settings.")}
           </div>
         </div>
       )}
       {!visitId && watching && !denied && (
-        <span className="muted small">
+        <p className="field-hint">
           {mode === "clock"
             ? dayClock
               ? t("Your clock starts when Crewtavo is open on this phone at your next visit, not when you pull in. Once it sees you've left, it moves your clock to driving. Open it when you get there and when you leave, or tap the clock yourself.")
               : t("Your clock starts when Crewtavo is open on this phone at your next visit, not when you pull in. It never stops your clock by itself: once it sees you've left, it asks you. Open it when you get there and when you leave, or tap the clock yourself.")
             : t("Crewtavo reminds you to start and finish visits when it's open on this phone at the property. It can't tell while the phone is locked.")}
-        </span>
+        </p>
       )}
     </>
   );

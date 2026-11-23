@@ -10,6 +10,7 @@ import type { Env } from "../env";
 import { renderEmail } from "../lib/email";
 import { HttpError } from "../lib/http";
 import { sendEmail } from "../lib/notify";
+import { spendUploadBytes } from "../lib/publicUploads";
 import type { Db } from "../lib/supabase";
 import { logoImage } from "./logo";
 import type { FormCompany } from "./websiteForms";
@@ -48,6 +49,19 @@ export function checkFiles(entries: Array<[string, unknown]>): CheckedFile[] {
   });
 }
 
+/** What an application hears when the business has taken its day's worth of strangers' files. */
+export const FILES_PAUSED = "This form has taken in a lot of files today, so it can't take more until tomorrow. Try again tomorrow, or email your application.";
+
+/**
+ * Whether the business can take these files today: they're counted against the visitor's and the
+ * business's day of strangers' uploads (lib/publicUploads.ts) before any is stored, since what an
+ * application sends is kept. An application without files always can.
+ */
+export async function roomForFiles(env: Env, companyId: string, visitor: string, files: CheckedFile[]): Promise<boolean> {
+  const bytes = files.reduce((sum, f) => sum + f.file.size, 0);
+  return bytes === 0 || spendUploadBytes(env, companyId, visitor, bytes);
+}
+
 /** Store an application's files under its applicant. Stored ones are removed again if one fails. */
 export async function storeFiles(admin: Db, companyId: string, applicantId: string, files: CheckedFile[]): Promise<ApplicantFile[]> {
   const stored: ApplicantFile[] = [];
@@ -75,11 +89,13 @@ export async function removeFiles(admin: Db, files: Array<{ path: string }>): Pr
 /** Email each application to the people the form names, replying to the applicant. Sent one by one; a failure is logged. */
 export async function emailApplication(
   env: Env,
-  input: { base: string; company: FormCompany; form: { name: string; email_to: string[] }; application: Application; files: ApplicantFile[]; applicantId: string },
+  input: { base: string | null; company: FormCompany; form: { name: string; email_to: string[] }; application: Application; files: ApplicantFile[]; applicantId: string },
 ): Promise<void> {
   const { base, company, form, application } = input;
-  const { subject, text } = applicationEmail({ formName: form.name, application, files: input.files, link: `${base}/applicants/${input.applicantId}` });
-  const email = renderEmail({ companyName: company.name, logo: logoImage(base, company.id, company.settings), text });
+  // Without this Crewtavo's own address (base null), no link or logo: see emailMessage.
+  const { subject, text } = applicationEmail({ formName: form.name, application, files: input.files, link: base ? `${base}/applicants/${input.applicantId}` : null });
+  // What the applicant typed is in it: only the application's own link here is a button.
+  const email = renderEmail({ companyName: company.name, logo: base ? logoImage(base, company.id, company.settings) : null, text, base });
   for (const to of form.email_to) {
     const result = await sendEmail(env, { to, subject, text: email.text, html: email.html, replyTo: application.email ?? undefined, fromName: company.name }, company.id);
     if (!result.sent) console.warn(`Careers email to ${to} wasn't sent: ${result.reason ?? "unknown reason"}`);

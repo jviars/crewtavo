@@ -14,7 +14,7 @@ const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import
 describe("hints for the business", () => {
   it("say on the Twilio panel that clients must have agreed to texts, and promotional ones in writing", () => {
     expect(TEXT_CONSENT_HINT).toBe("Text only people who agreed to get texts from you. Texts that promote something (a sale, a discount, a new service) need their agreement in writing.");
-    expect(source("../src/features/apps/TwilioPanel.tsx")).toContain('<span className="muted small">{TEXT_CONSENT_HINT}</span>');
+    expect(source("../src/features/apps/TwilioPanel.tsx")).toContain('<p className={kit.note}>{TEXT_CONSENT_HINT}</p>');
   });
 
   it("say the same under a rule's text, and under its email that promotions belong in Campaigns", () => {
@@ -23,13 +23,13 @@ describe("hints for the business", () => {
     expect(rule).toContain("{RULE_TEXT_CONSENT_HINT}");
     expect(RULE_EMAIL_HINT).toBe("For messages about a client's own work. For promotions, use Marketing → Campaigns: a rule's email has no unsubscribe link.");
     // Not on an automated campaign's rule, whose email does go as a campaign's, with the link.
-    expect(rule).toContain('{!campaign && <span className="muted small">{RULE_EMAIL_HINT}</span>}');
+    expect(rule).toContain("{!campaign && <p className={styles.note}>{RULE_EMAIL_HINT}</p>}");
     expect(rule).toContain("campaign={Boolean(campaign)}");
   });
 
   it("say beside Marketing on a client who unsubscribed to turn it back on only if they asked", () => {
     expect(RESUBSCRIBE_HINT).toBe("They unsubscribed. Turn this back on only if they asked you to.");
-    expect(source("../src/features/clients/ClientPage.tsx")).toContain('{c.marketing_opt_out && <span className="muted small" style={{ display: "block" }}>{RESUBSCRIBE_HINT}</span>}');
+    expect(source("../src/features/clients/ClientPage.tsx")).toContain("{c.marketing_opt_out && <span className={styles.hint}>{RESUBSCRIBE_HINT}</span>}");
   });
 
   it("say under the review ask's message not to offer anything for a review or ask only happy clients, with Google's policy", () => {

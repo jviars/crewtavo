@@ -5,6 +5,7 @@
  * (people who see job costs), so these lines are in English for now: see docs/spanish-support-plan.md.
  */
 import { Icon } from "@/components/ui/Icon";
+import styles from "./jobMoney.module.css";
 import { alreadyLoggedNote, planWords, type LinePlan, type MaterialsPlan } from "./expenseMaterials";
 
 /** Under one line of the invoice: the tickets already on the job for its material, and "Log it too". */
@@ -12,8 +13,8 @@ export function LineAlreadyLogged({ plan, again, onAgain }: { plan: LinePlan | u
   const note = plan ? alreadyLoggedNote(plan) : null;
   if (!note) return null;
   return (
-    <div className="small stack-sm" style={{ flexBasis: "100%", gap: 4 }}>
-      <span className="muted">{note}</span>
+    <div className={styles.logged}>
+      <span className={styles.note}>{note}</span>
       <label className="checkbox"><input type="checkbox" checked={again} onChange={(e) => onAgain(e.target.checked)} /> Log it too</label>
     </div>
   );
@@ -26,7 +27,7 @@ export function CostingNote({ plan, logMaterials, ticked }: { plan: MaterialsPla
   return (
     <div className="callout callout-info" role="status">
       <Icon name="info" size={16} />
-      <span className="grow small" style={{ fontWeight: 400 }}>{words}</span>
+      <span className="grow">{words}</span>
     </div>
   );
 }

@@ -68,7 +68,8 @@ export async function linkCanSend(env: Env, link: string, bytes: number, paused?
   return false;
 }
 
-async function tellAdmins(env: Env, paused: { company: string; title: string; body: string; open: string }) {
+/** A notice on the bell for the company's owners and admins (kind "hosting"), opening `open` in the app. */
+export async function tellAdmins(env: Env, paused: { company: string; title: string; body: string; open: string }) {
   const admin = adminClient(env);
   const { data: people, error } = await admin.from("memberships").select("user_id").eq("company_id", paused.company).eq("active", true).in("role", [...ADMINS]);
   if (error) throw new Error(error.message);

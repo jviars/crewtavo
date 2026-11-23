@@ -7,15 +7,17 @@
 import { GOOGLE_ACCESS_FORM } from "@crewtavo/core/reviews";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { Fact, Facts, Section } from "@/components/ui/Section";
 import { api, supabase, unwrap } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { useSession } from "@/lib/session";
 import type { AppRow } from "./catalog";
+import { CodeRow, Fold, kit, Step, Steps } from "./PanelKit";
+import { Select } from "@/components/ui/Select";
 
 const INTUIT_DEVELOPER = "https://developer.intuit.com/";
 const GOOGLE_CLOUD = "https://console.cloud.google.com/";
@@ -45,15 +47,9 @@ const ZOHO_REGIONS = [
 const accountsOf = (tld: string) => `https://accounts.${tld}`;
 const regionOf = (accountsServer: string | null | undefined) => ZOHO_REGIONS.find((r) => accountsOf(r.tld) === accountsServer) ?? ZOHO_REGIONS[0]!;
 
-/** One value to copy into the provider's form, with the name that form gives it. */
+/** One value to copy into the provider's form, with the name that form gives it: a quiet code row. */
 export function CopyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="app-copy">
-      <span>{label}</span>
-      <code className="code-pill">{value}</code>
-      <Button size="sm" icon="copy" aria-label={`Copy ${label}`} onClick={() => copyText(value, `${label} copied`)}>Copy</Button>
-    </div>
-  );
+  return <CodeRow label={label} value={value} />;
 }
 
 /**
@@ -84,48 +80,48 @@ export function AppKeysCard({ app, onChanged, onConnect, connecting, anchor = tr
 
   if (keys && !editing) {
     const end = keys.client_id.slice(-4);
+    const more: MenuEntry[] = [
+      { label: "Change keys", icon: "edit", kbd: "E", onSelect: () => setEditing(true) },
+      { separator: true },
+      { label: "Remove keys", icon: "trash", danger: true, disabled: remove.isPending, onSelect: askRemove },
+    ];
     return (
-      <section id={setupId} className="card card-pad stack-sm" aria-labelledby="app-keys-title" style={{ gap: 8 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>Your {provider} app</h2>
-        <span className="muted small">
-          {meta ? "App ID" : "Client ID"} ending in <strong>{end}</strong>
-          {qbo ? (keys.sandbox ? " · Development keys, for a sandbox company" : " · Production keys") : google ? null : meta ? (keys.config_id ? " · With a Facebook Login for Business configuration" : null) : ` · ${regionOf(keys.accounts_server).label}`}
-          . The secret is stored encrypted on your server and never shown again.
-        </span>
+      <Section id={setupId} title={`Your ${provider} app`} className={kit.panel} action={<Menu items={more} label={`Your ${provider} app keys`} title={`Your ${provider} app`} />}>
         {app.status === "disconnected" && (
-          <div className="callout" style={{ marginTop: 4 }}>
-            <Icon name="info" size={20} />
-            <div className="grow stack-sm" style={{ gap: 8 }}>
-              <span>Last step: {google ? "sign in with Google and pick your location." : meta ? "sign in with Facebook as your Page's admin and pick your Page." : `sign in to ${app.name} and pick your company.`}</span>
-              <Button variant="primary" style={{ justifySelf: "start" }} loading={connecting} onClick={onConnect}>{google ? "Sign in with Google" : meta ? "Sign in with Facebook" : `Sign in to ${app.name}`}</Button>
+          <div className="callout callout-info">
+            <Icon name="info" size={16} />
+            <div className={cx("grow", kit.calloutBody)}>
+              <div>Last step: {google ? "sign in with Google and pick your location." : meta ? "sign in with Facebook as your Page's admin and pick your Page." : `sign in to ${app.name} and pick your company.`}</div>
+              <div className={kit.actions}><Button size="sm" variant="primary" loading={connecting} onClick={onConnect}>{google ? "Sign in with Google" : meta ? "Sign in with Facebook" : `Sign in to ${app.name}`}</Button></div>
             </div>
           </div>
         )}
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button size="sm" onClick={() => setEditing(true)}>Change keys</Button>
-          <Button size="sm" variant="ghost" loading={remove.isPending} onClick={askRemove}>Remove keys</Button>
-        </div>
-      </section>
+        <Facts label={`Your ${provider} app`}>
+          <Fact label={meta ? "App ID" : "Client ID"}>Ending in <strong>{end}</strong></Fact>
+          {qbo && <Fact label="Keys">{keys.sandbox ? "Development keys, for a sandbox company" : "Production keys"}</Fact>}
+          {!qbo && !google && !meta && <Fact label="Zoho account">{regionOf(keys.accounts_server).label}</Fact>}
+          {meta && keys.config_id && <Fact label="Sign-in">With a Facebook Login for Business configuration</Fact>}
+          <Fact label="Secret">Stored encrypted on your server and never shown again</Fact>
+        </Facts>
+        {remove.isPending && <p className={kit.note} role="status">Removing your keys…</p>}
+      </Section>
     );
   }
 
   return (
-    <section id={setupId} className="card card-pad stack" aria-labelledby="app-keys-title">
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="app-keys-title" className="section-title" style={{ fontSize: 16 }}>{keys ? `Change your ${provider} app keys` : `Set up ${app.name}`}</h2>
-        <span className="muted small">
-          {qbo
-            ? "QuickBooks connects through an app you make at Intuit, for your business only. It's free, and these steps give you everything Intuit asks for."
-            : google
-              ? googleIntro(app)
-              : meta
-                ? "Facebook & Instagram connects through a Meta app you make for your business only. It's free, takes about ten minutes, and Meta doesn't need to review an app that only posts to your own Page."
-                : "Zoho Books connects through an app you make in Zoho's API Console, for your business only. It's free and takes about five minutes."}
-        </span>
-      </div>
+    <Section id={setupId} title={keys ? `Change your ${provider} app keys` : `Set up ${app.name}`} className={kit.panel}>
+      <p className={kit.text}>
+        {qbo
+          ? "QuickBooks connects through an app you make at Intuit, for your business only. It's free, and these steps give you everything Intuit asks for."
+          : google
+            ? googleIntro(app)
+            : meta
+              ? "Facebook & Instagram connects through a Meta app you make for your business only. It's free, takes about ten minutes, and Meta doesn't need to review an app that only posts to your own Page."
+              : "Zoho Books connects through an app you make in Zoho's API Console, for your business only. It's free and takes about five minutes."}
+      </p>
       {qbo ? <IntuitSteps app={app} /> : google ? <GoogleSteps app={app} /> : meta ? <MetaSteps app={app} /> : null}
       <KeysForm app={app} initial={keys} onSaved={() => { setEditing(false); onChanged(); }} onCancel={keys ? () => setEditing(false) : undefined} />
-    </section>
+    </Section>
   );
 }
 
@@ -144,60 +140,60 @@ function IntuitSteps({ app }: { app: AppRow }) {
   const origin = app.redirect_uri ? new URL(app.redirect_uri).origin : window.location.origin;
   const page = `${origin}/apps/quickbooks`;
   return (
-    <ol className="app-steps" style={{ gap: 14 }}>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+    <Steps>
+      <Step>
         <span>Sign in to Intuit Developer with your Intuit account, then create an app for <strong>QuickBooks Online</strong>. Name it Crewtavo and give it the <strong>Accounting</strong> permission.</span>
-        <a className="btn btn-sm" style={{ justifySelf: "start" }} href={INTUIT_DEVELOPER} target="_blank" rel="noreferrer">Open Intuit Developer <Icon name="external" size={12} /></a>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <a className="btn btn-sm" href={INTUIT_DEVELOPER} target="_blank" rel="noreferrer">Open Intuit Developer <Icon name="external" size={12} /></a>
+      </Step>
+      <Step>
         <span>In the app's <strong>production</strong> settings, fill in its details with these:</span>
         <CopyRow label="Host domain" value={new URL(origin).host} />
         <CopyRow label="Launch URL" value={page} />
         <CopyRow label="Disconnect URL" value={page} />
         <CopyRow label="Connect/Reconnect URL" value={page} />
         <CopyRow label="End-user license agreement URL" value={`${origin}/license`} />
-        <span className="small">For <strong>Privacy policy URL</strong>, use your website's privacy page, or your website's address if it doesn't have one.</span>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <span className={kit.note}>For <strong>Privacy policy URL</strong>, use your website's privacy page, or your website's address if it doesn't have one.</span>
+      </Step>
+      <Step>
         <span>Add this under <strong>Redirect URIs</strong> in the production settings:</span>
         {app.redirect_uri && <CopyRow label="Redirect URI" value={app.redirect_uri} />}
-      </div></li>
-      <li>Answer Intuit's <strong>app assessment questionnaire</strong>. Intuit asks it even of an app only your business uses, and your production keys unlock once it's reviewed, which can take a few days.</li>
-      <li>Copy the production <strong>Client ID</strong> and <strong>Client Secret</strong> from <strong>Keys and credentials</strong>, and paste them below.</li>
-    </ol>
+      </Step>
+      <Step>Answer Intuit's <strong>app assessment questionnaire</strong>. Intuit asks it even of an app only your business uses, and your production keys unlock once it's reviewed, which can take a few days.</Step>
+      <Step>Copy the production <strong>Client ID</strong> and <strong>Client Secret</strong> from <strong>Keys and credentials</strong>, and paste them below.</Step>
+    </Steps>
   );
 }
 
 /** A Google Cloud project for the business's own Google app: Google's access request comes early, since it's the step that takes weeks. */
 export function GoogleSteps({ app }: { app: AppRow }) {
   return (
-    <ol className="app-steps" style={{ gap: 14 }}>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+    <Steps>
+      <Step>
         <span>In Google Cloud, create a project for Crewtavo, signed in with a Google account that manages your Business Profile.</span>
-        <a className="btn btn-sm" style={{ justifySelf: "start" }} href={GOOGLE_CLOUD} target="_blank" rel="noreferrer">Open Google Cloud <Icon name="external" size={12} /></a>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <a className="btn btn-sm" href={GOOGLE_CLOUD} target="_blank" rel="noreferrer">Open Google Cloud <Icon name="external" size={12} /></a>
+      </Step>
+      <Step>
         <span>
           Ask Google for access to the Business Profile APIs now: it takes about 2 weeks. Google's form asks for the project number (on the project's
           dashboard) and an email that manages your profile, which must have been verified for 60 days or more.
         </span>
-        <a className="btn btn-sm" style={{ justifySelf: "start" }} href={GOOGLE_ACCESS_FORM} target="_blank" rel="noreferrer">Google's access request form <Icon name="external" size={12} /></a>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <a className="btn btn-sm" href={GOOGLE_ACCESS_FORM} target="_blank" rel="noreferrer">Google's access request form <Icon name="external" size={12} /></a>
+      </Step>
+      <Step>
         <span>Turn on these three APIs in the project:</span>
-        <ul className="app-access">{GOOGLE_APIS.map((a) => <li key={a.name}><a href={a.href} target="_blank" rel="noreferrer">{a.name} <Icon name="external" size={12} /></a></li>)}</ul>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <ul className={kit.bullets}>{GOOGLE_APIS.map((a) => <li key={a.name}><a href={a.href} target="_blank" rel="noreferrer">{a.name} <Icon name="external" size={12} /></a></li>)}</ul>
+      </Step>
+      <Step>
         <span>Under <strong>Google Auth Platform</strong>, set up the consent screen as <strong>External</strong>, add this scope under <strong>Data access</strong>, and publish the app so it says <strong>In production</strong>. An app left in Testing signs out after 7 days.</span>
         <CopyRow label="Scope" value={BUSINESS_SCOPE} />
-        <span className="small">Google shows an "unverified app" screen at sign-in until it reviews the app. That's fine for your own business: click <strong>Advanced</strong>, then continue.</span>
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <span className={kit.note}>Google shows an "unverified app" screen at sign-in until it reviews the app. That's fine for your own business: click <strong>Advanced</strong>, then continue.</span>
+      </Step>
+      <Step>
         <span>Under <strong>Clients</strong>, create an OAuth client of type <strong>Web application</strong> with this redirect URI:</span>
         {app.redirect_uri && <CopyRow label="Authorized redirect URI" value={app.redirect_uri} />}
-      </div></li>
-      <li>Copy the <strong>Client ID</strong> and <strong>Client secret</strong> Google shows, and paste them below.</li>
-    </ol>
+      </Step>
+      <Step>Copy the <strong>Client ID</strong> and <strong>Client secret</strong> Google shows, and paste them below.</Step>
+    </Steps>
   );
 }
 
@@ -219,12 +215,12 @@ export function usePrivacyUrl(): string | null {
 export function PrivacyLine() {
   const url = usePrivacyUrl();
   return url ? (
-    <div className="stack-sm" style={{ gap: 6 }}>
+    <div className={kit.step}>
       <CopyRow label="Privacy policy URL" value={url} />
-      <span className="small">Use your own privacy page if it's somewhere else. It has to load, and say how to ask for data to be deleted.</span>
+      <span className={kit.note}>Use your own privacy page if it's somewhere else. It has to load, and say how to ask for data to be deleted.</span>
     </div>
   ) : (
-    <span className="small">Add a privacy page to your website first, saying how to ask for data to be deleted. Meta checks that it loads.</span>
+    <span className={kit.note}>Add a privacy page to your website first, saying how to ask for data to be deleted. Meta checks that it loads.</span>
   );
 }
 
@@ -237,28 +233,28 @@ export function PrivacyLine() {
  */
 export function MetaSteps({ app }: { app: AppRow }) {
   return (
-    <ol className="app-steps" style={{ gap: 14 }}>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+    <Steps>
+      <Step>
         <span><strong>Before you start:</strong> Meta asks for a privacy page before your app can go Live.</span>
         <PrivacyLine />
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+      </Step>
+      <Step>
         <span>At Meta for Developers, signed in as your Page's admin, click <strong>Create app</strong>. Name it after your business, pick the use case for managing everything on your Page, and choose your business portfolio, or none.</span>
-        <a className="btn btn-sm" style={{ justifySelf: "start" }} href={META_DEVELOPERS} target="_blank" rel="noreferrer">Open Meta for Developers <Icon name="external" size={12} /></a>
-      </div></li>
-      <li>Add the <strong>Facebook Login for Business</strong> product, if the app doesn't have it.</li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+        <a className="btn btn-sm" href={META_DEVELOPERS} target="_blank" rel="noreferrer">Open Meta for Developers <Icon name="external" size={12} /></a>
+      </Step>
+      <Step>Add the <strong>Facebook Login for Business</strong> product, if the app doesn't have it.</Step>
+      <Step>
         <span>Under <strong>Facebook Login for Business → Settings</strong>, paste this under <strong>Valid OAuth Redirect URIs</strong> and save. Leave <strong>Strict mode</strong> on.</span>
         {app.redirect_uri && <CopyRow label="Valid OAuth Redirect URI" value={app.redirect_uri} />}
-      </div></li>
-      <li><div className="stack-sm" style={{ gap: 8 }}>
+      </Step>
+      <Step>
         <span>In the use case's <strong>Permissions</strong>, click <strong>Add</strong> for each of these. If Instagram's two aren't offered there, add the Instagram use case too, and add them from it.</span>
-        <ul className="app-access">{META_PERMISSIONS.map((p) => <li key={p}><strong>{p}</strong></li>)}</ul>
-      </div></li>
-      <li>Under <strong>App settings → Basic</strong>, copy the <strong>App ID</strong> and the <strong>App secret</strong> (click <strong>Show</strong>), and paste them below. Fill in the <strong>Privacy policy URL</strong> and the <strong>User data deletion</strong> instructions URL there too, with the same privacy page.</li>
-      <li>Save the keys, then sign in with Facebook and pick your Page and its Instagram account.</li>
-      <li>Switch the app to <strong>Live</strong> with the <strong>App mode</strong> switch at the top of the dashboard. Until it's Live, only you can see the posts. Meta's API can't tell Crewtavo when it's Live, so tick the box once you've switched it.</li>
-    </ol>
+        <ul className={kit.bullets}>{META_PERMISSIONS.map((p) => <li key={p}><strong>{p}</strong></li>)}</ul>
+      </Step>
+      <Step>Under <strong>App settings → Basic</strong>, copy the <strong>App ID</strong> and the <strong>App secret</strong> (click <strong>Show</strong>), and paste them below. Fill in the <strong>Privacy policy URL</strong> and the <strong>User data deletion</strong> instructions URL there too, with the same privacy page.</Step>
+      <Step>Save the keys, then sign in with Facebook and pick your Page and its Instagram account.</Step>
+      <Step>Switch the app to <strong>Live</strong> with the <strong>App mode</strong> switch at the top of the dashboard. Until it's Live, only you can see the posts. Meta's API can't tell Crewtavo when it's Live, so tick the box once you've switched it.</Step>
+    </Steps>
   );
 }
 
@@ -292,58 +288,57 @@ function KeysForm({ app, initial, onSaved, onCancel }: { app: AppRow; initial: N
   };
 
   return (
-    <form className="stack" onSubmit={submit}>
+    <form className={kit.form} onSubmit={submit}>
       {zohoBooks && (
-        <ol className="app-steps" style={{ gap: 14 }}>
-          <li><div className="stack-sm" style={{ gap: 8 }}>
+        <Steps>
+          <Step>
             <span>Pick where your Zoho account is. When you're in Zoho Books, the address shows it: <strong>books.zoho.eu</strong> is Europe.</span>
-            <Select className="select" style={{ maxWidth: 260 }} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Where your Zoho account is">
+            <Select className="select" style={{ maxWidth: 280 }} value={region} onChange={(e) => setRegion(e.target.value)} aria-label="Where your Zoho account is">
               {ZOHO_REGIONS.map((r) => <option key={r.tld} value={r.tld}>{r.label} (books.{r.tld})</option>)}
             </Select>
-          </div></li>
-          <li><div className="stack-sm" style={{ gap: 8 }}>
+          </Step>
+          <Step>
             <span>Open Zoho's API Console, click <strong>Add Client</strong> (or <strong>Get Started</strong>) and choose <strong>Server-based Applications</strong>.</span>
-            <a className="btn btn-sm" style={{ justifySelf: "start" }} href={`https://api-console.${zoho.tld}/`} target="_blank" rel="noreferrer">Open Zoho API Console <Icon name="external" size={12} /></a>
-          </div></li>
-          <li><div className="stack-sm" style={{ gap: 8 }}>
+            <a className="btn btn-sm" href={`https://api-console.${zoho.tld}/`} target="_blank" rel="noreferrer">Open Zoho API Console <Icon name="external" size={12} /></a>
+          </Step>
+          <Step>
             <span>Fill it in with these, then click <strong>Create</strong>:</span>
             <CopyRow label="Client Name" value="Crewtavo" />
             <CopyRow label="Homepage URL" value={origin} />
             {app.redirect_uri && <CopyRow label="Authorized Redirect URIs" value={app.redirect_uri} />}
-          </div></li>
-          <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> Zoho shows, and paste them below.</li>
-        </ol>
+          </Step>
+          <Step>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> Zoho shows, and paste them below.</Step>
+        </Steps>
       )}
-      <Field label={meta ? "App ID" : "Client ID"}>
-        <input className="input" autoComplete="off" spellCheck={false} inputMode={meta ? "numeric" : undefined} value={clientId} onChange={(e) => { setClientId(e.target.value); save.reset(); }} />
-      </Field>
-      <Field label={meta ? "App secret" : "Client Secret"} hint={initial ? `Paste the secret again, even if only the ${meta ? "App ID" : "Client ID"} changed.` : undefined}>
-        <div className="input-group">
-          <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} style={{ paddingLeft: 12, paddingRight: 36 }} />
-          <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
-        </div>
-      </Field>
+      <div className={kit.fields}>
+        <Field label={meta ? "App ID" : "Client ID"}>
+          <input className="input" autoComplete="off" spellCheck={false} inputMode={meta ? "numeric" : undefined} value={clientId} onChange={(e) => { setClientId(e.target.value); save.reset(); }} />
+        </Field>
+        <Field label={meta ? "App secret" : "Client Secret"} hint={initial ? `Paste the secret again, even if only the ${meta ? "App ID" : "Client ID"} changed.` : undefined}>
+          <div className="input-group">
+            <input className="input" type={show ? "text" : "password"} autoComplete="off" spellCheck={false} value={secret} onChange={(e) => { setSecret(e.target.value); save.reset(); }} style={{ paddingLeft: 12, paddingRight: 36 }} />
+            <button type="button" className="icon-btn addon-right" style={{ position: "absolute", right: 2, pointerEvents: "auto" }} aria-label={show ? "Hide secret" : "Show secret"} onClick={() => setShow(!show)}><Icon name={show ? "eye" : "lock"} size={14} /></button>
+          </div>
+        </Field>
+      </div>
       {qbo && (
         <label className="checkbox">
           <input type="checkbox" checked={sandbox} onChange={(e) => setSandbox(e.target.checked)} />
           <span>
             These are development keys
-            <span className="muted small" style={{ display: "block", fontWeight: 400 }}>They work right away, but only with a QuickBooks sandbox company, so they're for trying it out. Add the Redirect URI to the development settings too.</span>
+            <span className={kit.hint} style={{ display: "block" }}>They work right away, but only with a QuickBooks sandbox company, so they're for trying it out. Add the Redirect URI to the development settings too.</span>
           </span>
         </label>
       )}
       {meta && (
-        <details className="app-details" open={Boolean(initial?.config_id) || undefined}>
-          <summary className="small">More options</summary>
-          <div style={{ marginTop: 10 }}>
-            <Field label="Configuration ID" optional hint="Only if you made a Facebook Login for Business configuration. Leave it empty and Crewtavo asks for the permissions itself.">
-              <input className="input" autoComplete="off" spellCheck={false} inputMode="numeric" value={configId} onChange={(e) => { setConfigId(e.target.value); save.reset(); }} />
-            </Field>
-          </div>
-        </details>
+        <Fold summary="More options" open={Boolean(initial?.config_id)}>
+          <Field label="Configuration ID" optional hint="Only if you made a Facebook Login for Business configuration. Leave it empty and Crewtavo asks for the permissions itself.">
+            <input className="input" autoComplete="off" spellCheck={false} inputMode="numeric" value={configId} onChange={(e) => { setConfigId(e.target.value); save.reset(); }} />
+          </Field>
+        </Fold>
       )}
       <FormError error={save.error} />
-      <div className="row wrap" style={{ gap: 8 }}>
+      <div className={kit.actions}>
         <Button type="submit" variant="primary" loading={save.isPending} disabled={!ready}>Save keys</Button>
         {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
       </div>

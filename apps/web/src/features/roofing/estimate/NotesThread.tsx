@@ -166,7 +166,8 @@ export function NotesThread({ quoteId, composer, title = "Notes", hint = "Only y
   return (
     <section className={`${bare ? "" : "card card-pad "}${styles.notes}`} data-size={composer} aria-labelledby={`${id}-title`}>
       <div className={styles.notesHead}>
-        <h2 id={`${id}-title`} className={styles.notesTitle}>{title}</h2>
+        {/* A part of a step in the office (under the step's own heading), a section of its own on site. */}
+        {site ? <h2 id={`${id}-title`} className={styles.notesTitle}>{title}</h2> : <h3 id={`${id}-title`} className={styles.notesTitle}>{title}</h3>}
         <span className={styles.private}><Icon name="lock" size={14} />{hint}</span>
       </div>
       {site ? <>{box}{list}</> : <>{list}{box}</>}

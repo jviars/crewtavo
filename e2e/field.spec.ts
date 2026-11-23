@@ -156,7 +156,7 @@ test("the foreman logs hours and marks maintenance done from My day on a phone",
   const page = await as("foreman", PHONE);
   await page.goto("/field");
   await expect(page.getByRole("heading", { name: "Your equipment" })).toBeVisible();
-  const row = page.locator("div", { has: page.getByRole("link", { name: new RegExp(name) }) }).filter({ has: page.getByRole("button", { name: "Log hours" }) }).last();
+  const row = page.getByRole("listitem").filter({ has: page.getByRole("link", { name: new RegExp(name) }) });
   await expect(row).toContainText("Overdue");
   await expectAccessible(page, "My day with equipment (phone)");
 

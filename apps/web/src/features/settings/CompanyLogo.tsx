@@ -7,6 +7,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { base64Of, logoPicture } from "@/lib/files";
 import { useSession } from "@/lib/session";
@@ -36,22 +37,20 @@ export function CompanyLogo({ path }: { path: string | null }) {
     onSuccess: changed,
   });
   return (
-    <div className="row wrap" style={{ gap: 12 }}>
+    <div className="set-logo">
       {/* On white, as clients see it. */}
-      {path && (
-        <span style={{ display: "grid", placeItems: "center", height: 64, minWidth: 64, padding: "0 14px", background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }}>
-          <img src={`/api/public/logo/${path.replace("/logo/", "/")}`} alt="Your logo" style={{ display: "block", maxHeight: 40, maxWidth: 180, objectFit: "contain" }} />
+      {path ? (
+        <span className="set-logo-tile">
+          <img src={`/api/public/logo/${path.replace("/logo/", "/")}`} alt="Your logo" />
         </span>
+      ) : (
+        <span className="set-logo-tile" data-empty aria-hidden="true"><Icon name="image" size={18} /></span>
       )}
-      <div className="stack-sm" style={{ gap: 6 }}>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button size="sm" icon="upload" loading={set.isPending} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
-            {path ? "Change logo" : "Add your logo"}
-          </Button>
-          {path && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()}>Remove logo</Button>}
-        </div>
-        <span className="muted small">A PNG or SVG with a see-through background looks best.</span>
-      </div>
+      <Button size="sm" icon={path ? undefined : "upload"} loading={set.isPending} slowHint={false} disabled={remove.isPending} onClick={() => input.current?.click()}>
+        {path ? "Replace" : "Add your logo"}
+      </Button>
+      {path && <Button size="sm" variant="ghost" loading={remove.isPending} disabled={set.isPending} onClick={() => remove.mutate()} aria-label="Remove logo">Remove</Button>}
+      <span className="hint">A PNG or SVG with a see-through background looks best.</span>
       <input
         ref={input}
         type="file"

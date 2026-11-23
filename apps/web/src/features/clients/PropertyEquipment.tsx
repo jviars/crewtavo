@@ -10,8 +10,9 @@ import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
+import { cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
@@ -19,21 +20,31 @@ import { formatDate, todayIn } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { ASSET_FIELDS, ASSET_NAMES, assetDetails, byNewest, warrantyNote, type PropertyAsset, type ServiceVisit } from "./propertyAssets";
 import { t } from "@/lib/i18n";
+import styles from "./clients.module.css";
+import { Select } from "@/components/ui/Select";
 
 const assetsKey = (propertyId: string) => ["property-assets", propertyId];
 
 /**
- * The property's equipment. `inCard` sits inside a property card; otherwise it's a card of its own.
- * With `visitId` (the field app) each item can be ticked as serviced on that visit, retired ones are
- * left out, and anyone on the visit can add one.
+ * The property's equipment, each item a hairline row that opens it. `inCard` sits inside another
+ * section: under the job page's client facts with a quiet label, or in a visit's own "Equipment at
+ * this property" section as rows alone; otherwise it's a Section of its own. With `visitId` (the
+ * field app) each item can be ticked as serviced on that visit, retired ones are left out, anyone
+ * on the visit can add one, and Add equipment is the last row in green words. `inRow` is a client page's property row: each item a
+ * quiet line, nothing at all while there are none, and Add equipment in the row's menu (`adding`).
  */
-export function PropertyEquipment({ propertyId, visitId, inCard }: { propertyId: string | null; visitId?: string; inCard?: boolean }) {
+export function PropertyEquipment({ propertyId, visitId, inCard, inRow, adding, onAddingDone }: { propertyId: string | null; visitId?: string; inCard?: boolean; inRow?: boolean; adding?: boolean; onAddingDone?: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
   // The office edits everything; the field adds items and keeps notes (the database holds it to that).
   const isOffice = hasRole(session, "admin", "office", "estimator");
   const canAdd = isOffice || Boolean(visitId);
-  const [open, setOpen] = useState<PropertyAsset | "new" | null>(null);
+  const [picked, setOpen] = useState<PropertyAsset | "new" | null>(null);
+  const open = picked ?? (adding ? "new" : null);
+  const close = () => {
+    setOpen(null);
+    onAddingDone?.();
+  };
   const list = useQuery({
     queryKey: assetsKey(propertyId ?? ""),
     enabled: Boolean(propertyId),
@@ -62,37 +73,73 @@ export function PropertyEquipment({ propertyId, visitId, inCard }: { propertyId:
   const items = (list.data ?? []).filter((a) => !visitId || a.status === "active");
   // No property, or nothing recorded and nothing to add: no section at all.
   if (!propertyId || (list.isSuccess && !items.length && !canAdd)) return null;
+  const dialog = open && <AssetDialog propertyId={propertyId} asset={open === "new" ? null : open} isOffice={isOffice} visitId={visitId} onClose={close} />;
 
-  const body = (
-    <>
-      <div className="row-between">
-        <strong className={inCard ? "small" : undefined}>{t("Equipment at this property")}</strong>
-        {canAdd && <Button size="sm" variant="ghost" icon="plus" onClick={() => setOpen("new")}>{t("Add equipment")}</Button>}
-      </div>
-      {list.isPending && <Skeleton width="60%" />}
-      {items.map((a) => {
-        const line = [assetDetails(a), warrantyNote(a.warranty_until, today)].filter(Boolean).join(" · ");
-        return (
-          <div key={a.id} className="row" style={{ alignItems: "flex-start", gap: 10 }}>
-            <button type="button" className="link-btn grow" style={{ textAlign: "left", minWidth: 0 }} onClick={() => setOpen(a)}>
-              <span className={a.status === "retired" ? "muted" : "strong"}>{a.name}</span>
-              {a.status === "retired" && <span className="chip" style={{ marginLeft: 6 }}>{t("Retired")}</span>}
-              {line && <span className="muted small" style={{ display: "block" }}>{line}</span>}
+  if (inRow) {
+    if (!items.length) return dialog || null;
+    return (
+      <div className={styles.equipment}>
+        {items.map((a) => {
+          const line = [assetDetails(a), warrantyNote(a.warranty_until, today)].filter(Boolean).join(" · ");
+          return (
+            <button key={a.id} type="button" className={styles.asset} onClick={() => setOpen(a)}>
+              <Icon name="wrench" size={12} />
+              <span className={styles.assetName} data-retired={a.status === "retired" || undefined}>{a.name}</span>
+              {a.status === "retired" && <span> · {t("Retired")}</span>}
+              {line && <span className={styles.assetLine}> · {line}</span>}
             </button>
-            {visitId && (
-              <label className="checkbox small">
-                <input type="checkbox" checked={ticked.data?.has(a.id) ?? false} disabled={ticked.isPending || tick.isPending} onChange={(e) => tick.mutate({ asset: a, on: e.target.checked })} />
-                <span>{t("Serviced")}</span>
-              </label>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+        {dialog}
+      </div>
+    );
+  }
+
+  const rows = items.length > 0 && (
+    <RelatedList label={t("Equipment at this property")}>
+      {items.map((a) => (
+        <RelatedRow
+          key={a.id}
+          onClick={() => setOpen(a)}
+          title={a.name}
+          sub={[assetDetails(a), warrantyNote(a.warranty_until, today)]}
+          end={a.status === "retired" ? <span className={styles.retired}>{t("Retired")}</span> : undefined}
+          actions={visitId && (
+            <label className={cx("checkbox", styles.serviced)}>
+              <input type="checkbox" checked={ticked.data?.has(a.id) ?? false} disabled={ticked.isPending || tick.isPending} onChange={(e) => tick.mutate({ asset: a, on: e.target.checked })} />
+              <span>{t("Serviced")}</span>
+            </label>
+          )}
+        />
+      ))}
+    </RelatedList>
+  );
+  // In the field the last row adds one, in green words like the visit's Add work; for the office it's a quiet row.
+  const add = canAdd && (
+    <button type="button" className={visitId ? cx("field-add", styles.fieldAdd) : styles.equipAdd} onClick={() => setOpen("new")}>
+      <Icon name="plus" size={visitId ? 18 : 14} />
+      {t("Add equipment")}
+    </button>
+  );
+  const parts = (
+    <>
+      {list.isPending && <Skeleton width="60%" />}
+      {rows}
+      {add}
       <FormError error={tick.error} />
-      {open && <AssetDialog propertyId={propertyId} asset={open === "new" ? null : open} isOffice={isOffice} visitId={visitId} onClose={() => setOpen(null)} />}
+      {dialog}
     </>
   );
-  return inCard ? <div className="stack-sm" style={{ marginTop: 4 }}>{body}</div> : <section className="card card-pad stack-sm">{body}</section>;
+  // A visit's own section names it already; on the job page it sits under the client's facts with a quiet label.
+  if (inCard) {
+    return visitId ? parts : (
+      <div className={styles.equipBlock}>
+        <h3 className={styles.equipLabel}>{t("Equipment at this property")}</h3>
+        {parts}
+      </div>
+    );
+  }
+  return <Section title={t("Equipment at this property")} count={items.length || undefined}>{parts}</Section>;
 }
 
 /** Add an item, or open one: its details (the office edits them all, the field its notes) and its service history. */

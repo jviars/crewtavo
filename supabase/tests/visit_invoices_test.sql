@@ -55,7 +55,7 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "d4000000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select public.create_company('Vine Fencing', 'general') as co \gset
 insert into public.clients (company_id, display_name) values (:'co', 'Wes Ward') returning id as wes \gset
-update public.companies set settings = settings || '{"default_tax_rate": 0}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"default_tax_rate": 0}' where id = :'co';
 
 -- ===== A one-off job billed when it's done =====================================================
 select tvi.job(:'co', :'wes', 'Fence', 'one_off', 'on_completion') as fence \gset

@@ -9,7 +9,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
 import { AuthLayout } from "@/features/auth/LoginPage";
 import authStyles from "@/features/auth/auth.module.css";
 import { api } from "@/lib/api";
@@ -40,28 +40,28 @@ function flow(text: string) {
   return lines.join("\n");
 }
 
-const POINTS: Array<{ icon: IconName; text: string }> = [
-  { icon: "info", text: "Crewtavo is free and open source, provided as is, with no warranty of any kind." },
-  { icon: "lock", text: "You run it on accounts you own, so you're responsible for your data, your backups and keeping it secure." },
-  { icon: "users", text: "Your customers deal with your business. You handle their questions, complaints, refunds and claims." },
-  { icon: "alert", text: "The people who make Crewtavo aren't liable for lost or exposed data, for mistakes, or for anything done with it, and you cover them if a claim about your Crewtavo is made against them." },
-  { icon: "check", text: "Check quotes, invoices, payments, pay and taxes before you rely on them. AI answers and map measurements can be wrong." },
-  { icon: "book", text: "You follow the laws that apply to your business, such as privacy, texting, tax and labor laws." },
+const POINTS = [
+  "Crewtavo is free and open source, provided as is, with no warranty of any kind.",
+  "You run it on accounts you own, so you're responsible for your data, your backups and keeping it secure.",
+  "Your customers deal with your business. You handle their questions, complaints, refunds and claims.",
+  "The people who make Crewtavo aren't liable for lost or exposed data, for mistakes, or for anything done with it, and you cover them if a claim about your Crewtavo is made against them.",
+  "Check quotes, invoices, payments, pay and taxes before you rely on them. AI answers and map measurements can be wrong.",
+  "You follow the laws that apply to your business, such as privacy, texting, tax and labor laws.",
 ];
 
-/** The terms in plain language: what someone is agreeing to, before the full text. */
+/** The terms in plain language, each with a check: what someone is agreeing to, before the full text. */
 export function TermsSummary() {
   return (
     <ul className={styles.points}>
-      {POINTS.map((p) => <li key={p.text}><Icon name={p.icon} size={14} />{p.text}</li>)}
+      {POINTS.map((text) => <li key={text}><Icon name="check" size={16} />{text}</li>)}
     </ul>
   );
 }
 
-/** The full terms, folded away until someone opens them. */
+/** The full terms, folded away under a link until someone opens them. */
 export function TermsText({ open = false }: { open?: boolean }) {
   return (
-    <details className="more-options" open={open || undefined}>
+    <details className={styles.full} open={open || undefined}>
       <summary>Read the full terms</summary>
       <pre className={styles.text} tabIndex={0} aria-label="Crewtavo Terms">{flow(TERMS_TEXT)}</pre>
     </details>
@@ -76,16 +76,16 @@ export function TermsText({ open = false }: { open?: boolean }) {
  */
 export function LicenseNotice() {
   return (
-    <div className="stack-sm" style={{ gap: 10 }}>
-      <span className="muted small">
+    <div className={styles.notice}>
+      <span className={styles.noticeText}>
         Copyright (C) 2026 Joshua Viars. Crewtavo is free software under the GNU Affero General Public License, version 3, with the additional terms in its notice, and comes with no warranty. <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer">Source code</a>
         {" · "}<a href="/licenses.txt" target="_blank" rel="noopener noreferrer">Open-source licenses</a>
       </span>
-      <details className="more-options">
+      <details className={styles.full}>
         <summary>Read the notice and additional terms</summary>
         <pre className={styles.text} tabIndex={0} aria-label="Crewtavo notice">{flow(NOTICE_TEXT)}</pre>
       </details>
-      <details className="more-options">
+      <details className={styles.full}>
         <summary>Read the full license</summary>
         <pre className={styles.text} tabIndex={0} aria-label="GNU Affero General Public License">{LICENSE_TEXT}</pre>
       </details>
@@ -93,14 +93,17 @@ export function LicenseNotice() {
   );
 }
 
-/** Summary, full text and the "I agree" box, for setting up a business and for TermsPage. */
-export function TermsAgreement({ agreed, onChange, error }: { agreed: boolean; onChange: (agreed: boolean) => void; error?: string | null }) {
+/**
+ * Summary, full text and the "I agree" box, for setting up a business and for TermsPage. `title`
+ * heads it; null when the page's own title already says it's the terms.
+ */
+export function TermsAgreement({ agreed, onChange, error, title = "The Crewtavo Terms" }: { agreed: boolean; onChange: (agreed: boolean) => void; error?: string | null; title?: string | null }) {
   return (
-    <section className={styles.terms} aria-labelledby="terms-title">
-      <h2 id="terms-title">The Crewtavo Terms</h2>
+    <section className={styles.terms} aria-labelledby={title ? "terms-title" : undefined} aria-label={title ? undefined : "The Crewtavo Terms"}>
+      {title && <h2 id="terms-title">{title}</h2>}
       <TermsSummary />
       <TermsText />
-      <label className={`checkbox ${styles.agree}`}>
+      <label className={styles.agree}>
         <input type="checkbox" checked={agreed} onChange={(e) => onChange(e.target.checked)} aria-invalid={error ? true : undefined} aria-describedby={error ? "terms-error" : undefined} />
         <span>I have read and agree to the Crewtavo Terms, for myself and on behalf of my business.</span>
       </label>
@@ -131,19 +134,16 @@ export function TermsPage({ companyName, onAccepted, onSignOut }: { companyName:
   };
 
   return (
-    <AuthLayout>
-      <form className={`card card-pad ${authStyles.card} ${authStyles.wide}`} style={{ padding: 28, gap: 18 }} onSubmit={submit}>
-        <div style={{ display: "grid", gap: 6 }}>
-          <h1 className={authStyles.title}>Before you continue</h1>
-          <p className="muted" style={{ margin: 0 }}>
-            An owner or admin needs to agree to the current Crewtavo Terms for <strong style={{ color: "var(--ink)" }}>{companyName}</strong>. You only do this once.
-          </p>
-        </div>
+    <AuthLayout onSignOut={onSignOut} width="read">
+      <form className={authStyles.flow} onSubmit={submit}>
+        <h1 className={authStyles.title}>Before you continue</h1>
+        <p className={authStyles.sub}>
+          An owner or admin needs to agree to the current Crewtavo Terms for <strong>{companyName}</strong>. You only do this once.
+        </p>
         <TermsAgreement agreed={agreed} onChange={setAgreed} error={touched && !agreed ? TERMS_REQUIRED : null} />
-        <FormError error={accept.error} />
-        <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-          <Button variant="ghost" icon="logout" onClick={() => onSignOut()}>Sign out</Button>
-          <Button type="submit" variant="primary" size="lg" loading={accept.isPending}>Agree and continue</Button>
+        <div style={{ marginTop: 16 }}><FormError error={accept.error} /></div>
+        <div className={authStyles.acts}>
+          <Button type="submit" variant="primary" loading={accept.isPending}>Agree and continue</Button>
         </div>
       </form>
     </AuthLayout>

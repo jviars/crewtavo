@@ -9,6 +9,7 @@ export * from "./campaigns";
 export * from "./chat";
 export * from "./clock";
 export * from "./clientImport";
+export * from "./companySettings";
 export * from "./contracts";
 export * from "./customFields";
 export * from "./demo";

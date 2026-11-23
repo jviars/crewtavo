@@ -1,51 +1,146 @@
-/* The quote page (QuotePage.tsx): what its totals are for when it offers options, its end date, and
-   "Which option did they choose?", one card per option to pick from. */
+/* The quote page (QuotePage.tsx, Page-Quote.dc.html): the client in the line under the title, the
+   lines as a document, the totals and profit as quiet figure rows, the history, and "Which option
+   did they choose?", one tile per option to pick from. */
 
-.totalsFor { margin: 0 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); overflow-wrap: anywhere; }
-.note { margin: 2px 0 6px; font-size: var(--fs-13); color: var(--text-3); }
-.warn { margin: 2px 0 6px; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
+/* The title as a box that grows to its words (TitleInput), set as the page title is. */
+.titleBox { display: block; height: auto; min-height: 0; padding-top: 1px; padding-bottom: 1px; overflow: hidden; resize: none; line-height: inherit; }
+
+.client { font-weight: 500; color: var(--ink); text-decoration: none; }
+.client:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+
+/* What the client asked to change, in their words, then what to do about it. */
+.said { display: block; margin: 4px 0; color: var(--text-2); }
+.calloutNote { font-size: var(--fs-12); color: var(--text-2); }
+
+/* The line items' section, and the paper in it (its column heads sit on the hairline: features.css). */
+.linesSection { min-width: 0; }
+.paper { padding-top: 2px; }
+
+/* "Lines | Paper": a small switch in the line items' heading. */
+.viewSwitch { padding: 2px; border-radius: 8px; }
+.viewSwitch button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: var(--fs-12); }
+
+/* The heading under the title note: quiet words after "Message to client". */
+.titleNote { margin-left: 6px; font-size: var(--fs-12); font-weight: 400; color: var(--quiet); }
+.message { margin: 0; font-size: var(--fs-14); line-height: 1.55; }
+.messageField { display: grid; gap: 8px; }
+.messageField :global(.textarea) { min-height: 88px; font-size: var(--fs-13); }
+
+/* Totals and Profit estimate: label and figure on rows 34px tall, the total bigger on a hairline. */
+.totalsSection { min-width: 0; }
+/* A tablet puts the totals under the lines: their figures stay together on the right, as on paper. */
+@media (min-width: 901px) and (max-width: 1100px) { .totalsSection :global(.sec-body) { max-width: 440px; margin-left: auto; } }
+.totalsFor { margin: 0 0 4px; font-size: var(--fs-12); color: var(--text-3); overflow-wrap: anywhere; }
+.sum { gap: 0; font-size: var(--fs-13); }
+.sum :global(.line) { min-height: 34px; padding: 4px 0; }
+.sum :global(.line) > :first-child { color: var(--text-3); }
+.sum :global(.line.grand) { min-height: 44px; margin: 4px 0; padding: 6px 0; font-size: var(--fs-15); font-weight: 700; }
+.sum :global(.line.grand) > :first-child { color: var(--ink); }
+.sum :global(.promo-entry) { margin: 2px 0 6px; }
+.sum > :global(.callout) { margin: 4px 0; }
+.taxCell { display: inline-flex; align-items: center; gap: 10px; }
+.sum .profit > :first-child { color: var(--ink); font-weight: 600; }
+.profit [data-tone="good"] { color: var(--green-dark); font-weight: 600; }
+.profit [data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.note { margin: 0 0 6px; font-size: var(--fs-12); color: var(--text-3); }
+.warn { margin: 2px 0 6px; font-size: var(--fs-12); font-weight: 600; color: var(--warning); }
+.warn > svg { vertical-align: -2px; }
 
 /* "Valid until": the date (or "No end date") with small buttons to pick, change or remove it. The
    ghost buttons' own padding is tucked in, so the date lines up with the figures above it. */
-.validUntil { display: inline-flex; align-items: center; gap: 4px; margin-right: -10px; }
-.validUntil :global(.btn-icon) { margin-left: -6px; }
+.validUntil { display: inline-flex; align-items: center; gap: 2px; margin-right: -8px; }
+.validUntil :global(.btn) { padding: 0 8px; font-size: var(--fs-13); }
+.validUntil :global(.btn-icon) { margin-left: -4px; color: var(--quiet); }
 /* The date reads as the figures do; only its hover says it opens the picker. */
-.validUntil .validUntilDate { font-size: inherit; font-weight: 400; }
-/* "How often": "Every 2 weeks, Tuesday, April to October" wraps rather than pushing the card wider. */
-.howOften { height: auto; min-height: var(--control-sm); white-space: normal; text-align: right; }
+.validUntil .validUntilDate { font-weight: 400; color: var(--ink); }
+.validUntil .validUntilDate[data-tone="warning"], .sum [data-tone="warning"] { color: var(--warning); font-weight: 600; }
+/* "How often": "Every 2 weeks, Tuesday, April to October" wraps rather than pushing the column wider. */
+.howOften { white-space: normal; text-align: right; }
+.validUntil .howOften { height: auto; min-height: var(--control-sm); }
+/* Small beside the figures on a desktop; a phone keeps the shared 44px small controls. */
+@media (min-width: 901px) {
+  .validUntil :global(.btn) { height: 28px; }
+  .validUntil :global(.btn-icon) { width: 28px; }
+  .validUntil .howOften { height: auto; min-height: 28px; }
+}
 .howOftenRow > :first-child { white-space: nowrap; }
 
 /* "Deposit required": as an amount or a percent, then the field for it. */
 .deposit { display: inline-flex; align-items: center; gap: 6px; }
+.deposit :global(.segmented) { padding: 2px; border-radius: 8px; }
+.deposit :global(.segmented) button { height: 24px; min-width: 26px; padding: 0 7px; border-radius: 6px; font-size: var(--fs-12); }
 
-/* A payment in the schedule editor: its name, its amount and when it's due, wrapping on a phone. */
-.scheduleRow { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--divider); }
+/* Document style: the picker and what it's for. */
+.styleField { display: grid; gap: 6px; }
+.quiet { margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+
+/* Payment schedule (PaymentSchedule.tsx): the payments as figure rows; editing, a payment at a time
+   (its name, its amount and when it's due, wrapping on a phone), then what's left to place. */
+.schedule :global(.sec-body) > * + * { margin-top: 8px; }
+.schedule :global(.sec-body) > p { margin-bottom: 0; }
+.scheduleRow { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.paymentLine { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.paymentLine > :global(:is(.input, .select)) { flex: none; }
+.paymentLine > .paymentKind { width: 104px; }
+.paymentLine > .paymentDue { flex: 1 1 auto; width: auto; min-width: 0; }
+.paymentLine > :global(.input[type="date"]) { width: 136px; }
+.paymentLine > :global(.btn-icon) { flex: none; margin-left: auto; color: var(--quiet); }
+.paymentName { font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.paymentAmount { margin-left: auto; font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.scheduleActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 4px; }
+.takeOff { margin-left: auto; }
+
+/* History: one quiet line for each thing that happened, its small icon, and when. */
+.history { display: grid; margin: -4px 0 0; padding: 0; list-style: none; }
+.history > li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 8px; padding: 8px 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-2); }
+.history > li > svg { margin-top: 1px; color: var(--quiet); }
+/* When, after a dot on the same line, as the board has it. */
+.when { color: var(--quiet); white-space: nowrap; }
+.when::before { content: "· " / ""; }
+
+@media (max-width: 900px) {
+  .viewSwitch button { position: relative; height: 34px; padding: 0 12px; font-size: var(--fs-13); }
+  /* On the grouped page's grey ground the usual track is the ground's own color: a shade darker shows it. */
+  :global(.m-grouped) .viewSwitch { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .history > li { font-size: var(--fs-14); padding: 10px 0; }
+  .sum { font-size: var(--fs-15); }
+  /* Notes in an inset card read at the size of the card's other quiet words. */
+  .quiet, .note, .warn, .totalsFor { font-size: var(--fs-14); }
+  .sum :global(.line) { min-height: 44px; }
+  .sum :global(.line.grand) { margin: 0; font-size: var(--fs-16); }
+  .deposit :global(.segmented) { padding: 3px; border-radius: 10px; }
+  .deposit :global(.segmented) button { position: relative; height: 38px; min-width: 40px; border-radius: 7px; font-size: var(--fs-14); }
+  /* Under 44px tall, each choice keeps a 44px target drawn around it. */
+  .viewSwitch button::after, .deposit :global(.segmented) button::after { content: ""; position: absolute; inset: -5px 0; }
+}
 
 /* Which option did they choose? */
-.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 10px; }
 .choice {
   position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
-  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink);
-  font-weight: 400; cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+  border-radius: 12px; background: var(--menu); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border);
+  font-weight: 400; cursor: pointer; transition: box-shadow var(--dur-fast);
 }
-.choice:hover { border-color: var(--border-strong); }
-.choice:focus-within, .choice[data-on] { border-color: var(--green); box-shadow: var(--ring); }
+.choice:hover { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.choice[data-on] { box-shadow: inset 0 0 0 2px var(--ink); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
 .choice[data-disabled] { cursor: default; opacity: 0.6; }
-.choice[data-disabled]:hover { border-color: var(--border); }
-.choice input {
-  position: absolute; z-index: 1; top: 10px; right: 10px; width: 20px; height: 20px; margin: 0;
-  accent-color: var(--green); border-radius: 50%; background: var(--surface); box-shadow: 0 0 0 3px var(--surface);
-}
-.choicePicture { width: 100%; border-radius: 0; }
-.choiceText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: start; min-width: 0; padding: 12px 14px 14px; }
-.choiceChips { display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%; }
-/* A long tier word stops at the card's edge. */
-.choiceText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-.choiceName { font-size: var(--fs-16); overflow-wrap: anywhere; }
+.choice[data-disabled]:hover { box-shadow: inset 0 0 0 1px var(--border); }
+/* The radio sits by the name and price, clear of the picture. */
+.choice input { position: absolute; z-index: 1; right: 12px; bottom: 14px; width: 18px; height: 18px; margin: 0; accent-color: var(--green); }
+.choicePicture { width: 100%; aspect-ratio: 16 / 9; border-radius: 0; }
+.choiceText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; justify-items: start; min-width: 0; padding: 10px 40px 12px 12px; }
+.choiceChips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; }
+/* The tier and "Shown first" are small quiet words over the name, as on the options strip. */
+.choiceText :global(.chip) { display: inline-block; height: auto; max-width: 100%; padding: 0; overflow: hidden; background: none; color: var(--text-3); font-size: var(--fs-11); font-weight: 600; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.choiceText :global(.chip.chip-green) { color: var(--green-dark); }
+.choiceName { font-size: var(--fs-14); font-weight: 600; overflow-wrap: anywhere; }
 .choiceTotal { font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
 /* On a phone the cards stack, so the picture moves to the side. */
 @media (max-width: 600px) {
   .choice { flex-direction: row; align-items: stretch; }
-  .choicePicture { width: 96px; aspect-ratio: auto; min-height: 72px; }
+  .choicePicture { width: 88px; aspect-ratio: auto; min-height: 72px; }
   .choiceText { padding: 12px 44px 12px 14px; }
+  .choice input { top: 50%; bottom: auto; margin-top: -9px; }
+  .choiceName { font-size: var(--fs-16); }
 }

@@ -6,26 +6,30 @@ import { askRefusal, marketingOn } from "@crewtavo/core/marketing";
 import { contractDiscountNote } from "@crewtavo/core/promos";
 import { belowProfitLine, profitAlertPercent } from "@crewtavo/core/reports";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { featureOn } from "@/components/shell/nav";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
 import { ClientPreview } from "@/components/ui/ClientPreview";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
+import { ListFoot, MetaLine } from "@/components/ui/InboxList";
 import { MapsLink } from "@/components/ui/MapsLink";
-import { Menu } from "@/components/ui/Menu";
+import type { MenuEntry } from "@/components/ui/Menu";
 import { Note } from "@/components/ui/Note";
-import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
-import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { BackLink, useDocumentTitle } from "@/components/ui/PageHeader";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { DetailSkeleton, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatDateTime, formatMoney, todayIn } from "@/lib/format";
+import { addressLine, formatDate, formatMoney, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
+import { intlLocale } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { AddWorkDialog } from "../invoices/AddWorkDialog";
 import { LineItems } from "../quotes/LineItems";
@@ -53,8 +57,9 @@ import { repeatText } from "./repeatText";
 import { ScopeOfWork } from "./ScopeOfWork";
 import { ExtraWorkDialog, ExtrasToReview, useEditsExtras, useJobExtras, VisitExtraLines } from "./VisitExtras";
 import { askToastKind, type AskResult } from "../marketing/askForm";
-import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
+import { CustomFieldFacts, useCustomFields } from "../customFields/CustomFields";
 import { memberName, useTeam } from "../requests/RequestsPage";
+import styles from "./jobs.module.css";
 
 /** The sections a job only shows once it uses them, offered under its line items until then. */
 type Extra = "materials" | "expenses" | "pay";
@@ -92,9 +97,9 @@ export function JobPage() {
     const was = wasAdding.current;
     wasAdding.current = adding;
     if (adding || !was || (document.activeElement && document.activeElement !== document.body)) return;
-    (document.querySelector<HTMLElement>(`[data-add="${was}"]`) ?? document.querySelector<HTMLElement>(`[data-extra="${was}"] .section-head button`))?.focus({ preventScroll: true });
+    (document.querySelector<HTMLElement>(`[data-add="${was}"]`) ?? document.querySelector<HTMLElement>(`[data-extra="${was}"] :is(.section-head, .sec-head) button`))?.focus({ preventScroll: true });
   }, [adding]);
-  const visitsRef = useListAnimation<HTMLDivElement>();
+  const visitsRef = useListAnimation<HTMLUListElement>();
   const isOffice = hasRole(session, "admin", "office");
   const seesInvoices = isOffice && can(session, "invoices");
   const seesCosts = isOffice && can(session, "job_costs");
@@ -346,305 +351,346 @@ export function JobPage() {
     offers.push({ key: "pay", label, name: `Add ${label.toLowerCase()}` });
   }
   const addButtons = offers.length > 0 && (
-    <div className="add-chips" role="group" aria-label="Add to this job">
+    <div className={cx("add-chips", styles.adds)} role="group" aria-label="Add to this job">
       {offers.map((o) => <Button key={o.key} size="sm" icon="plus" className="add-chip" aria-label={o.name} data-add={o.key} onClick={() => setAdding(o.key)}>{o.label}</Button>)}
     </div>
   );
   const doneAdding = () => setAdding(null);
   // Green says the job made money: ink while there's nothing to count, red when it lost some.
-  const profitColor = profit >= 0.005 ? "var(--green-dark)" : profit <= -0.005 ? "var(--danger)" : undefined;
+  const profitTone = profit >= 0.005 ? "good" : profit <= -0.005 ? "danger" : undefined;
+  const askable = (channel: "email" | "sms") => Boolean(j.client) && !askRefusal(j.client!, channel, ready);
+  const timeZone = session.company.timezone;
+  const doneCount = past.filter((v) => v.status === "completed").length;
+  const openVisit = (v: (typeof visits)[number]) => setVisit({ ...v, job_id: j.id, property_id: j.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: { label: `Job #${j.number}`, to: `/jobs/${j.id}` } });
+  const place = j.property ? [j.property.line1, j.property.city].filter(Boolean).join(", ") : null;
+
+  // Everything but the page's buttons: what it is, then what happens to it (danger last).
+  const more: MenuEntry[] = [
+    { label: "Edit details and schedule", icon: "edit", kbd: "E", onSelect: () => setDialog("details") },
+    { label: "New change order", icon: "quote", hidden: !["active", "requires_invoicing"].includes(j.status) || !j.client, onSelect: () => changeOrder.mutate() },
+    j.client?.reviewed_at
+      ? { label: "Already left a Google review", icon: "star", hidden: !marketingOn(session.company.settings), disabled: true, onSelect: () => undefined }
+      : {
+          // By email, or by text: only the ways an ask can go to this client.
+          label: "Ask for a review", icon: "star",
+          hidden: !marketingOn(session.company.settings) || !j.client, disabled: !reviewBy,
+          items: [
+            { label: "By email", icon: "mail", hidden: !askable("email"), onSelect: () => review.mutate("email") },
+            { label: "By text", icon: "messages", hidden: !askable("sms"), onSelect: () => review.mutate("sms") },
+          ],
+        },
+    {
+      // A finished job's before and after photos, on a page to share (Marketing → Showcases).
+      label: "Make a showcase", icon: "image",
+      hidden: !marketingOn(session.company.settings) || !isOffice || !can(session, "marketing") || !(["requires_invoicing", "completed"].includes(j.status) || visits.some((v) => v.status === "completed")),
+      onSelect: () => setDialog("showcase"),
+    },
+    { separator: true },
+    { label: "Pause job", icon: "pause", hidden: j.status !== "active" || j.kind !== "recurring" || Boolean(j.paused_at), onSelect: () => setDialog("pause") },
+    { label: "Resume job", icon: "play", hidden: !j.paused_at, onSelect: () => resume.mutate() },
+    { label: "Mark work complete", icon: "check", hidden: j.status !== "active" || j.kind === "one_off", onSelect: () => update.mutate({ status: "requires_invoicing" }) },
+    { label: "Close job", icon: "check", hidden: !["requires_invoicing"].includes(j.status), onSelect: () => closeJob("completed") },
+    { label: "Reopen job", icon: "undo", hidden: j.status === "active", onSelect: () => update.mutate({ status: "active" }) },
+    { label: "Archive job", icon: "archive", hidden: j.status === "archived", onSelect: () => closeJob("archived") },
+    { separator: true },
+    {
+      label: "Delete job",
+      icon: "trash",
+      danger: true,
+      hidden: !isOffice || hasInvoices,
+      onSelect: async () => {
+        if (await confirm({ title: `Delete job #${j.number}?`, body: "Its visits, line items and checklists are deleted too. Logged time and expenses are kept. This can't be undone.", confirmLabel: "Delete job", danger: true, typeToConfirm: visits.length > 5 ? "delete" : undefined })) remove.mutate();
+      },
+    },
+  ];
 
   return (
     <>
-      <BackLink to="/jobs">Jobs</BackLink>
-      <PageHeader
+      {/* The status (an active job's late, today, upcoming or unscheduled), its number, who it's for, where, and how often it repeats. */}
+      <DetailHeader
+        crumb={{ to: "/jobs", label: "Jobs" }}
         title={j.title}
+        documentTitle={`Job #${j.number}`}
+        status={<EntityStatus kind="job" status={j.job_state ?? j.status} />}
+        meta={[
+          `Job #${j.number}`,
+          j.client && <ClientPreview id={j.client.id}><Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link></ClientPreview>,
+          place,
+          j.kind === "recurring" && (j.recurrence_rule ? repeatText(j.recurrence_rule) : "Recurring"),
+          // Every client needs a card on file, and this one has none they agreed to that can be charged.
+          autopay.card_required && jobAutopay.data && !jobAutopay.data.onFile && !["completed", "archived"].includes(j.status) && <span className="chip chip-amber"><Icon name="card" size={12} />Card not set up</span>,
+        ]}
         actions={
           <>
             {seesInvoices && j.status !== "archived" && <Button icon="invoice" variant={j.status === "requires_invoicing" && !charging ? "primary" : "secondary"} onClick={() => setDialog("invoice")}>Create invoice</Button>}
             {canSell && j.status === "active" && j.kind === "one_off" && <Button variant="primary" icon="check" loading={update.isPending} onClick={markComplete}>Mark work complete</Button>}
-            {canSell && (
-              <Menu
-                items={[
-                  { label: "Edit details and schedule", icon: "edit", onSelect: () => setDialog("details") },
-                  { label: "New change order", icon: "quote", hidden: !["active", "requires_invoicing"].includes(j.status) || !j.client, onSelect: () => changeOrder.mutate() },
-                  {
-                    label: j.client?.reviewed_at ? "Already left a Google review" : reviewBy === "sms" ? "Ask for a review by text" : "Ask for a review", icon: "star",
-                    hidden: !marketingOn(session.company.settings) || !j.client, disabled: !reviewBy, onSelect: () => review.mutate(reviewBy!),
-                  },
-                  {
-                    // A finished job's before and after photos, on a page to share (Marketing → Showcases).
-                    label: "Make a showcase", icon: "image",
-                    hidden: !marketingOn(session.company.settings) || !isOffice || !can(session, "marketing") || !(["requires_invoicing", "completed"].includes(j.status) || visits.some((v) => v.status === "completed")),
-                    onSelect: () => setDialog("showcase"),
-                  },
-                  { separator: true },
-                  { label: "Pause job", icon: "pause", hidden: j.status !== "active" || j.kind !== "recurring" || Boolean(j.paused_at), onSelect: () => setDialog("pause") },
-                  { label: "Resume job", icon: "play", hidden: !j.paused_at, onSelect: () => resume.mutate() },
-                  { label: "Mark work complete", icon: "check", hidden: j.status !== "active" || j.kind === "one_off", onSelect: () => update.mutate({ status: "requires_invoicing" }) },
-                  { label: "Close job", icon: "check", hidden: !["requires_invoicing"].includes(j.status), onSelect: () => closeJob("completed") },
-                  { label: "Reopen job", icon: "undo", hidden: j.status === "active", onSelect: () => update.mutate({ status: "active" }) },
-                  { label: "Archive job", icon: "archive", hidden: j.status === "archived", onSelect: () => closeJob("archived") },
-                  {
-                    label: "Delete job",
-                    icon: "trash",
-                    danger: true,
-                    hidden: !isOffice || hasInvoices,
-                    onSelect: async () => {
-                      if (await confirm({ title: `Delete job #${j.number}?`, body: "Its visits, line items and checklists are deleted too. Logged time and expenses are kept. This can't be undone.", confirmLabel: "Delete job", danger: true, typeToConfirm: visits.length > 5 ? "delete" : undefined })) remove.mutate();
-                    },
-                  },
-                ]}
-              />
-            )}
           </>
         }
+        more={canSell ? more : undefined}
       />
-      {/* The status (an active job's late, today, upcoming or unscheduled), who it's for and how often it repeats. The number is under Details, the address with the client. */}
-      <div className="page-meta">
-        <EntityStatus kind="job" status={j.job_state ?? j.status} />
-        {j.client && <ClientPreview id={j.client.id}><Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link></ClientPreview>}
-        {j.kind === "recurring" && <span className="muted">{j.recurrence_rule ? repeatText(j.recurrence_rule) : "Recurring"}</span>}
-        {/* Every client needs a card on file, and this one has none they agreed to that can be charged. */}
-        {autopay.card_required && jobAutopay.data && !jobAutopay.data.onFile && !["completed", "archived"].includes(j.status) && <span className="chip chip-amber"><Icon name="card" size={12} />Card not set up</span>}
-      </div>
 
       {/* The database made the change the Mark work complete button makes (20261113000100), so the page says how, and how to undo it. */}
       {j.finished_by_visits_at && ["requires_invoicing", "completed"].includes(j.status) && (
-        <div className="muted small row wrap" style={{ gap: 6 }}>
+        <div className={styles.note}>
           <Icon name="check" size={14} />
           <span>Marked complete when its last visit was finished{canSell ? ". Reopen it if another visit is needed." : "."}</span>
           {canSell && <Button size="sm" variant="ghost" icon="undo" loading={update.isPending && update.variables?.status === "active"} onClick={() => update.mutate({ status: "active" })}>Reopen job</Button>}
         </div>
       )}
+      {/* At rest, not a problem: the quiet callout. */}
       {j.paused_at && j.status === "active" && (
-        <div className="callout callout-info">
-          <Icon name="pause" size={20} />
-          <div className="grow">Paused since {formatDate(j.paused_at)}. {j.resume_on ? `Visits start again on ${formatDate(j.resume_on)}.` : "No visits are scheduled until it's resumed."}</div>
+        <div className="callout">
+          <Icon name="pause" size={16} />
+          <div className="grow"><div>Paused since {formatDate(j.paused_at)}.</div>{j.resume_on ? `Visits start again on ${formatDate(j.resume_on)}.` : "No visits are scheduled until it's resumed."}</div>
           {canSell && <Button size="sm" icon="play" loading={resume.isPending} onClick={() => resume.mutate()}>Resume</Button>}
         </div>
       )}
       {/* Requires invoicing needs no banner: the pill says so and Create invoice is the page's green button. */}
       {uninvoiced > 0 && seesInvoices && j.status === "active" && j.billing_mode === "per_visit" && !charging && (
-        <div className="callout callout-info">
-          <Icon name="invoice" size={20} />
+        <div className="callout callout-good">
+          <Icon name="invoice" size={16} />
           <div className="grow">{uninvoiced} completed {uninvoiced === 1 ? "visit is" : "visits are"} ready to invoice.</div>
           <Button size="sm" onClick={() => setDialog("invoice")}>Invoice visits</Button>
         </div>
       )}
       {/* A monthly job's month that's due: its invoice, made here or with the others on Invoices. */}
       {seesInvoices && !charging && dueMonths.data?.map((d) => (
-        <div key={d.month} className="callout callout-info">
-          <Icon name="invoice" size={20} />
+        <div key={d.month} className="callout callout-good">
+          <Icon name="invoice" size={16} />
           <div className="grow">{monthText(d.month!)} needs its invoice.</div>
           <Button size="sm" loading={invoiceMonth.isPending && invoiceMonth.variables === d.month} onClick={() => invoiceMonth.mutate(d.month!)}>Invoice {monthText(d.month!).split(" ")[0]}</Button>
         </div>
       ))}
       {charging && j.status !== "archived" && (
-        <div className="muted small row" style={{ gap: 6 }}><Icon name="card" size={14} />Charged automatically {autopayDueText(charging.due_at, session.company.timezone)}.</div>
+        <div className={styles.note}><Icon name="card" size={14} /><span>Charged automatically {autopayDueText(charging.due_at, session.company.timezone)}.</span></div>
       )}
       {extras.data && extras.data.length > 0 && <ExtrasToReview jobId={j.id} extras={extras.data} visits={visits} />}
 
-      <div className="two-col">
-        <div className="wide stack-lg">
-          <section className="stack">
-            <div className="section-head">
-              <h2 className="section-title">Visits</h2>
-              {visits.length > 0 && <span className="muted small">{past.filter((v) => v.status === "completed").length} of {visits.length} done</span>}
-              {canDispatch && j.status !== "archived" && <Button size="sm" icon="plus" onClick={() => setVisit(newVisit())}>Add visit</Button>}
-            </div>
-            <div className="card" ref={visitsRef}>
-              {visits.length === 0 && (
-                <EmptyState inline title="No visits scheduled">
-                  {j.kind === "recurring" ? "Set how it repeats in Edit details, and visits are made for the next year." : null}
-                </EmptyState>
-              )}
-              {shownVisits.map((v) => {
-                const overdue = !["completed", "cancelled"].includes(v.status) && v.scheduled_on && v.scheduled_on < today;
-                return (
-                  <div key={v.id} className="card-row" style={{ cursor: canDispatch ? "pointer" : undefined }} onClick={() => canDispatch && setVisit({ ...v, job_id: j.id, property_id: j.property?.id ?? null, assignee_ids: v.assignees.map((a) => a.user_id), context: { label: `Job #${j.number}`, to: `/jobs/${j.id}` } })}>
-                    <span style={{ width: 4, alignSelf: "stretch", borderRadius: "var(--radius-sm)", background: (v.crew as { color?: string } | null)?.color || "var(--fill-3)" }} aria-hidden="true" />
-                    <span className="grow">
-                      <strong>{v.title}</strong>
-                      <span className={`small ${overdue ? "text-danger strong" : "muted"}`} style={{ display: "block" }}>
-                        {v.starts_at ? formatDateTime(v.starts_at, session.company.timezone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled"}
-                        {v.crew ? ` · ${(v.crew as { name: string }).name}` : ""}
-                        {overdue ? " · overdue" : ""}
-                        {v.invoice_id ? " · invoiced" : ""}
-                      </span>
-                      {v.hold_reason && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>Weather: {v.hold_reason}</span>}
-                      <VisitExtraLines extras={visitExtras.get(v.id) ?? []} visit={v} />
-                    </span>
-                    <StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} />
-                    {addsExtras && v.kind === "job" && visitTakesExtras(v) && (
-                      <Button size="sm" variant="ghost" icon="plus" aria-label={`Extra work on ${v.title}${v.scheduled_on ? `, ${formatDate(v.scheduled_on)}` : ""}`} title="Extra work on this visit" onClick={(e) => { e.stopPropagation(); setExtraVisit({ id: v.id, title: v.title, scheduled_on: v.scheduled_on }); }}>Extra work</Button>
-                    )}
-                    {canDispatch && !["completed", "cancelled"].includes(v.status) && (
-                      <Button size="sm" variant="ghost" icon="check" aria-label={`Complete ${v.title}`} title="Mark complete" loading={completeVisit.isPending && completeVisit.variables === v.id} onClick={(e) => { e.stopPropagation(); completeVisit.mutate(v.id); }} />
-                    )}
+      <DetailColumns
+        grouped
+        side={
+          <>
+            {/* How the quote it came from was priced (the paving calculator): the office's only, and fixed once sold. */}
+            {canSell && j.quote && <WorksheetsCard quoteId={j.quote.id} editable={false} />}
+            {seesCosts && (costs.isPending ? <SectionSkeleton rows={6} /> : (
+              <Section title="Job costing" className={styles.stacked}>
+                {belowLine && (
+                  <div className="callout callout-warning" role="status">
+                    <Icon name="alert" size={16} />
+                    <div className="grow">At {margin}% profit, this job is below your {profitLine}%.</div>
                   </div>
-                );
-              })}
-              {(upcoming.length > 12 || past.length > 0) && (
-                <div className="list-foot">
-                  <span>{upcoming.length > 12 ? `${upcoming.length - 12} more upcoming` : ""}</span>
-                  {past.length > 0 && <Button size="sm" variant="ghost" onClick={() => setShowPast(!showPast)}>{showPast ? "Hide past visits" : `Show ${past.length} past ${past.length === 1 ? "visit" : "visits"}`}</Button>}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <JobChecklists jobId={j.id} />
-
-          {!hasRole(session, "admin", "office", "estimator") && (
-            <>
-              <ScopeOfWork jobId={j.id} />
-              {addButtons}
-            </>
-          )}
-
-          {hasRole(session, "admin", "office", "estimator") && (
-            <section className="stack">
-              <h2 className="section-title">Line items</h2>
-              <LineItems table="job_line_items" parent="job_id" parentId={j.id} lines={j.lines} editable={canSell && ["active", "requires_invoicing"].includes(j.status)} onChanged={refresh} propertyId={j.property?.id} />
-              <FieldAddedLines jobId={j.id} lines={j.lines} />
-              {repeats && <JobDiscountNote jobId={j.id} lines={j.lines} seesInvoices={seesInvoices} canSwitch={canSell && j.status === "active"} onChanged={refresh} />}
-              {addButtons}
-            </section>
-          )}
-
-          {canSell && <ChangeOrders jobId={j.id} onStart={() => changeOrder.mutate()} starting={changeOrder.isPending} />}
-
-          <PhotosCard jobId={j.id} />
-          <PlansCard scope={{ kind: "job", id: j.id, propertyId: j.property?.id ?? null }} />
-
-          {/* Each wrapped (display: contents) so focus can find its add button as its dialog closes. */}
-          {shows.materials && <div data-extra="materials" style={{ display: "contents" }}><MaterialsCard jobId={j.id} showCosts={seesCosts} use={seesCosts ? cost.materialRows : undefined} startAdding={adding === "materials"} onAddClosed={doneAdding} /></div>}
-
-          {shows.expenses && <div data-extra="expenses" style={{ display: "contents" }}><ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} startAdding={adding === "expenses"} onAddClosed={doneAdding} /></div>}
-
-          {shows.pay && <div data-extra="pay" style={{ display: "contents" }}><JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} startAdding={adding === "pay"} onAddClosed={doneAdding} /></div>}
-
-          {seesInvoices && (
-            <section className="stack">
-              <h2 className="section-title">Invoices</h2>
-              <div className="card">
-                {invoices.isPending && <div className="card-row"><Skeleton width="50%" /></div>}
-                {/* Create invoice is in the page header, so the empty line doesn't repeat it. */}
-                {invoices.data?.length === 0 && <EmptyState inline title="Not invoiced yet" />}
-                {invoices.data?.map((inv) => (
-                  <Link key={inv.id} to={`/invoices/${inv.id}`} className="card-row">
-                    <strong className="grow">Invoice #{inv.number}{inv.kind === "progress" ? ` · pay app ${inv.pay_app_number}` : inv.kind === "deposit" ? " · deposit" : inv.kind === "visits" ? " · visits" : inv.kind === "retainage" ? " · retainage" : ""}</strong>
-                    <span className="tabular">{formatMoney(inv.total)}</span>
-                    <EntityStatus kind="invoice" status={inv.status} />
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
-        <aside className="narrow stack">
-          {/* How the quote it came from was priced (the paving calculator): the office's only, and fixed once sold. */}
-          {canSell && j.quote && <WorksheetsCard quoteId={j.quote.id} editable={false} />}
-          {seesCosts && (
-            <div className="card card-pad stack-sm">
-              <strong>Job costing</strong>
-              {costs.isPending ? <Skeleton height={60} /> : (
-                <>
-                  {belowLine && (
-                    <div className="callout callout-warning" role="status">
-                      <Icon name="alert" size={16} />
-                      <span className="grow small" style={{ fontWeight: 400 }}>At {margin}% profit, this job is below your {profitLine}%.</span>
-                    </div>
-                  )}
-                  <ProfitBar price={contract + cost.extras} labor={labor} crew={crew} expenses={expenses} materials={materials} />
-                  {/* The figures roll to their new values as line items, time and costs change. */}
-                  <div className="totals" style={{ marginTop: 6 }}>
-                    <div className="line" style={{ alignItems: "flex-start" }}>
-                      <span>Price{contractNote && <span className="muted small" style={{ display: "block" }}>{contractNote}</span>}</span>
-                      <AnimatedNumber value={contract} format={MONEY_CENTS} />
-                    </div>
-                    {/* Billed once each with its visit, on top of the price, which it doesn't change. */}
-                    {cost.extras !== 0 && <div className="line"><span>Extra work on visits</span><AnimatedNumber value={cost.extras} format={MONEY_CENTS} /></div>}
-                    <div className="line"><span>{cost.actualLabor ? "Line item materials" : "Line item costs"}</span><AnimatedNumber value={materials} format={MONEY_CENTS} /></div>
-                    <div className="line"><span>Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</span><AnimatedNumber value={labor} format={MONEY_CENTS} /></div>
-                    <div className="line"><span>Sub and crew pay</span><AnimatedNumber value={crew} format={MONEY_CENTS} /></div>
-                    <div className="line"><span>Expenses</span><AnimatedNumber value={expenses} format={MONEY_CENTS} /></div>
-                    <div className="line grand">
-                      <span>Profit</span>
-                      <span style={{ color: profitColor }}><AnimatedNumber value={profit} format={MONEY_CENTS} />{margin !== null ? ` (${margin}%)` : ""}</span>
-                    </div>
-                  </div>
-                  {cost.note && <span className="muted small">{cost.note}</span>}
-                  {cost.materialNote && <span className="muted small">{cost.materialNote}</span>}
-                  {cost.expenseNote && <span className="muted small">{cost.expenseNote}</span>}
-                  {labor === 0 && (costs.data?.hours ?? 0) > 0 && <span className="muted small">Set labor rates in Settings → Team to cost tracked hours.</span>}
-                </>
-              )}
-            </div>
-          )}
-          <div className="card card-pad stack-sm">
-            <div className="row-between">
-              <strong>Details</strong>
-              {canSell && <Button size="sm" variant="ghost" icon="edit" onClick={() => setDialog("details")}>Edit</Button>}
-            </div>
-            <dl className="kv">
-              <dt>Job number</dt><dd>#{j.number}</dd>
-              {canSell && (
-                <>
-                  <dt>Contract</dt>
-                  <dd>
+                )}
+                <ProfitBar price={contract + cost.extras} labor={labor} crew={crew} expenses={expenses} materials={materials} />
+                {/* The figures roll to their new values as line items, time and costs change. Each cost's dot is its color in the bar. */}
+                <Facts label="Job costing">
+                  {/* What it brings in has no part of the bar: its label keeps the dots' column so all of them line up. */}
+                  <Fact label={<CostKey>Price</CostKey>}>
                     <AnimatedNumber value={contract} format={MONEY_CENTS} />
-                    {contractNote && <span className="muted small" style={{ display: "block" }}>{contractNote}</span>}
-                  </dd>
-                </>
-              )}
-              <dt>Billing</dt><dd>{billingText(j)}</dd>
-              {autopayOn && j.client && (
-                <>
-                  <dt>Autopay</dt>
-                  <dd>
+                    {contractNote && <span className={styles.factNote}>{contractNote}</span>}
+                  </Fact>
+                  {/* Billed once each with its visit, on top of the price, which it doesn't change. */}
+                  {cost.extras !== 0 && <Fact label={<CostKey>Extra work on visits</CostKey>}><AnimatedNumber value={cost.extras} format={MONEY_CENTS} /></Fact>}
+                  <Fact label={<CostKey part="materials">{cost.actualLabor ? "Line item materials" : "Line item costs"}</CostKey>}><AnimatedNumber value={materials} format={MONEY_CENTS} /></Fact>
+                  <Fact label={<CostKey part="labor">Labor ({(costs.data?.hours ?? 0).toFixed(1)} h)</CostKey>}><AnimatedNumber value={labor} format={MONEY_CENTS} /></Fact>
+                  <Fact label={<CostKey part="crew">Sub and crew pay</CostKey>}><AnimatedNumber value={crew} format={MONEY_CENTS} /></Fact>
+                  <Fact label={<CostKey part="expenses">Expenses</CostKey>}><AnimatedNumber value={expenses} format={MONEY_CENTS} /></Fact>
+                  <Fact label={<CostKey part="profit"><strong>Profit</strong></CostKey>} tone={profitTone}>
+                    <AnimatedNumber value={profit} format={MONEY_CENTS} />{margin !== null ? ` (${margin}%)` : ""}
+                  </Fact>
+                </Facts>
+                {(cost.note || cost.materialNote || cost.expenseNote || (labor === 0 && (costs.data?.hours ?? 0) > 0)) && (
+                  <div className={styles.notes}>
+                    {cost.note && <p>{cost.note}</p>}
+                    {cost.materialNote && <p>{cost.materialNote}</p>}
+                    {cost.expenseNote && <p>{cost.expenseNote}</p>}
+                    {labor === 0 && (costs.data?.hours ?? 0) > 0 && <p>Set labor rates in Settings → Team to cost tracked hours.</p>}
+                  </div>
+                )}
+              </Section>
+            ))}
+            <Section title="Details" action={canSell && <button type="button" onClick={() => setDialog("details")}><Icon name="edit" size={14} />Edit</button>}>
+              <Facts label="Job details">
+                {canSell && (
+                  <Fact label="Contract">
+                    <AnimatedNumber value={contract} format={MONEY_CENTS} />
+                    {contractNote && <span className={styles.factNote}>{contractNote}</span>}
+                  </Fact>
+                )}
+                <Fact label="Billing">{billingText(j)}</Fact>
+                {autopayOn && j.client && (
+                  <Fact label="Autopay">
                     <label className="switch-row" style={{ fontWeight: 400 }}>
                       <input type="checkbox" className="switch" checked={j.autopay} disabled={!autopayAllowed(j.kind, j.billing_mode, j.pricing, j.invoice_schedule) || j.status === "archived"} onChange={(e) => setAutopay.mutate(e.target.checked)} />
                       Charge their saved card
                     </label>
-                    {autopayHint && <span className="muted small" style={{ display: "block" }}>{autopayHint}</span>}
-                  </dd>
-                </>
-              )}
-              {j.kind === "recurring" && <><dt>Repeats</dt><dd>{j.recurrence_rule ? repeatText(j.recurrence_rule) : "—"}{j.starts_on ? `, from ${formatDate(j.starts_on)}` : ""}{j.ends_on ? ` to ${formatDate(j.ends_on)}` : ""}</dd></>}
-              {j.crew && <><dt>Crew</dt><dd>{j.crew.name}</dd></>}
-              {snowSite && featureOn(session.company.settings, "snow_app") && <><dt>Snow</dt><dd><Link to={`/snow?edit=${j.id}`}>Plows at {Number(snowSite.trigger_in)} in</Link></dd></>}
-              {j.po_number && <><dt>PO</dt><dd>{j.po_number}</dd></>}
-              {j.permit_number && <><dt>Permit</dt><dd>{j.permit_number}</dd></>}
-              {Number(j.retainage_pct) > 0 && <><dt>Retainage</dt><dd>{Number(j.retainage_pct)}%</dd></>}
-              {j.warranty_until && <><dt>Warranty</dt><dd>until {formatDate(j.warranty_until)}</dd></>}
-              {j.quote && <><dt>From</dt><dd><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></dd></>}
-              {/* Who to ask about what was promised: the estimate's salesperson, for crew leads too (they can't open the estimate). */}
-              {j.salesperson_id && team.data && <><dt>Sold by</dt><dd>{memberName(team.data.find((m) => m.user_id === j.salesperson_id)) ?? "Former team member"}</dd></>}
-              <CustomFieldList fields={jobFields} values={j.custom_fields} />
-            </dl>
-            {j.instructions && <Note className="small" style={{ padding: 10, background: "var(--note)", borderRadius: "var(--radius-control)", border: "1px solid var(--note-border)" }} text={j.instructions} />}
-          </div>
-          {/* The quote's payment schedule, for the people who look after money (nothing shows without one). */}
-          {seesInvoices && j.quote && <JobPaymentSchedule jobId={j.id} finalInvoice={live.find((i) => i.kind === "standard") ?? null} />}
-          {j.client && (
-            <div className="card card-pad stack-sm">
-              <strong>Client</strong>
-              <Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link>
-              {j.client.phone && <a href={`tel:${j.client.phone}`} className="small">{j.client.phone}</a>}
-              {j.property && (
-                <>
-                  <span className="small">{addressLine(j.property)}</span>
-                  <span style={{ justifySelf: "start" }}><MapsLink className="btn btn-sm btn-ghost" place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink></span>
-                  <PropertyEquipment propertyId={j.property.id} inCard />
-                </>
-              )}
-            </div>
+                    {autopayHint && <span className={styles.factNote}>{autopayHint}</span>}
+                  </Fact>
+                )}
+                {j.kind === "recurring" && <Fact label="Repeats">{j.recurrence_rule ? repeatText(j.recurrence_rule) : "Recurring"}{j.starts_on ? `, from ${formatDate(j.starts_on)}` : ""}{j.ends_on ? ` to ${formatDate(j.ends_on)}` : ""}</Fact>}
+                <Fact label="Crew">{j.crew?.name}</Fact>
+                {snowSite && featureOn(session.company.settings, "snow_app") && <Fact label="Snow"><Link to={`/snow?edit=${j.id}`}>Plows at {Number(snowSite.trigger_in)} in</Link></Fact>}
+                <Fact label="PO">{j.po_number}</Fact>
+                <Fact label="Permit">{j.permit_number}</Fact>
+                <Fact label="Retainage">{Number(j.retainage_pct) > 0 && `${Number(j.retainage_pct)}%`}</Fact>
+                <Fact label="Warranty">{j.warranty_until && `Until ${formatDate(j.warranty_until)}`}</Fact>
+                {j.quote && <Fact label="From"><Link to={`/quotes/${j.quote.id}`}>Quote #{j.quote.number}</Link></Fact>}
+                {/* Who to ask about what was promised: the estimate's salesperson, for crew leads too (they can't open the estimate). */}
+                {j.salesperson_id && team.data && <Fact label="Sold by">{memberName(team.data.find((m) => m.user_id === j.salesperson_id)) ?? "Former team member"}</Fact>}
+                <CustomFieldFacts fields={jobFields} values={j.custom_fields} />
+                {j.instructions && <Fact label="Instructions for the crew" wide><Note className={styles.instructions} text={j.instructions} /></Fact>}
+              </Facts>
+            </Section>
+            {/* The quote's payment schedule, for the people who look after money (nothing shows without one). */}
+            {seesInvoices && j.quote && <JobPaymentSchedule jobId={j.id} finalInvoice={live.find((i) => i.kind === "standard") ?? null} />}
+            {j.client && (
+              <Section
+                title="Client"
+                className={styles.stacked}
+                action={j.property && <MapsLink className={styles.directions} place={j.property}><Icon name="navigation" size={14} />Directions</MapsLink>}
+              >
+                <Facts label="Client">
+                  <Fact label="Name"><Link to={`/clients/${j.client.id}`}>{j.client.display_name}</Link></Fact>
+                  <Fact label="Phone">{j.client.phone && <a href={`tel:${j.client.phone}`}>{j.client.phone}</a>}</Fact>
+                  <Fact label="Property">{j.property && addressLine(j.property)}</Fact>
+                </Facts>
+                {j.property && <PropertyEquipment propertyId={j.property.id} inCard />}
+              </Section>
+            )}
+          </>
+        }
+      >
+        <Section
+          title="Visits"
+          count={visits.length > 0 ? `${doneCount} of ${visits.length} done` : undefined}
+          className={styles.visits}
+          action={canDispatch && j.status !== "archived" && <button type="button" onClick={() => setVisit(newVisit())}><Icon name="plus" size={14} />Add visit</button>}
+        >
+          {visits.length === 0 ? (
+            <EmptyState inline title="No visits scheduled">
+              {j.kind === "recurring" ? "Set how it repeats in Edit details, and visits are made for the next year." : null}
+            </EmptyState>
+          ) : shownVisits.length === 0 ? (
+            // Every visit is done or cancelled: the way to them is on the same line. As they show, the button
+            // goes, so keyboard focus moves to the one that hides them again.
+            <EmptyState
+              inline
+              title="No visits coming up"
+              action={
+                <Button onClick={() => { setShowPast(true); requestAnimationFrame(() => document.querySelector<HTMLElement>(`.${styles.visits} .il-more`)?.focus()); }}>
+                  {`Show ${past.length} past ${past.length === 1 ? "visit" : "visits"}`}
+                </Button>
+              }
+            />
+          ) : (
+            <ul className="rel" role="list" aria-label="Visits" ref={visitsRef}>
+              {shownVisits.map((v) => {
+                const open = !["completed", "cancelled"].includes(v.status);
+                const overdue = open && Boolean(v.scheduled_on) && v.scheduled_on! < today;
+                const crewOf = v.crew as { name: string; color?: string | null } | null;
+                const day = v.scheduled_on ? visitDay(v.scheduled_on, today) : null;
+                const title = (
+                  <>
+                    <span className="rel-title">{v.title}</span>
+                    {day && <span className="sr-only">, {day.weekday} {day.date}</span>}
+                  </>
+                );
+                return (
+                  <li key={v.id} className={cx("rel-row", canDispatch && "rel-row-link", styles.visit)} data-done={!open || undefined}>
+                    <span className={cx("rel-lead", styles.visitDay)} data-tone={overdue ? "danger" : undefined} aria-hidden="true">
+                      {day ? <><span>{day.weekday}</span><b>{day.date}</b></> : <Icon name="calendar" size={15} />}
+                    </span>
+                    <div className="rel-body">
+                      {canDispatch ? <button type="button" className="rel-link" onClick={() => openVisit(v)}>{title}</button> : <span className="rel-head">{title}</span>}
+                      <MetaLine
+                        className="rel-sub"
+                        parts={[
+                          v.starts_at ? formatTime(v.starts_at, timeZone) : v.scheduled_on ? "Anytime" : "Not scheduled",
+                          crewOf && <span className={styles.crew}><i style={{ background: crewOf.color || "var(--fill-3)" }} aria-hidden="true" />{crewOf.name}</span>,
+                          overdue && <span className={styles.overdue}>Overdue</span>,
+                          v.invoice_id && "Invoiced",
+                        ]}
+                      />
+                      {v.hold_reason && <div className={styles.hold}>Weather: {v.hold_reason}</div>}
+                      <VisitExtraLines extras={visitExtras.get(v.id) ?? []} visit={v} />
+                    </div>
+                    <span className="rel-end"><StatusPill label={statusText("visit", v.status)} tone={visitTone(v.status)} /></span>
+                    {/* Every row keeps the column, so the statuses line up whether a row has actions or not. */}
+                    {(addsExtras || canDispatch) && (
+                      <span className="rel-actions">
+                        {addsExtras && v.kind === "job" && visitTakesExtras(v) && (
+                          <Button size="sm" variant="ghost" icon="plus" aria-label={`Extra work on ${v.title}${v.scheduled_on ? `, ${formatDate(v.scheduled_on)}` : ""}`} title="Extra work on this visit" onClick={() => setExtraVisit({ id: v.id, title: v.title, scheduled_on: v.scheduled_on })}>Extra work</Button>
+                        )}
+                        {canDispatch && open && (
+                          // An icon on a desktop's hover; on a phone, with its word, as the row's actions sit on a line of their own.
+                          <Button size="sm" variant="ghost" icon="check" aria-label={`Complete ${v.title}`} title="Mark complete" loading={completeVisit.isPending && completeVisit.variables === v.id} onClick={() => completeVisit.mutate(v.id)}><span className={styles.phoneWord}>Complete</span></Button>
+                        )}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </aside>
-      </div>
+          {shownVisits.length > 0 && (upcoming.length > 12 || past.length > 0) && (
+            <ListFoot more={past.length > 0 ? { onClick: () => setShowPast(!showPast), label: showPast ? "Hide past visits" : `Show ${past.length} past ${past.length === 1 ? "visit" : "visits"}` } : undefined}>
+              {upcoming.length > 12 ? `${upcoming.length - 12} more upcoming` : ""}
+            </ListFoot>
+          )}
+        </Section>
+
+        <JobChecklists jobId={j.id} />
+
+        {!hasRole(session, "admin", "office", "estimator") && (
+          <>
+            <ScopeOfWork jobId={j.id} />
+            {addButtons}
+          </>
+        )}
+
+        {hasRole(session, "admin", "office", "estimator") && (
+          <Section title="Line items" count={j.lines.length || undefined} className={styles.stacked}>
+            <LineItems table="job_line_items" parent="job_id" parentId={j.id} lines={j.lines} editable={canSell && ["active", "requires_invoicing"].includes(j.status)} onChanged={refresh} propertyId={j.property?.id} />
+            <FieldAddedLines jobId={j.id} lines={j.lines} />
+            {repeats && <JobDiscountNote jobId={j.id} lines={j.lines} seesInvoices={seesInvoices} canSwitch={canSell && j.status === "active"} onChanged={refresh} />}
+            {addButtons}
+          </Section>
+        )}
+
+        {canSell && <ChangeOrders jobId={j.id} onStart={() => changeOrder.mutate()} starting={changeOrder.isPending} />}
+
+        <PhotosCard jobId={j.id} />
+        <PlansCard scope={{ kind: "job", id: j.id, propertyId: j.property?.id ?? null }} />
+
+        {/* Each wrapped (display: contents) so focus can find its add button as its dialog closes. */}
+        {shows.materials && <div data-extra="materials" style={{ display: "contents" }}><MaterialsCard jobId={j.id} showCosts={seesCosts} use={seesCosts ? cost.materialRows : undefined} startAdding={adding === "materials"} onAddClosed={doneAdding} /></div>}
+
+        {shows.expenses && <div data-extra="expenses" style={{ display: "contents" }}><ExpensesCard jobId={j.id} onChanged={() => queryClient.invalidateQueries({ queryKey: ["job", id, "costs"] })} startAdding={adding === "expenses"} onAddClosed={doneAdding} /></div>}
+
+        {shows.pay && <div data-extra="pay" style={{ display: "contents" }}><JobPayCard job={{ id: j.id, number: j.number, title: j.title, archived: j.status === "archived" }} visits={visits} lines={j.lines} startAdding={adding === "pay"} onAddClosed={doneAdding} /></div>}
+
+        {seesInvoices && (
+          <Section title="Invoices" count={invoices.data?.length || undefined}>
+            {invoices.isPending ? (
+              <div className={styles.loadingRow}><Skeleton width="50%" /></div>
+            ) : invoices.data?.length ? (
+              <RelatedList label="Invoices">
+                {invoices.data.map((inv) => (
+                  <RelatedRow
+                    key={inv.id}
+                    to={`/invoices/${inv.id}`}
+                    lead={`#${inv.number}`}
+                    title={inv.kind === "progress" ? `Pay app ${inv.pay_app_number}` : inv.kind === "deposit" ? "Deposit" : inv.kind === "visits" ? "Visits" : inv.kind === "retainage" ? "Retainage" : "Invoice"}
+                    end={<><EntityStatus kind="invoice" status={inv.status} /><b>{formatMoney(inv.total)}</b></>}
+                  />
+                ))}
+              </RelatedList>
+            ) : (
+              // Create invoice is in the page header, so the empty line doesn't repeat it.
+              <EmptyState inline title="Not invoiced yet" />
+            )}
+          </Section>
+        )}
+      </DetailColumns>
 
       {visit && <VisitDialog visit={visit} onClose={() => setVisit(null)} onSaved={refresh} />}
       {extraVisit && <ExtraWorkDialog visit={extraVisit} jobId={j.id} onClose={() => setExtraVisit(null)} />}
@@ -667,19 +713,37 @@ export function JobPage() {
   );
 }
 
+/** A visit's day for the left of its row: "Wed" (or "Today") over "Nov 4", with the year when it isn't this one. */
+function visitDay(date: string, today: string) {
+  const at = new Date(`${date}T12:00:00`);
+  return {
+    weekday: date === today ? "Today" : at.toLocaleDateString(intlLocale(), { weekday: "short" }),
+    date: at.toLocaleDateString(intlLocale(), { month: "short", day: "numeric", year: date.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric" }),
+  };
+}
+
+/** The bar's parts, each with its color: the same dot keys each cost's line under it. */
+const COST_PARTS = [
+  { key: "materials", label: "Line item costs", color: "#c9852a" },
+  { key: "labor", label: "Labor", color: "#3474d4" },
+  { key: "crew", label: "Sub and crew pay", color: "#0e9aa7" },
+  { key: "expenses", label: "Expenses", color: "#8b5cf6" },
+  { key: "profit", label: "Profit", color: "var(--green)" },
+] as const;
+
+/** A cost's label with its color in the bar before it; with no part (the price), an empty place for the dot. */
+function CostKey({ part, children }: { part?: (typeof COST_PARTS)[number]["key"]; children: ReactNode }) {
+  return <span className={styles.costKey}><i style={part ? { background: COST_PARTS.find((p) => p.key === part)!.color } : undefined} aria-hidden="true" />{children}</span>;
+}
+
 /** Price split into costs and profit, like Jobber's job profit bar. */
 function ProfitBar({ price, labor, crew, expenses, materials }: { price: number; labor: number; crew: number; expenses: number; materials: number }) {
   const total = Math.max(price, labor + crew + expenses + materials, 1);
-  const parts = [
-    { label: "Line item costs", value: materials, color: "#c9852a" },
-    { label: "Labor", value: labor, color: "#3474d4" },
-    { label: "Sub and crew pay", value: crew, color: "#0e9aa7" },
-    { label: "Expenses", value: expenses, color: "#8b5cf6" },
-    { label: "Profit", value: Math.max(0, price - labor - crew - expenses - materials), color: "var(--green)" },
-  ];
+  const values: Record<(typeof COST_PARTS)[number]["key"], number> = { materials, labor, crew, expenses, profit: Math.max(0, price - labor - crew - expenses - materials) };
+  const parts = COST_PARTS.map((p) => ({ ...p, value: values[p.key] }));
   return (
-    <div style={{ display: "flex", height: 12, borderRadius: "var(--radius-pill)", overflow: "hidden", background: "var(--fill-2)" }} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>
-      {parts.map((p) => p.value > 0 && <span key={p.label} title={`${p.label}: ${formatMoney(p.value)}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color, transition: "width var(--dur-slow) var(--ease-out)" }} />)}
+    <div className={styles.bar} role="img" aria-label={parts.map((p) => `${p.label} ${formatMoney(p.value)}`).join(", ")}>
+      {parts.map((p) => p.value > 0 && <span key={p.key} title={`${p.label}: ${formatMoney(p.value)}`} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} />)}
     </div>
   );
 }

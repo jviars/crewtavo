@@ -1,92 +1,126 @@
 /*
- * Snow → Storm (StormBoard.tsx). The snow coming sits on the same sky the weather popup opens to
- * (SnowWeather.module.css): the sky brings its own colors, so it looks the same in the light and
- * dark themes, with white type checked against each sky for contrast. Everything under it is the
- * house's own cards and tables.
+ * Snow → Storm (StormBoard.tsx, App-Snow.dc.html). The snow coming sits on a sky of its own: a flat
+ * slate gradient when it snows, the weather popup's colors for any other sky (SnowWeather.tsx), so it
+ * looks the same in the light and dark themes, with white type checked against each for contrast.
+ * Everything under it is the house's own: a stats strip, then inbox rows on hairlines.
  */
-@keyframes sky-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes sky-in { from { opacity: 0; transform: translateY(4px); } }
 .sky {
   display: grid;
-  gap: 14px;
-  padding: 20px clamp(16px, 2.4vw, 26px) 14px;
-  border-radius: 18px;
-  background:
-    radial-gradient(110% 70% at 12% -12%, var(--sky-glow), transparent 62%),
-    radial-gradient(70% 45% at 96% 4%, rgba(255, 255, 255, 0.07), transparent 60%),
-    linear-gradient(180deg, var(--sky-top), var(--sky-bottom));
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 20px;
+  padding: 20px 22px 16px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--sky-top), var(--sky-bottom));
   color: #fff;
-  animation: sky-in 0.4s var(--ease-enter, ease-out) both;
+  animation: sky-in 0.3s var(--ease-enter, ease-out) both;
 }
 @media (prefers-reduced-motion: reduce) { .sky { animation: none; } }
 .sky a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
-
-.coming { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: end; gap: 12px 36px; }
-.lead { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.lead > picture, .lead > img { flex: none; }
-.kicker { color: rgba(255, 255, 255, 0.78); font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
-.amount { font-size: clamp(34px, 4.4vw, 46px); font-weight: 600; line-height: 1.1; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
-.story { min-height: 1.4em; margin-top: 4px; color: rgba(255, 255, 255, 0.9); font-size: var(--fs-14); text-wrap: pretty; }
-
-/* Hour by hour at the shop. Its ticks read on the sky. */
-.hourly { display: grid; gap: 2px; min-width: 0; }
-.hourly :global(.recharts-cartesian-axis-tick-value) { fill: rgba(255, 255, 255, 0.78); }
-.more { justify-self: end; display: inline-flex; align-items: center; gap: 2px; padding: 4px 0 4px 8px; border: 0; background: none; color: #fff; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.sky > :not(.kicker, .credit) { grid-column: 1 / -1; }
+.kicker { grid-column: 1; font-size: var(--fs-12); font-weight: 600; color: rgba(255, 255, 255, 0.78); }
+.credit { grid-column: 2; grid-row: 1; justify-self: end; font-size: var(--fs-11); color: rgba(255, 255, 255, 0.7); white-space: nowrap; }
+.credit a { color: rgba(255, 255, 255, 0.9); }
+.amount { margin-top: 2px; font-size: 40px; font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.story { max-width: 640px; min-height: 1.4em; margin: 6px 0 0; font-size: var(--fs-13); line-height: 1.5; color: rgba(255, 255, 255, 0.88); text-wrap: pretty; }
+.storySkeleton { display: inline-block; vertical-align: middle; opacity: 0.35; }
+/* The weather in detail, after the sentence. */
+.more { display: inline-flex; align-items: center; gap: 1px; padding: 0; border: 0; border-radius: var(--radius-sm); background: none; color: #fff; font-size: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .more:hover { text-decoration: underline; text-underline-offset: 2px; }
-.more:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: var(--radius-sm); }
+.more:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
-/* An official alert in force: its name, opening to what it says. */
-.alert { border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 12px; background: rgba(8, 15, 30, 0.3); font-size: var(--fs-14); }
-.alert summary { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-weight: 700; cursor: pointer; list-style: none; }
+/* Hour by hour: a bar each, the heaviest white, with the clock under them. */
+.hourly { margin-top: 14px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 54px; }
+.bar { flex: 1 1 0; min-width: 0; border-radius: 2px 2px 0 0; background: rgba(255, 255, 255, 0.5); }
+.bar[data-peak] { background: #fff; }
+.bar[data-none] { height: 2px !important; background: rgba(255, 255, 255, 0.22); }
+.marks { position: relative; height: 16px; margin-top: 4px; font-size: var(--fs-11); color: rgba(255, 255, 255, 0.7); }
+.marks > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.marks > span[data-edge="start"] { transform: translateX(-12%); }
+.marks > span[data-edge="end"] { transform: translateX(-88%); }
+
+/* An official alert in force, on a hairline at the foot: its name, opening to what it says. */
+.alert { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.18); font-size: var(--fs-12); color: rgba(255, 255, 255, 0.92); }
+.alert + .alert { margin-top: 8px; padding-top: 8px; }
+.alert summary { display: flex; align-items: center; gap: 8px; min-height: 22px; cursor: pointer; list-style: none; }
 .alert summary::-webkit-details-marker { display: none; }
-.alert summary > svg { flex: none; color: #ffcf70; }
-.alert summary::after { content: ""; flex: none; width: 7px; height: 7px; margin-left: auto; border-right: 2px solid rgba(255, 255, 255, 0.7); border-bottom: 2px solid rgba(255, 255, 255, 0.7); transform: rotate(45deg) translateY(-2px); transition: transform var(--dur-fast); }
+.alert summary > svg { flex: none; color: #ffc53d; }
+.alert summary b { font-weight: 600; color: #fff; }
+.alert summary::after { content: ""; flex: none; width: 6px; height: 6px; margin: 0 4px 0 auto; border-right: 1.5px solid rgba(255, 255, 255, 0.7); border-bottom: 1.5px solid rgba(255, 255, 255, 0.7); transform: rotate(45deg) translateY(-2px); transition: transform var(--dur-fast); }
 .alert[open] summary::after { transform: rotate(-135deg) translateY(-2px); }
-.alert summary:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: 12px; }
-.alert p { margin: 0; padding: 0 14px 10px; color: rgba(255, 255, 255, 0.9); }
-.fine { font-size: var(--fs-12); }
+.alert summary:focus-visible { outline: 2px solid #fff; outline-offset: 2px; border-radius: var(--radius-sm); }
+.alertBody { display: grid; gap: 6px; max-width: 720px; padding: 8px 0 2px 22px; }
+.alertBody p { margin: 0; }
+.alertText { white-space: pre-wrap; font-size: var(--fs-13); line-height: 1.5; }
+.fine { color: rgba(255, 255, 255, 0.72); }
 
-.credit { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 4px 16px; color: rgba(255, 255, 255, 0.78); font-size: var(--fs-12); }
+/* Before the forecast is in: the sky's shape, quiet. */
+.skyLoading { display: grid; gap: 12px; align-content: start; min-height: 150px; padding: 22px; border-radius: 12px; background: var(--fill-2); }
 
-@media (max-width: 760px) {
-  .coming { grid-template-columns: 1fr; }
-  .lead > picture img, .lead > img { width: 64px; height: 64px; }
-}
+.of { font-size: var(--fs-14); font-weight: 500; letter-spacing: 0; color: var(--quiet); }
 
-/* ---------- The customers, piled by what's left to do ---------- */
-.rows .group th { padding: 0; border-bottom: 1px solid var(--divider); background: var(--fill); font-size: var(--fs-13); font-weight: 700; color: var(--ink); white-space: normal; }
-.rows tbody + tbody .group th { border-top: 1px solid var(--divider); }
-.groupHead { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 16px; }
-.groupHead > :global(.btn) { margin-left: auto; }
-.count { min-width: 22px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: var(--fs-12); font-variant-numeric: tabular-nums; text-align: center; }
-.group[data-group="schedule"] .count { background: var(--warning-tint); color: var(--warning); }
-.group[data-group="check"] .count { background: var(--danger-tint); color: var(--danger); }
-.group[data-group="scheduled"] .count { background: var(--green-tint); color: var(--green-dark); }
-
+/* ---------- The rows ---------- */
 /* The forecast against the triggers: a bar that reaches the plow's line (and the salt's, shorter) or doesn't. */
-.reading { display: inline-flex; align-items: center; gap: 10px; }
-/* The forecast opens the weather there, and reads in ink: link green would say "go" on a row that's under its trigger. */
-.rows td a.inches { color: var(--text-2); }
-.rows td a.inches[data-reached] { color: var(--ink); font-weight: 700; }
-.rows td a.inches:hover { text-decoration: underline; text-underline-offset: 2px; }
-.gauge { position: relative; flex: none; width: 84px; height: 6px; border-radius: var(--radius-pill); background: var(--fill-3); }
+:global(.il-meta) > .reading { display: inline-flex; flex: none; align-items: center; gap: 7px; overflow: visible; }
+:global(.il-meta) > .reading > .gauge { position: relative; flex: none; width: 64px; height: 6px; overflow: visible; border-radius: var(--radius-pill); background: var(--fill-3); }
 .fill { position: absolute; inset: 0 auto 0 0; min-width: 6px; border-radius: var(--radius-pill); background: var(--text-4); }
 .fill[data-reached] { background: var(--info); }
-.mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface); }
-.mark[data-salt] { top: -2px; bottom: -2px; background: var(--text-3); }
+.mark { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
+.mark[data-salt] { top: -1px; bottom: -1px; background: var(--text-3); }
+/* The forecast reads in ink once it reaches a trigger, quiet under it: link green would say "go" on a row that isn't. */
+:global(.il-meta) > .reading > a.inches { overflow: visible; color: var(--text-2); font-weight: 500; text-decoration: none; }
+:global(.il-meta) > .reading > a.inches[data-reached] { color: var(--ink); font-weight: 600; }
+:global(.il-meta) > .reading > a.inches:hover { text-decoration: underline; text-underline-offset: 2px; }
 
-.work { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; white-space: nowrap; }
-.work > svg { flex: none; color: var(--text-3); }
-.yes { color: var(--green-dark); }
-.of { font-size: var(--fs-16); font-weight: 600; color: var(--text-3); letter-spacing: 0; }
-.phoneOnly { display: none; }
+.grew { color: var(--warning); font-weight: 600; }
+.report { font-weight: 600; }
 
-/* On a phone a row is a card: who and where it stands on top, the rest under them, and nothing for a dash. */
+/* The one green button in a pile's heading, small and filled (App-Snow's "Schedule all 6"). */
+:global(.il-head-end) .go { height: 26px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--green-solid); color: #fff; font-size: var(--fs-12); font-weight: 600; }
+:global(.il-head-end) .go:hover { background: var(--green-solid-hover); color: #fff; text-decoration: none; }
+
+/* Not this storm: folded into one line until it's opened. */
+.foldHead { padding: 0; }
+.foldHead > button { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; min-height: 40px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.foldHead > button:hover { color: var(--ink); }
+.foldHead > button:disabled { cursor: default; }
+.foldHead > button > svg { flex: none; color: var(--quiet); transition: transform var(--dur-fast); }
+.foldHead > button[aria-expanded="true"] > svg { transform: rotate(90deg); }
+.foldNote { min-width: 0; overflow: hidden; font-weight: 400; color: var(--quiet); text-overflow: ellipsis; white-space: nowrap; }
+.foldNote::before { content: "· "; }
+.fold:not(:has([aria-expanded="true"])) .foldHead { border-bottom: 1px solid var(--row-divider); }
+@media (prefers-reduced-motion: reduce) { .foldHead > button > svg { transition: none; } }
+
+/* Storms that schedule themselves: one switch, on the page itself. */
+.auto { display: flex; align-items: flex-start; gap: 12px; max-width: 760px; cursor: pointer; }
+.auto > :global(.switch) { margin-top: 1px; }
+.autoTitle { display: block; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.autoHint { display: block; margin-top: 2px; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.footnote { margin: -8px 0 0; font-size: var(--fs-12); color: var(--quiet); }
+
 @media (max-width: 900px) {
-  .rows tbody tr:not(.group) { grid-template-columns: minmax(0, 1fr) auto; }
-  .rows tbody tr:not(.group) > td { grid-column: 1 / -1; }
-  .rows tbody tr:not(.group) > td.who { grid-column: 1; }
-  .rows tbody tr:not(.group) > td.status { grid-column: 2; grid-row: 1 / span 2; justify-self: end; max-width: 150px; text-align: right; }
-  .rows tr.group { padding: 0; }
-  .rows td.blank { display: none; }
-  .phoneOnly { display: inline; }
+  .sky { padding: 16px 18px 14px; border-radius: 18px; }
+  .credit { grid-column: 1 / -1; grid-row: auto; order: 9; justify-self: start; margin-top: 10px; white-space: normal; }
+  .amount { font-size: 36px; }
+  .story { font-size: var(--fs-14); }
+  .bars { height: 44px; }
+  .more { min-height: 32px; }
+  .alert { font-size: var(--fs-13); }
+  .alert summary { min-height: 32px; }
+  .skyLoading { border-radius: 18px; background: var(--m-card); }
+  /* Small links in a row, and tomorrow's schedule in its heading while today's is pinned: 44px tall to a thumb. */
+  :global(.il-meta) > .reading > a.inches, :global(.il-head-end) > .words { position: relative; }
+  :global(.il-meta) > .reading > a.inches::after, .report::after, :global(.il-head-end) > .words::after { content: ""; position: absolute; inset: -14px -6px; }
+  /* Three figures across, without their notes (Mobile-Apps.dc.html, Snow). */
+  .phoneStrip :global(.strip-grid) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .phoneStrip :global(.strip-item):last-child:nth-child(odd) { grid-column: auto; }
+  .foldHead > button { min-height: 44px; padding: 0 4px; font-size: var(--fs-13); color: var(--text-3); }
+  .fold:not(:has([aria-expanded="true"])) .foldHead { border-bottom: 0; }
+  .auto { padding: 14px 16px; border-radius: 14px; background: var(--m-card); }
+  .auto > :global(.switch) { margin-top: 2px; }
+  .autoTitle { font-size: var(--fs-15); }
+  .autoHint { font-size: var(--fs-13); }
+  .footnote { padding: 0 4px; font-size: var(--fs-13); }
 }

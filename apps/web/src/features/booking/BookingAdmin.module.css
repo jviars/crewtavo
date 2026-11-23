@@ -1,0 +1,48 @@
+/* Settings → Online booking (BookingAdminPage.tsx): the forms as inbox rows, and the form's dialog. */
+
+/* A form's link, as the row's second line: quiet, cut short with "…" on a narrow screen. */
+.link { font-size: var(--fs-13); color: var(--text-3); }
+
+/* A switch with what it does beside it. */
+.switchRow { display: flex; align-items: flex-start; gap: 12px; font-size: var(--fs-13); cursor: pointer; }
+.switchRow :global(.switch) { flex: none; margin-top: 1px; }
+.switchRow strong { display: block; font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.switchRow span span { display: block; color: var(--text-3); }
+.stack { display: grid; gap: 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+.note { margin: 0 0 4px; font-size: var(--fs-12); color: var(--text-3); }
+
+/* The questions: numbered hairline rows, each with its More menu (move, remove). */
+.questions { display: grid; margin: 0; padding: 0; list-style: none; }
+.question { display: grid; grid-template-columns: 18px minmax(0, 1fr) 168px auto; align-items: center; gap: 8px 10px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.question:first-child { padding-top: 4px; }
+.num { align-self: center; font-size: var(--fs-12); font-weight: 600; color: var(--quiet); font-variant-numeric: tabular-nums; text-align: right; }
+.qMore { display: flex; }
+.qSub { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.qSub :global(.checkbox) { flex: none; color: var(--text-2); }
+
+/* Sharing a saved form from its dialog (on a phone, the row's More menu isn't there). */
+.share { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+/* The link on one line, cut short with "…" (a block, since a flex box won't show the dots). */
+.share :global(.code-pill) { display: block; box-sizing: border-box; height: var(--control); min-width: 0; padding-block: 0; line-height: calc(var(--control) - 2px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delete { margin-right: auto; }
+
+.openings { display: grid; gap: 8px; font-size: var(--fs-13); }
+.openings > strong { font-size: var(--fs-13); font-weight: 600; }
+.openings > span { color: var(--text-3); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 560px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .question { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .qType { grid-column: 2 / 3; grid-row: 2; }
+  .qMore { grid-column: 3; grid-row: 1; }
+  .qSub { grid-column: 2 / -1; }
+  .share :global(.code-pill) { flex-basis: 100%; }
+  /* A thumb's reach for the share buttons and a question's Required box. */
+  .share :global(.btn) { flex: 1 1 auto; height: 44px; }
+  .qSub :global(.checkbox) { min-height: 44px; align-items: center; }
+  .delete { margin-right: 0; }
+}

@@ -46,6 +46,7 @@ import {
   type Source,
 } from "./socialData";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
+import styles from "./Presence.module.css";
 
 export interface ComposerStart {
   source?: Source;
@@ -64,7 +65,7 @@ function zonedParts(at: Date, timeZone: string) {
 }
 
 function Stars({ n }: { n: number }) {
-  return <span aria-label={`${n} out of 5 stars`} style={{ color: "#f5b400", letterSpacing: 1 }}>{"★".repeat(n)}<span style={{ color: "var(--border)" }}>{"★".repeat(5 - n)}</span></span>;
+  return <span className={styles.stars} role="img" aria-label={`${n} out of 5 stars`}><span className={styles.starsOn}>{"★".repeat(n)}</span><span className={styles.starsOff}>{"★".repeat(5 - n)}</span></span>;
 }
 
 export function SocialComposer({ open, onClose, state, post, start }: { open: boolean; onClose: () => void; state: SocialState; post?: SocialPost | null; start?: ComposerStart | null }) {
@@ -254,8 +255,8 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
           )}
 
           {source === "photos" && (
-            <section className="stack-sm" aria-label="Photos">
-              <div className="row-between wrap" style={{ gap: 8 }}>
+            <section className={styles.dialogPart} aria-label="Photos">
+              <div className={styles.dialogHead}>
                 <span className="muted small">{picked.length} of {MAX_PHOTOS} at most. Check the photo doesn't show a house number, a car plate or people's faces.</span>
                 {takenOut && <span className="muted small" role="status">{takenOut}</span>}
                 {(jobs.length > 1 || job) && (
@@ -278,14 +279,14 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
                     {allPhotos.map((p) => {
                       const on = picked.includes(p.id);
                       return (
-                        <div key={p.id} className="stack-sm" style={{ gap: 2 }}>
+                        <div key={p.id} className={styles.thumbCell}>
                           <div className="thumb">
                             {p.url && <img src={p.url} alt="" loading="lazy" />}
                             <button type="button" className="thumb-pick" aria-pressed={on} disabled={!on && picked.length >= MAX_PHOTOS} aria-label={`Photo from ${p.job_number != null ? `job #${p.job_number}` : "a client"}, ${formatDate(p.visit_on ?? p.created_at)}`} onClick={() => toggle(p.id)}>
                               <span className="thumb-pick-badge"><Icon name="check" size={13} bold /></span>
                             </button>
                           </div>
-                          <span className="muted small ellipsis">{p.job_number != null ? `Job #${p.job_number} · ` : ""}{photoDay(p, tz)}</span>
+                          <span className={styles.thumbNote}>{p.job_number != null ? `Job #${p.job_number} · ` : ""}{photoDay(p, tz)}</span>
                         </div>
                       );
                     })}
@@ -297,7 +298,7 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
           )}
 
           {source === "review" && (
-            <section className="stack-sm" aria-label="Reviews">
+            <section className={styles.dialogPart} aria-label="Reviews">
               {reviews.isPending ? (
                 <Skeleton height={64} />
               ) : reviews.error ? (
@@ -305,7 +306,7 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
               ) : !allReviews.length && !automatic ? (
                 <EmptyState inline icon="star" title="No 4 or 5-star reviews with words yet">They come in from Google Business Profile.</EmptyState>
               ) : (
-                <div className="stack-sm" style={{ maxHeight: 280, overflow: "auto" }}>
+                <div className={styles.choices}>
                   {automatic && <span className="muted small">An automatic post keeps its review. To share another one, make a new post.</span>}
                   {pickedOutOfList && <span className="muted small">The review you picked is chosen: its card is in the preview below.</span>}
                   {shownReviews.map((r) => {
@@ -314,7 +315,7 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
                       <label key={r.id} ref={review === r.id ? pickedReviewRef : undefined} className={`card-row choice-row${review === r.id ? " picked" : ""}`} style={{ cursor: automatic ? "default" : blocked ? "not-allowed" : "pointer", alignItems: "flex-start" }}>
                         {!automatic && <input type="radio" name="social-review" checked={review === r.id} disabled={blocked} onChange={() => setReview(r.id)} />}
                         <span className="grow stack-sm" style={{ gap: 2, minWidth: 0 }}>
-                          <span className="row wrap" style={{ gap: 8 }}><Stars n={r.rating} /><strong>{r.name ?? "A Google user"}</strong><span className="muted small">{formatDate(r.posted_at)}</span>{r.posted_on && <span className="chip">Posted {formatDate(r.posted_on)}</span>}</span>
+                          <span className={styles.choiceHead}><strong>{r.name ?? "A Google user"}</strong><Stars n={r.rating} /><span className="muted small">{formatDate(r.posted_at)}</span>{r.posted_on && <span className="chip">Posted {formatDate(r.posted_on)}</span>}</span>
                           <ReviewWords text={r.comment ?? ""} />
                           {!r.card_ok && <span className="muted small">This review has characters the card can't show yet.</span>}
                           {r.card_ok && r.card_drops_emoji && <span className="muted small">The card leaves out its emoji.</span>}
@@ -330,11 +331,11 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
           )}
 
           {(source === "review" ? Boolean(review) : pickedPhotos.length > 0) && (
-            <section className="stack-sm" aria-label="Preview">
-              <strong className="small">Preview</strong>
+            <section className={styles.dialogPart} aria-labelledby="post-preview">
+              <h3 id="post-preview" className={styles.dialogLabel}>Preview</h3>
               {source === "review" ? (
                 <>
-                  {card.isPending ? <Skeleton width={220} height={220} radius={8} /> : card.data ? <img src={card.data} alt="The review's card, as it posts" style={{ width: 220, height: 220, borderRadius: 8, border: "1px solid var(--border)" }} /> : <ErrorState compact error={card.error} onRetry={() => card.refetch()} />}
+                  {card.isPending ? <Skeleton width={220} height={220} radius={8} /> : card.data ? <img className={styles.cardPreview} src={card.data} alt="The review's card, as it posts" /> : <ErrorState compact error={card.error} onRetry={() => card.refetch()} />}
                   {allReviews.find((r) => r.id === review)?.card_drops_emoji && <span className="muted small">The card leaves out the review's emoji: its font can't draw them.</span>}
                 </>
               ) : (
@@ -346,12 +347,12 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
             </section>
           )}
 
-          <section className="stack-sm" aria-label="Caption">
+          <section className={styles.dialogPart} aria-label="Caption">
             <label className="field">
               <span>{source === "text" ? "What to post" : "Caption"}</span>
               <textarea className="textarea" style={{ minHeight: 110 }} value={caption} maxLength={2200} onChange={(e) => { setCaption(e.target.value); setCaptionBy("person"); }} placeholder={source === "text" ? "Booking spring cleanups now. Reply to get on the list." : "A few friendly words about the work."} />
             </label>
-            <div className="row wrap" style={{ gap: 8 }}>
+            <div className={styles.inline}>
               <Button size="sm" icon="sparkle" loading={suggest.isPending} disabled={!aiOn || (source === "photos" && !picked.length) || (source === "review" && !review)} onClick={() => suggest.mutate()}>{caption.trim() ? "Rewrite" : "Suggest a caption"}</Button>
               <span className="muted small grow" style={{ textAlign: "right", whiteSpace: "nowrap" }}>{caption.length.toLocaleString("en-US")} / {limit.toLocaleString("en-US")}</span>
             </div>
@@ -366,8 +367,8 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
             <span className="muted small">Captions never name clients or addresses.</span>
           </section>
 
-          <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend className="small strong" style={{ marginBottom: 6 }}>Where it posts</legend>
+          <fieldset className={styles.dialogFieldset}>
+            <legend>Where it posts</legend>
             {dropped.length > 0 && (
               <span className="muted small" role="status">
                 {networkWords(dropped.map((d) => d.network))} {dropped.length === 1 ? "was" : "were"} taken off this post: {dropped[0]!.reason}
@@ -380,32 +381,32 @@ export function SocialComposer({ open, onClose, state, post, start }: { open: bo
                   {c.label}
                   {c.network === "facebook" && state.networks.facebook.page_name ? <span className="muted"> · {state.networks.facebook.page_name}</span> : null}
                   {c.network === "instagram" && state.networks.instagram.username ? <span className="muted"> · @{state.networks.instagram.username}</span> : null}
-                  {c.reason && <span className="muted small" style={{ display: "block", fontWeight: 400 }}>{c.reason}</span>}
+                  {c.reason && <span className={styles.checkNote}>{c.reason}</span>}
                 </span>
               </label>
             ))}
             {notLive && (
-              <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">Posts stay hidden from the public until your Meta app is Live.</div></div>
+              <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">Posts stay hidden from the public until your Meta app is Live.</div></div>
             )}
           </fieldset>
 
-          <section className="stack-sm" aria-label="When">
+          <section className={styles.dialogPart} aria-label="When">
             <div className="segmented" role="group" aria-label="When it posts" style={{ justifySelf: "start" }}>
               <button type="button" aria-pressed={when === "now"} onClick={() => setWhen("now")}>Post now</button>
               <button type="button" aria-pressed={when === "schedule"} onClick={() => setWhen("schedule")}>Schedule</button>
             </div>
             {when === "schedule" && (
-              <div className="row wrap" style={{ gap: 8, alignItems: "flex-end" }}>
+              <div className={styles.when}>
                 <label className="field"><span>Date</span><input className="input" type="date" value={day} onChange={(e) => setDay(e.target.value)} required /></label>
                 <label className="field"><span>Time</span><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} required /></label>
-                <span className="muted small" style={{ paddingBottom: 10 }}>{timeZoneWords(tz)}</span>
+                <span className={styles.whenZone}>{timeZoneWords(tz)}</span>
               </div>
             )}
           </section>
 
           {unreachable && (
             <div className="callout callout-warning">
-              <Icon name="alert" size={20} />
+              <Icon name="alert" size={16} />
               <div className="grow">Crewtavo's address isn't public, so Meta and Google can't fetch the pictures. Save it as a draft, or use Share elsewhere. Words alone can still post.</div>
             </div>
           )}
@@ -468,8 +469,8 @@ function PhotoPreview({ photos, instagram, onRemove }: { photos: Array<Pick<Shar
     return r && (photos.length > 1 ? Math.abs(r - 1) > 0.01 : r < INSTAGRAM_RATIO.min || r > INSTAGRAM_RATIO.max);
   });
   return (
-    <div className="stack-sm" style={{ gap: 6 }}>
-      <div className="row" style={{ gap: 8, overflowX: "auto" }}>
+    <div className={styles.dialogPart}>
+      <div className={styles.previewRow}>
         {photos.map((p, i) => (
           <div key={p.id} className="thumb" style={{ height: 150, aspectRatio: frame(p) ?? ratios[p.id] ?? 1, background: instagram ? pad : "var(--fill-2)", borderRadius: 8, flex: "none", display: "grid", placeItems: "center" }}>
             {p.url && <img src={p.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }} onLoad={(e) => { const img = e.currentTarget; setRatios((now) => ({ ...now, [p.id]: img.naturalWidth / img.naturalHeight })); }} />}

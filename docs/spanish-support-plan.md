@@ -7,6 +7,12 @@ quote, invoice, Client Hub, booking form, emails and texts in Spanish, while the
 working in English. Business content stays as the business typed it: service names, checklist
 items, SOPs and notes.
 
+**Turned off for now (2026-11-20):** `languageChoice()` in `packages/core/src/i18n` is the one
+switch for all of it, and nothing turns it on yet, so everyone has English whatever their profile
+says: the Language setting, My day's question and the sign-in screens' choice are hidden, and the
+team list doesn't mark who uses Spanish. `setLanguageChoice(true)` brings it all back (the Spanish
+tests turn it on). What's below is built and kept working behind that switch.
+
 **Built (2026-11-14): the crew's side, as Jobber offers it.** A team member chooses Español in
 Settings → Profile → Language, or answers My day's question when their phone speaks Spanish
 ("¿Usar Crewtavo en español?"), or picks it under the sign-in screens. What's built:

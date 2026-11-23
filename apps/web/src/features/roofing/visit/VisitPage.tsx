@@ -15,6 +15,7 @@
  * choice, which is what the price is set for and what they sign. Review and sign waits until the
  * option looked at is the one they chose.
  */
+import { documentColor } from "@crewtavo/core/documents";
 import { isSiteAdjustment, marginPct } from "@crewtavo/core/estimates";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import { optionTotals, toCents } from "@crewtavo/core/money";
@@ -399,7 +400,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
 
       {options.length > 0 && <QuoteOptions quote={quote} options={options} lines={quote.lines} viewing={viewing} onView={setViewing} mode="visit" onChanged={onChanged} panelId={panelId} />}
 
-      <section id={panelId} role={view ? "tabpanel" : undefined} className={`card ${styles.estimate}`} aria-labelledby={estimateId}>
+      <section id={panelId} role={view ? "tabpanel" : undefined} className={styles.estimate} aria-labelledby={estimateId}>
         <div className={styles.estimateHead}>
           <h2 id={estimateId}>The estimate{view ? ` · ${view.label}` : ""}</h2>
           <p>Fix anything {office ? `${office} guessed` : "that's not right"}: − and + change it, − takes it off. Tap a line to change its price or words.</p>
@@ -432,14 +433,14 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
   const pricePart = (
     <>
       {range && quote.range_accepted_at ? (
-        <p className={`callout callout-good ${styles.strip}`}>
+        <p className={styles.strip} data-tone="good">
           <Icon name="check" size={20} bold />
           <span>
             {first || "They"} said yes to <strong>{rangeWords(range.low, range.high)}</strong> on {shortDay(quote.range_accepted_at, tz)}.
           </span>
         </p>
       ) : range ? (
-        <p className={`callout ${styles.strip}`}>
+        <p className={styles.strip}>
           <Icon name="info" size={20} />
           <span>
             The range sent to {first || "them"}
@@ -579,6 +580,8 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
       subtitle={whoAndWhere(quote)}
       back={{ to: `/roofing/${quote.id}`, label: quote.title || "The project" }}
       pageTitle={`Site visit · ${quote.title}`}
+      brand={documentColor(template, session.company.settings)}
+      step={1}
     >
       <div className={styles.visit}>
         <section className={styles.panel} data-open={sheet || undefined} aria-label="Change the estimate">
@@ -615,7 +618,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
               <strong>{priceFigure}</strong>
               {note && position && <span className={styles.bottomNote} data-where={position.where}>{note.short}</span>}
             </div>
-            <button type="button" className={`btn btn-primary ${styles.touch}`} onClick={() => setSheet(false)}>
+            <button type="button" className={`btn btn-primary ${styles.touch} ${styles.bigButton}`} style={{ width: "auto" }} onClick={() => setSheet(false)}>
               See the estimate
             </button>
           </div>
@@ -660,7 +663,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
             {paperReady ? (
               <DocumentSheet template={contractTemplate(template, contract)} company={letter} data={data} />
             ) : !details.data && details.error ? (
-              <div className="card">
+              <div className={styles.centeredCard}>
                 <ErrorState error={details.error} title="The estimate didn't load" onRetry={() => void details.refetch()} />
               </div>
             ) : (

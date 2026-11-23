@@ -1,0 +1,23 @@
+/*
+ * The photo editor's bars (PhotoEditor.tsx), laid out as a phone's own photo markup is: Cancel, the
+ * title, undo, redo, More and Save across the top; the tools, colours and line widths at the foot,
+ * each group on a quiet track. The editor's base look (dark around the photo whatever the theme, its
+ * tools and swatches) is in components.css.
+ */
+.head { flex-wrap: nowrap; gap: 8px; padding-top: max(8px, env(safe-area-inset-top)); padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+.title { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-15); font-weight: 600; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.cancel { flex: none; }
+.history { display: flex; flex: none; gap: 2px; }
+.save { flex: none; border-radius: var(--radius-pill); }
+.more[aria-expanded="true"] { background: rgba(255, 255, 255, 0.1); }
+.tools { justify-content: center; gap: 12px 16px; padding-top: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+.track { display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.08); }
+.track :global(.photo-editor-tool) { width: 42px; height: 42px; border-radius: 9px; }
+.swatches { display: flex; align-items: center; gap: 8px; }
+.words { padding-bottom: 0; }
+.problem { padding-block: 10px; }
+@media (max-width: 600px) {
+  /* The title is the dialog's name; on a phone the bar is for the buttons. */
+  .title { visibility: hidden; }
+  .tools { gap: 10px 12px; }
+}

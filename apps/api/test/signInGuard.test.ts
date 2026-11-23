@@ -44,6 +44,13 @@ describe("sign-in guard", () => {
     expect(isGuessable("GET", url("/user"), "/auth/v1")).toBe(false);
   });
 
+  it("knows a password sign-in by any spelling of its path, as Auth's router would read it", () => {
+    const url = (path: string) => new URL(`http://x/auth/v1${path}`);
+    for (const path of ["/token/", "//token", "/TOKEN", "/%74oken", "/t%6Fken/"]) expect(isGuessable("POST", url(`${path}?grant_type=password`), "/auth/v1"), path).toBe(true);
+    expect(isGuessable("post", url("/token?grant_type=password"), "/auth/v1")).toBe(true);
+    expect(isGuessable("POST", url("/tokens?grant_type=password"), "/auth/v1")).toBe(false);
+  });
+
   it("pauses an account after 10 wrong passwords, without passing more guesses on", async () => {
     fakeLimiter();
     const { send, seen } = gotrue();

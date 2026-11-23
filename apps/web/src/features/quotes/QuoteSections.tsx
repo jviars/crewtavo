@@ -14,7 +14,8 @@ import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-quer
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -33,6 +34,8 @@ export interface QuoteSectionsProps {
   approval?: unknown;
   /** After this job's sections were saved. */
   onChanged?: () => void;
+  /** The Contract heading's level: 2 as a page section, 3 inside another section (a roofing step). */
+  level?: 2 | 3;
 }
 
 /**
@@ -68,7 +71,7 @@ export function signedWith(approval: unknown): { terms: string; sections: Approv
   return null;
 }
 
-export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: QuoteSectionsProps) {
+export function QuoteSections({ quote, optionSectionIds, approval, onChanged, level = 2 }: QuoteSectionsProps) {
   const session = useSession();
   const queryClient = useQueryClient();
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
@@ -77,7 +80,6 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
   const { template, isPending } = useDocumentTemplate(quote.template_id);
   const signed = isSignedQuote(quote.status);
   const editable = canSell && EDITABLE.includes(quote.status);
-  const headingId = useId();
   const addId = useId();
 
   // Ticks show at once. The saved list takes over when it changes, unless a tick is still being
@@ -101,12 +103,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
     },
   });
 
-  const head = (
-    <div className="card-head">
-      <strong id={headingId}>Contract</strong>
-      {managesSettings && <Link className={styles.headLink} to="/settings?tab=contracts">Contract terms</Link>}
-    </div>
-  );
+  const termsLink = managesSettings && <Link to="/settings?tab=contracts">Contract terms</Link>;
 
   // Signed: what it was signed with, whatever the template and the library say now.
   if (signed) {
@@ -114,8 +111,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
     const any = Boolean(kept && (kept.terms || kept.sections.length));
     if (!any && !library.data?.length) return null;
     return (
-      <section className="card" aria-labelledby={headingId}>
-        {head}
+      <Section title="Contract" level={level} action={termsLink}>
         <div className={styles.body}>
           {kept && any ? (
             <>
@@ -133,12 +129,12 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
             </p>
           )}
         </div>
-      </section>
+      </Section>
     );
   }
 
-  if (library.isPending || isPending) return <CardSkeleton lines={3} />;
-  if (library.error) return <div className="card"><ErrorState compact title="Your contract sections couldn't load" error={library.error} onRetry={() => library.refetch()} /></div>;
+  if (library.isPending || isPending) return <SectionSkeleton rows={3} />;
+  if (library.error) return <Section title="Contract" level={level}><ErrorState compact title="Your contract sections couldn't load" error={library.error} onRetry={() => library.refetch()} /></Section>;
   const rows = library.data;
   if (!rows.length) return managesSettings ? <ContractTermsTip /> : null;
 
@@ -151,8 +147,7 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
   };
 
   return (
-    <section className="card" aria-labelledby={headingId}>
-      {head}
+    <Section title="Contract" level={level} action={termsLink}>
       <div className={styles.body}>
         <div className={styles.group}>
           <span className={styles.label}>What prints</span>
@@ -167,8 +162,9 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
             <EmptyState inline title={`Nothing from your template${optionSectionIds ? " or this option" : ""} yet`} />
           )}
         </div>
-        {others.length > 0 && (
-          <div className={styles.group} role="group" aria-labelledby={addId}>
+        {/* Read only, nothing added for this job is said by its leaving no group. */}
+        {(editable ? others.length > 0 : others.some((s) => s.added)) && (
+          <div className={`${styles.group} ${editable ? styles.picks : ""}`} role="group" aria-labelledby={addId}>
             <span className={styles.label} id={addId}>{editable ? "Add for this job" : "Added for this job"}</span>
             {editable ? (
               others.map((s) => (
@@ -183,19 +179,17 @@ export function QuoteSections({ quote, optionSectionIds, approval, onChanged }: 
                   </span>
                 </label>
               ))
-            ) : others.some((s) => s.added) ? (
+            ) : (
               <ul className={styles.list}>
                 {others.filter((s) => s.added).map((s) => (
                   <Item key={s.id} title={s.title} meta={placeLabel(s.place)} initials={s.initials ? "The customer initials it when they sign" : null} />
                 ))}
               </ul>
-            ) : (
-              <EmptyState inline title="None added" />
             )}
           </div>
         )}
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -209,7 +203,7 @@ function Item({ title, meta, initials }: { title: string; meta: string; initials
         <span className={styles.meta}>{meta}</span>
         {initials && (
           <span className={styles.initials}>
-            <Icon name="pen" size={14} />
+            <Icon name="pen" size={12} />
             {initials}
           </span>
         )}
@@ -253,8 +247,8 @@ function ContractTermsTip() {
   }, [shown, key]);
   if (!shown) return null;
   return (
-    <div className={`card card-pad ${styles.setup}`}>
-      <Icon name="file" size={20} />
+    <div className={`callout ${styles.setup}`}>
+      <Icon name="file" size={16} />
       <span className="grow">
         Print your own contract terms with your estimates, like payment, your warranty and the right to cancel. <Link to="/settings?tab=contracts">Set them up</Link>
       </span>

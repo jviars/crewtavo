@@ -9,7 +9,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
@@ -21,6 +21,7 @@ import { AddMaterial } from "../../materials/MaterialPicker";
 import { packagesKey, type PriceListService, type RoofPackage } from "../packages";
 import styles from "./catalog.module.css";
 import { listed, usesOf } from "./uses";
+import { Select } from "@/components/ui/Select";
 
 interface ItemAnswer { item: CatalogDetail; uom: string; length_ft: number | null; unit_price: number | null; note: string | null }
 
@@ -86,78 +87,74 @@ export function CatalogItemDialog({ itemNumber, seed, supplier, uses, services, 
   return (
     <Dialog open onClose={onClose} size="lg" title={name} description={[shown?.brand, itemNumber].filter(Boolean).join(" · ")}>
       <div className="dialog-body">
-        {detail.error && !shown ? (
-          <ErrorState error={detail.error} onRetry={() => detail.refetch()} />
-        ) : (
-          <div className={styles.detail}>
-            <AbcPicture item={{ name, color: shown?.color, image: shown?.image }} caption className={styles.detailPicture} />
-            <div className={styles.detailText}>
-              {item?.path.length ? <span className={styles.path}>{item.path.join(" › ")}</span> : null}
-              <dl className={styles.facts}>
-                <dt>Item number</dt><dd>{itemNumber}</dd>
-                {shown?.brand && <><dt>Made by</dt><dd>{shown.brand}</dd></>}
-                {shown?.color && <><dt>Color</dt><dd>{shown.color}</dd></>}
-                {item?.uoms.length ? <><dt>Sold by the</dt><dd>{item.uoms.map((u) => u.name.toLowerCase()).join(", ")}</dd></> : null}
-                {item?.lengths.length ? <><dt>Lengths</dt><dd>{item.lengths.map((l) => `${formatNumber(l, 2)} ft`).join(", ")}</dd></> : null}
-              </dl>
-              <div className={styles.yourPrice}>
-                {detail.isPending ? (
-                  <Skeleton width={140} height={24} />
-                ) : detail.error ? (
-                  <strong style={{ fontSize: 14 }}>{(detail.error as Error).message}</strong>
-                ) : detail.data!.unit_price !== null ? (
-                  <strong>{formatMoneyCents(detail.data!.unit_price)} <small style={{ fontSize: 13, fontWeight: 400 }}>/ {unit(detail.data!.uom)}</small></strong>
-                ) : (
-                  <strong style={{ fontSize: 14 }}>{detail.data!.note ?? "No price from the branch"}</strong>
-                )}
-                <span>Your price for one{detail.data?.length_ft ? `, ${formatNumber(detail.data.length_ft, 2)} ft long` : ""}, at {supplier.branch_name}</span>
+        <div className={styles.dialogSections}>
+          {detail.error && !shown ? (
+            <ErrorState error={detail.error} onRetry={() => detail.refetch()} />
+          ) : (
+            <div className={styles.detail}>
+              <AbcPicture item={{ name, color: shown?.color, image: shown?.image }} caption className={styles.detailPicture} />
+              <div className={styles.detailText}>
+                <div className={styles.yourPrice}>
+                  {detail.isPending ? (
+                    <Skeleton width={140} height={24} />
+                  ) : detail.error ? (
+                    <strong className={styles.priceNote}>{(detail.error as Error).message}</strong>
+                  ) : detail.data!.unit_price !== null ? (
+                    <strong>{formatMoneyCents(detail.data!.unit_price)} <small>/ {unit(detail.data!.uom)}</small></strong>
+                  ) : (
+                    <strong className={styles.priceNote}>{detail.data!.note ?? "No price from the branch"}</strong>
+                  )}
+                  <span>Your price for one{detail.data?.length_ft ? `, ${formatNumber(detail.data.length_ft, 2)} ft long` : ""}, at {supplier.branch_name}</span>
+                </div>
+                <Facts label="About this item">
+                  <Fact label="Item number">{itemNumber}</Fact>
+                  <Fact label="Made by">{shown?.brand}</Fact>
+                  <Fact label="Color">{shown?.color}</Fact>
+                  <Fact label="Sold by the">{item?.uoms.length ? item.uoms.map((u) => u.name.toLowerCase()).join(", ") : null}</Fact>
+                  <Fact label="Lengths">{item?.lengths.length ? item.lengths.map((l) => `${formatNumber(l, 2)} ft`).join(", ") : null}</Fact>
+                  <Fact label="Category">{item?.path.length ? item.path.join(" › ") : null}</Fact>
+                </Facts>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {item?.about && <p className="small" style={{ margin: 0, lineHeight: 1.55 }}>{item.about}</p>}
+          {item?.about && <p className={styles.about}>{item.about}</p>}
 
-        {colors.length > 1 && (
-          <div className={styles.section}>
-            <h3>{family.data && family.data.items.length > 1 ? "Colors and sizes at your branch" : "Other colors and sizes"}</h3>
-            <div className={styles.colors}>
-              {colors.map((c) => (
-                <button key={c.item_number} type="button" className={styles.color} aria-current={c.item_number === itemNumber ? "true" : undefined} onClick={() => c.item_number !== itemNumber && onOpen(c.item_number, c.from)}>
-                  <AbcPicture item={c} className={styles.colorDot} />
-                  <span>{c.color ?? c.name}</span>
-                  {c.price !== null && <small>{formatMoneyCents(c.price)}</small>}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+          {colors.length > 1 && (
+            <Section title={family.data && family.data.items.length > 1 ? "Colors and sizes at your branch" : "Other colors and sizes"} count={colors.length} level={3}>
+              <div className={styles.colors}>
+                {colors.map((c) => (
+                  <button key={c.item_number} type="button" className={styles.color} aria-current={c.item_number === itemNumber ? "true" : undefined} onClick={() => c.item_number !== itemNumber && onOpen(c.item_number, c.from)}>
+                    <AbcPicture item={c} className={styles.colorDot} />
+                    <span>{c.color ?? c.name}</span>
+                    {c.price !== null && <small>{formatMoneyCents(c.price)}</small>}
+                  </button>
+                ))}
+              </div>
+            </Section>
+          )}
 
-        {item?.specs.length ? (
-          <div className={styles.section}>
-            <h3>Specs</h3>
-            <dl className={styles.specs}>
-              {item.specs.map((spec) => <div key={spec.name}><dt>{spec.name}</dt><dd>{spec.value}</dd></div>)}
-            </dl>
-          </div>
-        ) : null}
+          {item?.specs.length ? (
+            <Section title="Specs" level={3}>
+              <dl className={styles.specs} style={{ marginTop: -12 }}>
+                {item.specs.map((spec) => <div key={spec.name}><dt>{spec.name}</dt><dd>{spec.value}</dd></div>)}
+              </dl>
+            </Section>
+          ) : null}
 
-        {used.length > 0 && (
-          <div className={styles.section}>
-            <h3>In your price list</h3>
-            <ul className={styles.uses}>
-              {used.map((u) => (
-                <li key={u.link.id}>
-                  <strong>{u.service?.name ?? "A service"}</strong>
-                  <span className="muted small">{u.amount}{u.packages.length ? ` · in the ${listed(u.packages)} ${u.packages.length === 1 ? "package" : "packages"}` : ""}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+          {used.length > 0 && (
+            <Section title="In your price list" count={used.length} level={3}>
+              <RelatedList>
+                {used.map((u) => (
+                  <RelatedRow key={u.link.id} title={u.service?.name ?? "A service"} sub={[u.amount, u.packages.length ? `In the ${listed(u.packages)} ${u.packages.length === 1 ? "package" : "packages"}` : null]} />
+                ))}
+              </RelatedList>
+            </Section>
+          )}
+        </div>
 
         <div className="form-actions">
-          {!canEdit && <span className="muted small spacer">Someone who can change the price list can add it to a service.</span>}
+          {!canEdit && <span className={`spacer ${styles.dialogNote}`}>Someone who can change the price list can add it to a service.</span>}
           <Button onClick={onClose}>Close</Button>
           {canEdit && (
             <Button variant="primary" icon="plus" disabled={!priced} onClick={() => setAdding(true)}>
@@ -190,9 +187,13 @@ function AddToService({ item, services, has, onBack, onAdded }: { item: CatalogI
   };
   return (
     <form onSubmit={submit}>
+      {/* The same head as the next step (AddMaterial): its picture, then the name over its details. */}
       <div className="material-picked">
-        <strong>{item.name}</strong>
-        <span className="muted small">{[item.item_number, item.color, item.unit_price !== null ? `${formatMoneyCents(item.unit_price)} / ${(item.uoms.find((u) => u.code === item.uom)?.name ?? item.uom).toLowerCase()}` : item.note].filter(Boolean).join(" · ")}</span>
+        <AbcPicture item={item} />
+        <span className="grow">
+          <strong>{item.name}</strong>
+          <span className="muted">{[item.item_number, item.color, item.unit_price !== null ? `${formatMoneyCents(item.unit_price)} / ${(item.uoms.find((u) => u.code === item.uom)?.name ?? item.uom).toLowerCase()}` : item.note].filter(Boolean).join(" · ")}</span>
+        </span>
       </div>
       <Field label="Which service is it in?" requiredMessage="Pick the service it goes into." hint="Every estimate with that service is then priced with it, so you only pick it once.">
         <Select className="select" required value={serviceId} onChange={(e) => setServiceId(e.target.value)} autoFocus>

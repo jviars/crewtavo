@@ -57,12 +57,15 @@ export function Dialog({
       dialog.style.removeProperty("--pull");
       dialog.showModal();
       announceTopLayer();
-      // Start typing straight away on desktop; on phones don't pop the keyboard over the sheet.
+      // Start typing straight away on desktop; on phones don't pop the keyboard over the sheet. A field
+      // out of sight (a picker's search, in its shut menu) is passed over: focus that can't land would
+      // stay on the close button, where showModal put it.
       const finePointer = window.matchMedia("(pointer: fine)").matches;
       const target = finePointer && focusField
-        ? bodyRef.current?.querySelector<HTMLElement>('[autofocus], input:not([type="hidden"]):not([disabled]):not([type="checkbox"]):not([type="radio"]), textarea:not([disabled]), select:not([disabled])')
+        ? [...(bodyRef.current?.querySelectorAll<HTMLElement>('[autofocus], input:not([type="hidden"]):not([disabled]):not([type="checkbox"]):not([type="radio"]), textarea:not([disabled]), select:not([disabled])') ?? [])].find((el) => el.getClientRects().length > 0)
         : null;
-      (target ?? dialog).focus({ preventScroll: true });
+      target?.focus({ preventScroll: true });
+      if (!target || document.activeElement !== target) dialog.focus({ preventScroll: true });
     }
     if (!open && dialog.open) dialog.close();
   }, [open]);

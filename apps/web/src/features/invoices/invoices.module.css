@@ -1,0 +1,173 @@
+/*
+ * Invoices, an invoice and Deposits (Page-Invoices.dc.html, Page-Invoice.dc.html, Mobile-Sales.dc.html).
+ * The shared list, section, strip and record-page parts do most of it; these are the few things
+ * only these screens have.
+ */
+
+/* ---------- The list ---------- */
+
+/* A phone shows what's owed and what's past due; Collected waits for a desktop. A phone's nudge
+   keeps to its one line (Mobile-Sales.dc.html): the names wait for the dialog, and a row's kind tag
+   for a desktop, so the client's name has the room. */
+@media (max-width: 900px) {
+  .summary :global(.strip-item):nth-child(3) { display: none; }
+  :global(.rel-detail):has(> .who) { display: none; }
+  .kind { display: none; }
+}
+
+/* How late, in red words, with its clock. */
+.late, .late svg { color: var(--danger) !important; }
+.late { font-weight: 600; }
+
+/* A void invoice's amount: there, but not money anyone owes. */
+.voided { color: var(--text-3); font-weight: 500; text-decoration: line-through; text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); }
+
+/* ---------- Picking in a dialog (Invoice finished jobs, Charge saved cards, Add logged work) ---------- */
+/* Hairline rows, not a box in the box: a check box, the name over a quiet line, the money on the right. */
+.pickGroup { display: grid; gap: 4px; min-width: 0; }
+.picks { max-height: 340px; margin: 0; padding: 0; overflow-y: auto; list-style: none; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); overscroll-behavior: contain; }
+.picks > li + li { border-top: 1px solid var(--row-divider); }
+.pick { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 8px 2px; font-size: var(--fs-13); font-weight: 400; color: var(--ink); cursor: pointer; }
+.pick[data-off], .pick[data-static] { cursor: default; }
+.pick > input[type="checkbox"] { flex: none; margin: 0; }
+.pickText { flex: 1; min-width: 0; }
+.pickName { display: block; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pickSub { display: block; margin-top: 1px; font-size: var(--fs-12); color: var(--text-3); }
+.pickEnd { display: grid; flex: none; justify-items: end; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+.pickEnd > input { width: 110px; }
+.pickNote { font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.pickNote[data-tone="danger"] { color: var(--danger); font-weight: 600; }
+.pickAll { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 2px; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); cursor: pointer; }
+.pickAll[data-off] { cursor: default; color: var(--text-3); }
+.pickHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.switches { display: grid; gap: 12px; justify-items: start; }
+.switches :global(.switch-row) { font-weight: 500; }
+@media (max-width: 900px) {
+  .pick { min-height: 60px; gap: 14px; font-size: var(--fs-15); }
+  .pickSub, .pickNote { font-size: var(--fs-13); }
+  .pickAll { min-height: 44px; font-size: var(--fs-15); }
+  .picks { max-height: none; }
+  .switches { gap: 0; }
+  .switches :global(.switch-row) { min-height: 44px; }
+}
+
+/* ---------- An invoice (Page-Invoice.dc.html) ---------- */
+
+/* The quiet line under the title: the client in ink, the job quieter. */
+.client { color: var(--ink); font-weight: 500; text-decoration: none; }
+.client:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.job { color: var(--text-3); text-decoration: none; }
+.job:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+
+/* What someone must notice, one tinted line each, close together over the lines. */
+.notes { display: grid; gap: 8px; min-width: 0; }
+.notes:empty { display: none; }
+
+.subject { max-width: 560px; }
+.quiet { margin: 8px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+.note { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
+.noteInput { max-width: 880px; }
+.tip { font-weight: 500; color: var(--text-3); }
+.paper { display: grid; gap: 10px; min-width: 0; }
+.paper > .quiet { margin: 0; }
+
+/* Totals: short rows, the figures tabular; Total in ink; then Balance due, large, on its own hairline. */
+.totals { gap: 0; font-size: var(--fs-13); }
+.totals :global(.line) { min-height: 34px; }
+.totals :global(.line) > :last-child { font-weight: 500; color: var(--ink); }
+.totals :global(.line[data-total]) > * { font-weight: 600; color: var(--ink); }
+/* Add promo code, Apply referral credit: quiet words lined up with the labels above, not a button's inset. */
+.totals :global(.line) :global(.btn-ghost) { color: var(--text-2); }
+.totals :global(.line) > :global(.btn-ghost):first-child { padding-inline: 0; }
+.totals :global(.line) > :global(.btn-ghost):first-child:hover { background: none; color: var(--ink); }
+.due { display: grid; gap: 2px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--divider); }
+.dueLabel { font-size: var(--fs-12); color: var(--text-3); }
+.dueValue { font-size: var(--fs-30); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dueValue[data-tone="danger"] { color: var(--danger); }
+.dueValue[data-tone="muted"] { color: var(--text-2); }
+
+/* Under the dates: the terms as small outlined choices, the late-fee tick, a note. */
+.after { display: grid; gap: 10px; justify-items: start; margin-top: 12px; }
+.terms { display: flex; flex-wrap: wrap; gap: 6px; }
+.terms > button { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast); }
+.terms > button:hover { border-color: var(--border-strong); color: var(--ink); }
+.terms > button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: 600; }
+
+/* The phone's opening figure: Balance due, centered and large. A desktop has it in Totals. */
+.hero { display: none; }
+
+@media (max-width: 900px) {
+  .hero { display: grid; flex-basis: 100%; order: 4; justify-items: center; gap: 2px; padding: 12px 0 4px; text-align: center; }
+  .heroLabel { font-size: var(--fs-13); font-weight: 500; color: var(--text-3); }
+  .heroValue { font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .heroValue[data-tone="danger"] { color: var(--danger); }
+  .heroValue[data-tone="muted"] { color: var(--text-2); }
+  .notes { gap: 10px; }
+  .subject { max-width: none; }
+  /* Totals as the kit's rows, on the same inset hairlines as the facts under them. */
+  .totals { font-size: var(--fs-15); }
+  .totals :global(.line) { min-height: 48px; }
+  .totals :global(.line) + :global(.line) { border-top: 1px solid var(--row-divider); }
+  /* The hero at the top says it already. */
+  .due[data-repeated] { display: none; }
+  .due { margin-top: 0; padding: 12px 0 14px; }
+  .dueLabel { font-size: var(--fs-13); }
+  .dueValue { font-size: var(--fs-22); }
+  .terms > button { height: 34px; padding: 0 12px; border-radius: 8px; font-size: var(--fs-14); }
+  .terms > button::after { content: ""; position: absolute; inset: -5px 0; }
+  .terms > button { position: relative; }
+  .quiet { font-size: var(--fs-13); }
+  .note { font-size: var(--fs-15); }
+  /* Three in the bar: Record payment across the top, the other two under it (Mobile-Sales.dc.html). */
+  :global(.action-bar):has(> .barWide) { flex-wrap: wrap; }
+  .barWide { order: -1; flex-basis: 100% !important; }
+  :global(.content):has(.barWide) { padding-bottom: calc(var(--mobile-nav-height) + 152px + env(safe-area-inset-bottom)); }
+  /* The bar's quiet buttons are words only, as the kit's are, so "Send a reminder" fits beside the green one. */
+  .barQuiet svg { display: none; }
+}
+
+/* One column (a tablet or a phone): the printed pages go last, after Totals and Dates, rather than
+   pushing them a letter page down. The main column's sections join the side's in one grid. */
+@media (max-width: 1100px) {
+  .cols > :global(.detail-main) { display: contents; }
+  .cols > :global(.detail-side) { order: 1; }
+  .paperLast { order: 2; }
+}
+@media (max-width: 900px) {
+  .cols:global(.detail-cols) { gap: 22px; }
+}
+
+/* Only on a phone: a sent invoice's lines as rows (a desktop has the table). */
+.phoneOnly { display: none !important; }
+@media (max-width: 900px) {
+  .phoneOnly { display: block !important; }
+}
+
+/* ---------- Deposits ---------- */
+.monthSum { font-size: var(--fs-13); font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.failed { color: var(--danger); font-weight: 600; }
+/* "2 payments ⌄" at the end of a deposit's quiet line, so every deposit's money lines up on the right. */
+.toggle { position: relative; display: inline-flex; align-items: center; gap: 2px; font-size: inherit; }
+@media (max-width: 900px) {
+  .toggle::after { content: ""; position: absolute; inset: -13px -8px; }
+}
+/* A deposit's payments, opened under it: quieter rows, set in under its icon. */
+.inDeposit { padding: 0 0 6px 20px; border-bottom: 1px solid var(--row-divider); background: none; }
+.inDeposit :global(.rel-row) { min-height: 38px; padding: 7px 0; }
+.inDeposit :global(.rel-row):last-child { border-bottom: 0; }
+@media (max-width: 900px) {
+  .monthSum { font-size: var(--fs-14); }
+  .inDeposit { padding-left: 16px; }
+  .inDeposit :global(.rel-row) { min-height: 48px; }
+}
+.depositEnd { display: grid; justify-items: end; gap: 1px; }
+@media (max-width: 900px) {
+  /* Under the title, as a page's lede is, not between the back button and the title. */
+  .lede { order: 3; flex-basis: 100%; }
+}
+
+/* Edit invoice: each line's fields on a hairline, not a box in the box. */
+.editLines { display: grid; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+.editLine { display: grid; gap: 8px; padding: 12px 0; }
+.editLine + .editLine { border-top: 1px solid var(--row-divider); }
+.pickTitle { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }

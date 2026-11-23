@@ -22,16 +22,16 @@ export function LanguageCard() {
   const current = getLocale();
   const save = useMutation({ meta: { inline: true }, mutationFn: (locale: Locale) => saveLanguage(session, locale) });
   return (
-    <div className="card card-pad stack-sm">
-      <strong id="language-title">{t("Language")}</strong>
-      <div className="segmented" role="group" aria-labelledby="language-title" style={{ justifySelf: "start" }}>
+    <div className="set-item">
+      <span className="set-item-label" id="language-title">{t("Language")}</span>
+      <div className="segmented" role="group" aria-labelledby="language-title">
         {(["en", "es"] as const).map((locale) => (
           <button key={locale} type="button" lang={locale} aria-pressed={current === locale} disabled={save.isPending} onClick={() => save.mutate(locale)}>
             {LOCALE_NAMES[locale]}
           </button>
         ))}
       </div>
-      <span className="muted small">{t("My day, visits, the clock, chat, guides and your notifications. Office screens stay in English for now.")}</span>
+      <span className="hint">{t("My day, visits, the clock, chat, guides and your notifications. Office screens stay in English for now.")}</span>
       <FormError error={save.error} />
     </div>
   );

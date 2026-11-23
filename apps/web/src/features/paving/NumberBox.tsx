@@ -1,4 +1,5 @@
 import { useState } from "react";
+import styles from "./paving.module.css";
 
 /**
  * A number field that takes what's typed as it's typed ("1." stays on screen as 1) and shows an
@@ -9,7 +10,7 @@ export function NumberBox({ label, value, onChange, prefix, width = 92, small, b
   const shown = draft ?? (value ? String(Math.round(value * 1000) / 1000) : "");
   const box = (
     <input
-      className={`input${small ? " input-sm" : ""}${big ? " calc-big" : ""}`}
+      className={`input${small ? " input-sm" : ""}${big ? ` ${styles.big}` : ""}`}
       inputMode="decimal"
       aria-label={label}
       aria-invalid={invalid || undefined}

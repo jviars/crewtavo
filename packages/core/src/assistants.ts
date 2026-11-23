@@ -1,10 +1,16 @@
 /**
  * What a connected AI assistant (Claude, ChatGPT and other MCP clients) may change. Each
  * connection starts out only reading; the person who connected it can let it change chosen areas,
- * give it full access, which also lets it delete, or full access without money (quotes, invoices,
- * payments, pay and promo codes). It never gets more than the person's own role (row-level security and the
- * database's own rules still apply), and some things stay out of reach whatever it's given: sign-in,
- * passwords and spare keys, connected apps and keys, and its own access.
+ * give it full access, which also lets it delete, or full access without money (prices, quotes,
+ * invoices, payments, pay and promo codes). It never gets more than the person's own role (row-level
+ * security and the database's own rules still apply), and some things stay out of reach whatever it's
+ * given: sign-in, passwords and spare keys, connected apps and keys, and its own access.
+ *
+ * Prices are what clients pay: the price list (whose "Add to every job" items go on new jobs by
+ * themselves), a job's lines and how it's billed (its retainage too, and a new job's billing), what
+ * one visit bills, extra work on a visit, and changing prices across jobs. So are the money settings
+ * on a client or the company: tax, payment terms, the minimum charge, late fees and tips, and
+ * whether a job is charged automatically (autopay), which go with Invoices and payments.
  *
  * The web app's access picker, the MCP server (apps/api/src/mcp.ts) and the database
  * (private.assistant_may_change, in the assistant_areas migrations) use the same rules.
@@ -29,12 +35,15 @@ export const ASSISTANT_AREAS = [
   { key: "quotes", label: "Quotes", group: "Money", money: true, roles: SALES_ROLES, permission: "sales" },
   { key: "invoices", label: "Invoices and payments", group: "Money", money: true, roles: OFFICE_ROLES, permission: "invoices" },
   { key: "pay", label: "Pay and pay rates", group: "Money", money: true, roles: OFFICE_ROLES, permission: "job_costs" },
+  // The price list, what jobs charge and how they're billed, extra work on visits, and price changes
+  // across jobs. Any role that sells may be offered it: the database holds each person to what their
+  // own role may change (the price list itself needs the Settings area).
+  { key: "prices", label: "Price list and job prices", group: "Money", money: true, roles: SALES_ROLES, permission: null },
   // Campaigns, review and referral asks, Google review replies and social posts. Never a card charge.
   { key: "marketing", label: "Campaigns, reviews and social posts", group: "Marketing", money: false, roles: OFFICE_ROLES, permission: "marketing" },
   // A discount is money, so "Full access, no money" leaves promo codes out.
   { key: "promos", label: "Promo codes", group: "Marketing", money: true, roles: OFFICE_ROLES, permission: "marketing" },
   { key: "company", label: "Company details", group: "Setup", money: false, roles: ["owner", "admin"], permission: null },
-  { key: "prices", label: "Price list", group: "Setup", money: false, roles: SALES_ROLES, permission: "settings" },
   { key: "templates", label: "Document styles and contract terms", group: "Setup", money: false, roles: OFFICE_ROLES, permission: "settings" },
   { key: "crews", label: "Crews", group: "Setup", money: false, roles: OFFICE_ROLES, permission: "settings" },
   { key: "checklists", label: "Checklists", group: "Setup", money: false, roles: OFFICE_ROLES, permission: "settings" },
@@ -56,7 +65,7 @@ export const READ_ONLY_ACCESS: AssistantAccess = { level: "read", areas: [] };
 
 export const isAssistantArea = (value: unknown): value is AssistantArea => ASSISTANT_AREAS.some((a) => a.key === value);
 export const assistantAreaLabel = (area: AssistantArea) => ASSISTANT_AREAS.find((a) => a.key === area)?.label ?? area;
-/** Quotes, invoices and payments, pay, and promo codes: what "Full access, no money" leaves out. */
+/** Prices, quotes, invoices and payments, pay, and promo codes: what "Full access, no money" leaves out. */
 export const isMoneyArea = (area: AssistantArea) => ASSISTANT_AREAS.some((a) => a.key === area && a.money);
 export const MONEY_AREAS: AssistantArea[] = ASSISTANT_AREAS.filter((a) => a.money).map((a) => a.key);
 
@@ -68,8 +77,8 @@ export function toAssistantAccess(row: { level?: string | null; areas?: readonly
 }
 
 /**
- * Full access changes and deletes anything; full access without money the same, except quotes,
- * invoices, payments, pay and promo codes; chosen areas add and change there, but don't delete.
+ * Full access changes and deletes anything; full access without money the same, except prices,
+ * quotes, invoices, payments, pay and promo codes; chosen areas add and change there, but don't delete.
  */
 export function mayChange(access: AssistantAccess, area: AssistantArea, deleting = false): boolean {
   if (access.level === "full") return true;
@@ -82,7 +91,7 @@ export function areasForRole(role: Role, permissions: readonly Permission[]): As
   return ASSISTANT_AREAS.filter((a) => (a.roles as readonly Role[]).includes(role) && (a.permission === null || permissions.includes(a.permission))).map((a) => a.key);
 }
 
-/** What an area's refusal calls it: "This assistant can't change the price list." */
+/** What an area's refusal calls it: "This assistant can't change prices." */
 const AREA_NOUNS: Record<AssistantArea, string> = {
   clients: "clients and properties",
   records: "requests and notes",
@@ -95,7 +104,7 @@ const AREA_NOUNS: Record<AssistantArea, string> = {
   marketing: "campaigns, reviews and social posts",
   promos: "promo codes",
   company: "company details",
-  prices: "the price list",
+  prices: "prices",
   templates: "document styles and contract terms",
   crews: "crews",
   checklists: "checklists",
@@ -105,17 +114,21 @@ const AREA_NOUNS: Record<AssistantArea, string> = {
   team: "people and roles",
 };
 
+/** What "Full access, no money" says to a change it can't make. The database says the same (hooks.before_request). */
+export const MONEY_REFUSAL =
+  "This assistant can't change money: prices, quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.";
+
 /** Why an assistant can't make a change, and where to allow it. The database says the same (hooks.before_request). */
 export function assistantRefusal(area: AssistantArea, deleting = false, access: AssistantAccess = READ_ONLY_ACCESS): string {
   if (access.level === "full_no_money" && isMoneyArea(area)) {
-    return "This assistant can't change money: quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.";
+    return MONEY_REFUSAL;
   }
   return deleting && access.level === "areas"
     ? "This assistant can't delete things. Only an assistant with full access can, in Crewtavo, under Settings → AI assistants."
     : `This assistant can't change ${AREA_NOUNS[area]}. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.`;
 }
 
-/** "Read only", "Can change: Price list, Crews", "Full access", "Full access, no money". */
+/** "Read only", "Can change: Price list and job prices, Crews", "Full access", "Full access, no money". */
 export function describeAssistantAccess(access: AssistantAccess): string {
   if (access.level === "full") return "Full access";
   if (access.level === "full_no_money") return "Full access, no money";

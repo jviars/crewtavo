@@ -11,6 +11,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoneyCents } from "@/lib/format";
+import styles from "./invoices.module.css";
 import { editRows, lockedLines, newRow, resultWords, rowsProblem, rowsToLines, type EditResult, type EditRow, type InvoiceLine } from "./editInvoice";
 
 const decimal = (value: string, negative = false) => value.replace(negative ? /[^0-9.-]/g : /[^0-9.]/g, "");
@@ -75,9 +76,9 @@ export function EditInvoiceDialog({ invoice, onClose, onSaved }: { invoice: { id
   return (
     <Dialog open onClose={onClose} title={`Edit invoice #${invoice.number}`} description="Payments on it stay as they are. The client's link shows the new lines as soon as you save." size="xl">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); if (!refusal && settled && !unchanged) save.mutate(); }} className="stack">
-        <div className="stack-sm">
+        <div className={styles.editLines}>
           {rows.map((row, index) => (
-            <div key={row.key} className="card card-pad stack-sm" style={{ boxShadow: "none", padding: 12 }}>
+            <div key={row.key} className={styles.editLine}>
               <div className="row wrap" style={{ gap: 8, alignItems: "flex-end" }}>
                 <label className="field grow" style={{ minWidth: 180 }}>
                   <span className="small">Item</span>
@@ -103,17 +104,22 @@ export function EditInvoiceDialog({ invoice, onClose, onSaved }: { invoice: { id
               </div>
             </div>
           ))}
-          <div><Button size="sm" icon="plus" onClick={() => setRows((list) => [...list, newRow(list, crypto.randomUUID())])}>Add line</Button></div>
         </div>
+        <div><Button size="sm" icon="plus" onClick={() => setRows((list) => [...list, newRow(list, crypto.randomUUID())])}>Add line</Button></div>
         {locked.length > 0 && (
-          <div className="stack-sm">
-            <strong className="small">Staying as they are</strong>
-            {locked.map(({ line, reason }) => (
-              <div key={line.id} className="row-between wrap muted small" style={{ gap: 8 }}>
-                <span>{line.name}. {reason}</span>
-                <span className="tabular">{formatMoneyCents(Number(line.quantity) * Number(line.unit_price))}</span>
-              </div>
-            ))}
+          <div className={styles.pickGroup}>
+            <h3 className={styles.pickHead}>Staying as they are</h3>
+            <ul className={styles.picks} role="list">
+              {locked.map(({ line, reason }) => (
+                <li key={line.id} className={styles.pick} data-static="">
+                  <span className={styles.pickText}>
+                    <span className={styles.pickName}>{line.name}</span>
+                    <span className={styles.pickSub}>{reason}</span>
+                  </span>
+                  <span className={styles.pickEnd}>{formatMoneyCents(Number(line.quantity) * Number(line.unit_price))}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         <FormError error={save.error ?? refusal} />

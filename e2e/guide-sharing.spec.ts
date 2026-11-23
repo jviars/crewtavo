@@ -46,7 +46,7 @@ test("a guide shared by link: only people added → anyone with the link → a n
 
     // Opened to anyone with the link.
     await share.getByRole("button", { name: "General access: Restricted" }).click();
-    await office.getByRole("menuitem", { name: "Anyone with the link" }).click();
+    await office.getByRole("menuitemradio", { name: /^Anyone with the link/ }).click();
     await expect(share.getByRole("button", { name: "General access: Anyone with the link" })).toBeVisible();
     await stranger.reload();
     await expect(stranger.getByRole("heading", { level: 1, name: title })).toBeVisible();
@@ -76,8 +76,9 @@ test("a guide shared by link: only people added → anyone with the link → a n
     const crew = await as("employee");
     await crew.goto(`/kb/${guide.id}`);
     await expect(crew.getByRole("heading", { level: 1, name: title })).toBeVisible();
-    await crew.getByRole("button", { name: "More actions" }).click();
-    await expect(crew.getByRole("menuitem", { name: "Print" })).toBeVisible();
+    // Someone who can't share has Print on its own, with no menu to share from.
+    await expect(crew.getByRole("button", { name: "Print" })).toBeVisible();
+    await expect(crew.getByRole("button", { name: "More actions" })).toHaveCount(0);
     await expect(crew.getByRole("menuitem", { name: "Share with a link" })).toHaveCount(0);
     await expect(crew.getByText("Anyone with the link can read this")).toHaveCount(0);
   } finally {

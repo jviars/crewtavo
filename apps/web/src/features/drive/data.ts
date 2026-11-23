@@ -12,7 +12,7 @@ import { fileKind, fileSize, isImage, isPdf, type PlanFile } from "@/features/pl
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError, friendlyDbError } from "@/lib/errors";
 import { everyRow } from "@/lib/paging";
-import { formatDate } from "@/lib/format";
+import { addDaysIso, dateIn, formatDate, todayIn } from "@/lib/format";
 import { can, hasRole, type Session } from "@/lib/session";
 
 /** A current, live file as Drive lists it (public.drive_list), with where it is. */
@@ -213,12 +213,12 @@ export function iconKind(f: Pick<DriveFile, "content_type" | "file_name">): File
   if (isSheet(f)) return "sheet";
   return "file";
 }
-export const ICON_FOR: Record<FileIconKind, IconName> = { pdf: "quote", image: "fileImage", doc: "quote", sheet: "fileSpreadsheet", file: "file" };
+export const ICON_FOR: Record<FileIconKind, IconName> = { pdf: "file", image: "fileImage", doc: "fileText", sheet: "fileSpreadsheet", file: "file" };
 
-/** "Version 3 · Rev B · 12 MB · PDF · updated Oct 19, 2026 · by Dana Ruiz". */
+/** "Version 3 · Rev B · 12 MB · PDF · updated Oct 19, 2026 by Dana Ruiz" (Page-Drive.dc.html: when and who are one part). */
 export function fileMeta(f: Pick<DriveFile, "versions" | "revision" | "size_bytes" | "content_type" | "file_name" | "created_at" | "created_by_name">): string {
-  const when = f.versions > 1 ? `updated ${formatDate(f.created_at)}` : formatDate(f.created_at);
-  return [f.versions > 1 && `Version ${f.versions}`, f.revision?.trim(), fileSize(f.size_bytes), fileKind(f), when, f.created_by_name && `by ${f.created_by_name}`].filter(Boolean).join(" · ");
+  const when = `${f.versions > 1 ? "updated " : ""}${formatDate(f.created_at)}${f.created_by_name ? ` by ${f.created_by_name}` : ""}`;
+  return [f.versions > 1 && `Version ${f.versions}`, f.revision?.trim(), fileSize(f.size_bytes), fileKind(f), when].filter(Boolean).join(" · ");
 }
 
 export type Slot = "job_id" | "quote_id" | "request_id" | "property_id";
@@ -355,6 +355,21 @@ export function groupClientFiles(files: DriveFile[]): PropertyGroup[] {
     group.places.sort((a, b) => PLACE_ORDER[a.key.split(":")[0]] - PLACE_ORDER[b.key.split(":")[0]] || number(b.files[0]) - number(a.files[0]) || collator.compare(a.label, b.label));
   }
   return [...groups.values()].sort((a, b) => Number(!a.propertyId) - Number(!b.propertyId) || collator.compare(a.label, b.label));
+}
+
+/**
+ * Recent files by when they were added (their newest version), in the company's time zone: Today,
+ * This week (since Sunday), then Earlier. Empty groups are left out; each keeps the list's order.
+ */
+export function groupByDay<F extends { created_at: string }>(files: readonly F[], timeZone: string): Array<{ key: "today" | "week" | "earlier"; label: string; files: F[] }> {
+  const today = todayIn(timeZone);
+  const weekStart = addDaysIso(today, -new Date(`${today}T12:00:00Z`).getUTCDay());
+  const groups = { today: [] as F[], week: [] as F[], earlier: [] as F[] };
+  for (const f of files) {
+    const day = dateIn(f.created_at, timeZone);
+    groups[day >= today ? "today" : day >= weekStart ? "week" : "earlier"].push(f);
+  }
+  return ([["today", "Today"], ["week", "This week"], ["earlier", "Earlier"]] as const).map(([key, label]) => ({ key, label, files: groups[key] })).filter((g) => g.files.length);
 }
 
 /** What the viewer needs from a listed file (only current versions are listed). */

@@ -10,12 +10,13 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { CATALOG } from "../materials/data";
 import { MaterialSearch } from "../materials/MaterialSearch";
 import type { AppRow, SupplierSettings } from "./catalog";
+import { CodeRow, Step, Steps, kit } from "./PanelKit";
+import { Select } from "@/components/ui/Select";
 
 const ABC_PORTAL = "https://partners-developer.abcsupply.com/";
 const MY_ABC = "https://www.myabcsupply.com/";
@@ -29,71 +30,57 @@ export function AbcSupplyPanel({ app, onChanged }: { app: AppRow; onChanged: () 
     return (
       <>
         <AccountCard app={app} supplier={supplier} onChanged={onChanged} onChangeKeys={() => setChanging(true)} />
-        <section className="card card-pad stack-sm" aria-labelledby="abc-catalog" style={{ gap: 10 }}>
-          <div className="row wrap" style={{ gap: 10 }}>
-            <h2 id="abc-catalog" className="section-title grow" style={{ fontSize: 16 }}>Your catalog</h2>
-            <Link className="btn btn-sm" to={CATALOG}>Open the Catalog</Link>
-          </div>
-          <span className="muted small">
+        <Section className={kit.panel} title="Your catalog" action={<Link to={CATALOG}>Open the Catalog</Link>}>
+          <p className={kit.note}>
             Roofing now has a Catalog: ABC's items at {supplier.branch_name} with your price on each, what your account buys most, every color and size, and your materials checked with ABC in one tap.
             Or look up a price for one of each here.
-          </span>
+          </p>
           <MaterialSearch />
-        </section>
+        </Section>
       </>
     );
   }
   return (
-    <section id="app-setup" className="card card-pad stack" aria-labelledby="abc-setup-title">
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="abc-setup-title" className="section-title" style={{ fontSize: 16 }}>{changing ? "Change your ABC Supply app" : "Connect your ABC Supply account"}</h2>
-        <span className="muted small">
-          ABC Supply gives your prices to an app you make in its developer portal, for your company only. It's free and takes about ten minutes, plus a business day or two for ABC to switch on your real prices.
-          Once it's connected, Roofing gets a Catalog: ABC's items at your branch with your prices, what you buy most up front, and your materials kept current.
-        </span>
+    <Section className={kit.panel} id="app-setup" title={changing ? "Change your ABC Supply app" : "Connect your ABC Supply account"}>
+      <p className={kit.note}>
+        ABC Supply gives your prices to an app you make in its developer portal, for your company only. It's free and takes about ten minutes, plus a business day or two for ABC to switch on your real prices.
+        Once it's connected, Roofing gets a Catalog: ABC's items at your branch with your prices, what you buy most up front, and your materials kept current.
+      </p>
+      <div className="callout callout-info" role="note">
+        <Icon name="info" size={16} />
+        <div className="grow">
+          <div>Before you start</div>
+          Have your ABC account number (top left in <a href={MY_ABC} target="_blank" rel="noreferrer">myABCSupply</a>, or on any ABC invoice) and a myABCSupply login that can see that account. No login yet? Sign up at myABCSupply or ask your branch.
+        </div>
       </div>
-      <div className="callout" role="note">
-        <Icon name="info" size={20} />
-        <span className="grow" style={{ fontWeight: 400 }}>
-          <strong>Before you start:</strong> have your ABC account number (top left in <a href={MY_ABC} target="_blank" rel="noreferrer">myABCSupply</a>, or on any ABC invoice) and a myABCSupply login that can see that account. No login yet? Sign up at myABCSupply or ask your branch.
-        </span>
-      </div>
-      <ol className="app-steps" style={{ gap: 14 }}>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+      <Steps>
+        <Step>
           <span>
             Open ABC's developer portal and sign up with a work email you'll keep (ABC writes to it about your app). Confirm the email and set a password. When ABC asks for a <strong>Developer Organization</strong>, give it your company's name and click <strong>Complete ABC API Developer Account</strong>.
           </span>
-          <a className="btn btn-sm" style={{ justifySelf: "start" }} href={ABC_PORTAL} target="_blank" rel="noreferrer">Open ABC's developer portal <Icon name="external" size={12} /></a>
-        </div></li>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+          <a className="btn btn-sm" href={ABC_PORTAL} target="_blank" rel="noreferrer">Open ABC's developer portal <Icon name="external" size={12} /></a>
+        </Step>
+        <Step>
           <span>Click <strong>Create New App</strong> and fill it in with these:</span>
-          <CopyRow label="Application Name" value="Crewtavo" />
-          <div className="app-copy"><span>Used by multiple ABC customers?</span><strong>No</strong><span /></div>
-          <span className="small muted">That's ABC's question "Do you plan to integrate our APIs into a product or platform that will be used by multiple ABC customers?" The app is for your company only.</span>
-          <CopyRow label="OAuth 2.0 Redirect URIs" value={PLACEHOLDER_REDIRECT} />
-          <span className="small muted">ABC fills this in already: leave it as it is. Crewtavo doesn't use it, but ABC's form needs one. Description and Application URL can stay empty.</span>
-          <span>Then click <strong>Create App</strong>. ABC sets it up in its sandbox, with test prices, right away.</span>
-        </div></li>
-        <li>Under <strong>Manage Applications</strong>, click <strong>Manage</strong> next to the app and copy its <strong>Client ID</strong> and <strong>Client Secret</strong>. Keep them private, like a password. Paste them below with <strong>Sandbox</strong> ticked and click <strong>Connect</strong> to try it with ABC's test prices.</li>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+          <div>
+            <CodeRow label="Application Name" value="Crewtavo" />
+            <div className={kit.codeRow}><span className={kit.codeLabel}>Used by multiple ABC customers?</span><strong>No</strong></div>
+          </div>
+          <p className={kit.note}>That's ABC's question "Do you plan to integrate our APIs into a product or platform that will be used by multiple ABC customers?" The app is for your company only.</p>
+          <CodeRow label="OAuth 2.0 Redirect URIs" value={PLACEHOLDER_REDIRECT} />
+          <p className={kit.note}>ABC fills this in already: leave it as it is. Crewtavo doesn't use it, but ABC's form needs one. Description and Application URL can stay empty.</p>
+          <p>Then click <strong>Create App</strong>. ABC sets it up in its sandbox, with test prices, right away.</p>
+        </Step>
+        <Step>Under <strong>Manage Applications</strong>, click <strong>Manage</strong> next to the app and copy its <strong>Client ID</strong> and <strong>Client Secret</strong>. Keep them private, like a password. Paste them below with <strong>Sandbox</strong> ticked and click <strong>Connect</strong> to try it with ABC's test prices.</Step>
+        <Step>
           <span>
             For your real prices, click <strong>Manage</strong> next to the app again, then <strong>Production Request</strong>. Give ABC your myABCSupply email and your account number and click <strong>Continue</strong>. ABC usually approves it in a business day or two.
           </span>
-        </div></li>
-        <li>Once ABC approves it, come back to this page, click <strong>Change keys</strong>, and paste the app's keys again with <strong>Sandbox</strong> unticked. Your estimates then use your real prices.</li>
-      </ol>
+        </Step>
+        <Step>Once ABC approves it, come back to this page, click <strong>Change keys</strong>, and paste the app's keys again with <strong>Sandbox</strong> unticked. Your estimates then use your real prices.</Step>
+      </Steps>
       <KeysForm sandboxFirst={!supplier} onSaved={() => { setChanging(false); onChanged(); }} onCancel={changing ? () => setChanging(false) : undefined} />
-    </section>
-  );
-}
-
-function CopyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="app-copy">
-      <span>{label}</span>
-      <code className="code-pill">{value}</code>
-      <Button size="sm" icon="copy" aria-label={`Copy ${label}`} onClick={() => copyText(value, `${label} copied`)}>Copy</Button>
-    </div>
+    </Section>
   );
 }
 
@@ -130,7 +117,7 @@ function KeysForm({ sandboxFirst, onSaved, onCancel }: { sandboxFirst: boolean; 
         <input type="checkbox" checked={sandbox} onChange={(e) => { setSandbox(e.target.checked); save.reset(); }} />
         <span>
           Sandbox
-          <span className="muted small" style={{ display: "block", fontWeight: 400 }}>ABC's test accounts and prices, which work as soon as the app is made. Untick it once ABC approves your Production Request.</span>
+          <span className={kit.note} style={{ display: "block", fontWeight: 400 }}>ABC's test accounts and prices, which work as soon as the app is made. Untick it once ABC approves your Production Request.</span>
         </span>
       </label>
       <FormError error={save.error} />
@@ -138,7 +125,7 @@ function KeysForm({ sandboxFirst, onSaved, onCancel }: { sandboxFirst: boolean; 
         <Button type="submit" variant="primary" loading={save.isPending} disabled={!ready}>Connect</Button>
         {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
       </div>
-      <span className="muted small">Crewtavo checks the keys with ABC before keeping them, then keeps them encrypted on your server. It only reads your account, ABC's catalog and your prices: it can't order anything.</span>
+      <p className={kit.note}>Crewtavo checks the keys with ABC before keeping them, then keeps them encrypted on your server. It only reads your account, ABC's catalog and your prices: it can't order anything.</p>
     </form>
   );
 }
@@ -156,12 +143,11 @@ function AccountCard({ app, supplier, onChanged, onChangeKeys }: { app: AppRow; 
   });
   const changed = shipTo !== supplier.ship_to || branchNow !== supplier.branch;
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="abc-account" style={{ gap: 12 }}>
-      <h2 id="abc-account" className="section-title" style={{ fontSize: 16 }}>Where prices come from</h2>
+    <Section className={kit.panel} title="Where prices come from" action={<button type="button" onClick={onChangeKeys}><Icon name="edit" size={14} />Change keys</button>}>
       {supplier.environment === "sandbox" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="info" size={20} />
-          <span className="grow">These are ABC's sandbox test prices, not yours. Once ABC approves your Production Request, change the keys and untick Sandbox.</span>
+          <Icon name="info" size={16} />
+          <div className="grow">These are ABC's sandbox test prices, not yours. Once ABC approves your Production Request, change the keys and untick Sandbox.</div>
         </div>
       )}
       {app.status === "error" && app.last_error && <span className="field-error" role="alert">{app.last_error}</span>}
@@ -179,10 +165,7 @@ function AccountCard({ app, supplier, onChanged, onChangeKeys }: { app: AppRow; 
         {changed && <Button variant="primary" loading={choose.isPending} onClick={() => choose.mutate()}>Use these</Button>}
       </div>
       <FormError error={choose.error} />
-      <span className="muted small">Each branch sets its own prices. Estimates are priced at {supplier.branch_name}{supplier.environment === "sandbox" ? ", in ABC's sandbox" : ""}.</span>
-      <div className="row wrap" style={{ gap: 8 }}>
-        <Button size="sm" onClick={onChangeKeys}>Change keys</Button>
-      </div>
-    </section>
+      <p className={kit.note}>Each branch sets its own prices. Estimates are priced at {supplier.branch_name}{supplier.environment === "sandbox" ? ", in ABC's sandbox" : ""}.</p>
+    </Section>
   );
 }

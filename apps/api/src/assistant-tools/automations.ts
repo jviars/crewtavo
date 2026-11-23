@@ -83,7 +83,7 @@ export const automationTools = {
   }),
   save_automation: tool({
     description:
-      "Make an automation rule (no rule_id) or replace one (with rule_id). Build it from automation_options. New rules start off; only turn one on (enabled) when the person says to, since rules can email and text clients.",
+      "Make an automation rule (no rule_id) or replace one (with rule_id). Build it from automation_options. New rules start off. A rule that emails or texts clients (send_email, send_sms) is turned on, or changed while it's on, by the person in Crewtavo under Automations, where they read what it sends: save it off (turn one that's on off first) and tell them. Turn any other rule on (enabled) only when the person says to.",
     input: z.object({
       rule_id: z.uuid().optional(),
       name: z.string().max(120),

@@ -15,21 +15,21 @@ import { scheduleSettings } from "@crewtavo/core/routing";
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { crewPeople, visitPeople, type CrewMember } from "@crewtavo/core/visitPeople";
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow } from "@/components/ui/InboxList";
 import { RouteMapsLink } from "@/components/ui/MapsLink";
-import { Menu } from "@/components/ui/Menu";
+import { Menu, type MenuEntry, type MenuSearch } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { InboxSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
-import { EntityStatus } from "@/components/ui/StatusPill";
+import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
-import { Select } from "@/components/ui/Select";
 import { api, supabase, unwrap } from "@/lib/api";
 import { addDaysIso, addressLine, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
@@ -38,15 +38,17 @@ import { toast } from "@/lib/toast";
 import { CalendarEventDialog, monthLabel, type CalendarEvent } from "./CalendarEventDialog";
 import { dayRoute } from "./dayRoute";
 import { RouteDialog } from "./RouteDialog";
-import { clock, conflictsOf, conflictText, fitBlock, lengthOf, minutesOf, TimeGrid, TimeRange, useGridScale, type GridColumn, type GridExternal } from "./TimeGrid";
+import { clock, conflictsOf, conflictText, fitBlock, lengthOf, minutesOf, TimeGrid, TimeRange, useGridScale, useMedia, usePhoneGrid, type GridColumn, type GridExternal } from "./TimeGrid";
 import { useVisitDrag, type DropTarget } from "./useVisitDrag";
 import { VisitDetails } from "./VisitDetails";
 import { VisitDialog, type VisitInput } from "./VisitDialog";
 import { usePendingChanges } from "./changeRequests";
 import { useSchedulingRights } from "./myCrews";
 import { eventOnRow, movePeople, onRow, peopleRows } from "./people";
-import { spanDays, stepMonth, type Span } from "./range";
+import { filterLine } from "./filterLine";
+import { spanDays, stepMonth, weekStart, type Span } from "./range";
 import { intlLocale, msg, t } from "@/lib/i18n";
+import { Select } from "@/components/ui/Select";
 
 const ScheduleMap = lazy(() => import("./ScheduleMap").then((m) => ({ default: m.ScheduleMap })));
 
@@ -90,6 +92,7 @@ type View = "day" | "week" | "month" | "list" | "map";
 const VIEWS: View[] = ["day", "week", "month", "list", "map"];
 /** Each view by name, said in the person's language where it's shown. */
 const VIEW_LABELS: Record<View, string> = { day: msg("Day"), week: msg("Week"), month: msg("Month"), list: msg("List"), map: msg("Map") };
+const VIEW_ICONS: Record<View, IconName> = { day: "clock", week: "table", month: "calendar", list: "list", map: "map" };
 const SPANS: Span[] = ["day", "week", "month"];
 type Board = "crews" | "people";
 /** Someone on the team, from GET /api/team (former members too, so old visits keep their names). */
@@ -197,6 +200,10 @@ export function SchedulePage() {
     writePref("crewtavo.schedule.person", id);
   };
   const ppm = useGridScale();
+  // A phone's day shows every crew in one column, in their colors (Mobile-Work.dc.html), not a lane each.
+  const phoneGrid = usePhoneGrid();
+  // Where the phone's header and menus take over from the desktop's bar (components.css's 900px).
+  const phoneLayout = useMedia("(max-width: 900px)");
   const unscheduledList = useListAnimation<HTMLDivElement>();
 
   // The map shows a day, and the list a day, a week or a month (its own days, not the month grid's).
@@ -246,6 +253,8 @@ export function SchedulePage() {
   // Until someone picks, a business with no crews sees People.
   const board: Board = boardChoice === "crews" || boardChoice === "people" ? boardChoice : schedule.data && !crews.length ? "people" : "crews";
   const byPerson = board === "people" && (view === "day" || view === "week");
+  // One column for the whole day on a phone, every crew's visits side by side in their colors.
+  const merged = phoneGrid && view === "day" && !byPerson && !crewId && crews.length > 0;
   // A row (lane) per person, and one for visits nobody's on yet, like "No crew". Picking a person shows only theirs.
   const rowPeople = peopleRows(team.data ?? [], scheduled, nameOf, session.userId, onCrews);
   const rowIds = new Set(rowPeople.map((p) => p.user_id));
@@ -443,36 +452,53 @@ export function SchedulePage() {
     );
   };
 
+  /** Its stop in the crew's route, as a small number: "Stop 2" to a screen reader. */
+  const stopOf = (v: Visit) =>
+    v.route_order && v.status === "scheduled" ? (
+      <span className="tg-stop"><span aria-hidden="true">{v.route_order}</span><span className="sr-only">{t("Stop {number}", { number: v.route_order })} </span></span>
+    ) : null;
+  /** Done: a green check at the end of its first row, its words quieter. On the way or started: a blue dot. */
+  const doneMark = (v: Visit) => v.status === "completed" && <span className="tg-done" title={statusText("visit", "completed")}><Icon name="check" size={12} bold /><span className="sr-only">{statusText("visit", "completed")}</span></span>;
+  const liveMark = (v: Visit) => (v.status === "in_progress" || v.status === "en_route") && <span className="tg-live" title={statusText("visit", v.status)}><span className="sr-only">{statusText("visit", v.status)} </span></span>;
+
   /**
    * A visit's words: an Anytime chip's one line, or the rows a block's height has room for
-   * (fitBlock). The time keeps a row of its own, so the people never squeeze it.
+   * (fitBlock). The time keeps a row of its own, so the people never squeeze it. On a phone's one
+   * column for every crew, the time also says whose crew it is.
    */
   const content = (v: Visit, height?: number) => {
     const who = v.job?.client?.display_name ?? v.property?.line1 ?? v.address;
-    const done = v.status === "completed" ? "✓ " : "";
-    const day = v.series_total && v.series_total > 1 ? ` · day ${v.series_day}/${v.series_total}` : "";
-    const stop = v.route_order && v.status === "scheduled" ? `${v.route_order}. ` : "";
+    const day = v.series_total && v.series_total > 1 ? ` · ${t("Day {day} of {days}", { day: v.series_day, days: v.series_total })}` : "";
     const changed = changes.has(v.id);
-    const asked = changed && <span title={t("Change requested")}>↺ <span className="sr-only">{t("Change requested:")} </span></span>;
-    if (height === undefined) return <span className="tg-line"><span className="tg-n" style={{ WebkitLineClamp: 1 }}>{asked}{stop}{done}{v.title}{day}</span>{faces(v)}</span>;
+    const asked = changed && <span className="tg-ask" title={t("Change requested")}><Icon name="refresh" size={11} bold /><span className="sr-only">{t("Change requested:")} </span></span>;
+    if (height === undefined) return <span className="tg-line">{stopOf(v)}{liveMark(v)}<span className="tg-n" style={{ WebkitLineClamp: 1 }}>{asked}{v.title}{day}</span>{doneMark(v)}{faces(v)}</span>;
     // A change requested takes the weather hold's row: it's what to see to first.
     const fit = fitBlock(height, { time: Boolean(v.starts_at), people: v.assignees.length > 0, hold: Boolean(v.hold_reason) || changed, client: Boolean(who) });
-    const time = fit.time && v.starts_at && <span className="tg-t">{stop}<TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /></span>;
-    const title = <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{!fit.hold && asked}{time ? "" : stop}{done}{v.title}{day}</span>;
+    const crew = merged && crewOf(v.crew_id)?.name;
+    const time = fit.time && v.starts_at && (
+      <span className="tg-t">
+        {stopOf(v)}
+        {liveMark(v)}
+        <span className="tg-when"><TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} />{crew && <span className="tg-crew"> · {crew}</span>}</span>
+        {doneMark(v)}
+      </span>
+    );
+    const title = <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{!fit.hold && asked}{time ? null : stopOf(v)}{v.title}{day}</span>;
     return (
       <>
         {time}
-        {fit.people === "inline" ? <span className="tg-line">{title}{faces(v)}</span> : title}
+        {fit.people === "inline" ? <span className="tg-line">{title}{!time && doneMark(v)}{faces(v)}</span> : title}
         {fit.client && <span className="tg-m">{who}</span>}
         {fit.people === "row" && <span className="tg-line tg-who">{faces(v)}<span className="tg-m" aria-hidden="true">{firstNames(v)}</span></span>}
-        {fit.hold && (changed ? <span className="tg-w">{t("↺ Change requested")}</span> : <span className="tg-w" title={v.hold_reason ?? undefined}>⚠ {v.hold_reason?.split(";")[0]}</span>)}
+        {fit.hold && (changed ? <span className="tg-w"><Icon name="refresh" size={12} bold />{t("Change requested")}</span> : <span className="tg-w" title={v.hold_reason ?? undefined}><Icon name="cloud" size={12} bold />{v.hold_reason?.split(";")[0]}</span>)}
         {!fit.people && v.assignees.length > 0 && <span className="sr-only">{t("With {names}", { names: namesOn(v).replace(/^You\b/, "you") })}</span>}
+        {!time && fit.people !== "inline" && v.status === "completed" && <span className="sr-only">{statusText("visit", "completed")}</span>}
       </>
     );
   };
 
   /** How many visits a day (or a crew's lane) has, rolling to the new count as visits move. */
-  const visitCount = (n: number) => n > 0 && <span className="muted small"><AnimatedNumber value={n} /><span className="sr-only">{n === 1 ? t(" visit") : t(" visits")}</span></span>;
+  const visitCount = (n: number) => n > 0 && <span className="sched-count"><AnimatedNumber value={n} /><span className="sr-only">{n === 1 ? t(" visit") : t(" visits")}</span></span>;
 
   const newAt = (col: GridColumn, minutes: number | null) => {
     const start = minutes === null ? null : zonedTimeToUtc(col.date, hhmm(minutes), tz);
@@ -494,37 +520,49 @@ export function SchedulePage() {
     ...(crewId ? crews.filter((c) => c.id === crewId) : crews).map((c) => ({ key: c.id, date: anchor, crew: c.id, color: c.color, label: c.name })),
     ...(crewId ? [] : [{ key: "none", date: anchor, crew: "", label: t("No crew") }]),
   ];
+  // A crew's day can be put in route order (by whoever runs that crew) once it has stops to visit.
+  const canRoute = (col: GridColumn) => canDispatch && anchor >= today && rights.canChange(col.crew || null) && laneVisits(col).some((v) => v.status === "scheduled");
+  const planRoute = (col: GridColumn) => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : t("Crew") });
   const dayColumns: GridColumn[] = lanes.map((col) => {
     const lane = laneVisits(col);
-    const stops = lane.filter((v) => v.status === "scheduled");
     const route = dayRoute(lane, session.company);
     return {
       ...col,
       today: anchor === today,
       past: anchor < today,
       headerExtra: (
-        <span className="row" style={{ gap: 4 }}>
-          {route.stops.length > 1 && anchor >= today && (
-            <RouteMapsLink className="btn btn-ghost btn-sm btn-icon" route={route}>
-              <Icon name="map" size={14} />
-              <span className="sr-only">{t("Open route in maps")}</span>
-            </RouteMapsLink>
-          )}
-          {canDispatch && stops.length > 0 && anchor >= today && rights.canChange(col.crew || null) && (
-            <Button size="sm" variant="ghost" icon="navigation" title={t("Organize this crew's route by distance")} onClick={() => setRouting({ crew: col.crew ?? "", name: typeof col.label === "string" ? col.label : "Crew" })}>{t("Plan route")}</Button>
-          )}
+        <>
           {visitCount(lane.length)}
-        </span>
+          <span className="tg-colhead-end">
+            {route.stops.length > 1 && anchor >= today && (
+              <RouteMapsLink className="btn btn-ghost btn-sm btn-icon tg-colhead-btn" route={route}>
+                <Icon name="map" size={14} />
+                <span className="sr-only">{t("Open route in maps")}</span>
+              </RouteMapsLink>
+            )}
+            {canRoute(col) && (
+              <button type="button" className="tg-colhead-link" title={t("Organize this crew's route by distance")} onClick={() => planRoute(col)}>{t("Plan route")}</button>
+            )}
+          </span>
+        </>
       ),
     };
   });
   const personColumns: GridColumn[] = personLanes.map((col) => ({ ...col, today: anchor === today, past: anchor < today, headerExtra: visitCount(laneVisits(col).length) }));
+  // Day view on a phone: one column, under the week strip that already says which day it is.
+  const mergedColumns: GridColumn[] = [{ key: "all", date: anchor, today: anchor === today, past: anchor < today, label: heading }];
   const weekColumns: GridColumn[] = days.map((date) => ({
     key: date,
     date,
     today: date === today,
     past: date < today,
-    label: label(date, { weekday: "short", day: "numeric" }),
+    label: (
+      <>
+        <span className="tg-dow">{label(date, { weekday: "short" })}</span>
+        <span className="tg-date">{Number(date.slice(8))}</span>
+        <span className="sr-only">{label(date, { month: "long" })}</span>
+      </>
+    ),
     onHeaderClick: () => {
       setAnchor(date);
       setView("day");
@@ -532,7 +570,8 @@ export function SchedulePage() {
     headerExtra: visitCount(byDay(date).length),
   }));
 
-  const showPanel = (panel ?? unscheduled.length > 0) && (canDispatch || unscheduled.length > 0);
+  // Open by itself when something's waiting, except on a phone, where it would sit under the whole board.
+  const showPanel = (panel ?? (unscheduled.length > 0 && !phoneLayout)) && (canDispatch || unscheduled.length > 0);
   const grid = {
     tz,
     ...span,
@@ -557,88 +596,226 @@ export function SchedulePage() {
   const mapVisits = view === "map" ? byDay(anchor) : [];
   const located = (v: Visit) => v.property?.lat != null && v.property.lng != null;
   const mapPins = mapVisits.flatMap((v, i) =>
-    located(v) ? [{ id: v.id, lat: v.property!.lat!, lng: v.property!.lng!, label: String(i + 1), title: [v.starts_at ? timeOf(v.starts_at) : "Anytime", v.title, v.job?.client?.display_name].filter(Boolean).join(" · "), color: v.crewColor }] : [],
+    located(v) ? [{ id: v.id, lat: v.property!.lat!, lng: v.property!.lng!, label: String(i + 1), title: [v.starts_at ? timeOf(v.starts_at) : t("Anytime"), v.title, v.job?.client?.display_name].filter(Boolean).join(" · "), color: v.crewColor }] : [],
   );
-  const unplaced = mapVisits.filter((v) => !located(v));
+
+  // ---- The bar over the board -------------------------------------------------------------------
+  const onToday = view === "day" || view === "map" ? anchor === today : days.includes(today);
+  const goToday = () => setAnchor(today);
+  // A phone's title is the month it's showing, as a phone's calendar says it (with the year when it isn't this one).
+  const phoneTitle = label(anchor, { month: "long", ...(anchor.slice(0, 4) !== today.slice(0, 4) && { year: "numeric" }) });
+  const weekDays = spanDays("week", anchor);
+  const crewNameOf = (id: string) => crews.find((c) => onCrews.get(c.id)?.includes(id))?.name;
+  const face = (id: string | null) => {
+    const p = id ? personById.get(id) : undefined;
+    return id ? (
+      <span className="sched-face" style={{ "--p": p?.profile?.color ?? undefined } as CSSProperties} aria-hidden="true"><Face name={p?.sub?.name || p?.profile?.full_name || p?.profile?.email} photo={p?.profile?.avatar_url} /></span>
+    ) : (
+      <span className="sched-face" data-none aria-hidden="true" />
+    );
+  };
+  const swatch = (color: string | null | undefined) => <span className="sched-swatch" style={{ "--c": color ?? "var(--text-4)" } as CSSProperties} aria-hidden="true" />;
+  const [personQuery, setPersonQuery] = useState("");
+  const personMatch = (name: string) => !personQuery.trim() || name.toLowerCase().includes(personQuery.trim().toLowerCase());
+  const personItems: MenuEntry[] = [
+    // A round, quiet "everyone" the size of the faces under it, so every name starts at the same place.
+    { label: t("Everyone"), lead: <span className="sched-face" data-all aria-hidden="true"><Icon name="users" size={phoneLayout ? 17 : 12} /></span>, checked: shownPerson === "", hidden: !personMatch(t("Everyone")), onSelect: () => setPerson("") },
+    { label: t("You"), lead: face(session.userId), checked: shownPerson === session.userId, hidden: !personMatch(t("You")), onSelect: () => setPerson(session.userId) },
+    { separator: true },
+    ...pickable.map((p): MenuEntry => ({ label: nameOf(p.user_id), lead: face(p.user_id), end: crewNameOf(p.user_id), checked: shownPerson === p.user_id, hidden: !personMatch(nameOf(p.user_id)), onSelect: () => setPerson(p.user_id) })),
+    { separator: true },
+    { label: t("Nobody assigned"), lead: face(""), checked: shownPerson === "none", hidden: !canDispatch || !personMatch(t("Nobody assigned")), onSelect: () => setPerson("none") },
+  ];
+  // A long team gets a field to find someone in.
+  const personSearch: MenuSearch | undefined = pickable.length > 8 ? { value: personQuery, onChange: setPersonQuery, placeholder: t("Search"), label: t("Person") } : undefined;
+  const personName = shownPerson === "" ? t("Everyone") : shownPerson === "none" ? t("Nobody assigned") : nameOf(shownPerson);
+  const crewItems: MenuEntry[] = [
+    { label: t("All"), lead: swatch("transparent"), checked: !crewId, onSelect: () => setCrewId("") },
+    { separator: true },
+    ...crews.map((c): MenuEntry => ({ label: c.name, lead: swatch(c.color), checked: crewId === c.id, onSelect: () => setCrewId(c.id) })),
+  ];
+  const crewName = crews.find((c) => c.id === crewId)?.name ?? t("All");
+  const rangeItems: MenuEntry[] = SPANS.map((s) => ({ label: t(VIEW_LABELS[s]), checked: listSpan === s, onSelect: () => setListSpan(s) }));
+  const canSeeUnscheduled = canDispatch || unscheduled.length > 0;
+  const canToggleCalendars = allEvents.length > 0 || !showCalendars;
+  // The rare tools, in More; a phone has them under its View button with the rest.
+  const tools: MenuEntry[] = [
+    { label: t("Other calendars"), checkbox: true, checked: showCalendars, hidden: !canToggleCalendars, title: showCalendars ? t("Hide events from other calendars") : t("Show events from other calendars"), onSelect: () => setShowCalendars(!showCalendars) },
+    { separator: true },
+    { label: t("Rain day: move a day's visits"), icon: "cloud", hidden: !canDispatch, onSelect: () => setDialog("shift") },
+    { label: t("Add a visit to many jobs"), icon: "calendarCheck", hidden: !canDispatch || !wholeTeam, onSelect: () => setDialog("bulk") },
+  ];
+  const viewItems: MenuEntry[] = [
+    ...VIEWS.map((v): MenuEntry => ({ label: t(VIEW_LABELS[v]), icon: VIEW_ICONS[v], checked: view === v, onSelect: () => setView(v) })),
+    { separator: true, hidden: view !== "day" && view !== "week" },
+    { heading: t("Show by"), hidden: view !== "day" && view !== "week" },
+    ...(["crews", "people"] as const).map((b): MenuEntry => ({ label: b === "crews" ? t("Crews") : t("People"), icon: b === "crews" ? "truck" : "users", checked: board === b, hidden: view !== "day" && view !== "week", onSelect: () => setBoard(b) })),
+    { separator: true, hidden: view !== "list" },
+    { heading: t("Range"), hidden: view !== "list" },
+    ...SPANS.map((s): MenuEntry => ({ label: t(VIEW_LABELS[s]), checked: listSpan === s, hidden: view !== "list", onSelect: () => setListSpan(s) })),
+    { separator: true },
+    { label: t("Unscheduled"), checkbox: true, checked: Boolean(showPanel), end: unscheduled.length ? String(unscheduled.length) : undefined, hidden: !canSeeUnscheduled, onSelect: () => setPanel(!showPanel) },
+    {
+      label: t("Plan route"),
+      icon: "navigation",
+      hidden: view !== "day" || byPerson,
+      items: dayColumns.map((col): MenuEntry => ({ label: typeof col.label === "string" ? col.label : t("Crew"), lead: swatch(col.color), hidden: !canRoute(col), onSelect: () => planRoute(col) })),
+    },
+    ...tools,
+  ];
+  const phoneFilters: MenuEntry[] = [
+    { heading: t("Person"), hidden: !canPickPerson },
+    ...personItems.map((e) => ({ ...e, hidden: !canPickPerson || e.hidden })),
+    { separator: true },
+    { heading: t("Crew"), hidden: crews.length < 2 },
+    ...crewItems.filter((e) => !("separator" in e)).map((e) => ({ ...e, hidden: crews.length < 2 })),
+  ];
+  const filtered = Boolean(shownPerson || crewId);
+  const shownLine = filterLine(shownPerson, session.userId, personName, crews.find((c) => c.id === crewId)?.name);
+  const shownCount = view === "map" || view === "day" || oneDay ? byDay(anchor).length : scheduled.length;
+
+  /** A visit as a row in the List and beside the Map: its time (or stop) first, then what, for whom, who's on it. */
+  const visitRow = (v: Visit, lead: ReactNode, compact?: { off: boolean }) => {
+    const when = v.starts_at ? `${timeOf(v.starts_at)}${v.ends_at ? ` – ${timeOf(v.ends_at)}` : ""}` : t("Anytime");
+    const crew = crewOf(v.crew_id);
+    return (
+      <InboxRow
+        key={v.id}
+        onClick={() => show(v)}
+        className={v.status === "completed" ? "sched-row is-done" : "sched-row"}
+        current={grid.selected === v.id}
+        avatar={lead}
+        title={<><span className="sr-only">{when}: </span>{v.title}</>}
+        badge={v.series_total && v.series_total > 1 ? <span className="il-num">{t("Day {day} of {days}", { day: v.series_day, days: v.series_total })}</span> : undefined}
+        subject={(v.job?.client || v.property || v.address) && [v.job?.client?.display_name, addressLine(v.property) || v.address].filter(Boolean).join(" · ")}
+        // Its status as a dot and words; a client's request or a weather hold in color, since someone has to see to it.
+        // Beside the map the pin's number leads the row, so its start time begins the line, and a visit that's
+        // simply scheduled says nothing more (the narrow column keeps its room for what needs seeing to).
+        meta={[
+          compact && <span key="when" className="sched-meta-when" aria-hidden="true">{v.starts_at ? timeOf(v.starts_at) : t("Anytime")}</span>,
+          !(compact && v.status === "scheduled") && <EntityStatus key="status" kind="visit" status={v.status} />,
+          compact?.off && <span key="off" className="il-note" data-tone="warning">{t("No map location yet")}</span>,
+          changes.has(v.id) && <span key="asked" className="il-note"><Icon name="refresh" size={13} />{t("Change requested")}</span>,
+          v.hold_reason && <span key="hold" className="il-note" data-tone="warning" title={v.hold_reason}><Icon name="cloud" size={13} />{v.hold_reason.split(";")[0]}</span>,
+          crew && <span key="crew" className="sched-meta-crew">{swatch(crew.color)}<span>{crew.name}</span></span>,
+          // Beside the map there's room for less: who's on it is in the visit itself. On a phone the
+          // faces on the right say who (the names stay for a screen reader).
+          !compact && <span key="who" className="sched-meta-who" data-faces={v.assignees.length > 0 || undefined}>{namesOn(v) || t("Nobody assigned")}</span>,
+        ]}
+        // The names are on the quiet line already, for a screen reader.
+        aside={!compact && v.assignees.length > 0 ? <span aria-hidden="true">{faces(v)}</span> : undefined}
+      />
+    );
+  };
+  /** "8:00 AM", "Anytime": the time in the row's left column, as Home's Today list has it. */
+  const timeLead = (v: Visit) => (v.starts_at ? <TimeRange start={timeOf(v.starts_at)} /> : <span className="sched-row-anytime">{t("Anytime")}</span>);
 
   return (
     <>
       <PageHeader
-        title={t("Schedule")}
+        documentTitle={t("Schedule")}
+        title={
+          <h1 className="page-title">
+            <span className="sched-title-desk">{t("Schedule")}</span>
+            <span className="sched-title-phone">{phoneTitle}</span>
+          </h1>
+        }
         actions={
-          canDispatch && (
-            <>
+          <>
+            {!onToday && <button type="button" className="btn sched-phone sched-today" onClick={goToday}>{t("Today")}</button>}
+            {(canPickPerson || crews.length > 1) && (
               <Menu
-                label={t("More scheduling tools")}
-                items={[
-                  { label: t("Rain day: move a day's visits"), icon: "cloud", onSelect: () => setDialog("shift") },
-                  { label: t("Add a visit to many jobs"), icon: "calendarCheck", hidden: !wholeTeam, onSelect: () => setDialog("bulk") },
-                ]}
+                label={t("Filter by person or crew")}
+                title={t("Show")}
+                triggerClassName={`btn sched-phone${filtered ? " sched-filtered" : ""}`}
+                trigger={<Icon name="filter" size={20} />}
+                items={phoneFilters}
+                search={personSearch}
+                footer={{ text: t.plural(shownCount, { one: "{count} visit", other: "{count} visits" }), action: filtered ? { label: t("Clear"), onSelect: () => { setPerson(""); setCrewId(""); } } : undefined }}
               />
-              <Button variant="primary" icon="plus" onClick={() => setEditing({ title: "", kind: "job", scheduled_on: oneDay ? anchor : today })}>{t("New visit")}</Button>
-            </>
-          )
+            )}
+            <Menu label={t("View")} title={t("View")} triggerClassName="btn sched-phone" trigger={<Icon name="calendar" size={20} />} items={viewItems} />
+            <Menu label={t("More scheduling tools")} triggerClassName="btn btn-icon sched-desk" items={tools} />
+            {canDispatch && <Button variant="primary" icon="plus" onClick={() => setEditing({ title: "", kind: "job", scheduled_on: oneDay ? anchor : today })}>{t("New visit")}</Button>}
+          </>
         }
       />
-      <div className="toolbar">
-        <div className="btn-group">
-          <Button size="sm" icon="chevronLeft" aria-label={t("Previous")} onClick={() => step(-1)} />
-          <Button size="sm" onClick={() => setAnchor(today)}>{t("Today")}</Button>
-          <Button size="sm" icon="chevronRight" aria-label={t("Next")} onClick={() => step(1)} />
+
+      {/* A desktop's bar: the days shown and stepping through them, who and which crew, then how they're laid out. */}
+      <div className="sched-bar">
+        <div className="sched-step">
+          <Button size="sm" variant="ghost" icon="chevronLeft" aria-label={t("Previous")} onClick={() => step(-1)} />
+          <Button size="sm" onClick={goToday}>{t("Today")}</Button>
+          <Button size="sm" variant="ghost" icon="chevronRight" aria-label={t("Next")} onClick={() => step(1)} />
+          <h2 className="sched-range" aria-live="polite">{heading}</h2>
+          {schedule.isFetching && !schedule.isPending && <span className="spinner sched-spinner" aria-label={t("Refreshing")} />}
         </div>
-        <strong style={{ fontSize: 16, letterSpacing: "var(--tracking-tight)", minWidth: 200 }}>{heading}</strong>
-        {schedule.isFetching && !schedule.isPending && <span className="spinner" style={{ width: 14, height: 14, color: "var(--text-3)" }} aria-label={t("Refreshing")} />}
+        {canPickPerson && <PickMenu label={t("Person")} value={personName} items={personItems} search={personSearch} clear={shownPerson ? { label: t("Show everyone"), onClick: () => setPerson("") } : undefined} />}
+        {crews.length > 1 && <PickMenu label={t("Crew")} value={crewName} items={crewItems} clear={crewId ? { label: t("Show all crews"), onClick: () => setCrewId("") } : undefined} />}
+        {view === "list" && <PickMenu label={t("Range")} value={t(VIEW_LABELS[listSpan])} items={rangeItems} />}
         <span className="grow" />
-        {(canDispatch || unscheduled.length > 0) && !showPanel && (
-          <Button size="sm" icon="inbox" onClick={() => setPanel(true)}>
-            {t("Show unscheduled")}
+        {canSeeUnscheduled && (
+          <Button size="sm" variant="ghost" className="sched-uns-toggle" aria-pressed={Boolean(showPanel)} title={showPanel ? t("Hide unscheduled") : t("Show unscheduled")} onClick={() => setPanel(!showPanel)}>
+            {t("Unscheduled")}
             {unscheduled.length > 0 && <span className="badge">{unscheduled.length}</span>}
           </Button>
         )}
-        {(allEvents.length > 0 || !showCalendars) && (
-          <Button size="sm" icon="calendar" title={showCalendars ? t("Hide events from other calendars") : t("Show events from other calendars")} onClick={() => setShowCalendars(!showCalendars)}>
-            {showCalendars ? t("Hide calendars") : t("Show calendars")}
-          </Button>
-        )}
-        {canPickPerson && (
-          <FilterSelect
-            label={t("Person")}
-            value={shownPerson}
-            onChange={setPerson}
-            options={[
-              ["", "Everyone"],
-              [session.userId, t("You")],
-              ...pickable.map((p): [string, string] => [p.user_id, nameOf(p.user_id)]),
-              ...(canDispatch ? [["none", t("Nobody assigned")] as [string, string]] : []),
-            ]}
-          />
-        )}
-        {crews.length > 1 && <FilterSelect label={t("Crew")} value={crewId} onChange={setCrewId} options={[["", t("All")], ...crews.map((c): [string, string] => [c.id, c.name])]} />}
         {(view === "day" || view === "week") && (
           <div className="segmented" role="group" aria-label={t("Show by")}>
             {(["crews", "people"] as const).map((b) => <button key={b} type="button" aria-pressed={board === b} onClick={() => setBoard(b)}>{b === "crews" ? t("Crews") : t("People")}</button>)}
           </div>
         )}
-        {view === "list" && <FilterSelect label={t("Range")} value={listSpan} onChange={(s) => setListSpan(s as Span)} options={SPANS.map((s): [string, string] => [s, s[0].toUpperCase() + s.slice(1)])} />}
         <div className="segmented" role="group" aria-label={t("View")}>
           {VIEWS.map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>{t(VIEW_LABELS[v])}</button>)}
         </div>
       </div>
-      {((crews.length > 0 && (view !== "day" || byPerson)) || (showCalendars && calendarsShown.length > 0)) && (
+
+      {/* A phone's: the week's days to pick from (Day), or the span shown with a step either side. */}
+      <div className="sched-phone-nav">
+        {view === "day" ? (
+          <div className="sched-strip" role="group" aria-label={t("Week")}>
+            <button type="button" className="sched-strip-step" aria-label={t("Previous")} onClick={() => setAnchor(addDaysIso(anchor, -7))}><Icon name="chevronLeft" size={18} /></button>
+            {weekDays.map((d) => (
+              <button key={d} type="button" className="sched-strip-day" aria-pressed={d === anchor} aria-current={d === today ? "date" : undefined} aria-label={label(d, { weekday: "long", month: "long", day: "numeric" })} onClick={() => setAnchor(d)}>
+                <span aria-hidden="true">{label(d, { weekday: "narrow" })}</span>
+                <b aria-hidden="true">{Number(d.slice(8))}</b>
+              </button>
+            ))}
+            <button type="button" className="sched-strip-step" aria-label={t("Next")} onClick={() => setAnchor(addDaysIso(weekStart(anchor), 7))}><Icon name="chevronRight" size={18} /></button>
+          </div>
+        ) : (
+          <div className="sched-phone-step">
+            <button type="button" className="sched-strip-step" aria-label={t("Previous")} onClick={() => step(-1)}><Icon name="chevronLeft" size={18} /></button>
+            <span className="sched-phone-range" aria-live="polite">{heading}</span>
+            <button type="button" className="sched-strip-step" aria-label={t("Next")} onClick={() => step(1)}><Icon name="chevronRight" size={18} /></button>
+          </div>
+        )}
+      </div>
+
+      {/* Under the bar, so a phone's header and strip stay put: whose visits these are, and the way back. */}
+      {shownLine && (
+        <p className="sched-filter-line">
+          {shownLine.text}
+          {/* The line goes once it's clicked, so focus lands on the bar's first filter, not the page. */}
+          <button type="button" className="link-btn" onClick={() => { document.querySelector<HTMLElement>(".sched-bar .sched-pick")?.focus(); setPerson(""); setCrewId(""); }}>{shownLine.clear}</button>
+        </p>
+      )}
+
+      {!merged && ((crews.length > 0 && view !== "list" && view !== "map") || (showCalendars && calendarsShown.length > 0)) && (
         <div className="crew-legend">
-          {(view !== "day" || byPerson) && crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
+          {view !== "list" && view !== "map" && crews.map((c) => <span key={c.id}><i style={{ ["--c" as string]: c.color ?? "var(--text-4)" }} />{c.name}</span>)}
           {showCalendars && calendarsShown.map((s) => <span key={s.id} title={t("Another calendar")}><i data-calendar style={{ ["--c" as string]: s.color ?? "var(--text-4)" }} />{s.name}</span>)}
         </div>
       )}
 
-      {schedule.error && !schedule.data && <div className="card"><ErrorState error={schedule.error} onRetry={() => schedule.refetch()} /></div>}
+      {schedule.error && !schedule.data && <ErrorState error={schedule.error} onRetry={() => schedule.refetch()} />}
       {schedule.isPending && <ScheduleSkeleton view={view} />}
 
       {schedule.data && (
         <div className="schedule-layout" data-panel={showPanel || undefined}>
-          <div style={{ minWidth: 0 }}>
+          <div className="schedule-main">
             {view === "week" && !byPerson && <TimeGrid columns={weekColumns} minColumn={96} {...grid} />}
-            {view === "day" && <TimeGrid columns={byPerson ? personColumns : dayColumns} minColumn={160} {...grid} />}
+            {view === "day" && <TimeGrid columns={merged ? mergedColumns : byPerson ? personColumns : dayColumns} minColumn={160} bare={merged} {...grid} />}
             {view === "week" && byPerson && (
               <div className={`tg-wrap people-week${schedule.isPlaceholderData ? " is-stale" : ""}`}>
                 <table>
@@ -647,7 +824,10 @@ export function SchedulePage() {
                       <th scope="col"><span className="sr-only">{t("Person")}</span></th>
                       {days.map((date) => (
                         <th key={date} scope="col" data-today={date === today || undefined}>
-                          <button type="button" className="link-btn" onClick={() => { setAnchor(date); setView("day"); }}>{label(date, { weekday: "short", day: "numeric" })}</button>
+                          <button type="button" className="link-btn" onClick={() => { setAnchor(date); setView("day"); }}>
+                            <span className="tg-dow">{label(date, { weekday: "short" })}</span>
+                            <span className="tg-date">{Number(date.slice(8))}</span>
+                          </button>
                         </th>
                       ))}
                     </tr>
@@ -655,7 +835,7 @@ export function SchedulePage() {
                   <tbody>
                     {personLanes.map((row) => (
                       <tr key={row.key}>
-                        <th scope="row" style={{ "--lane": row.color ?? undefined } as CSSProperties}>{row.label}</th>
+                        <th scope="row"><span className="people-week-who">{face(row.person || "")}<span>{row.label}</span></span></th>
                         {days.map((date) => {
                           const visits = byDay(date).filter((v) => onRow(v, row.person!, onCrews));
                           const rowEvents = eventsOn(date).filter((e) => eventOnRow(ownerOf(e), row.person!, rowIds));
@@ -686,7 +866,11 @@ export function SchedulePage() {
                                     onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
                                     onClick={() => !wasDragging() && show(v)}
                                   >
-                                    {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
+                                    <span className="tg-line">
+                                      {v.starts_at && <span className="tg-chip-time">{timeOf(v.starts_at)}</span>}
+                                      <span className="tg-n">{v.title}</span>
+                                      {doneMark(v)}
+                                    </span>
                                   </button>
                                 );
                               })}
@@ -704,49 +888,43 @@ export function SchedulePage() {
                 </table>
               </div>
             )}
-            {view === "list" && (
-              <div className={`stack${schedule.isPlaceholderData ? " is-stale" : ""}`}>
-                {listDays.length === 0 && <div className="card"><EmptyState inline title={period === "day" ? t("Nothing scheduled this day") : period === "week" ? t("Nothing scheduled this week") : t("Nothing scheduled this month")} /></div>}
-                {listDays.map(({ date, visits }) => (
-                  <section key={date}>
-                    <h2 className="schedule-list-day">{label(date, { weekday: "long", month: "long", day: "numeric" })} {visitCount(visits.length)}</h2>
-                    <div className="card">
-                      {visits.map((v) => (
-                        <button key={v.id} type="button" className="card-row schedule-list-row" data-selected={grid.selected === v.id || undefined} style={{ "--crew": v.crewColor } as CSSProperties} onClick={() => show(v)}>
-                          <span className="schedule-list-time">{v.starts_at ? <TimeRange start={timeOf(v.starts_at)} end={v.ends_at && timeOf(v.ends_at)} /> : t("Anytime")}</span>
-                          <span className="grow" style={{ minWidth: 0 }}>
-                            <strong>{v.title}</strong>
-                            {(v.job?.client || v.property || v.address) && <span className="muted small" style={{ display: "block" }}>{[v.job?.client?.display_name, addressLine(v.property) || v.address].filter(Boolean).join(" · ")}</span>}
-                            <span className="muted small" style={{ display: "block" }}>{[namesOn(v) || t("Nobody assigned"), crewOf(v.crew_id)?.name].filter(Boolean).join(" · ")}</span>
-                          </span>
-                          <EntityStatus kind="visit" status={v.status} />
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                ))}
-              </div>
-            )}
+            {view === "list" &&
+              (listDays.length === 0 ? (
+                <EmptyState icon="calendar" title={period === "day" ? t("Nothing scheduled this day") : period === "week" ? t("Nothing scheduled this week") : t("Nothing scheduled this month")} />
+              ) : (
+                <InboxList label={t("Schedule")} stale={schedule.isPlaceholderData} className="sched-list">
+                  {listDays.map(({ date, visits }) => (
+                    <InboxGroup key={date} label={label(date, { weekday: "long", month: "long", day: "numeric" })} count={visits.length} end={date === today ? t("Today") : undefined}>
+                      {visits.map((v) => visitRow(v, timeLead(v)))}
+                    </InboxGroup>
+                  ))}
+                </InboxList>
+              ))}
             {view === "map" && (
-              <div className="stack-sm">
-                {mapPins.length > 0 ? (
-                  <Suspense fallback={<Skeleton height={420} radius={12} />}>
-                    <ScheduleMap pins={mapPins} onOpen={(id) => { const v = mapVisits.find((x) => x.id === id); if (v) show(v); }} />
-                  </Suspense>
-                ) : (
-                  <div className="card"><EmptyState inline title={mapVisits.length ? t("None of this day's visits has a map location yet") : t("Nothing scheduled this day")} /></div>
-                )}
-                {unplaced.length > 0 && (
-                  <p className="muted small" style={{ margin: "0 2px" }}>
-                    {t("Not on the map, with no location yet:")}{" "}
-                    {unplaced.map((v, i) => <span key={v.id}>{i > 0 && ", "}<button type="button" className="link-btn" onClick={() => show(v)}>{v.title}</button></span>)}
-                  </p>
+              <div className={`sched-map${schedule.isPlaceholderData ? " is-stale" : ""}`}>
+                <div className="sched-map-main">
+                  {mapPins.length > 0 ? (
+                    <Suspense fallback={<Skeleton height={420} radius={12} />}>
+                      <ScheduleMap pins={mapPins} onOpen={(id) => { const v = mapVisits.find((x) => x.id === id); if (v) show(v); }} />
+                    </Suspense>
+                  ) : (
+                    <EmptyState icon="map" title={mapVisits.length ? t("None of this day's visits has a map location yet") : t("Nothing scheduled this day")} />
+                  )}
+                </div>
+                {mapVisits.length > 0 && (
+                  <InboxList label={t("Map of the day's visits")} className="sched-list sched-map-list">
+                    <InboxGroup>
+                      {mapVisits.map((v, i) =>
+                        visitRow(v, <span className="sched-pin" data-off={!located(v) || undefined} style={{ "--crew": v.crewColor } as CSSProperties}>{i + 1}</span>, { off: !located(v) }),
+                      )}
+                    </InboxGroup>
+                  </InboxList>
                 )}
               </div>
             )}
             {view === "month" && (
               <div className={`month${schedule.isPlaceholderData ? " is-stale" : ""}`}>
-                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => <div key={d} className="month-head">{d}</div>)}
+                {days.slice(0, 7).map((d) => <div key={d} className="month-head">{label(d, { weekday: "short" })}</div>)}
                 {days.map((date) => {
                   const visits = byDay(date);
                   const shown = visits.slice(0, 3);
@@ -763,8 +941,8 @@ export function SchedulePage() {
                       data-outside={date.slice(0, 7) !== anchor.slice(0, 7) || undefined}
                       data-today={date === today || undefined}
                     >
-                      <button type="button" className="month-day" onClick={() => { setAnchor(date); setView("day"); }}>
-                        <span>{Number(date.slice(8))}</span>
+                      <button type="button" className="month-day" onClick={() => { setAnchor(date); setView("day"); }} aria-label={label(date, { weekday: "long", month: "long", day: "numeric" })}>
+                        <span className="month-num">{Number(date.slice(8))}</span>
                         {visitCount(visits.length)}
                       </button>
                       {shown.map((v) => (
@@ -779,7 +957,7 @@ export function SchedulePage() {
                           onPointerDown={canDispatch && canMove(v) && !["completed", "cancelled"].includes(v.status) ? startDrag(v, "move") : undefined}
                           onClick={() => !wasDragging() && show(v)}
                         >
-                          {v.starts_at ? `${timeOf(v.starts_at)} ` : ""}{v.title}
+                          {v.starts_at && <span className="month-time">{timeOf(v.starts_at)} </span>}{v.title}
                         </button>
                       ))}
                       {shownEvents.map((e) => (
@@ -794,7 +972,7 @@ export function SchedulePage() {
               </div>
             )}
             {canDispatch && (view === "day" || view === "week") && (
-              <p className="muted small" style={{ margin: "8px 2px 0" }}>
+              <p className="sched-hint">
                 {byPerson ? t("Drag a visit onto someone to put them on it, or from one person to another to move it.") : t("Drag a visit to move it, drag its bottom edge to change how long it takes, or click an open time to book it.")}
               </p>
             )}
@@ -802,32 +980,29 @@ export function SchedulePage() {
 
           {showPanel && (
             <aside className="unscheduled-panel" aria-label={t("Unscheduled visits")} data-drop="unscheduled" data-over={drag?.target?.type === "unscheduled" || undefined}>
-              <div className="row-between">
-                <strong>{t("Unscheduled")}</strong>
-                <span className="row" style={{ gap: 4 }}>
-                  {unscheduled.length > 0 && <span className="badge">{unscheduled.length}</span>}
-                  <Button size="sm" variant="ghost" icon="x" aria-label={t("Hide unscheduled")} onClick={() => setPanel(false)} />
-                </span>
+              <div className="unscheduled-head">
+                <h2>{t("Unscheduled")}</h2>
+                {unscheduled.length > 0 && <span className="sched-count">{unscheduled.length}</span>}
+                <Button size="sm" variant="ghost" icon="x" className="unscheduled-close" aria-label={t("Hide unscheduled")} onClick={() => setPanel(false)} />
               </div>
-              {unscheduled.length === 0 ? (
-                <span className="muted small">{t("Nothing waiting. Drag a visit here to take it off the calendar.")}</span>
-              ) : (
-                canDispatch && <span className="muted small">{t("Drag onto the calendar to schedule.")}</span>
-              )}
+              <p className="unscheduled-hint">
+                {unscheduled.length === 0 ? t("Nothing waiting. Drag a visit here to take it off the calendar.") : canDispatch ? t("Drag onto the calendar to schedule.") : null}
+              </p>
               <div className="unscheduled-list" ref={unscheduledList}>
                 {unscheduled.map((v) => (
                   <button
                     key={v.id}
                     type="button"
-                    className="tg-chip"
+                    className="unscheduled-row"
                     data-dragging={drag?.visit.id === v.id || undefined}
                     data-selected={grid.selected === v.id || undefined}
+                    data-can-drag={(canDispatch && canMove(v)) || undefined}
                     style={{ "--crew": v.crewColor } as CSSProperties}
                     onPointerDown={canDispatch && canMove(v) ? startDrag(v, "move") : undefined}
                     onClick={() => !wasDragging() && show(v)}
                   >
-                    <span className="tg-line"><strong className="grow">{v.title}</strong>{faces(v)}</span>
-                    {(v.job?.client || v.property || v.address) && <span className="tg-m">{v.job?.client?.display_name ?? v.property?.line1 ?? v.address}</span>}
+                    <span className="unscheduled-title"><span className="grow">{v.title}</span>{faces(v)}</span>
+                    <span className="unscheduled-sub">{[v.job?.client?.display_name ?? v.property?.line1 ?? v.address, v.job && t("Job #{number}", { number: v.job.number }), crewOf(v.crew_id)?.name].filter(Boolean).join(" · ")}</span>
                   </button>
                 ))}
               </div>
@@ -869,31 +1044,64 @@ function patchFor(visit: Visit, date: string, tz: string) {
 }
 
 /**
- * A filter that says what it filters, "Crew | All", the way Jobber writes it. The native select lies
- * over the words, so the whole pill opens the phone's or browser's own list, and it's heard as "Crew".
+ * A filter that says what it filters, "Person Everyone ⌄" (Page-Schedule.dc.html): a quiet name and the
+ * choice, opening a menu of the choices with a check by the one shown. Heard as "Person: Everyone".
+ * With `clear` it's on (ScheduleFilter.dc.html): a green tint, and an × at its end that sets it back.
  */
-function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: Array<[string, string]>; onChange: (value: string) => void }) {
+function PickMenu({ label, value, items, search, clear }: { label: string; value: string; items: MenuEntry[]; search?: MenuSearch; clear?: { label: string; onClick: () => void } }) {
+  // Always the one wrapper, so turning it on or off doesn't remount the trigger and drop its focus.
   return (
-    <label className="schedule-filter">
-      <span className="schedule-filter-label" aria-hidden="true">{label}</span>
-      <span aria-hidden="true">{options.find(([v]) => v === value)?.[1] ?? options[0]?.[1]}</span>
-      <Icon name="chevronDown" size={14} />
-      <Select className="select-plain" value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
-        {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
-      </Select>
-    </label>
+    <span className={clear ? "sched-pick-on" : "sched-pick-off"}>
+      <Menu
+        items={items}
+        align="start"
+        label={`${label}: ${value}`}
+        title={label}
+        search={search}
+        triggerClassName="btn btn-sm sched-pick"
+        trigger={
+          <>
+            <span className="sched-pick-label">{label}</span>
+            <span className="sched-pick-value">{value}</span>
+            {!clear && <Icon name="chevronDown" size={14} />}
+          </>
+        }
+      />
+      {clear && (
+        <button type="button" className="sched-pick-clear" aria-label={clear.label} title={clear.label} onClick={(e) => { (e.currentTarget.parentElement?.firstElementChild as HTMLElement | null)?.focus(); clear.onClick(); }}>
+          <Icon name="x" size={14} />
+        </button>
+      )}
+    </span>
   );
 }
 
+/** While the schedule loads: the board's lines with a few quiet blocks, or the month's cells, or a list's rows. */
 function ScheduleSkeleton({ view }: { view: View }) {
+  if (view === "list" || view === "map") return <InboxSkeleton rows={5} />;
+  if (view === "month") {
+    return (
+      <Loading>
+        <div className="month">
+          {Array.from({ length: 35 }, (_, i) => (
+            <div key={i} className="month-cell">
+              <Skeleton width={18} height={11} />
+              {i % 4 === 1 && <Skeleton height={14} radius={5} />}
+            </div>
+          ))}
+        </div>
+      </Loading>
+    );
+  }
   const cols = view === "day" ? 3 : 7;
   return (
     <Loading>
-      <div className={view === "month" ? "month" : "week"} style={view === "day" ? { gridTemplateColumns: "repeat(3, 1fr)" } : undefined}>
-        {Array.from({ length: view === "month" ? 35 : cols }, (_, i) => (
-          <div key={i} className={view === "month" ? "month-cell" : "day-col"}>
-            <Skeleton width="50%" height={11} />
-            {Array.from({ length: view === "month" ? 1 : 2 + (i % 3) }, (_, j) => <Skeleton key={j} height={view === "month" ? 14 : 54} radius={8} />)}
+      <div className="sched-skel" style={{ "--cols": cols } as CSSProperties}>
+        <div className="sched-skel-gutter" />
+        {Array.from({ length: cols }, (_, i) => (
+          <div key={i} className="sched-skel-col">
+            <Skeleton width="45%" height={11} />
+            {Array.from({ length: 1 + (i % 3) }, (_, j) => <Skeleton key={j} height={44 + ((i + j) % 3) * 24} radius={7} style={{ marginTop: 18 + j * 30 }} />)}
           </div>
         ))}
       </div>
@@ -980,19 +1188,20 @@ function BulkVisitsDialog({ defaultDate, crews, onClose }: { defaultDate: string
             </Select>
           </Field>
         </div>
-        <div className="row-between">
-          <input className="input" style={{ maxWidth: 280 }} placeholder={t("Filter jobs")} value={term} onChange={(e) => setTerm(e.target.value)} aria-label={t("Filter jobs")} />
-          <span className="row">
-            <span className="muted small">{t("{count} selected", { count: picked.length })}</span>
-            <Button size="sm" variant="ghost" onClick={() => setPicked(picked.length === shown.length ? [] : shown.map((j) => j.id))}>{picked.length === shown.length && shown.length ? t("Clear") : t("Select all")}</Button>
-          </span>
+        <div className="visit-pick-tools">
+          <label className="search-field">
+            <Icon name="search" size={15} />
+            <input type="search" placeholder={t("Filter jobs")} value={term} onChange={(e) => setTerm(e.target.value)} aria-label={t("Filter jobs")} autoComplete="off" />
+          </label>
+          <span className="visit-pick-count">{t("{count} selected", { count: picked.length })}</span>
+          <Button size="sm" variant="ghost" onClick={() => setPicked(picked.length === shown.length ? [] : shown.map((j) => j.id))}>{picked.length === shown.length && shown.length ? t("Clear") : t("Select all")}</Button>
         </div>
-        <div className="card" style={{ maxHeight: 300, overflowY: "auto", boxShadow: "none" }}>
-          {jobs.isPending && <div className="card-row"><Skeleton width="60%" /></div>}
+        <div className="visit-pick-list" role="group" aria-label={t("Jobs")}>
+          {jobs.isPending && <div className="visit-pick-row"><Skeleton width="60%" /></div>}
           {shown.map((j) => (
-            <label key={j.id} className="card-row" style={{ cursor: "pointer" }}>
+            <label key={j.id} className="visit-pick-row" data-on={picked.includes(j.id) || undefined}>
               <input type="checkbox" checked={picked.includes(j.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, j.id] : picked.filter((x) => x !== j.id))} />
-              <span className="grow"><strong>{j.title}</strong><span className="muted small" style={{ display: "block" }}>{t("Job #{number}", { number: j.number })} · {j.client?.display_name}</span></span>
+              <span className="visit-pick-text"><strong>{j.title}</strong><span className="visit-pick-sub">{[t("Job #{number}", { number: j.number }), j.client?.display_name].filter(Boolean).join(" · ")}</span></span>
             </label>
           ))}
           {jobs.data && !shown.length && <EmptyState inline title={t("No active jobs match")} />}

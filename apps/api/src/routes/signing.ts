@@ -2,7 +2,7 @@
  * Signatures: a person's saved signature, signing a quote in person, signing for the business and
  * sending the signed copy. The steps themselves are in services/signing.ts.
  */
-import { SALES } from "@crewtavo/core";
+import { SALES, seesInvoices } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
@@ -25,7 +25,7 @@ import {
 
 export const signing = new Hono<AppEnv>();
 
-const scope = (c: Context<AppEnv>): SigningScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, userId: c.var.userId, baseUrl: appUrl(c) });
+const scope = (c: Context<AppEnv>): SigningScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, userId: c.var.userId, baseUrl: appUrl(c), noMoney: !seesInvoices(c.var.role, c.var.permissions) });
 
 // ---------------------------------------------------------------------------------------------
 // My saved signature (one per business)

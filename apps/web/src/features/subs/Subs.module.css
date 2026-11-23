@@ -1,0 +1,145 @@
+/* Subcontractors (Page-Subs.dc.html; on a phone Mobile-Team.dc.html, Subcontractors) and one sub's page. */
+
+/* The page header's reports menu: a phone's More sheet; on a computer the two reports are ghost buttons. */
+.phoneOnly:global(.btn) { display: none; }
+@media (max-width: 900px) { .phoneOnly:global(.btn) { display: inline-flex; } }
+
+/* Everything under the header, spaced as the page spaces its parts. On a phone it's the grouped page
+   (Mobile-Team, Subcontractors). */
+.body { display: flex; flex-direction: column; gap: inherit; min-width: 0; }
+
+/* What's owed: a line to pick them all, then a row each that lines up like a table. */
+.owedAll { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 4px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-12); color: var(--text-3); cursor: pointer; }
+.owed { margin: 0; padding: 0; list-style: none; }
+.owedRow { display: grid; grid-template-columns: 16px minmax(0, 1fr) minmax(0, 1.4fr) 120px 96px; grid-template-areas: "check sub job done money"; gap: 12px; align-items: center; min-height: 40px; padding: 6px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); }
+.owedRow[data-picked] { background: var(--fill); box-shadow: -8px 0 0 var(--fill), 8px 0 0 var(--fill); }
+.owedCheck { display: grid; grid-area: check; place-items: center; width: 28px; height: 28px; margin: -6px; cursor: pointer; }
+.owedCheck input { margin: 0; }
+.owedSub { grid-area: sub; min-width: 0; overflow: hidden; color: var(--ink); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.owedSub:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.owedJob { grid-area: job; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.owedJob a { color: var(--text-2); }
+.owedJob a:hover { color: var(--ink); }
+.owedDone { grid-area: done; color: var(--text-3); white-space: nowrap; }
+.owedMoney { grid-area: money; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* A row's papers: each with its dot and words, red or amber only when it's a problem. */
+.papers, :global(.il-row .il-meta) > .papers { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; gap: 2px 14px; min-width: 0; overflow: visible; white-space: normal; }
+.papers :global(.pill) { font-size: var(--fs-12); }
+.papers :global(.pill:not([data-tone="warning"], [data-tone="danger"])) { color: var(--text-3); }
+.paperName { color: var(--text-3); font-weight: 400; }
+.ask:global(.btn) { height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--fs-12); }
+
+/* The settings under the list. */
+.settings { display: grid; gap: 24px; margin-top: 8px; }
+.settings :global(.switch-row) { font-size: var(--fs-13); font-weight: 500; }
+.hint { display: block; margin-top: 4px; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.countries { display: grid; gap: 10px; }
+.countries > .hint { margin-top: 0; max-width: 72ch; }
+
+@media (max-width: 900px) {
+  .owedAll { min-height: 44px; font-size: var(--fs-14); }
+  .owedAll input, .owedCheck input { width: 20px; height: 20px; }
+  .owedCheck { width: 44px; height: 44px; margin: -10px; }
+  .owedRow { grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-areas: "check sub money" "check job done"; gap: 2px 12px; padding: 10px 0; font-size: var(--fs-15); }
+  .owedRow[data-picked] { box-shadow: -16px 0 0 var(--fill), 16px 0 0 var(--fill); }
+  /* The inset card's edge ends the list, so its last row draws no line of its own. */
+  .owedRow:last-child { border-bottom: 0; }
+  .owedJob, .owedDone { font-size: var(--fs-13); }
+  .owedDone { text-align: right; }
+  .papers { gap: 2px 12px; }
+  .papers :global(.pill) { font-size: var(--fs-13); }
+  /* The phone has no room beside the name; Send upload link is on the sub's page. */
+  .ask:global(.btn) { display: none; }
+  .settings :global(.switch-row) { font-size: var(--fs-15); }
+  .hint { font-size: var(--fs-13); }
+}
+
+/* One sub's page: each requirement's name, its state and Upload or Replace, then the documents on file. */
+.reqs { margin: 0; padding: 0; list-style: none; }
+.reqs:first-child { margin-top: -12px; }
+.req { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
+.reqHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 28px; }
+.reqName { font-size: var(--fs-13); font-weight: 600; }
+.reqAction { margin-left: auto; }
+.reqAction:global(.btn) { height: 28px; padding: 0 8px; border-color: transparent; color: var(--text-2); font-size: var(--fs-12); }
+.reqAction:global(.btn):hover { background: var(--fill-2); color: var(--ink); }
+.none { font-size: var(--fs-12); color: var(--text-3); }
+.doc { display: grid; gap: 2px; }
+.docLine { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-13); }
+.docLine > svg { flex: none; color: var(--quiet); }
+.docName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.docName { color: var(--ink); text-decoration: underline; text-decoration-color: var(--divider); text-underline-offset: 3px; }
+a.docName:hover { color: var(--ink); text-decoration-color: currentColor; }
+.docSize { flex: none; font-size: var(--fs-12); color: var(--quiet); }
+.docMenu { flex: none; margin-left: auto; }
+.docMenu :global(.btn) { width: 28px; height: 28px; border-color: transparent; color: var(--text-3); }
+.docMeta { padding-left: 22px; font-size: var(--fs-12); color: var(--text-3); }
+.verify { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-left: 22px; font-size: var(--fs-12); color: var(--info); }
+.verify :global(.btn) { height: 26px; padding: 0 9px; border-radius: 6px; font-size: var(--fs-12); }
+.kept { margin: 10px 0 0; font-size: var(--fs-12); color: var(--quiet); }
+
+@media (max-width: 900px) {
+  .req { padding: 12px 0; }
+  .req:last-child { border-bottom: 0; }
+  .reqName { font-size: var(--fs-15); }
+  .reqAction:global(.btn) { height: 36px; padding: 0 12px; border-radius: 10px; background: var(--fill-2); color: var(--ink); font-size: var(--fs-14); }
+  /* 36px to look at, 44px to tap. */
+  .reqAction:global(.btn)::after, .verify :global(.btn)::after { content: ""; position: absolute; inset: -4px 0; }
+  .none, .docMeta, .verify, .docSize { font-size: var(--fs-13); }
+  .docLine { font-size: var(--fs-15); }
+  .docMenu :global(.btn) { width: 40px; height: 40px; }
+  .verify :global(.btn) { height: 36px; font-size: var(--fs-14); }
+  .kept { margin: 0; padding: 12px 0; border-top: 1px solid var(--row-divider); font-size: var(--fs-13); }
+}
+
+/* A sub's pay: the year's figures, then each job's pay. */
+.pay { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.pay > :global(.strip) { margin-top: -12px; border-top: 0; }
+.more { padding-top: 8px; font-size: var(--fs-12); }
+.off { color: var(--text-3); }
+@media (max-width: 900px) {
+  .pay > :global(.strip) { margin: 0 -16px; border-radius: 0; border-bottom: 1px solid var(--row-divider); }
+  /* The status and the money go under the job, its buttons on the right. */
+  .payRows :global(.rel-row) { flex-wrap: wrap; row-gap: 4px; }
+  .payRows :global(.rel-body) { flex: 1 1 100%; }
+  .payRows :global(.rel-end) { flex: 1 1 auto; min-width: 0; justify-content: flex-start; white-space: normal; }
+  .payRows :global(.rel-actions) { margin-left: auto; }
+  .more { padding: 12px 0; border-top: 1px solid var(--row-divider); font-size: var(--fs-14); }
+}
+
+/* A sub's sign-in, in the side column. */
+.access { display: grid; gap: 8px; }
+.accessState { display: flex; align-items: center; min-height: 20px; }
+.accessButtons { display: flex; flex-wrap: wrap; gap: 6px; }
+.switches { display: grid; gap: 4px; margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--row-divider); }
+.switches .hint { margin: 0 0 6px; }
+.switches :global(.switch-row) { font-size: var(--fs-13); font-weight: 500; }
+@media (max-width: 900px) {
+  .accessButtons :global(.btn) { height: 40px; }
+  .switches :global(.switch-row) { min-height: 44px; font-size: var(--fs-15); }
+}
+
+/* Send upload link: its group labels read like the form's field labels; what they'll get, as a quiet filled block. */
+.dlgLabel { padding: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.preview { padding: 10px 12px; border-radius: var(--radius-control); background: var(--fill-2); color: var(--text-2); overflow-wrap: anywhere; }
+
+/* Year-end totals and the workers' comp audit. */
+.notes { display: grid; gap: 4px; }
+.periodBar { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.periodBar > :global(.tabs) { flex: 0 1 auto; min-width: 0; }
+.dates { display: flex; flex: none; align-items: center; gap: 6px; margin-left: auto; font-size: var(--fs-13); }
+.dates :global(.input) { width: 148px; height: var(--control-sm); }
+.datesLabel { margin-right: 4px; color: var(--text-3); }
+@media (max-width: 900px) {
+  .periodBar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .dates { flex-wrap: wrap; margin-left: 0; }
+  .datesLabel { flex-basis: 100%; }
+  .dates :global(.input) { flex: 1; width: auto; min-width: 0; height: 44px; }
+}
+.reportNote { margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+/* A job in the audit's table reads as a quiet link, so the sub's name stays the row's one strong word. */
+.jobLink { color: var(--text-2); }
+.jobLink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.nowrap { white-space: nowrap; }
+@media (max-width: 900px) { .reportNote { font-size: var(--fs-13); } .nowrap { white-space: normal; } }

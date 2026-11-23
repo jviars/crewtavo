@@ -11,12 +11,14 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { supabase } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { everyRow, type PagedQuery } from "@/lib/paging";
 import { useSession } from "@/lib/session";
+import styles from "./Marketing.module.css";
 import { audienceAddress, audienceCsvRows, leftOutWords, type AudienceRow } from "./postcardForm";
 
 export function PostcardAudienceDialog({ name, audience, onClose }: { name: string; audience: CampaignAudience; onClose: () => void }) {
@@ -38,34 +40,39 @@ export function PostcardAudienceDialog({ name, audience, onClose }: { name: stri
   return (
     <Dialog open onClose={onClose} title="Who gets a card" size="lg">
       {list.isPending ? (
-        <Skeleton height={240} />
+        <SectionSkeleton rows={5} />
       ) : list.error ? (
         <ErrorState compact error={list.error} onRetry={() => list.refetch()} />
       ) : (
         <div className="stack">
-          <div className="row-between wrap" style={{ gap: 8 }}>
-            <div className="segmented" role="group" aria-label="Show">
-              <button type="button" aria-pressed={show === "in"} onClick={() => setShow("in")}>Getting a card ({getting.length.toLocaleString("en-US")})</button>
-              <button type="button" aria-pressed={show === "out"} onClick={() => setShow("out")}>Left out ({left.length.toLocaleString("en-US")})</button>
-            </div>
-            <Button icon="download" onClick={download} disabled={!rows.length}>Download the list</Button>
+          <div className={styles.filters}>
+            <FilterTabs
+              label="Show"
+              value={show}
+              onChange={setShow}
+              options={[
+                { value: "in", label: "Getting a card", count: getting.length },
+                { value: "out", label: "Left out", count: left.length },
+              ]}
+            />
+            <Button size="sm" icon="download" onClick={download} disabled={!rows.length}>Download the list</Button>
           </div>
           {!shown.length ? (
-            <EmptyState icon="mail" title={show === "in" ? "No one gets a card yet" : "No one is left out"} />
+            <EmptyState inline title={show === "in" ? "No one gets a card yet" : "No one is left out"} />
           ) : (
-            <div style={{ maxHeight: "55vh", overflowY: "auto", border: "1px solid var(--divider)", borderRadius: 8 }} role="list" aria-label={show === "in" ? "Clients getting a card" : "Clients left out"}>
+            <ul className={`rel ${styles.scroll}`} aria-label={show === "in" ? "Clients getting a card" : "Clients left out"}>
               {shown.map((r) => (
-                <div key={r.client_id} className="card-row" role="listitem">
-                  <div className="grow" style={{ minWidth: 0 }}>
-                    <Link to={`/clients/${r.client_id}`} target="_blank" rel="noreferrer" className="ellipsis" style={{ display: "block", fontWeight: 600 }}>{r.display_name}</Link>
-                    <span className="muted small" style={{ display: "block", overflowWrap: "anywhere" }}>{audienceAddress(r) || "No address"}</span>
+                <li key={r.client_id} className={styles.recipient}>
+                  <div className={styles.recipientBody}>
+                    <Link to={`/clients/${r.client_id}`} target="_blank" rel="noreferrer" className={styles.recipientName}>{r.display_name}</Link>
+                    <div className={styles.recipientMeta}>{audienceAddress(r) || "No address"}</div>
                   </div>
-                  {r.left_out && <span className="small">{leftOutWords(r.left_out)}</span>}
-                </div>
+                  {r.left_out && <span className={styles.recipientEnd}>{leftOutWords(r.left_out)}</span>}
+                </li>
               ))}
-            </div>
+            </ul>
           )}
-          <span className="muted small">Each card goes to the client's billing address, or their first property's when that one can't be mailed to. {ONE_PER_ADDRESS} A wrong address is fixed on the client's page.</span>
+          <p className={styles.fine}>Each card goes to the client's billing address, or their first property's when that one can't be mailed to. {ONE_PER_ADDRESS} A wrong address is fixed on the client's page.</p>
         </div>
       )}
     </Dialog>

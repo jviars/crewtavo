@@ -15,6 +15,7 @@ import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { RuleRow } from "../automations/AutomationsPage";
+import styles from "./VisitNotices.module.css";
 
 type Answer = "on" | "with-reminder" | "off";
 
@@ -36,21 +37,20 @@ export function VisitNoticesNotice({ rules, link }: { rules: RuleRow[] | undefin
   const reminderOn = rules.some((r) => r.trigger === "visit.reminder" && r.enabled);
   const busy = (a: Answer) => answer.isPending && answer.variables === a;
   return (
-    <div className="callout callout-info" role="note">
-      <Icon name="info" size={20} />
-      <div className="grow stack-sm" style={{ gap: 8 }}>
-        <div>
-          Clients can now be told when a visit is booked, moved or cancelled
-          <div style={{ fontWeight: 400 }}>
-            These three messages are off for you, so nothing new goes to your clients until you turn them on. Your day-before visit reminder is {reminderOn ? "on" : "off"}. Each message goes{" "}
-            {VISIT_NOTICE_SETTLE_MIN} minutes after the change, so a visit you move twice is one message.
-            {link && <> You can read and reword them in <Link to="/settings?tab=client-notifications">Settings → Client notifications</Link>.</>}
-          </div>
-        </div>
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button size="sm" variant="primary" loading={busy("on")} disabled={answer.isPending} onClick={() => answer.mutate("on")}>Turn on all three</Button>
+    <div className="callout" role="note">
+      <Icon name="info" size={16} />
+      <div className="grow">
+        <div>Clients can now be told when a visit is booked, moved or cancelled</div>
+        <p className={styles.text}>
+          These three messages are off for you until you turn them on. Each goes {VISIT_NOTICE_SETTLE_MIN} minutes after a change, so a visit moved twice is one message. Your
+          day-before reminder is {reminderOn ? "on" : "off"}.
+          {link && <> Read and reword them in <Link to="/settings?tab=client-notifications">Settings → Client notifications</Link>.</>}
+        </p>
+        {/* Quiet buttons: the page's own green (New rule) stays its only one. */}
+        <div className={styles.actions}>
+          <Button size="sm" loading={busy("on")} disabled={answer.isPending} onClick={() => answer.mutate("on")}>Turn on all three</Button>
           {reminder && !reminderOn && (
-            <Button size="sm" loading={busy("with-reminder")} disabled={answer.isPending} onClick={() => answer.mutate("with-reminder")}>Turn on all three and the reminder</Button>
+            <Button size="sm" loading={busy("with-reminder")} disabled={answer.isPending} onClick={() => answer.mutate("with-reminder")}>Turn on with the reminder</Button>
           )}
           <Button size="sm" variant="ghost" loading={busy("off")} disabled={answer.isPending} onClick={() => answer.mutate("off")}>Keep them off</Button>
         </div>

@@ -10,6 +10,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { PropertySelect } from "@/features/clients/ClientForm";
 import { fileSize } from "@/features/plans/plans";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
@@ -153,7 +154,7 @@ export function MoveDialog({ item, tree, onClose }: { item: MoveItem; tree: Fold
           move.mutate();
         }}
       >
-        <div className={`card ${styles.tree}`} role="listbox" aria-label="Folders">
+        <div className={styles.tree} role="listbox" aria-label="Folders">
           {rows.map(({ folder, depth }) => {
             const current = folder.id === here;
             return (
@@ -169,7 +170,7 @@ export function MoveDialog({ item, tree, onClose }: { item: MoveItem; tree: Fold
               >
                 <Icon name={to === folder.id ? "folderOpen" : "folder"} size={16} />
                 <span className="grow ellipsis">{name(folder)}</span>
-                {current && <span className="muted small">Here now</span>}
+                {current ? <span className="muted small">Here now</span> : <span className={styles.treeCheck}><Icon name="check" size={15} /></span>}
               </button>
             );
           })}
@@ -320,22 +321,24 @@ export function AttachDialog({ file, rootId, onClose }: { file: DriveFile; rootI
       >
         {places.length > 0 && (
           <div className="stack-sm">
-            <span className="small strong muted">On now</span>
-            {places.map((p) => (
-              <div key={p.slot} className={styles.attached}>
-                <span className={styles.place} data-slot={p.slot} title={p.label}>{p.label}</span>
-                <Button size="sm" variant="ghost" loading={detach.isPending && detach.variables?.slot === p.slot} onClick={() => detach.mutate(p)}>
-                  Remove from {p.slot === "property_id" ? "this property" : p.label.split(" · ")[0]}
-                </Button>
-              </div>
-            ))}
+            <span className={styles.sectionLabel}>On now</span>
+            <ul className={styles.attachedList}>
+              {places.map((p) => (
+                <li key={p.slot} className={styles.attached}>
+                  <span title={p.label}>{p.label}</span>
+                  <Button size="sm" variant="ghost" loading={detach.isPending && detach.variables?.slot === p.slot} onClick={() => detach.mutate(p)}>
+                    Remove from {p.slot === "property_id" ? "this property" : p.label.split(" · ")[0]}
+                  </Button>
+                </li>
+              ))}
+            </ul>
             <FormError error={detach.error} />
           </div>
         )}
 
         {chosen ? (
           <div className="stack-sm">
-            <div className="row card" style={{ padding: "8px 8px 8px 12px", boxShadow: "none", background: "var(--fill)" }}>
+            <div className={styles.chosen}>
               <Icon name={KIND_ICON[chosen.kind]} size={16} />
               <span className="grow ellipsis"><strong>{foundLabel(chosen)}</strong>{chosen.kind !== "property" && chosen.subtitle && <span className="muted"> · {chosen.subtitle}</span>}</span>
               <Button size="sm" variant="ghost" onClick={() => setChosen(null)}>Change</Button>
@@ -359,10 +362,9 @@ export function AttachDialog({ file, rootId, onClose }: { file: DriveFile; rootI
           </div>
         ) : (
           <div className="stack-sm">
-            <div className="input-group">
-              <span className="addon"><Icon name="search" size={16} /></span>
+            <label className={styles.search}>
+              <Icon name="search" size={15} />
               <input
-                className="input"
                 placeholder="Search clients, addresses, requests, quotes and jobs"
                 value={term}
                 onChange={(e) => setTerm(e.target.value)}
@@ -371,21 +373,21 @@ export function AttachDialog({ file, rootId, onClose }: { file: DriveFile; rootI
                 autoComplete="off"
                 autoFocus
               />
-            </div>
-            <div className={`card ${styles.results}`} role="listbox" aria-label={query.length >= 2 ? "Matches" : "Recently opened"}>
+            </label>
+            <div className={styles.results} role="listbox" aria-label={query.length >= 2 ? "Matches" : "Recently opened"}>
               {query.length < 2 && options.length > 0 && <div className={styles.resultsHead}>Recently opened</div>}
-              {query.length >= 2 && results.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row" style={{ padding: "12px" }}><Skeleton width={`${60 - i * 12}%`} /></div>)}
+              {query.length >= 2 && results.isPending && [0, 1, 2].map((i) => <div key={i} className={styles.result} aria-hidden="true"><Skeleton width={`${60 - i * 12}%`} /></div>)}
               {options.map((o, i) => (
-                <button key={`${o.kind}-${o.id}`} type="button" role="option" aria-selected={i === index} className={`card-row ${styles.result}`} onMouseMove={() => setIndex(i)} onClick={() => choose(o)}>
+                <button key={`${o.kind}-${o.id}`} type="button" role="option" aria-selected={i === index} className={styles.result} onMouseMove={() => setIndex(i)} onClick={() => choose(o)}>
                   <Icon name={KIND_ICON[o.kind]} size={16} />
                   <span className="grow" style={{ minWidth: 0 }}>
-                    <strong className="ellipsis" style={{ display: "block" }}>{o.kind === "property" ? o.title : foundLabel(o)}</strong>
-                    <span className="muted small ellipsis" style={{ display: "block" }}>{[NOUN[o.kind], o.subtitle].filter(Boolean).join(" · ")}</span>
+                    <span className={styles.resultTitle}>{o.kind === "property" ? o.title : foundLabel(o)}</span>
+                    <span className={styles.resultSub}>{[NOUN[o.kind], o.subtitle].filter(Boolean).join(" · ")}</span>
                   </span>
                 </button>
               ))}
-              {query.length >= 2 && results.data && !options.length && <div className="empty" style={{ padding: 16 }}>Nothing matches. Try a client's name, an address or a job number.</div>}
-              {query.length < 2 && !options.length && <div className="empty" style={{ padding: 16 }}>Type a client's name, an address, or a request, quote or job.</div>}
+              {query.length >= 2 && results.data && !options.length && <div className={styles.resultsEmpty}>Nothing matches. Try a client's name, an address or a job number.</div>}
+              {query.length < 2 && !options.length && <div className={styles.resultsEmpty}>Type a client's name, an address, or a request, quote or job.</div>}
             </div>
           </div>
         )}
@@ -427,29 +429,31 @@ export function VersionsDialog({ file, onOpen, onDownload, onClose }: { file: Dr
         {versions.isPending && <div className="stack-sm"><Skeleton height={44} /><Skeleton height={44} /></div>}
         {versions.error && <FormError error={versions.error} />}
         {rows.length > 0 && (
-          <div className="card">
+          <ul className={styles.versions}>
             {rows.map((v, i) => (
-              <div key={v.id} className={`card-row ${styles.version}`}>
+              <li key={v.id} className={styles.version}>
                 <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>Version {rows.length - i}</strong>
-                  {i === 0 && <span className="chip chip-green" style={{ marginLeft: 8 }}>Current</span>}
-                  <span className="muted small" style={{ display: "block" }}>
+                  <span className="row" style={{ gap: 10 }}>
+                    <span className={styles.versionName}>Version {rows.length - i}</span>
+                    {i === 0 && <StatusPill label="Current" tone="good" />}
+                  </span>
+                  <span className={styles.versionMeta}>
                     {[v.revision?.trim(), fileSize(v.size_bytes), `added ${formatDate(v.created_at)}`, v.created_by_name && `by ${v.created_by_name}`].filter(Boolean).join(" · ")}
                   </span>
                 </span>
                 <span className={styles.versionButtons}>
-                  <Button size="sm" onClick={() => onOpen(v.id)}>Open</Button>
+                  <Button size="sm" variant="ghost" onClick={() => onOpen(v.id)}>Open</Button>
                   <Button size="sm" variant="ghost" icon="download" aria-label={`Download version ${rows.length - i}`} title="Download" onClick={() => onDownload(v)} />
                 </span>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
         {rows.length > 1 && (
           <div className="stack-sm">
             <p className="muted small" style={{ margin: 0 }}>Added a version by mistake? Move it to the Trash and version {rows.length - 1} becomes the current one again.</p>
             <FormError error={back.error} />
-            <Button variant="danger" icon="trash" style={{ justifySelf: "start" }} loading={back.isPending} onClick={() => back.mutate(rows[0].id)}>Move version {rows.length} to Trash</Button>
+            <Button variant="danger" size="sm" icon="trash" style={{ justifySelf: "start" }} loading={back.isPending} onClick={() => back.mutate(rows[0].id)}>Move version {rows.length} to Trash</Button>
           </div>
         )}
         <div className="form-actions"><Button variant="primary" onClick={onClose}>Done</Button></div>

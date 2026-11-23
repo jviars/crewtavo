@@ -1,9 +1,10 @@
 /**
  * Marketing → Reviews' Google reviews, once Google Business Profile is connected in Apps
- * (apps/api/src/services/googleReviews.ts brings them in): the numbers across the top (Google's own
- * average and count, the response rate, time to reply and asks that led to a review), a card in the
- * narrow column (the monthly trend, or what's in the way, or an invitation to connect), and the
- * reviews themselves under the ask settings, each with its stars, the client it's matched to and its
+ * (apps/api/src/services/googleReviews.ts brings them in): the numbers across the top as a flat
+ * strip (Google's own average and count, the response rate, time to reply and asks that led to a
+ * review), sections in the narrow column (the monthly trend, or what's in the way, or an invitation
+ * to connect), and the reviews themselves under the ask settings, as inbox rows grouped by what
+ * needs doing (Needs a reply, then Replied), each with its stars, the client it's matched to and its
  * reply. Replies post publicly on Google, so posting and changing one is confirmed first, and
  * Suggest a reply drafts one with Claude to read and change.
  *
@@ -15,18 +16,21 @@ import { REPLY_MAX, replyTimeWords, responseRate, reviewerName, starsLabel, type
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { InboxGroup, InboxList, ListFoot, MetaLine, RowAge } from "@/components/ui/InboxList";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
+import { InboxSkeleton, Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
+import { FilterTabs, Toolbar } from "@/components/ui/Toolbar";
 import { api, supabase, unwrap } from "@/lib/api";
-import { formatDate, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
@@ -53,6 +57,7 @@ import {
   type ReviewFilters,
   type SuggestedClient,
 } from "./googleReviewData";
+import styles from "./Presence.module.css";
 import { quotePickItem, QuoteReviewsCard, useQuoteReviews, useSetQuoteReviews } from "./QuoteReviews";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
 
@@ -124,12 +129,13 @@ function useRefresh() {
   };
 }
 
+/** A review's stars, lit and unlit, small enough to sit on its name's line. */
 function Stars({ rating }: { rating: number | null }) {
-  if (!rating) return <span className="muted small">No stars</span>;
+  if (!rating) return <span className={styles.noStars}>No stars</span>;
   return (
-    <span role="img" aria-label={starsLabel(rating)} style={{ letterSpacing: 1, whiteSpace: "nowrap" }}>
-      <span style={{ color: "var(--req)" }}>{"★".repeat(rating)}</span>
-      <span style={{ color: "var(--text-4)" }}>{"★".repeat(5 - rating)}</span>
+    <span className={styles.stars} role="img" aria-label={starsLabel(rating)}>
+      <span className={styles.starsOn}>{"★".repeat(rating)}</span>
+      <span className={styles.starsOff}>{"★".repeat(5 - rating)}</span>
     </span>
   );
 }
@@ -137,41 +143,45 @@ function Stars({ rating }: { rating: number | null }) {
 /** The numbers across the top: Google's own average and count, so they match what customers see. */
 export function GoogleNumbers({ g, stats }: { g: GoogleState; stats: ReturnType<typeof useReviewStats> }) {
   if (stats.isPending) return <StatsSkeleton count={5} />;
-  if (stats.error || !stats.data) return <div className="card"><ErrorState compact error={stats.error} onRetry={() => stats.refetch()} /></div>;
+  if (stats.error || !stats.data) return <ErrorState compact error={stats.error} onRetry={() => stats.refetch()} />;
   const s = stats.data;
   const average = g.google.average_rating ?? s.average;
   const total = g.google.total_reviews ?? s.count;
   const rate = responseRate(s.replied_12m, s.count_12m);
   return (
-    <div className="stat-row">
-      <div className="card stat">
-        <div className="label">Average rating</div>
-        <div className="value">{average ? <><span style={{ color: "var(--req)" }} aria-hidden>★</span> {Number(average).toFixed(1)}</> : "—"}</div>
-        <div className="hint">{g.google.average_rating !== null ? "As Google shows it" : "From the reviews here"}</div>
-      </div>
-      <div className="card stat"><div className="label">Reviews</div><div className="value">{total.toLocaleString("en-US")}</div><div className="hint">{countHint(g, s.unmatched)}</div></div>
-      <div className="card stat"><div className="label">Response rate</div><div className="value">{rate === null ? "—" : `${rate}%`}</div><div className="hint">Reviews in the last 12 months with a reply</div></div>
-      <div className="card stat"><div className="label">Time to reply</div><div className="value" style={{ whiteSpace: "nowrap" }}>{replyTimeWords(s.median_reply_hours) ?? "—"}</div><div className="hint">Usually, over the last 12 months</div></div>
-      <div className="card stat">
-        <div className="label">Asks that led to a review</div>
-        <div className="value">{s.asks_reviewed_12m.toLocaleString("en-US")}</div>
-        <div className="hint">{s.asks_12m ? `Of ${s.asks_12m.toLocaleString("en-US")} asks in the last 12 months` : "No asks in the last 12 months"}</div>
-      </div>
-    </div>
+    <StatStrip label="Google reviews">
+      {/* A figure there's nothing to work out yet (no reviews, no replies) is left out, not shown as "—". */}
+      {average ? (
+        <Stat
+          label="Average rating"
+          value={<><span className={styles.statStar} aria-hidden>★</span>{Number(average).toFixed(1)}</>}
+          note={g.google.average_rating !== null ? "As Google shows it" : "From the reviews here"}
+        />
+      ) : null}
+      <Stat label="Reviews" value={total.toLocaleString("en-US")} note={countHint(g, s.unmatched)} />
+      {rate !== null && <Stat label="Response rate" value={`${rate}%`} note="Reviews in the last 12 months with a reply" />}
+      {replyTimeWords(s.median_reply_hours) && <Stat label="Time to reply" value={replyTimeWords(s.median_reply_hours)!} note="Usually, over the last 12 months" />}
+      <Stat
+        label="Asks that led to a review"
+        value={s.asks_reviewed_12m.toLocaleString("en-US")}
+        note={s.asks_12m ? `Of ${s.asks_12m.toLocaleString("en-US")} asks in the last 12 months` : "No asks in the last 12 months"}
+      />
+    </StatStrip>
   );
 }
 
-/** Not connected: a small card saying what it adds, and who can connect it. */
+/** Not connected: a short section saying what it adds, and who can connect it. */
 function ConnectGoogleCard({ g }: { g: GoogleState }) {
   return (
-    <div className="card card-pad stack-sm">
-      <strong>Google reviews</strong>
-      <span className="muted small">
-        Connect Google Business Profile to see your reviews here, reply with a suggestion, and stop asking clients who already left one. Google approves each server first, which
-        takes about 2 weeks.
-      </span>
-      {g.can_connect ? <Link className="small" to="/apps/google_business">Connect Google Business Profile</Link> : <span className="muted small">Ask an owner or admin to connect it in Apps.</span>}
-    </div>
+    <Section title="Google reviews">
+      <div className={styles.copy}>
+        <p className={styles.note}>
+          Connect Google Business Profile to see your reviews here, reply with a suggestion, and stop asking clients who already left one. Google approves each server first, which
+          takes about 2 weeks.
+        </p>
+        {g.can_connect ? <Link className={styles.textLink} to="/apps/google_business">Connect Google Business Profile</Link> : <p className={styles.note}>Ask an owner or admin to connect it in Apps.</p>}
+      </div>
+    </Section>
   );
 }
 
@@ -192,16 +202,16 @@ export function GoogleSide({ g, stats }: { g: GoogleState | undefined; stats: Re
   return (
     <>
       {waiting && (
-        <>
+        <div className={styles.copy}>
           <ApprovalCallout own={g.own_app} projectNumber={g.project_number} admin={g.can_connect} notEnabled={g.state === "not_enabled"}
             onCheck={g.can_connect ? () => check.mutate() : undefined} checking={check.isPending} />
           <FormError error={check.error} />
-          {g.can_connect && <Link className="small" to="/apps/google_business">Open Google Business Profile in Apps</Link>}
-        </>
+          {g.can_connect && <Link className={styles.textLink} to="/apps/google_business">Open Google Business Profile in Apps</Link>}
+        </div>
       )}
       {copy && (
         <div className={`callout callout-${copy.tone}`} role="status">
-          <Icon name={copy.tone === "info" ? "info" : "alert"} size={18} />
+          <Icon name={copy.tone === "info" ? "info" : "alert"} size={16} />
           <div className="grow stack-sm" style={{ gap: 4 }}>
             <span>{copy.title}</span>
             {copy.body && <span style={{ fontWeight: 400 }}>{copy.body}</span>}
@@ -212,14 +222,50 @@ export function GoogleSide({ g, stats }: { g: GoogleState | undefined; stats: Re
       {/* Which reviews clients see on their quotes, once there are any to show. */}
       <QuoteReviewsCard hasReviews={Boolean(s && s.count > 0)} />
       {s && s.count > 0 && (
-        <div className="card card-pad stack-sm">
-          <strong>Reviews each month</strong>
-          <Suspense fallback={<CardSkeleton height={150} title={false} />}><ReviewTrend months={s.months} timeZone={session.company.timezone} /></Suspense>
-          {s.needs_reply > 0 && canReply(g) && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{s.needs_reply === 1 ? "1 review needs a reply" : `${s.needs_reply.toLocaleString("en-US")} reviews need a reply`}</span>}
-        </div>
+        <Section title="Reviews each month">
+          <div className={styles.copy}>
+            <Suspense fallback={<Skeleton height={150} />}><ReviewTrend months={s.months} timeZone={session.company.timezone} /></Suspense>
+            {s.needs_reply > 0 && canReply(g) && <p className={styles.warnLine}>{s.needs_reply === 1 ? "1 review needs a reply" : `${s.needs_reply.toLocaleString("en-US")} reviews need a reply`}</p>}
+          </div>
+        </Section>
       )}
     </>
   );
+}
+
+type Shown = "all" | "needs";
+
+/**
+ * The filters past the two tabs, in one menu: the stars and whether it's matched to a client, each a
+ * sub menu of choices with the one picked shown at its end, and Clear once any is on.
+ */
+function moreFilters(filters: ReviewFilters, change: (next: ReviewFilters) => void): MenuEntry[] {
+  const starWords = (n: number) => (n === 1 ? "1 star" : `${n} stars`);
+  const matchWords = { all: "Any", matched: "Matched", unmatched: "Not matched" } as const;
+  return [
+    {
+      label: "Stars",
+      icon: "star",
+      end: filters.stars ? starWords(filters.stars) : "Any",
+      items: [
+        { label: "Any stars", checked: filters.stars === null, onSelect: () => change({ ...filters, stars: null }) },
+        { separator: true },
+        ...[5, 4, 3, 2, 1].map((n) => ({ label: starWords(n), checked: filters.stars === n, onSelect: () => change({ ...filters, stars: n }) })),
+      ],
+    },
+    {
+      label: "Client",
+      icon: "user",
+      end: matchWords[filters.matched],
+      items: [
+        { label: "Any review", checked: filters.matched === "all", onSelect: () => change({ ...filters, matched: "all" }) },
+        { label: "Matched to a client", checked: filters.matched === "matched", onSelect: () => change({ ...filters, matched: "matched" }) },
+        { label: "Not matched", checked: filters.matched === "unmatched", onSelect: () => change({ ...filters, matched: "unmatched" }) },
+      ],
+    },
+    { separator: true, hidden: filters.stars === null && filters.matched === "all" },
+    { label: "Clear filters", icon: "x", hidden: filters.stars === null && filters.matched === "all", onSelect: () => change({ ...filters, stars: null, matched: "all" }) },
+  ];
 }
 
 /** The reviews, newest first, a page at a time, under a heading with when they last came in and Sync now. */
@@ -268,6 +314,8 @@ export function GoogleReviewList({ g }: { g: GoogleState }) {
     enabled: Boolean(filters.client),
     queryFn: async () => unwrap(await supabase().from("clients").select("display_name").eq("id", filters.client!).maybeSingle()),
   });
+  // How many need a reply, for the filter's count (the same figures as the strip above).
+  const stats = useReviewStats(true);
   const rows = list.data?.rows ?? [];
   const shown = focused.data ? [focused.data, ...rows.filter((r) => r.id !== focused.data!.id)] : rows;
   const repliers = [...new Set(shown.map((r) => r.replied_by).filter((id): id is string => Boolean(id)))];
@@ -309,74 +357,120 @@ export function GoogleReviewList({ g }: { g: GoogleState }) {
   const total = list.data?.total ?? 0;
   const live = canReply(g);
   const progress = progressWords(g.progress);
+  const row = (r: Review, showStatus: boolean) => (
+    <ReviewRow
+      key={r.id}
+      review={r}
+      names={names}
+      highlight={r.id === focused.data?.id}
+      live={live}
+      showStatus={showStatus}
+      onMatch={() => { setMatching(r); setDialogOpen(true); }}
+      onNotThem={() => notThem(r)}
+      onChanged={refresh}
+      quotePick={pickFor(r.id)}
+    />
+  );
+  // Grouped by what needs doing while replies can be posted: those still to answer first.
+  const rest = focused.data ? shown.slice(1) : shown;
+  const grouped = live && !filters.needsReply;
+  const waitingOnUs = grouped ? rest.filter((r) => !r.reply_comment) : [];
+  const answered = grouped ? rest.filter((r) => r.reply_comment) : [];
+  const shownFilter: Shown = filters.needsReply ? "needs" : "all";
+  const needsCount = stats.data?.needs_reply;
   return (
-    <section className="stack" aria-labelledby="google-reviews">
-      <div className="row-between wrap" style={{ gap: 8 }}>
-        <h2 id="google-reviews" className="section-title">Your Google reviews</h2>
-        <div className="row" style={{ gap: 8 }}>
-          <span className="muted small" role="status">{progress ?? (g.last_synced_at ? `Last synced ${timeAgo(g.last_synced_at)}` : null)}</span>
+    <Section
+      id="google-reviews"
+      title="Your Google reviews"
+      flush
+      action={
+        <>
+          <span className={styles.syncNote} data-progress={progress ? "" : undefined} role="status">{progress ?? (g.last_synced_at ? `Last synced ${timeAgo(g.last_synced_at)}` : null)}</span>
           {canSync(g) && <Button size="sm" variant="ghost" icon="refresh" loading={sync.isPending || g.syncing} onClick={() => sync.mutate()}>Sync now</Button>}
-        </div>
-      </div>
-      <FormError error={tooSoon(sync.error) ? null : sync.error} />
-      {/* Nothing to filter until there are reviews here. */}
-      {g.reviews > 0 && <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Show">
-        <button type="button" className="tab" aria-pressed={!filtersOn({ ...filters, client: null })} onClick={() => change({ ...NO_FILTERS, client: filters.client })}>All</button>
-        <button type="button" className="tab" aria-pressed={filters.needsReply} onClick={() => change({ ...filters, needsReply: !filters.needsReply })}>Needs a reply</button>
-        <Select className="select" style={{ width: "auto" }} aria-label="Stars" value={filters.stars ?? ""} onChange={(e) => change({ ...filters, stars: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">Any stars</option>
-          {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n === 1 ? "1 star" : `${n} stars`}</option>)}
-        </Select>
-        <button type="button" className="tab" aria-pressed={filters.matched === "matched"} onClick={() => change({ ...filters, matched: filters.matched === "matched" ? "all" : "matched" })}>Matched</button>
-        <button type="button" className="tab" aria-pressed={filters.matched === "unmatched"} onClick={() => change({ ...filters, matched: filters.matched === "unmatched" ? "all" : "unmatched" })}>Not matched</button>
-        {filters.client && (
-          <span className="chip chip-green">
-            {forClient.data?.display_name ?? "One client"}
-            <button type="button" aria-label="Show every client's reviews" onClick={() => change({ ...filters, client: null })}><Icon name="x" size={12} /></button>
-          </span>
-        )}
-      </div>}
-      <div className="card">
-        {list.isPending && <div className="card-pad"><CardSkeleton lines={3} title={false} /></div>}
+        </>
+      }
+    >
+      <div className={styles.listBody}>
+        <FormError error={tooSoon(sync.error) ? null : sync.error} />
+        {/* Nothing to filter until there are reviews here. */}
+        {g.reviews > 0 && <div className={styles.reviewTools}><Toolbar
+          label="Show"
+          filters={
+            <FilterTabs<Shown>
+              label="Show reviews"
+              value={shownFilter}
+              onChange={(v) => change({ ...filters, needsReply: v === "needs" })}
+              options={[
+                { value: "all", label: "All", count: g.reviews },
+                { value: "needs", label: "Needs a reply", count: needsCount },
+              ]}
+            />
+          }
+          tools={
+            <Menu
+              items={moreFilters(filters, change)}
+              align="end"
+              label={filters.stars !== null || filters.matched !== "all" ? "More filters, some on" : "More filters"}
+              title="Filter reviews"
+              triggerClassName={cx("btn btn-sm btn-ghost toolbar-btn", (filters.stars !== null || filters.matched !== "all") && "is-on")}
+              trigger={
+                <>
+                  <Icon name="filter" size={15} />
+                  <span className="toolbar-btn-text">Filter</span>
+                  {(filters.stars !== null || filters.matched !== "all") && <span className="badge toolbar-btn-count">{Number(filters.stars !== null) + Number(filters.matched !== "all")}</span>}
+                </>
+              }
+            />
+          }
+        >
+          {filters.client && (
+            <button type="button" className="chip" aria-label="Show every client's reviews" onClick={() => change({ ...filters, client: null })}>
+              {forClient.data?.display_name ?? "One client"}
+              <Icon name="x" size={12} />
+            </button>
+          )}
+        </Toolbar></div>}
+        {list.isPending && <InboxSkeleton rows={3} />}
         {list.error && <ErrorState compact error={list.error} onRetry={() => list.refetch()} />}
         {list.data && !shown.length && (
           filtersOn(filters)
             ? <EmptyState inline title="No reviews match" action={<Button size="sm" onClick={() => change(NO_FILTERS)}>Clear filters</Button>} />
             : <EmptyState inline title="No reviews yet">{progress ?? "New Google reviews show here."}</EmptyState>
         )}
-        {focused.data && (
-          <div className="list-foot" style={{ borderTop: 0 }}>
-            <span>From your notification</span>
-            <Button size="sm" variant="ghost" onClick={() => setParams({ tab: "reviews" }, { replace: true })}>Show all reviews</Button>
-          </div>
-        )}
-        {shown.map((r) => (
-          <ReviewRow
-            key={r.id}
-            review={r}
-            names={names}
-            highlight={r.id === focused.data?.id}
-            live={live}
-            onMatch={() => { setMatching(r); setDialogOpen(true); }}
-            onNotThem={() => notThem(r)}
-            onChanged={refresh}
-            quotePick={pickFor(r.id)}
-          />
-        ))}
-        {total > PAGE && (
-          <div className="list-foot">
-            <span>Showing {rows.length.toLocaleString("en-US")} of {total.toLocaleString("en-US")}</span>
-            {rows.length < total ? (
-              <Button size="sm" variant="ghost" loading={list.isFetching} onClick={() => setLimit((l) => l + PAGE)}>Load more</Button>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => setLimit(PAGE)}>Show less</Button>
+        {shown.length > 0 && (
+          <InboxList
+            label="Google reviews"
+            inset
+            stale={list.isPlaceholderData}
+            className={styles.reviewList}
+            foot={total > PAGE && (
+              <ListFoot
+                end={rows.length >= total ? <button type="button" className="il-more" onClick={() => setLimit(PAGE)}>Show less</button> : undefined}
+                more={rows.length < total ? { onClick: () => setLimit((l) => l + PAGE), loading: list.isFetching } : undefined}
+              >
+                Showing {rows.length.toLocaleString("en-US")} of {total.toLocaleString("en-US")}
+              </ListFoot>
             )}
-          </div>
+          >
+            {focused.data && (
+              <InboxGroup label="From your notification" icon="bell" end={<button type="button" onClick={() => setParams({ tab: "reviews" }, { replace: true })}>Show all reviews</button>}>
+                {row(focused.data, true)}
+              </InboxGroup>
+            )}
+            {grouped ? (
+              <>
+                {waitingOnUs.length > 0 && <InboxGroup label="Needs a reply" count={waitingOnUs.length} tone="warning" icon="reply">{waitingOnUs.map((r) => row(r, false))}</InboxGroup>}
+                {answered.length > 0 && <InboxGroup label="Replied" count={answered.length}>{answered.map((r) => row(r, false))}</InboxGroup>}
+              </>
+            ) : rest.length > 0 && (
+              focused.data ? <InboxGroup label="Other reviews">{rest.map((r) => row(r, !filters.needsReply))}</InboxGroup> : <InboxGroup>{rest.map((r) => row(r, !filters.needsReply))}</InboxGroup>
+            )}
+          </InboxList>
         )}
       </div>
       <MatchDialog review={matching} open={dialogOpen} onClose={() => setDialogOpen(false)} onExited={() => setMatching(null)}
         onPick={(client) => { setDialogOpen(false); setClient.mutate({ review: matching!, client }); }} />
-    </section>
+    </Section>
   );
 }
 
@@ -386,11 +480,13 @@ const LONG = 320;
  * One review. The status and the menu sit on the name's line, so on a phone the words and the reply
  * get the row's whole width beside the photo.
  */
-function ReviewRow({ review: r, names, highlight, live, onMatch, onNotThem, onChanged, quotePick }: {
+function ReviewRow({ review: r, names, highlight, live, showStatus, onMatch, onNotThem, onChanged, quotePick }: {
   review: Review;
   names: ReadonlyMap<string, string>;
   highlight: boolean;
   live: boolean;
+  /** The reply status on the name's line, where the group heading doesn't already say it. */
+  showStatus: boolean;
   onMatch: () => void;
   onNotThem: () => void;
   onChanged: () => void;
@@ -405,44 +501,50 @@ function ReviewRow({ review: r, names, highlight, live, onMatch, onNotThem, onCh
   const text = r.comment ?? "";
   const long = text.length > LONG;
   return (
-    <div id={`review-${r.id}`} className="card-row" style={{ alignItems: "flex-start", ...(highlight ? { background: "var(--green-tint)" } : {}) }}>
-      <span className="avatar" style={{ width: 36, height: 36, fontSize: 13 }} aria-hidden>
+    <li id={`review-${r.id}`} className={cx("il-row", styles.review)} data-highlight={highlight || undefined}>
+      <span className="il-avatar" aria-hidden>
         {r.reviewer_photo_url && !broken
-          ? <img className="avatar-photo" src={r.reviewer_photo_url} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => setBroken(true)} />
+          ? <img className={styles.avatarPhoto} src={r.reviewer_photo_url} alt="" referrerPolicy="no-referrer" loading="lazy" onError={() => setBroken(true)} />
           : known ? initials(known) : <Icon name="user" size={16} />}
       </span>
-      <div className="grow stack-sm" style={{ gap: 6, minWidth: 0 }}>
-        <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
-          <div className="row wrap grow" style={{ gap: 8, minWidth: 0 }}>
+      <div className={styles.reviewBody}>
+        <div className={styles.reviewHead}>
+          <div className={styles.reviewWho}>
             <strong>{name}</strong>
             <Stars rating={r.rating} />
-            <span className="muted small">{formatDate(r.posted_at)}</span>
-            <EntityStatus kind="review" status={r.reply_comment ? "replied" : "needs_reply"} />
+            {showStatus && <EntityStatus kind="review" status={r.reply_comment ? "replied" : "needs_reply"} />}
           </div>
+          <RowAge at={r.posted_at} />
           <Menu
-            triggerClassName="btn btn-sm btn-ghost btn-icon"
+            triggerClassName={cx("btn btn-sm btn-ghost btn-icon", styles.rowMore)}
             label="Review actions"
+            title={name}
             items={[
-              { label: r.client ? "Match to another client…" : "Match to a client…", icon: "user", onSelect: onMatch },
+              { label: r.client ? "Match to another client…" : "Match to a client…", icon: "user", kbd: "M", onSelect: onMatch },
               { label: "Not this client", icon: "x", hidden: !r.client, onSelect: onNotThem },
+              { separator: true },
               // A 4 or 5-star review with words can be posted as a card (Marketing → Social).
-              { label: "Post on social", icon: "share", hidden: (r.rating ?? 0) < 4 || !text.trim(), onSelect: () => navigate(`/marketing?tab=social&compose=review&review=${r.id}`) },
+              { label: "Post on social", icon: "share", kbd: "P", hidden: (r.rating ?? 0) < 4 || !text.trim(), onSelect: () => navigate(`/marketing?tab=social&compose=review&review=${r.id}`) },
               quotePick,
             ]}
           />
         </div>
         {text && (
-          <p className="pre-wrap" style={{ margin: 0 }}>
+          <p className={cx("pre-wrap", styles.reviewText)}>
             {long && !more ? `${text.slice(0, LONG).trimEnd()}…` : text}
             {long && <>{" "}<button type="button" className="link-btn small" onClick={() => setMore(!more)}>{more ? "Less" : "More"}</button></>}
           </p>
         )}
-        <span className="muted small">
-          {r.client ? <><Link to={`/clients/${r.client.id}`}>{r.client.display_name}</Link>{r.match === "auto" ? " · Matched by name" : ""}</> : r.reviewer_anonymous ? "Anonymous, so not matched" : "Not matched to a client"}
-        </span>
+        <MetaLine
+          className={styles.reviewMeta}
+          parts={[
+            r.client ? <Link to={`/clients/${r.client.id}`}>{r.client.display_name}</Link> : r.reviewer_anonymous ? "Anonymous, so not matched" : "Not matched to a client",
+            r.client && r.match === "auto" && "Matched by name",
+          ]}
+        />
         <Reply review={r} names={names} live={live} open={highlight && !r.reply_comment} onChanged={onChanged} />
       </div>
-    </div>
+    </li>
   );
 }
 
@@ -498,7 +600,7 @@ function Reply({ review: r, names, live, open, onChanged }: { review: Review; na
       body: (
         <div className="stack-sm">
           <p style={{ margin: 0 }}>Everyone can read it on Google, under {reviewer ? `${reviewer}'s review` : "the review"}.</p>
-          <blockquote className="pre-wrap" style={{ margin: 0, paddingLeft: 12, borderLeft: "3px solid var(--border)" }}>{comment}</blockquote>
+          <blockquote className={cx("pre-wrap", styles.quote)}>{comment}</blockquote>
         </div>
       ),
       confirmLabel: updating ? "Update reply" : "Post reply",
@@ -511,23 +613,28 @@ function Reply({ review: r, names, live, open, onChanged }: { review: Review; na
 
   if (r.reply_comment && !editing) {
     return (
-      <div className="stack-sm" style={{ gap: 4, paddingLeft: 12, borderLeft: "3px solid var(--border)" }}>
-        <span className="pre-wrap small">{r.reply_comment}</span>
-        <span className="muted small">
-          {repliedWords(r, names)}
-          {live && <>{" · "}<button type="button" className="link-btn small" onClick={() => { setText(r.reply_comment ?? ""); setEditing(true); }}>Edit</button>{" · "}<button type="button" className="link-btn small" onClick={askDelete}>Delete</button></>}
-        </span>
+      <div className={styles.reply}>
+        <span className={styles.replyLabel}>Your reply</span>
+        <p className={cx("pre-wrap", styles.replyText)}>{r.reply_comment}</p>
+        <MetaLine
+          className={styles.replyMeta}
+          parts={[
+            repliedWords(r, names),
+            live && <button type="button" className="link-btn" onClick={() => { setText(r.reply_comment ?? ""); setEditing(true); }}>Edit</button>,
+            live && <button type="button" className="link-btn" onClick={askDelete}>Delete</button>,
+          ]}
+        />
         <FormError error={remove.error} />
       </div>
     );
   }
   if (!live) return null;
-  if (!editing) return <Button size="sm" style={{ justifySelf: "start" }} icon="reply" onClick={() => setEditing(true)}>Reply</Button>;
+  if (!editing) return <Button size="sm" className={styles.replyButton} icon="reply" onClick={() => setEditing(true)}>Reply</Button>;
   const canAddKey = hasRole(session, "admin") && can(session, "apps");
   return (
-    <form className="stack-sm" onSubmit={submit}>
-      <textarea className="textarea" aria-label={reviewer ? `Reply to ${reviewer}` : "Reply to the review"} style={{ minHeight: 90 }} value={text} maxLength={REPLY_MAX} onChange={(e) => setText(e.target.value)} placeholder="Thank them, and keep it short." />
-      <div className="row wrap" style={{ gap: 8 }}>
+    <form className={styles.replyForm} onSubmit={submit}>
+      <textarea className="textarea" aria-label={reviewer ? `Reply to ${reviewer}` : "Reply to the review"} style={{ minHeight: 90 }} value={text} maxLength={REPLY_MAX} onChange={(e) => setText(e.target.value)} placeholder="Thank them, and keep it short." autoFocus={!open} />
+      <div className={styles.replyBar}>
         <Button type="submit" size="sm" variant="primary" loading={post.isPending} disabled={!text.trim()}>{r.reply_comment ? "Update reply" : "Post reply"}</Button>
         <Button size="sm" icon="sparkle" loading={suggest.isPending} disabled={!aiOn} onClick={() => suggest.mutate()}>{text.trim() ? "Rewrite" : "Suggest a reply"}</Button>
         <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setText(r.reply_comment ?? ""); }}>Cancel</Button>
@@ -566,27 +673,29 @@ function MatchDialog({ review, open, onClose, onExited, onPick }: { review: Revi
   const twins = sharedNames(suggestions.data ?? []);
   return (
     <Dialog open={open} onClose={onClose} onExited={() => { setPicked(null); onExited(); }} title="Match to a client" description={review ? `Who left ${reviewer ? `${reviewer}'s review` : "this review"}? They won't be asked for reviews again.` : undefined}>
-      <form className="dialog-body stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (picked) onPick({ id: picked.id, display_name: picked.display_name }); }}>
+      <form className="dialog-body stack" onSubmit={(e: FormEvent) => { e.preventDefault(); if (picked) onPick({ id: picked.id, display_name: picked.display_name }); }}>
         {(suggestions.data?.length ?? 0) > 0 && (
-          <div className="stack-sm" style={{ gap: 6 }}>
-            <span className="muted small strong">Names that fit</span>
+          <div className={styles.options} role="group" aria-labelledby="names-that-fit">
+            <span id="names-that-fit" className={styles.optionsLabel}>Names that fit</span>
             {suggestions.data!.map((c) => {
               const detail = clientDetail(c);
               // Two of the same name: a click picks this one below, and Match matches it.
               const twin = twins.has(c.id);
+              const on = twin && picked?.id === c.id;
               return (
                 <button
                   key={c.id}
                   type="button"
-                  className={`card-row choice-row${twin && picked?.id === c.id ? " picked" : ""}`}
-                  aria-pressed={twin ? picked?.id === c.id : undefined}
+                  className={styles.option}
+                  aria-pressed={twin ? on : undefined}
                   onClick={() => (twin ? setPicked({ id: c.id, display_name: c.display_name }) : onPick(c))}
                 >
-                  <Icon name="user" size={16} />
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    {c.display_name}
-                    {detail && <span className="muted small ellipsis" style={{ display: "block" }}>{detail}</span>}
+                  <span className={styles.optionFace} aria-hidden>{initials(c.display_name)}</span>
+                  <span className={styles.optionText}>
+                    <span className={styles.optionName}>{c.display_name}</span>
+                    {detail && <span className={styles.optionDetail}>{detail}</span>}
                   </span>
+                  {on ? <Icon name="check" size={16} /> : !twin && <Icon name="chevronRight" size={16} />}
                 </button>
               );
             })}

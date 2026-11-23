@@ -10,10 +10,11 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { NumberInput } from "@/components/ui/NumberInput";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { bandsKey } from "./snowData";
+import styles from "./snow.module.css";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 /** A whole number or a decimal typed into a field, or null for an empty one. */
 export const amount = (text: string) => (text.trim() === "" ? null : Number(text));
@@ -31,26 +32,30 @@ export function readDepths(rows: DepthRow[], what: string): Array<{ up_to_in: nu
   return read.sort((a, b) => (a.up_to_in ?? Infinity) - (b.up_to_in ?? Infinity));
 }
 
-/** The rows to type them in. `money`: each is a price; otherwise a multiple of the push price. */
+/** The rows to type them in, on hairlines. `money`: each is a price; otherwise a multiple of the push price. */
 export function DepthRows({ rows, onChange, money, what, addLabel }: { rows: DepthRow[]; onChange: (rows: DepthRow[]) => void; money: boolean; what: string; addLabel: string }) {
   const set = (i: number, change: Partial<DepthRow>) => onChange(rows.map((r, n) => (n === i ? { ...r, ...change } : r)));
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {rows.map((r, i) => (
-        <div key={i} className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <span className="muted small">Up to</span>
-          <div className="input-group" style={{ width: 120 }}>
-            <NumberInput className="input" inputMode="decimal" min={0.1} max={100} step={0.1} value={r.upTo} onChange={(e) => set(i, { upTo: e.target.value })} placeholder="any" aria-label={`${what} ${i + 1}: up to how many inches`} />
-            <span className="addon addon-right addon-unit">in</span>
-          </div>
-          <div className="input-group" style={{ width: 130 }}>
-            <span className="addon">{money ? "$" : "×"}</span>
-            <NumberInput className="input" inputMode="decimal" min={0} step={0.01} value={r.value} onChange={(e) => set(i, { value: e.target.value })} aria-label={`${what} ${i + 1}: ${money ? "price" : "times the push price"}`} />
-          </div>
-          <Button size="sm" variant="ghost" onClick={() => onChange(rows.filter((_, n) => n !== i))}>Remove</Button>
+    <div className={styles.depthList}>
+      {rows.length > 0 && (
+        <div className={styles.depths}>
+          {rows.map((r, i) => (
+            <div key={i} className={styles.depth}>
+              <span className={styles.depthLabel}>Up to</span>
+              <div className="input-group">
+                <NumberInput className="input" inputMode="decimal" min={0.1} max={100} step={0.1} value={r.upTo} onChange={(e) => set(i, { upTo: e.target.value })} placeholder="any" aria-label={`${what} ${i + 1}: up to how many inches`} />
+                <span className="addon addon-right addon-unit">in</span>
+              </div>
+              <div className="input-group">
+                <span className="addon">{money ? "$" : "×"}</span>
+                <NumberInput className="input" inputMode="decimal" min={0} step={0.01} value={r.value} onChange={(e) => set(i, { value: e.target.value })} aria-label={`${what} ${i + 1}: ${money ? "price" : "times the push price"}`} />
+              </div>
+              <Button size="sm" variant="ghost" icon="x" className={styles.depthRemove} aria-label={`Remove ${what.toLowerCase()} ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, n) => n !== i))} />
+            </div>
+          ))}
         </div>
-      ))}
-      {rows.length < 8 && <div><Button size="sm" icon="plus" onClick={() => onChange([...rows, { upTo: "", value: "" }])}>{rows.length ? "Add another depth" : addLabel}</Button></div>}
+      )}
+      {rows.length < 8 && <Button size="sm" variant="ghost" icon="plus" className={styles.depthAdd} onClick={() => onChange([...rows, { upTo: "", value: "" }])}>{rows.length ? "Add another depth" : addLabel}</Button>}
     </div>
   );
 }
@@ -76,7 +81,7 @@ export function StandardPricesDialog({ saved, onClose }: { saved: SnowBand[]; on
         <Field label="What a storm bills, by how much fell" hint="Each is a multiple of what one push bills the customer: 1 is the push price, 1.5 is one and a half times it. Leave the last depth empty for anything deeper.">
           <DepthRows rows={rows} onChange={setRows} money={false} what="Depth" addLabel="Add a depth" />
         </Field>
-        <p className="muted small">A snow customer's own storm prices fill from these when you add or edit one. Customers already priced keep their prices until you fill them again.</p>
+        <p className={styles.partHint}>A snow customer's own storm prices fill from these when you add or edit one. Customers already priced keep their prices until you fill them again.</p>
         <FormError error={save.error} />
         <div className="form-actions">
           <FormChecks />

@@ -17,8 +17,8 @@ export interface ClientLink {
   exp: number; // seconds since epoch
   pv?: 1; // office preview: may show drafts
   // "office": a copy of the client's Hub link the office made (Copy Client Hub link), every link a
-  // signed-in person is handed (a send's Copy link, the copy kept on the client's timeline, a send
-  // typed to an address that isn't the client's; clientLinks), and every link minted from one. It
+  // signed-in person is handed (a send's Copy link, a send typed to an address that isn't the
+  // client's, a rule's email or text to a contact; clientLinks), and every link minted from one. It
   // works as the client's own link, except that it can't say yes to a card it didn't save itself or
   // add a tip to a saved card. Missing means the client's own link (and see `own`).
   via?: "office";
@@ -32,6 +32,11 @@ export interface ClientLink {
   // links (clients.links_reset_at): a quote, invoice or client link made before the reset, or one
   // from before links carried a time, then stops opening (linksReplaced). Other kinds don't look.
   at?: number;
+  // 1: an office copy made for someone who doesn't see invoices (an estimator, a crew, a role with
+  // Invoices and payments off): its Hub home leaves out the client's invoices, balances, payments,
+  // referral credit and the autopay they're on (routes/public.ts clientHome), and every link minted
+  // from it keeps the mark. The client's own link never has it.
+  nm?: 1;
 }
 
 const PATHS: Record<LinkKind, string> = {
@@ -47,23 +52,47 @@ const PATHS: Record<LinkKind, string> = {
 const LIFETIME_DAYS: Record<LinkKind, number> = { quote: 60, invoice: 90, client: 120, unsub: 3650, review: 365, refer: 3650, sub: 30 };
 export const linkLifetimeDays = (kind: LinkKind) => LIFETIME_DAYS[kind];
 
-export async function clientLink(env: Env, baseUrl: string, link: Omit<ClientLink, "exp">, days?: number): Promise<string> {
+/**
+ * A signed link of `link.t`'s kind, good for `days` (the kind's own lifetime unless said). `exp`:
+ * the link it's minted from runs out then, and this one never outlives it (it runs out at whichever
+ * comes first), so opening a link can't hand out fresh ones that keep it going for good.
+ */
+export async function clientLink(env: Env, baseUrl: string, link: Omit<ClientLink, "exp"> & { exp?: number }, days?: number): Promise<string> {
   const lifetime = days ?? LIFETIME_DAYS[link.t];
   const now = Date.now();
-  const token = await signToken(env, { ...link, at: link.at ?? now, exp: Math.floor(now / 1000) + lifetime * 86_400 });
+  const own = Math.floor(now / 1000) + lifetime * 86_400;
+  const exp = typeof link.exp === "number" && Number.isFinite(link.exp) ? Math.min(link.exp, own) : own;
+  const token = await signToken(env, { ...link, at: link.at ?? now, exp });
   return `${baseUrl.replace(/\/$/, "")}${PATHS[link.t]}${token}`;
 }
 
 /**
- * One client link minted twice: `own`, the client's own (own: 1), only for the email or text that
- * goes out to their own email or phone (sentToClient); and `office`, the office's copy (via
- * "office"), for anything a signed-in person gets: what a send hands back to copy, the copy kept on
- * the client's timeline, and a send to any other address. So no one on the team holds a link that
- * can say yes to autopay or tip on the client's saved card for them.
+ * What stands for a client's link in the copy the team keeps of what was sent: the client's timeline,
+ * and a rule's notes, tasks and notices. A link opens the client's page without a sign-in, as the
+ * client, for months, and everyone who reads these would hold one: crews read a visit's messages, and
+ * an AI assistant connected as someone reads what they do. The client has their link; someone in the
+ * office who needs one copies it from the quote, invoice or client page.
  */
-export async function clientLinks(env: Env, baseUrl: string, link: Omit<ClientLink, "exp" | "via" | "own">, days?: number): Promise<{ own: string; office: string }> {
-  const [own, office] = await Promise.all([clientLink(env, baseUrl, { ...link, own: 1 }, days), clientLink(env, baseUrl, { ...link, via: "office" }, days)]);
-  return { own, office };
+export const KEPT_LINK = "[Client Hub link]";
+
+/**
+ * One client link minted for each place it goes: `own`, the client's own (own: 1), only for the email
+ * or text that goes out to their own email or phone (sentToClient); `office`, the office's copy (via
+ * "office"), for what a send hands back to the person who sent it to copy, and for a send to any other
+ * address. So no one on the team holds a link that can say yes to autopay or tip on the client's
+ * saved card for them. `kept`, for the copy kept on the client's timeline, is no link at all
+ * (KEPT_LINK).
+ *
+ * `nm` (lib/links above) only ever marks the office's copy: the client's own link shows them their
+ * money.
+ */
+export async function clientLinks(env: Env, baseUrl: string, link: Omit<ClientLink, "exp" | "via" | "own">, days?: number): Promise<{ own: string; office: string; kept: string }> {
+  const { nm, ...rest } = link;
+  const [own, office] = await Promise.all([
+    clientLink(env, baseUrl, { ...rest, own: 1 }, days),
+    clientLink(env, baseUrl, { ...rest, via: "office", ...(nm && { nm }) }, days),
+  ]);
+  return { own, office, kept: KEPT_LINK };
 }
 
 /** An email's address for comparing: trimmed, in lower case. */

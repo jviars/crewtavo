@@ -181,7 +181,7 @@ describe("Settings → AI assistants", () => {
       const html = await tab(role, fakeSupabase(grants, [{ client_id: "claude", level: "full", areas: [] }, { client_id: "chatgpt", level: "areas", areas: ["prices", "crews"] }]).db);
       expect(html, role).toContain("https://ops.example.com/mcp");
       expect(html, role).toContain("Full access");
-      expect(html, role).toContain("Can change: Price list, Crews");
+      expect(html, role).toContain("Can change: Price list and job prices, Crews");
       expect(html, role).toContain("Read only");
       expect(html.match(/>Access</g), role).toHaveLength(3);
       expect(html.match(/>Disconnect</g), role).toHaveLength(3);
@@ -215,10 +215,11 @@ describe("Settings → AI assistants", () => {
   it("shows the owner everyone's connected assistants, with who connected each, what they let it change and Disconnect", () => {
     const html = tabWithTeam("owner", team);
     expect(html).toContain("Your team&#x27;s connected assistants");
-    expect(html).toContain("<strong>Ola Office</strong> · Claude");
-    expect(html).toContain("<strong>Cal Crew</strong> · Shop helper");
+    // Who connected it, then the assistant, quieter.
+    expect(html).toMatch(/>Ola Office<span class="[^"]+"> · Claude<\/span>/);
+    expect(html).toMatch(/>Cal Crew<span class="[^"]+"> · Shop helper<\/span>/);
     expect(html).toContain("Full access");
-    expect(html).toContain("Can change: Price list");
+    expect(html).toContain("Can change: Price list and job prices");
     expect(html).toContain('aria-label="Disconnect Claude from Ola Office&#x27;s sign-in"');
     expect(html.match(/>Disconnect</g)).toHaveLength(2);
     expect(tabWithTeam("owner", [])).toContain("Nobody has connected one yet.");

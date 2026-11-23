@@ -46,6 +46,16 @@ const GuideHeading = Heading.extend({
   },
 }).configure({ levels: [2, 3, 4] });
 
+/** A checklist item. One written without its data-type (by hand, or an older import) is still read as one, as the guide shows it. */
+const ChecklistItem = TaskItem.extend({
+  parseHTML() {
+    return [
+      { tag: `li[data-type="${this.name}"]`, priority: 51 },
+      { tag: 'ul[data-type="taskList"] > li', priority: 51 },
+    ];
+  },
+});
+
 /** A YouTube or Vimeo player, rebuilt from the video's id like everywhere else (see core/video). Stored as a line holding just the iframe. */
 const Video = Node.create({
   name: "video",
@@ -204,7 +214,7 @@ export function guideExtensions(placeholder: string, link: PictureLink | null = 
     }),
     GuideHeading,
     TaskList,
-    TaskItem.configure({ nested: true }),
+    ChecklistItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
     Picture.configure({ allowBase64: false, link }),
     Video,

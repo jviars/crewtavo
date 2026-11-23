@@ -7,7 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LoginPage, signupOpen } from "../src/features/auth/LoginPage";
+import { LoginPage, signupOpen, SwitchAccountPage } from "../src/features/auth/LoginPage";
 
 /** GoTrue's answer to GET /auth/v1/settings on an instance (GOTRUE_DISABLE_SIGNUP), and on a Supabase project with sign-up on. */
 const INSTANCE = { external: { email: true, google: false, phone: false }, disable_signup: true, mailer_autoconfirm: true };
@@ -39,5 +39,14 @@ describe("creating an account", () => {
     const html = await page(OPEN);
     expect(html).toContain("Sign in");
     expect(html).toContain("Create an account");
+  });
+});
+
+describe("a link for another account than the one signed in", () => {
+  it("names both, and offers staying first", () => {
+    const html = renderToStaticMarkup(createElement(SwitchAccountPage, { current: "owner@greenlawn.example", link: "crew@greenlawn.example", onAnswer: () => undefined }));
+    expect(html).toContain("Switch accounts?");
+    expect(html).toMatch(/This link signs in as <strong[^>]*>crew@greenlawn\.example<\/strong>\. You&#x27;re signed in here as <strong[^>]*>owner@greenlawn\.example<\/strong>\./);
+    expect(html.indexOf("Stay signed in")).toBeLessThan(html.lastIndexOf("Switch accounts"));
   });
 });

@@ -133,10 +133,10 @@ rollback;
 -- Read only: switched back, or connected before any of this existed.
 begin;
 set local role authenticated;
-select t1040.check(e = 'PT403: This assistant can''t change the price list. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.',
+select t1040.check(e = 'PT403: This assistant can''t change prices. To let it, choose what it can change in Crewtavo, under Settings → AI assistants.',
   'a read-only assistant can''t add to the price list, and is told where to allow it: ' || e) from (select t1040.hook(:'owner', :'reading', 'POST', '/services') as e) x;
 select t1040.check(t1040.hook(:'owner', :'reading', 'PATCH', '/requests') like 'PT403: This assistant can''t change requests and notes.%', 'or change a request');
-select t1040.check(t1040.hook(:'owner', :'reading', 'DELETE', '/services') like 'PT403: This assistant can''t change the price list.%', 'or delete anything');
+select t1040.check(t1040.hook(:'owner', :'reading', 'DELETE', '/services') like 'PT403: This assistant can''t change prices.%', 'or delete anything');
 select t1040.check(t1040.hook(:'owner', :'earlier', 'POST', '/services') like 'PT403:%', 'nor can one connected before any of this');
 rollback;
 
@@ -185,7 +185,7 @@ select t1040.check(t1040.hook(:'owner', :'full', 'DELETE', '/payments') = 'none'
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/clients') = 'none', 'full access without money adds clients');
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'DELETE', '/jobs') = 'none', 'deletes a job');
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/company_roles') = 'none', 'and saves roles');
-select t1040.check(e = 'PT403: This assistant can''t change money: quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.',
+select t1040.check(e = 'PT403: This assistant can''t change money: prices, quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.',
   'but doesn''t touch invoices: ' || e) from (select t1040.hook(:'owner', :'nomoney', 'POST', '/invoices') as e) x;
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'PATCH', '/quotes') like 'PT403: This assistant can''t change money%', 'quotes');
 select t1040.check(t1040.hook(:'owner', :'nomoney', 'POST', '/pay_periods') like 'PT403: This assistant can''t change money%', 'or pay');
@@ -242,9 +242,10 @@ set local role authenticated;
 select t1040.as_request(:'owner', :'nomoney', 'PATCH', '/memberships');
 select t1040.check(t1040.error_of(format('update public.memberships set labor_rate = 31 where company_id = %L and user_id = %L', :'co', :'office')) like '42501: This assistant can''t change pay rates.%',
   'full access without money can''t change a pay rate');
-select t1040.check(t1040.error_of(format('update public.memberships set role = %L where company_id = %L and user_id = %L', 'estimator', :'co', :'office')) = 'none', 'but changes a role');
+-- (To crew lead: an assistant gives no one more, 20261123100600_assistant_prices_are_money.sql.)
+select t1040.check(t1040.error_of(format('update public.memberships set role = %L where company_id = %L and user_id = %L', 'crew_lead', :'co', :'office')) = 'none', 'but changes a role');
 reset role;
-select t1040.check((select count(*) = 1 from public.notifications where company_id = :'co' and user_id = :'owner' and kind = 'security' and title = 'An AI assistant changed your team' and body like '%changed % role to Estimator'),
+select t1040.check((select count(*) = 1 from public.notifications where company_id = :'co' and user_id = :'owner' and kind = 'security' and title = 'An AI assistant changed your team' and body like '%changed % role to Crew lead'),
   'and the owner hears about it');
 select t1040.check((select count(*) = 1 from public.activity where company_id = :'co' and verb = 'assistant.team'), 'and it''s on record');
 rollback;
@@ -288,18 +289,18 @@ rollback;
 begin;
 set local role authenticated;
 select t1040.as_request(:'owner', :'full', 'PATCH', '/companies');
-select t1040.check(t1040.error_of(format($$update public.companies set name = 'Kilo Lawns', settings = settings || '{"quote_valid_days": 14, "branding": {"color": "#3b7d23"}}' where id = %L$$, :'co')) = 'none',
+select t1040.check(t1040.error_of(format($$update public.companies set name = 'Kilo Lawns', settings = public.company_settings(id) || '{"quote_valid_days": 14, "branding": {"color": "#3b7d23"}}' where id = %L$$, :'co')) = 'none',
   'an assistant with full access changes the company''s details and settings');
-select t1040.check(t1040.error_of(format($$update public.companies set settings = settings || '{"assistants": {"enabled": true, "read_only": false}}' where id = %L$$, :'co')) like '42501:%',
+select t1040.check(t1040.error_of(format($$update public.companies set settings = public.company_settings(id) || '{"assistants": {"enabled": true, "read_only": false}}' where id = %L$$, :'co')) like '42501:%',
   'but not the owner''s limits on assistants');
-select t1040.check(t1040.error_of(format($$update public.companies set settings = jsonb_set(settings, '{branding,logo}', '"x"') where id = %L$$, :'co')) like '42501:%',
+select t1040.check(t1040.error_of(format($$update public.companies set settings = jsonb_set(public.company_settings(id), '{branding,logo}', '"x"') where id = %L$$, :'co')) like '42501:%',
   'or anything else in its settings');
 select t1040.check(t1040.error_of(format($$update public.companies set slug = 'kilo-new' where id = %L$$, :'co')) like '42501:%', 'or its other columns');
 rollback;
 begin;
 set local role authenticated;
 select t1040.as_request(:'owner', null, 'PATCH', '/companies');
-select t1040.check(t1040.error_of(format($$update public.companies set settings = settings || '{"assistants": {"read_only": true}}' where id = %L$$, :'co')) = 'none', 'the owner still sets them');
+select t1040.check(t1040.error_of(format($$update public.companies set settings = public.company_settings(id) || '{"assistants": {"read_only": true}}' where id = %L$$, :'co')) = 'none', 'the owner still sets them');
 rollback;
 
 -- Files: Storage writes with the person's token, through the storage.objects policies.

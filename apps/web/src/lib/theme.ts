@@ -3,15 +3,21 @@
  * <html>; index.html does the same before first paint so there's no flash. Pages clients see (their
  * hub, booking forms, referral and unsubscribe links, a job showcase) always stay light: they carry
  * the business's own branding. The same pages are listed in index.html, lib/i18n.tsx, lib/install.ts
- * and public/sw.js, and test/clientPages.test.ts holds every list to the routes.
+ * and public/sw.js, and test/clientPages.test.ts holds every list to the routes. The roofing site
+ * visit's screens the homeowner reads and signs on the salesperson's iPad stay light too (only here
+ * and in index.html's theme check: they're the team's app otherwise, in its language, offline and
+ * installable).
  */
-import { useSyncExternalStore } from "react";
+import { useLayoutEffect, useSyncExternalStore } from "react";
+import { useLocation } from "react-router-dom";
 
 export type ThemeChoice = "light" | "dark" | "system";
 
 const KEY = "crewtavo.theme"; // also read by the script in index.html
 const CLIENT_FACING = /^\/(hub|book|u|refer|s|g)\//;
-const media = window.matchMedia("(prefers-color-scheme: dark)");
+const HOMEOWNER = /^\/roofing\/[^/]+\/(visit|sign|signed)$/;
+// Optional so the session (which imports this) still loads in the unit tests, where there's no window.
+const media = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
 const listeners = new Set<() => void>();
 
 function stored(): ThemeChoice {
@@ -26,7 +32,8 @@ function stored(): ThemeChoice {
 let choice = stored();
 
 function apply() {
-  const dark = !CLIENT_FACING.test(window.location.pathname) && (choice === "dark" || (choice === "system" && media.matches));
+  const { pathname } = window.location;
+  const dark = !CLIENT_FACING.test(pathname) && !HOMEOWNER.test(pathname) && (choice === "dark" || (choice === "system" && Boolean(media?.matches)));
   document.documentElement.classList.toggle("dark", dark);
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#191918" : "#F6F5F1");
 }
@@ -60,9 +67,15 @@ export function useTheme(): ThemeChoice {
   );
 }
 
+/** Look again as the app moves between screens (the site visit is opened from inside the app), before it paints. */
+export function useThemeForPage() {
+  const { pathname } = useLocation();
+  useLayoutEffect(apply, [pathname]);
+}
+
 /** Keep up with the device switching modes, and with the choice changing in another tab. */
 export function initTheme() {
-  media.addEventListener("change", apply);
+  media?.addEventListener("change", apply);
   window.addEventListener("storage", (e) => {
     if (e.key !== KEY && e.key !== null) return;
     choice = stored();

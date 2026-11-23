@@ -19,7 +19,7 @@ import { adminClient } from "../lib/supabase";
 import { logoImage } from "./logo";
 import { visitBusyTimes } from "./onlineBooking";
 import { recipientsColumn, recipientsFor, sendToEach } from "./recipients";
-import { companyZone, updateVisit, type Scope } from "./schedule";
+import { companyTimeZone, updateVisit, type Scope } from "./schedule";
 
 const FIELDS =
   "id, kind, starts_at, ends_at, scheduled_on, message, reason, created_at, visit:visits(id, title, status, scheduled_on, starts_at, ends_at, crew_id), client:clients(id, display_name)";
@@ -50,7 +50,7 @@ export async function answerVisitChange(s: Scope, env: Env, id: string, answer: 
   if (answer.approve) {
     if (visit.status !== "scheduled") throw new HttpError(409, "This visit has started or changed since. Decline the request, or change the visit yourself.");
     if (ask.kind === "reschedule" && ask.scheduled_on) {
-      const { tz } = await companyZone(s);
+      const tz = await companyTimeZone(s);
       // At the time asked for; a whole day keeps the visit's own time, if it has one now. Either way
       // it keeps its own length.
       const start = ask.starts_at ? new Date(ask.starts_at) : visit.starts_at ? zonedTimeToUtc(ask.scheduled_on, localTime(new Date(visit.starts_at), tz), tz) : null;

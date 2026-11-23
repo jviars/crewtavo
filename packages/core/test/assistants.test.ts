@@ -26,6 +26,7 @@ import {
   normalizeIntakeForm,
   inServiceArea,
   isPostalCode,
+  MONEY_REFUSAL,
   toAssistantAccess,
 } from "../src";
 
@@ -42,7 +43,7 @@ describe("assistant access", () => {
     expect(mayChange(access, "prices")).toBe(true);
     expect(mayChange(access, "automations")).toBe(false);
     expect(mayChange(access, "prices", true)).toBe(false);
-    expect(describeAssistantAccess(access)).toBe("Can change: Price list, Crews");
+    expect(describeAssistantAccess(access)).toBe("Can change: Price list and job prices, Crews");
   });
 
   it("full access changes and deletes everything", () => {
@@ -56,13 +57,13 @@ describe("assistant access", () => {
     expect(areasForRole("owner", memberPermissions("owner"))).toHaveLength(19);
     expect(areasForRole("office", memberPermissions("office"))).not.toContain("company");
     expect(areasForRole("office", memberPermissions("office"))).not.toContain("team");
-    expect(areasForRole("estimator", memberPermissions("estimator"))).toEqual(["clients", "records", "jobs", "schedule", "time", "quotes"]);
+    expect(areasForRole("estimator", memberPermissions("estimator"))).toEqual(["clients", "records", "jobs", "schedule", "time", "quotes", "prices"]);
     expect(areasForRole("crew_lead", memberPermissions("crew_lead"))).toEqual(["schedule", "time"]);
     expect(areasForRole("field_crew", memberPermissions("field_crew"))).toEqual(["time"]);
     // A custom office role without guides or money.
     expect(areasForRole("office", memberPermissions("office", ["settings", "automations"]))).toEqual(["clients", "records", "jobs", "schedule", "time", "prices", "templates", "crews", "checklists", "booking", "automations"]);
-    // Marketing and promo codes go with the Marketing area of a role.
-    expect(areasForRole("office", memberPermissions("office", ["marketing"]))).toEqual(["clients", "records", "jobs", "schedule", "time", "marketing", "promos"]);
+    // Marketing and promo codes go with the Marketing area of a role; prices with any role that sells.
+    expect(areasForRole("office", memberPermissions("office", ["marketing"]))).toEqual(["clients", "records", "jobs", "schedule", "time", "prices", "marketing", "promos"]);
   });
 
   it("full access without money changes and deletes everything else", () => {
@@ -70,10 +71,12 @@ describe("assistant access", () => {
     expect(access).toEqual({ level: "full_no_money", areas: [] });
     expect(mayChange(access, "jobs", true)).toBe(true);
     expect(mayChange(access, "team")).toBe(true);
-    for (const money of ["quotes", "invoices", "pay"] as const) expect(mayChange(access, money)).toBe(false);
+    // What clients pay is money too: the price list, job prices and extra work.
+    for (const money of ["quotes", "invoices", "pay", "promos", "prices"] as const) expect(mayChange(access, money), money).toBe(false);
     expect(describeAssistantAccess(access)).toBe("Full access, no money");
-    expect(assistantRefusal("invoices", false, access)).toBe("This assistant can't change money: quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.");
-    expect(assistantRefusal("prices", true, { level: "read", areas: [] })).toMatch(/^This assistant can't change the price list\./);
+    expect(assistantRefusal("invoices", false, access)).toBe("This assistant can't change money: prices, quotes, invoices, payments, pay or promo codes. To let it, give it Full access in Crewtavo, under Settings → AI assistants.");
+    expect(assistantRefusal("prices", false, access)).toBe(MONEY_REFUSAL);
+    expect(assistantRefusal("prices", true, { level: "read", areas: [] })).toMatch(/^This assistant can't change prices\./);
   });
 });
 

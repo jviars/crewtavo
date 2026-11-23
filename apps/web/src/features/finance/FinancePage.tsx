@@ -1,32 +1,40 @@
 /**
- * Finance: money in, money owed and profit over one date range. The overview leads with a running
- * total against the period before; every table sorts and exports to CSV. Sales, work, team and
+ * Finance (Page-Finance.dc.html): money in, money owed and profit over one date range. The overview
+ * leads with one figure against the period before and what's owed beside it, then the breakdowns
+ * as rows and the latest payments; every table sorts and exports to CSV. Sales, work, team and
  * client figures are on Metrics. Owners and office staff who see invoices.
  */
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Link, Navigate } from "react-router-dom";
+import { Button, cx } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Icon, type IconName } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, ListFoot, RowPerson } from "@/components/ui/InboxList";
+import { Menu } from "@/components/ui/Menu";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { CardSkeleton, Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
-import { StatusPill, statusText } from "@/components/ui/StatusPill";
+import { statusText } from "@/components/ui/StatusPill";
+import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { formatDate, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
+import { dateIn, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
-import { localDate } from "@crewtavo/core/time";
-import { Breakdown, Change, Kpi, KpiStrip, ReportCard, ReportTable, TrendChart, type Column, type Part } from "./Charts";
+import { addDays, localDate } from "@crewtavo/core/time";
 import { agingBuckets, previousRange, serviceFigures } from "@crewtavo/core/reports";
 import { ReceiptDrafts } from "../jobs/ReceiptDrafts";
+import { Sparkline } from "@/components/ui/Chart";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
+import { Breakdown, Change, Lines, ReportCard, ReportTable, TrendChart, type Column, type LineRow, type Part } from "./Charts";
 import { CostsWithoutJob, costsWithoutJobKey } from "./CostsWithoutJob";
+import styles from "./Finance.module.css";
 import { byJobs, jobRates, loadProfit } from "./jobCosts";
-import { bucketize, bucketizeShifted, bucketsFor, resolveRange, shortDate, type Range } from "./range";
-import { both, pct, plural, RangeHeader, rangeQuery, SectionHead, sum, TabBody, useRangeParams } from "./shared";
+import { bucketize, bucketizeShifted, bucketsFor, dayWords, resolveRange, type Range } from "./range";
+import { both, datesWords, pct, plural, RangeHeader, rangeQuery, sum, TabBody, TabPanel, useRangeParams } from "./shared";
+import { loadSettings } from "@/lib/companySettings";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -43,6 +51,17 @@ const running = (values: number[]) => {
   let total = 0;
   return values.map((v) => (total += v));
 };
+/** When a deposit lands or landed, mid-sentence: "today", "tomorrow", "yesterday", or "Mon, Nov 24" (with the year from another one). */
+const bankDay = (day: string, today: string) => {
+  if (day === today) return "today";
+  if (day === addDays(today, 1)) return "tomorrow";
+  if (day === addDays(today, -1)) return "yesterday";
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: day.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric", timeZone: "UTC" });
+};
+/** Whole days from one date to a later one. */
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+/** How late reads, as Unpaid invoices colors its ages: amber up to 30 days, red past that. */
+const lateTone = (days: number) => (days > 30 ? "danger" : "warning");
 /** "Oct 16, 4:52 PM" in the company's zone. */
 const paidAt = (iso: string, timeZone: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
 
@@ -62,24 +81,25 @@ export function FinancePage() {
   return (
     <>
       <RangeHeader title="Finance" state={state} tabs={TABS} tab={tab} />
-      <div key={tab} className="stack" style={{ gap: 28, animation: "page-in var(--dur-slow) var(--ease-out)" }} role="tabpanel">
+      <TabPanel tab={tab}>
         {tab === "overview" && <Overview range={range} openTab={openTab} />}
         {tab === "payments" && <Payments range={range} />}
         {tab === "profit" && <Profit range={range} />}
         {tab === "services" && <Services range={range} />}
-      </div>
+      </TabPanel>
     </>
   );
 }
 
 /* ------------------------------------------------------------------ Payments, shared */
 
-const METHODS: Record<string, { label: string; icon: IconName; color: string }> = {
-  card: { label: "Card", icon: "card", color: "var(--green)" },
-  ach: { label: "Bank transfer", icon: "bank", color: "var(--invoice)" },
-  cash: { label: "Cash", icon: "cash", color: "var(--req)" },
-  check: { label: "Check", icon: "receipt", color: "var(--chat-purple)" },
-  other: { label: "Other", icon: "dollar", color: "var(--text-4)" },
+/** How a payment came in, and its color in the method bar (Page-Finance.dc.html: card blue, bank green, check amber, cash grey). */
+const METHODS: Record<string, { label: string; color: string }> = {
+  card: { label: "Card", color: "var(--invoice)" },
+  ach: { label: "Bank transfer", color: "var(--job)" },
+  check: { label: "Check", color: "var(--req)" },
+  cash: { label: "Cash", color: "var(--quiet)" },
+  other: { label: "Other", color: "var(--border-strong)" },
 };
 const methodOf = (m: string) => METHODS[m] ?? METHODS.other!;
 
@@ -104,41 +124,39 @@ function usePayments(range: Range) {
 }
 type Payment = NonNullable<ReturnType<typeof usePayments>["data"]>[number];
 
-function PaymentsTable({ rows }: { rows: Payment[] }) {
+/**
+ * One payment on a hairline: the amount, how it was paid, what for (the invoice, which the row
+ * opens), who paid and when. `time` says the time of day instead of the day, under a day's heading.
+ */
+function PaymentRow({ p, time }: { p: Payment; time?: boolean }) {
   const { company } = useSession();
-  const navigate = useNavigate();
+  const tz = company.timezone;
+  const refund = Number(p.amount) < 0;
+  const method = methodOf(p.method);
+  const what = refund ? "Refund" : "Payment";
+  const day = dateIn(p.received_at, tz);
   return (
-    <table className="table table-stack pay-table">
-      <thead><tr><th className="num">Amount</th><th>Status</th><th>Method</th><th>Description</th><th>Client</th><th>Date</th></tr></thead>
-      <tbody>
-        {rows.map((p) => {
-          const refund = Number(p.amount) < 0;
-          const method = methodOf(p.method);
-          const what = refund ? "Refund" : "Payment";
-          return (
-            <tr key={p.id} className={p.invoice ? "row-link" : undefined} onClick={() => p.invoice && navigate(`/invoices/${p.invoice.id}`)}>
-              <td className="num tabular"><strong>{formatMoneyCents(p.amount)}</strong>{Number(p.tip_amount) > 0 && <div className="muted small">+{formatMoneyCents(p.tip_amount)} tip</div>}</td>
-              <td><StatusPill label={refund ? "Refunded" : "Paid"} tone={refund ? "muted" : "good"} /></td>
-              <td><span className="pay-method"><Icon name={method.icon} size={14} />{method.label}</span></td>
-              <td>
-                {p.invoice ? (
-                  <Link className="cell-link" to={`/invoices/${p.invoice.id}`} onClick={(e) => e.stopPropagation()}>{what} for invoice #{p.invoice.number}</Link>
-                ) : (
-                  p.notes?.trim() || what
-                )}
-              </td>
-              <td>
-                {p.client ? (
-                  <Link className="cell-link" to={`/clients/${p.client.id}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 400 }}>{p.client.display_name}</Link>
-                ) : <span className="muted">—</span>}
-              </td>
-              <td className="muted tabular" style={{ whiteSpace: "nowrap" }}>{paidAt(p.received_at, company.timezone)}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <li className={styles.pay} data-no-client={p.client ? undefined : ""}>
+      <span className={styles.payAmount} data-refund={refund || undefined}>
+        {formatMoneyCents(p.amount)}
+        {Number(p.tip_amount) > 0 && <span className={styles.payTip}>+{formatMoneyCents(p.tip_amount)} tip</span>}
+      </span>
+      <span className={styles.payMethod}><i className={styles.dot} style={{ background: method.color }} aria-hidden="true" />{method.label}</span>
+      <span className={styles.payWhat}>
+        {p.invoice ? (
+          <Link className={styles.payLink} to={`/invoices/${p.invoice.id}`}>{what} for invoice #{p.invoice.number}</Link>
+        ) : (
+          p.notes?.trim() || what
+        )}
+      </span>
+      {p.client && <span className={styles.payClient}><Link to={`/clients/${p.client.id}`}>{p.client.display_name}</Link></span>}
+      <time className={styles.payWhen} dateTime={p.received_at} title={paidAt(p.received_at, tz)}>{time ? formatTime(p.received_at, tz) : dayWords(day, todayIn(tz))}</time>
+    </li>
   );
+}
+
+function PaymentList({ rows }: { rows: Payment[] }) {
+  return <ul className={cx("rel", styles.pays)} aria-label="Payments">{rows.map((p) => <PaymentRow key={p.id} p={p} />)}</ul>;
 }
 
 /** What came in, by how it was paid; refunds listed on their own. */
@@ -161,6 +179,7 @@ function methodParts(payments: Payment[]): Part[] {
   }
   const parts: Part[] = Object.keys(METHODS)
     .filter((k) => by.get(k)?.value)
+    .sort((a, b) => by.get(b)!.value - by.get(a)!.value)
     .map((k) => ({ key: k, label: METHODS[k]!.label, color: METHODS[k]!.color, value: by.get(k)!.value, hint: plural(by.get(k)!.count, "payment") }));
   if (refunds) parts.push({ key: "refunded", label: "Refunded", color: "var(--fill-3)", value: refunded, hint: plural(refunds, "refund") });
   return parts;
@@ -169,9 +188,9 @@ function methodParts(payments: Payment[]): Part[] {
 /* ------------------------------------------------------------------ Overview */
 
 const FIGURES = {
-  collected: { label: "Collected", chart: "Collected, running total" },
-  net: { label: "Net after fees", chart: "Collected after fees, running total" },
-  invoiced: { label: "Invoiced", chart: "Invoiced, running total" },
+  collected: { label: "Collected", chart: "Collected, running total, against the period before", info: "Payments received, less refunds. Tips aren't included." },
+  net: { label: "Net after fees", chart: "Collected after fees, running total, against the period before", info: "Collected, less card and bank processing fees: roughly what reaches your bank." },
+  invoiced: { label: "Invoiced", chart: "Invoiced, running total, against the period before", info: "Invoices issued, not counting drafts or voided invoices." },
 } as const;
 type Figure = keyof typeof FIGURES;
 
@@ -216,25 +235,36 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
           net: { now: sum(pay, net), before: sum(d.before, net) },
           invoiced: { now: sum(invoicedNow, (i) => Number(i.total)), before: sum(invoicedBefore, (i) => Number(i.total)) },
         };
+        const received = pay.filter((p) => Number(p.amount) > 0);
         const fees = sum(pay, (p) => Number(p.fee_amount ?? 0));
         const owed = sum(d.open, (i) => Number(i.balance_due));
         const late = d.open.filter((i) => i.due_on && i.due_on < today && Number(i.balance_due) > 0).sort((a, b) => a.due_on!.localeCompare(b.due_on!));
         const coming = d.payouts.filter((p) => p.status === "pending" || p.status === "in_transit");
         const deposited = d.payouts.find((p) => p.status === "paid");
         const quotesNow = d.quotes.filter((q) => q.sent_at && q.sent_at >= range.start);
-        const quotesBefore = d.quotes.filter((q) => q.sent_at && q.sent_at < range.start);
         const won = (q: { status: string }) => q.status === "approved" || q.status === "converted";
+        const wonNow = quotesNow.filter(won);
         // How long invoices took to be paid: issue date to payment date.
-        const waits = pay.filter((p) => Number(p.amount) > 0 && p.invoice?.issued_on).map((p) => ({ amount: Number(p.amount), days: Math.max(0, Math.round((Date.parse(localDate(new Date(p.received_at), tz)) - Date.parse(p.invoice!.issued_on)) / 86_400_000)) }));
+        const waits = received.filter((p) => p.invoice?.issued_on).map((p) => ({ amount: Number(p.amount), days: Math.max(0, Math.round((Date.parse(localDate(new Date(p.received_at), tz)) - Date.parse(p.invoice!.issued_on)) / 86_400_000)) }));
         const avgWait = waits.length ? sum(waits, (w) => w.days) / waits.length : null;
-        const speed = [
-          { key: "week", label: "Within a week", color: "var(--green)", test: (n: number) => n <= 7 },
-          { key: "month", label: "1–4 weeks", color: "#d9a43b", test: (n: number) => n > 7 && n <= 30 },
-          { key: "two", label: "1–2 months", color: "#d97a3b", test: (n: number) => n > 30 && n <= 60 },
-          { key: "more", label: "Over 2 months", color: "#c8553d", test: (n: number) => n > 60 },
+        const waited = sum(waits, (w) => w.amount);
+        const speed: LineRow[] = [
+          { key: "week", label: "Within a week", test: (n: number) => n <= 7 },
+          { key: "month", label: "1–4 weeks", test: (n: number) => n > 7 && n <= 30 },
+          { key: "two", label: "1–2 months", test: (n: number) => n > 30 && n <= 60 },
+          { key: "more", label: "Over 2 months", test: (n: number) => n > 60 },
         ].map((b) => {
           const rows = waits.filter((w) => b.test(w.days));
-          return { key: b.key, label: b.label, color: b.color, value: sum(rows, (w) => w.amount), hint: plural(rows.length, "payment") };
+          return { key: b.key, label: b.label, note: rows.length ? formatMoney(sum(rows, (w) => w.amount)) : undefined, value: waited ? pct(sum(rows, (w) => w.amount), waited) : "0%", none: !rows.length };
+        });
+        // Nothing paid on an invoice yet: one quiet line instead of four empty ones.
+        if (!waits.length) speed.splice(0, speed.length, { key: "none", label: "No invoice payments in this period", value: "", none: true });
+        speed.push({
+          key: "won",
+          label: <Link to={`/metrics?tab=sales&${rangeQuery(range)}`}>Quotes won</Link>,
+          note: wonNow.length ? formatMoney(sum(wonNow, (q) => Number(q.total))) : undefined,
+          value: quotesNow.length ? `${wonNow.length} of ${quotesNow.length} · ${pct(wonNow.length, quotesNow.length)}` : "None sent",
+          none: !wonNow.length,
         });
         const payers = new Map<string, { id: string; name: string; email: string | null; paid: number }>();
         for (const p of pay) {
@@ -244,115 +274,96 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
           payers.set(p.client.id, row);
         }
         const top = [...payers.values()].filter((c) => c.paid > 0).sort((a, b) => b.paid - a.paid).slice(0, 5);
-        const agingColors: Record<string, string> = { current: "var(--green)", "30": "#d9a43b", "60": "#d97a3b", "90": "#c8553d", "90+": "var(--danger)" };
-        const aging = agingBuckets(d.open, today).map((b) => ({ key: b.key, label: b.label, value: b.amount, color: agingColors[b.key]!, hint: plural(b.count, "invoice") }));
-        const days = (due: string) => Math.round((Date.parse(today) - Date.parse(due)) / 86_400_000);
+        const aging: LineRow[] = agingBuckets(d.open, today).map((b) => ({
+          key: b.key,
+          label: b.label,
+          note: b.count ? plural(b.count, "invoice") : undefined,
+          value: formatMoney(b.amount),
+          tone: b.key === "current" ? undefined : b.key === "30" ? "warning" : "danger",
+          none: !b.amount,
+        }));
+        const now = totals[figure].now;
+        const before = totals[figure].before;
+        const lead = figure === "collected" ? plural(received.length, "payment") : figure === "net" ? `${formatMoneyCents(fees)} in fees` : plural(invoicedNow.length, "invoice");
         return (
           <>
-            <section className="fin-hero" aria-label="Overview">
-              <div className="fin-hero-main">
-                <div className="fin-figures">
-                  <div className="fin-figure">
-                    <label className="metric-pick">
-                      <i className="key" style={{ borderColor: figure === "invoiced" ? "var(--invoice)" : undefined }} aria-hidden />
-                      <span className="sr-only">Figure to chart</span>
-                      <Select className="select-plain" value={figure} onChange={(e) => setFigure(e.target.value as Figure)}>
-                        {Object.entries(FIGURES).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
-                      </Select>
-                      <Icon name="chevronDown" size={14} />
-                    </label>
-                    <div className="fin-hero-value">{formatMoney(totals[figure].now)}</div>
-                    <div className="fin-hero-hint"><Change now={totals[figure].now} before={totals[figure].before} /> {range.label}</div>
-                  </div>
-                  <div className="fin-figure">
-                    <div className="fin-figure-label"><i className="key dashed" aria-hidden />Previous period</div>
-                    <div className="fin-hero-value is-muted">{formatMoney(totals[figure].before)}</div>
-                    <div className="fin-hero-hint">{shortDate(prev.from)} – {shortDate(prev.to)}</div>
-                  </div>
+            <div className={styles.hero}>
+              <section className={styles.heroMain} aria-label={FIGURES[figure].label}>
+                <div className="segmented" role="group" aria-label="Figure to chart">
+                  {(Object.keys(FIGURES) as Figure[]).map((k) => (
+                    <button key={k} type="button" aria-pressed={figure === k} title={FIGURES[k].info} onClick={() => setFigure(k)}>{FIGURES[k].label}</button>
+                  ))}
                 </div>
-                <TrendChart key={figure} buckets={buckets} values={running(series[figure].now)} previous={running(series[figure].before)} format={formatMoney} label={FIGURES[figure].chart} color={figure === "invoiced" ? "var(--invoice)" : "var(--green)"} height={240} />
-                <div className="fin-balances">
-                  <Balance label="Owed to you" value={formatMoney(owed)} hint={`${plural(d.open.length, "open invoice")}`} to="/invoices" />
-                  <Balance label={statusText("invoice", "overdue")} value={formatMoney(sum(late, (i) => Number(i.balance_due)))} hint={late.length ? plural(late.length, "invoice") : "Nothing late"} to="/invoices?status=overdue" tone={late.length ? "bad" : undefined} />
+                <div className={styles.big}>{formatMoney(now)}<Change now={now} before={before} /></div>
+                <p className={styles.prev}>{lead} · Previous period {formatMoney(before)}, {datesWords(prev.from, prev.to, today)}</p>
+                <div className={styles.heroChart}>
+                  <TrendChart key={figure} buckets={buckets} values={running(series[figure].now)} previous={running(series[figure].before)} format={formatMoney} label={FIGURES[figure].chart} height={180} area />
+                </div>
+              </section>
+              <aside className={styles.side} aria-label="What you're owed">
+                <div className={styles.bals}>
+                  <Balance label="Owed to you" value={formatMoney(owed)} hint={plural(d.open.length, "open invoice")} to="/invoices" />
+                  <Balance label={statusText("invoice", "overdue")} value={formatMoney(sum(late, (i) => Number(i.balance_due)))} hint={late.length ? plural(late.length, "invoice") : "Nothing late"} to="/invoices?status=overdue" tone={late.length ? "danger" : undefined} />
                   {coming.length > 0 ? (
-                    <Balance label="On the way to your bank" value={formatMoneyCents(sum(coming, (p) => Number(p.amount)))} hint={`Arrives ${formatDate(coming.map((p) => p.arrival_on).sort()[0])}`} to="/payouts" />
+                    <Balance label="On the way to your bank" value={formatMoney(sum(coming, (p) => Number(p.amount)))} hint={`Arrives ${bankDay(coming.map((p) => p.arrival_on).sort()[0]!, today)}`} to="/payouts" />
                   ) : deposited ? (
-                    <Balance label="Last deposit" value={formatMoneyCents(deposited.amount)} hint={`Deposited ${formatDate(deposited.arrival_on)}`} to="/payouts" />
+                    <Balance label="Last deposit" value={formatMoney(Number(deposited.amount))} hint={`Deposited ${bankDay(deposited.arrival_on, today)}`} to="/payouts" />
                   ) : null}
                 </div>
-              </div>
-              <RevenueGoal />
-            </section>
+                <RevenueGoal />
+              </aside>
+            </div>
 
-            <section className="stack" style={{ gap: 14 }} aria-labelledby="fin-performance">
-              <SectionHead title="Performance" id="fin-performance"><span className="muted small">{range.label}</span></SectionHead>
-              <div className="fin-grid">
-                <ReportCard as="h3" title="Payments" info="Money received, by how it was paid. Refunds are listed on their own." footer={plural(pay.filter((p) => Number(p.amount) > 0).length, "payment")} more={{ label: "View all", onClick: () => openTab("payments") }}>
-                  <Breakdown parts={methodParts(pay)} format={formatMoney} label="Payments by method" empty="No payments in this period" />
-                </ReportCard>
-                <ReportCard as="h3" title="Collected" info="Payments received, less refunds. Tips aren't included." value={<>{formatMoney(totals.collected.now)}<Change now={totals.collected.now} before={totals.collected.before} /></>} more={{ label: "More details", onClick: () => openTab("payments") }}>
-                  <TrendChart buckets={buckets} values={series.collected.now} format={formatMoney} label="Collected over time" />
-                </ReportCard>
-                <ReportCard as="h3" title="Net volume" info="Collected, less card and bank processing fees: roughly what reaches your bank." value={<>{formatMoney(totals.net.now)}<Change now={totals.net.now} before={totals.net.before} /></>} footer={fees ? `${formatMoneyCents(fees)} in fees` : "No fees"} more={d.payouts.length ? { label: "Deposits", to: "/payouts" } : undefined}>
-                  <TrendChart buckets={buckets} values={series.net.now} format={formatMoney} label="Net volume over time" />
-                </ReportCard>
-                <ReportCard as="h3" title="Unpaid invoices" info="What clients owe today, by how late it is." value={formatMoney(owed)} more={{ label: "View all", to: "/invoices" }}>
-                  <Breakdown parts={aging} format={formatMoney} label="Unpaid invoices by age" empty="Nothing owed" />
-                </ReportCard>
-                <ReportCard as="h3" title="Invoiced" info="Invoices issued, not counting drafts or voided invoices." value={<>{formatMoney(totals.invoiced.now)}<Change now={totals.invoiced.now} before={totals.invoiced.before} /></>} footer={plural(invoicedNow.length, "invoice")} more={{ label: "Invoices", to: "/invoices" }}>
-                  <TrendChart buckets={buckets} values={series.invoiced.now} format={formatMoney} label="Invoiced over time" color="var(--invoice)" />
-                </ReportCard>
-                <ReportCard as="h3" title={statusText("invoice", "overdue")} info="Invoices past their due date that still have a balance, oldest first." footer={late.length ? plural(late.length, "invoice") : undefined} more={late.length ? { label: "View all", to: "/invoices?status=overdue" } : undefined}>
-                  {late.length ? (
-                    <ul className="fin-list">
-                      {late.slice(0, 4).map((i) => (
-                        <li key={i.id}>
-                          <Link to={`/invoices/${i.id}`} className="fin-list-main">
-                            <strong className="tabular">{formatMoneyCents(i.balance_due)}</strong>
-                            <span className="muted small ellipsis">#{i.number} · {i.client?.display_name ?? "—"} · due {shortDate(i.due_on!)}</span>
-                          </Link>
-                          <StatusPill label={`${days(i.due_on!)} ${days(i.due_on!) === 1 ? "day" : "days"} late`} tone={days(i.due_on!) > 60 ? "danger" : "warning"} />
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="fin-clear"><Icon name="check" size={16} />Every invoice is within its terms.</p>
-                  )}
-                </ReportCard>
-                <ReportCard as="h3" title="Top clients by spend" info="Who paid you the most in this period." footer={payers.size ? plural(payers.size, "client") + " paid" : undefined}>
-                  {top.length ? (
-                    <ul className="fin-list">
-                      {top.map((c) => (
-                        <li key={c.id}>
-                          <Link to={`/clients/${c.id}`} className="fin-list-main">
-                            <strong className="ellipsis">{c.name}</strong>
-                            {c.email && <span className="muted small ellipsis">{c.email}</span>}
-                          </Link>
-                          <strong className="tabular">{formatMoneyCents(c.paid)}</strong>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <EmptyState inline title="No payments in this period" />
-                  )}
-                </ReportCard>
-                <ReportCard as="h3" title="Time to get paid" info="Days from an invoice being issued to its payment, for payments received in this period." value={avgWait === null ? "—" : `${formatNumber(avgWait, avgWait < 10 ? 1 : 0)} days`} footer={waits.length ? `Average of ${plural(waits.length, "invoice payment")}` : undefined}>
-                  <Breakdown parts={speed} format={formatMoney} label="Payments by how long they took" empty="No invoice payments in this period" />
-                </ReportCard>
-                <ReportCard as="h3" title="Quotes won" info="The value of quotes sent in this period that were approved." value={<>{formatMoney(sum(quotesNow.filter(won), (q) => Number(q.total)))}<Change now={sum(quotesNow.filter(won), (q) => Number(q.total))} before={sum(quotesBefore.filter(won), (q) => Number(q.total))} /></>} footer={`${quotesNow.filter(won).length} of ${quotesNow.length} won · ${pct(quotesNow.filter(won).length, quotesNow.length)}`} more={{ label: "Sales metrics", to: `/metrics?tab=sales&${rangeQuery(range)}` }}>
-                  <TrendChart buckets={buckets} values={bucketize(quotesNow.filter(won), buckets, (q) => q.sent_at, (q) => Number(q.total), tz)} format={formatMoney} label="Quotes won over time" color="var(--quote)" />
-                </ReportCard>
-              </div>
-            </section>
+            <div className={styles.cols3}>
+              <ReportCard title="Payments" info="Money received, by how it was paid. Refunds are listed on their own." count={received.length ? formatNumber(received.length) : undefined}>
+                <Breakdown parts={methodParts(pay)} format={formatMoney} label="Payments by method" empty="No payments in this period" />
+              </ReportCard>
+              <ReportCard title="Unpaid invoices" info="What clients owe today, by how late it is." count={formatMoney(owed)}>
+                <Lines rows={aging} label="Unpaid invoices by how late they are" />
+              </ReportCard>
+              <ReportCard title="Time to get paid" info="Days from an invoice being issued to its payment, on average, for payments received in this period; then how much came in how soon." count={avgWait === null ? undefined : `${formatNumber(avgWait, avgWait < 10 ? 1 : 0)} days`}>
+                <Lines rows={speed} label="Payments by how long they took" />
+              </ReportCard>
+            </div>
 
-            <section className="stack" style={{ gap: 14 }}>
-              <SectionHead title="Recent payments">{pay.length > 0 && <button type="button" className="section-link" onClick={() => openTab("payments")}>View all<Icon name="arrowRight" size={14} /></button>}</SectionHead>
-              {pay.length ? (
-                <div className="card"><PaymentsTable rows={pay.slice(0, 6)} /></div>
-              ) : (
-                <div className="card"><EmptyState inline title="No payments in this period" /></div>
-              )}
-            </section>
+            <ReportCard title="Recent payments" more={pay.length ? { label: "View all", onClick: () => openTab("payments") } : undefined}>
+              {pay.length ? <PaymentList rows={pay.slice(0, 6)} /> : <EmptyState inline title="No payments in this period" />}
+            </ReportCard>
+
+            <div className={styles.cols2}>
+              <Section title={statusText("invoice", "overdue")} count={late.length || undefined} action={late.length > 4 ? <Link to="/invoices?status=overdue">View all</Link> : undefined}>
+                {late.length ? (
+                  <RelatedList label="Past due invoices, oldest first">
+                    {late.slice(0, 4).map((i) => {
+                      const n = daysBetween(i.due_on!, today);
+                      return (
+                        <RelatedRow
+                          key={i.id}
+                          to={`/invoices/${i.id}`}
+                          lead={`#${i.number}`}
+                          title={i.client?.display_name ?? `Invoice #${i.number}`}
+                          sub={[`Due ${datesWords(i.due_on!, i.due_on!, today)}`, <span key="late" className={styles.late} data-tone={lateTone(n)}>{n} {n === 1 ? "day" : "days"} late</span>]}
+                          end={<b>{formatMoneyCents(i.balance_due)}</b>}
+                        />
+                      );
+                    })}
+                  </RelatedList>
+                ) : (
+                  <EmptyState inline title="Every invoice is within its terms" />
+                )}
+              </Section>
+              <Section title="Top clients by spend" count={payers.size ? plural(payers.size, "client") + " paid" : undefined}>
+                {top.length ? (
+                  <RelatedList label="Who paid you the most in this period">
+                    {top.map((c) => (
+                      <RelatedRow key={c.id} to={`/clients/${c.id}`} lead={<RowPerson name={c.name} />} title={c.name} sub={c.email ?? undefined} end={<b>{formatMoneyCents(c.paid)}</b>} />
+                    ))}
+                  </RelatedList>
+                ) : (
+                  <EmptyState inline title="No payments in this period" />
+                )}
+              </Section>
+            </div>
           </>
         );
       }}
@@ -360,15 +371,15 @@ function Overview({ range, openTab }: { range: Range; openTab: OpenTab }) {
   );
 }
 
-function Balance({ label, value, hint, to, tone }: { label: string; value: string; hint: string; to: string; tone?: "bad" }) {
+/** A figure beside the chart: its label and View, the figure, a quiet line. On a phone, a row of an inset card. */
+function Balance({ label, value, hint, to, tone }: { label: string; value: string; hint: string; to: string; tone?: "danger" }) {
   return (
-    <div className="fin-balance">
-      <div className="row-between">
-        <span className="fin-balance-label">{label}</span>
-        <Link to={to} aria-label={`View ${label.toLowerCase()}`}>View</Link>
-      </div>
-      <div className="fin-balance-value" style={tone === "bad" ? { color: "var(--danger)" } : undefined}>{value}</div>
-      <div className="muted small">{hint}</div>
+    <div className={styles.bal}>
+      <span className={styles.balLabel}>{label}</span>
+      <Link className={styles.balLink} to={to} aria-label={`View ${label.toLowerCase()}: ${value}`}>View</Link>
+      <span className={styles.balValue} data-tone={tone}>{value}</span>
+      <span className={styles.balHint}>{hint}</span>
+      <span className={styles.chev} aria-hidden="true"><Icon name="chevronRight" size={16} /></span>
     </div>
   );
 }
@@ -376,15 +387,20 @@ function Balance({ label, value, hint, to, tone }: { label: string; value: strin
 function OverviewSkeleton() {
   return (
     <>
-      <div className="fin-hero" aria-hidden>
-        <div className="fin-hero-main" style={{ display: "grid", gap: 14 }}>
-          <Skeleton width={120} height={14} />
-          <Skeleton width={220} height={40} />
-          <Skeleton height={240} radius={8} />
+      <div className={styles.hero} aria-hidden="true">
+        <div className={styles.heroMain} style={{ display: "grid", gap: 12 }}>
+          <Skeleton width={260} height={34} radius={10} />
+          <Skeleton width={200} height={36} />
+          <Skeleton width={240} height={11} />
+          <Skeleton height={180} radius={8} />
         </div>
-        <CardSkeleton lines={4} />
+        <div className={styles.side}>
+          <div className={styles.bals}>
+            {[0, 1, 2].map((i) => <div key={i} className={styles.bal}><span style={{ display: "grid", flex: 1, gap: 6, gridColumn: "1 / -1" }}><Skeleton width="45%" height={10} /><Skeleton width="60%" height={20} /></span></div>)}
+          </div>
+        </div>
       </div>
-      <div className="fin-grid" aria-hidden>{[0, 1, 2, 3, 4, 5].map((i) => <CardSkeleton key={i} lines={4} height={230} />)}</div>
+      <div className={styles.cols3} aria-hidden="true">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={4} />)}</div>
     </>
   );
 }
@@ -402,50 +418,62 @@ function RevenueGoal() {
       const db = supabase();
       const yearRange = resolveRange("year", today, tz);
       const [settings, payments] = await Promise.all([
-        db.from("companies").select("settings").eq("id", company.id).single(),
+        // The goals are kept apart from the settings crews read (company_private_settings); saving them below still goes through the company.
+        db.from("company_private_settings").select("settings").eq("company_id", company.id).maybeSingle(),
         everyRow(() => db.from("payments").select("amount").eq("company_id", company.id).gte("received_at", yearRange.start)),
       ]);
-      const s = (unwrap(settings).settings ?? {}) as Record<string, unknown>;
+      const s = (unwrap(settings)?.settings ?? {}) as Record<string, unknown>;
       return { settings: s, goal: Number(s.revenue_goal ?? 0), margin: Number(s.margin_target ?? 0), ytd: sum(payments, (p) => Number(p.amount)) };
     },
   });
   const isAdmin = hasRole(session, "admin");
+  const head = (action?: ReactNode) => (
+    <div className={styles.goalHead}>
+      <h2 className={styles.goalTitle} id="fin-goal">{year} revenue goal</h2>
+      {action}
+    </div>
+  );
   if (!query.data)
-    return query.error ? <div className="card"><ErrorState compact error={query.error} onRetry={() => query.refetch()} /></div> : <CardSkeleton lines={3} />;
+    return (
+      <section className={styles.goal} aria-labelledby="fin-goal">
+        {head()}
+        <div className={styles.goalBody}>
+          {query.error ? <ErrorState compact error={query.error} onRetry={() => query.refetch()} /> : <div style={{ display: "grid", gap: 8, marginTop: 6 }} aria-hidden="true"><Skeleton width="70%" height={13} /><Skeleton height={8} radius={999} /></div>}
+        </div>
+      </section>
+    );
   const { goal, ytd } = query.data;
   const dayOfYear = Math.floor((Date.parse(today) - Date.parse(`${year}-01-01`)) / 86_400_000) + 1;
   const daysInYear = Number(year) % 4 === 0 ? 366 : 365;
   const pace = dayOfYear / daysInYear;
   const progress = goal > 0 ? ytd / goal : 0;
   const projected = ytd / pace;
+  const ahead = progress >= pace;
   return (
-    <ReportCard title={`${year} revenue goal`} info="Collected since January 1, against the yearly goal an admin sets." action={isAdmin && goal > 0 && <Button size="sm" variant="ghost" icon="edit" onClick={() => setEditing(true)}>Edit goal</Button>}>
-      {goal > 0 ? (
-        <div className="stack" style={{ gap: 14 }}>
-          <div className="row" style={{ alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <span className="report-card-value" style={{ fontSize: 32 }}>{formatMoney(ytd)}</span>
-            <span className="muted">of {formatMoney(goal)}</span>
-          </div>
-          <div className="goal-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)} aria-label="Progress to revenue goal">
-            <span className="fill" style={{ width: `${Math.min(100, progress * 100)}%`, background: progress >= pace ? "var(--green)" : "#d9a43b" }} />
-            <span className="pace" style={{ left: `${pace * 100}%` }} title="Where you'd be on an even pace" />
-          </div>
-          <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
-            <span className="muted">Progress</span><strong className="tabular">{Math.round(progress * 100)}%</strong>
-            <span className="muted">Even pace by today</span><strong className="tabular">{formatMoney(goal * pace)}</strong>
-            <span className="muted">On track for</span><strong className="tabular" style={{ color: projected >= goal ? "var(--green-dark)" : "var(--warning)" }}>{formatMoney(projected)}</strong>
-          </div>
-          <span className="small" style={{ color: progress >= pace ? "var(--green-dark)" : "var(--warning)", fontWeight: 700 }}>
-            {progress >= 1 ? "Goal reached" : progress >= pace ? `Ahead of pace by ${formatMoney(ytd - goal * pace)}` : `Behind pace by ${formatMoney(goal * pace - ytd)}`}
-          </span>
-        </div>
-      ) : (
-        <EmptyState inline title="No goal set" action={isAdmin ? <Button onClick={() => setEditing(true)}>Set a revenue goal</Button> : undefined}>
-          {formatMoney(ytd)} collected so far this year.
-        </EmptyState>
-      )}
+    <section className={styles.goal} aria-labelledby="fin-goal">
+      {head(isAdmin && goal > 0 && <button type="button" onClick={() => setEditing(true)}>Edit goal</button>)}
+      <div className={styles.goalBody}>
+        {goal > 0 ? (
+          <>
+            <div className={styles.goalFigure}>{formatMoney(ytd)} <span>of {formatMoney(goal)}</span></div>
+            <div className={styles.track} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, Math.round(progress * 100))} aria-label="Progress to revenue goal">
+              <span className={styles.trackFill} style={{ width: `${Math.min(100, progress * 100)}%` }} />
+              <span className={styles.trackPace} style={{ left: `${pace * 100}%` }} title="Where an even pace would be by today" />
+            </div>
+            <p className={styles.goalState} data-tone={ahead ? "good" : "warning"}>
+              {progress >= 1 ? "Goal reached" : ahead ? `Ahead of even pace by ${formatMoney(ytd - goal * pace)}` : `Behind even pace by ${formatMoney(goal * pace - ytd)}`}
+            </p>
+            <p className={styles.goalNote}>{Math.round(progress * 100)}% there · on track for {formatMoney(projected)}</p>
+          </>
+        ) : (
+          <p className={styles.goalEmpty}>
+            No goal set. {formatMoney(ytd)} collected so far this year.
+            {isAdmin && <button type="button" onClick={() => setEditing(true)}>Set a revenue goal</button>}
+          </p>
+        )}
+      </div>
       {editing && <GoalDialog settings={query.data.settings} onClose={() => setEditing(false)} />}
-    </ReportCard>
+    </section>
   );
 }
 
@@ -462,7 +490,7 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
       if (g !== null && !(g >= 0 && g < 1e10)) throw new Error("Enter a revenue goal of $0 or more.");
       if (m !== null && !(m >= 0 && m < 100)) throw new Error("Target margin must be between 0 and 99%.");
       // Re-read settings so a concurrent change elsewhere isn't overwritten.
-      const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
+      const current = await loadSettings(company.id);
       unwrap(await supabase().from("companies").update({ settings: { ...current, revenue_goal: g || null, margin_target: m } as never }).eq("id", company.id));
     },
     onSuccess: () => {
@@ -473,10 +501,10 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
   return (
     <Dialog open onClose={onClose} title="Goals" size="sm">
       <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Yearly revenue goal">
+        <Field label="Yearly revenue goal" hint="Collected from January 1, against an even pace through the year.">
           <div className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="500,000" autoFocus /></div>
         </Field>
-        <Field label="Target job margin" optional>
+        <Field label="Target job margin" optional hint="Jobs under it are counted on Profit.">
           <div className="input-group"><input className="input" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="30" style={{ paddingLeft: 12, paddingRight: 32 }} /><span className="addon addon-right">%</span></div>
         </Field>
         <FormError error={save.error} />
@@ -489,12 +517,15 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
 /* ------------------------------------------------------------------ Payments */
 
 const PAGE = 25;
+type FilterKey = string;
 
 function Payments({ range }: { range: Range }) {
   const { company } = useSession();
   const cid = company.id;
-  const [filter, setFilter] = useState("all");
-  const [page, setPage] = useState(0);
+  const tz = company.timezone;
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [search, setSearch] = useState("");
+  const [count, setCount] = useState(PAGE);
   const payments = usePayments(range);
   const rest = useQuery({
     queryKey: ["finance", cid, "billed", range.from, range.to],
@@ -513,21 +544,35 @@ function Payments({ range }: { range: Range }) {
     },
   });
   return (
-    <TabBody query={both(payments, rest)}>
+    <TabBody query={both(payments, rest)} skeleton={<><StatsSkeleton count={4} /><CardSkeleton lines={6} /></>}>
       {([pay, d]) => {
-        const today = todayIn(company.timezone);
+        const today = todayIn(tz);
         const refunds = pay.filter((p) => Number(p.amount) < 0);
         const collected = sum(pay, (p) => Number(p.amount));
         const fees = sum(pay, (p) => Number(p.fee_amount ?? 0));
         const writtenOff = sum(d.writtenOff, (i) => Number(i.balance_due));
+        const tips = sum(pay, (p) => Number(p.tip_amount ?? 0));
         const filters = [
           { key: "all", label: "All", rows: pay },
           ...Object.keys(METHODS).map((k) => ({ key: k, label: METHODS[k]!.label, rows: pay.filter((p) => Number(p.amount) >= 0 && (METHODS[p.method] ? p.method : "other") === k) })),
           { key: "refunds", label: "Refunds", rows: refunds },
         ].filter((f) => f.key === "all" || f.rows.length);
-        const shown = (filters.find((f) => f.key === filter) ?? filters[0]!).rows;
-        const pages = Math.max(1, Math.ceil(shown.length / PAGE));
-        const at = Math.min(page, pages - 1);
+        const current = filters.find((f) => f.key === filter) ?? filters[0]!;
+        const term = search.trim().toLowerCase().replace(/^#/, "");
+        const shown = term
+          ? current.rows.filter((p) =>
+              [p.client?.display_name, p.notes, p.invoice ? String(p.invoice.number) : null, methodOf(p.method).label, formatMoneyCents(p.amount), String(p.amount)].some((v) => v?.toLowerCase().includes(term)),
+            )
+          : current.rows;
+        const visible = shown.slice(0, count);
+        const days: Array<{ day: string; rows: Payment[] }> = [];
+        for (const p of visible) {
+          const day = dateIn(p.received_at, tz);
+          const last = days.at(-1);
+          if (last?.day === day) last.rows.push(p);
+          else days.push({ day, rows: [p] });
+        }
+        const pick = (key: FilterKey) => { setFilter(key); setCount(PAGE); };
         const balances = new Map<string, { id: string; name: string; count: number; balance: number; oldest: string | null }>();
         for (const i of d.open) {
           if (!i.client) continue;
@@ -553,46 +598,59 @@ function Payments({ range }: { range: Range }) {
           );
         return (
           <>
-            <KpiStrip label="Payments this period">
-              <Kpi label="Collected" value={formatMoney(collected)} hint={plural(pay.length - refunds.length, "payment")} />
-              <Kpi label="Refunded" value={formatMoney(-sum(refunds, (p) => Number(p.amount)))} hint={plural(refunds.length, "refund")} />
-              <Kpi label="Processing fees" value={formatMoneyCents(fees)} hint={d.payouts ? <Link to="/payouts">See deposits</Link> : "Card and bank payments"} />
-              <Kpi label="Net after fees" value={formatMoney(collected - fees)} />
-              <Kpi label="Tips" value={formatMoney(sum(pay, (p) => Number(p.tip_amount ?? 0)))} />
-              <Kpi label="Sales tax billed" value={formatMoney(sum(d.invoices, (i) => Number(i.tax_amount)))} hint={`On ${plural(d.invoices.length, "invoice")}`} />
-              {writtenOff > 0 && <Kpi label="Written off" value={formatMoneyCents(writtenOff)} hint={<Link to="/invoices?status=written_off">{plural(d.writtenOff.length, "invoice")}</Link>} />}
-            </KpiStrip>
+            <StatStrip label="Payments this period">
+              <Stat label="Collected" value={formatMoney(collected)} note={plural(pay.length - refunds.length, "payment")} />
+              {refunds.length > 0 && <Stat label="Refunded" value={formatMoney(Math.abs(sum(refunds, (p) => Number(p.amount))))} note={plural(refunds.length, "refund")} />}
+              <Stat label="Processing fees" value={formatMoneyCents(fees)} note={d.payouts ? <Link to="/payouts">See deposits</Link> : "Card and bank payments"} />
+              <Stat label="Net after fees" value={formatMoney(collected - fees)} />
+              {tips > 0 && <Stat label="Tips" value={formatMoney(tips)} />}
+              <Stat label="Sales tax billed" value={formatMoney(sum(d.invoices, (i) => Number(i.tax_amount)))} note={`On ${plural(d.invoices.length, "invoice")}`} />
+              {writtenOff > 0 && <Stat label="Written off" value={formatMoney(writtenOff)} note={<Link to="/invoices?status=written_off">{plural(d.writtenOff.length, "invoice")}</Link>} />}
+            </StatStrip>
 
-            <section className="stack" style={{ gap: 12 }}>
-              <div className="toolbar" style={{ justifyContent: "space-between" }}>
-                <div className="tabs" role="group" aria-label="Filter payments">
-                  {filters.map((f) => (
-                    <button key={f.key} type="button" className="tab" aria-pressed={filter === f.key || (f.key === "all" && !filters.some((x) => x.key === filter))} onClick={() => { setFilter(f.key); setPage(0); }}>
-                      {f.label}<span className="badge">{formatNumber(f.rows.length)}</span>
+            <section className={styles.body} style={{ gap: 12 }} aria-label="Payments">
+              <Toolbar
+                filters={filters.length > 1 && <div className={styles.deskOnly}><FilterTabs label="Filter payments" value={current.key} onChange={pick} options={filters.map((f) => ({ value: f.key, label: f.label, count: f.rows.length }))} /></div>}
+                search={<SearchField value={search} onChange={(v) => { setSearch(v); setCount(PAGE); }} placeholder="Client, invoice # or note" label="Search payments" />}
+                tools={
+                  <>
+                    {filters.length > 1 && <Menu
+                      items={filters.map((f) => ({ label: f.label, end: formatNumber(f.rows.length), checked: current.key === f.key, onSelect: () => pick(f.key) }))}
+                      label={`Show: ${current.label}`}
+                      title="Show"
+                      triggerClassName={cx("btn btn-sm btn-ghost toolbar-btn", styles.phoneOnly, current.key !== "all" && "is-on")}
+                      trigger={<><Icon name="filter" size={15} /><span className="toolbar-btn-text">{current.label}</span></>}
+                    />}
+                    <button type="button" className="btn btn-sm btn-ghost toolbar-btn" onClick={exportCsv} disabled={!shown.length}>
+                      <Icon name="download" size={15} /><span className="toolbar-btn-text">Download</span>
                     </button>
+                  </>
+                }
+              />
+              {visible.length ? (
+                <InboxList
+                  label="Payments"
+                  inset
+                  foot={
+                    <ListFoot end={<><b>{formatMoneyCents(sum(shown, (p) => Number(p.amount)))}</b> in all</>} more={visible.length < shown.length ? { onClick: () => setCount(count + PAGE) } : undefined}>
+                      {visible.length < shown.length ? `${formatNumber(visible.length)} of ${plural(shown.length, "payment")}` : plural(shown.length, "payment")}
+                    </ListFoot>
+                  }
+                >
+                  {days.map((g) => (
+                    <InboxGroup key={g.day} label={dayWords(g.day, today)} count={g.rows.length} end={formatMoneyCents(sum(g.rows, (p) => Number(p.amount)))}>
+                      {g.rows.map((p) => <PaymentRow key={p.id} p={p} time />)}
+                    </InboxGroup>
                   ))}
-                </div>
-                {shown.length > 0 && <Button size="sm" icon="download" onClick={exportCsv}>Download</Button>}
-              </div>
-              {shown.length ? (
-                <div className="card">
-                  <PaymentsTable rows={shown.slice(at * PAGE, at * PAGE + PAGE)} />
-                  <div className="list-foot">
-                    <span className="tabular">{formatNumber(at * PAGE + 1)}–{formatNumber(Math.min(shown.length, at * PAGE + PAGE))} of {plural(shown.length, "result")}</span>
-                    {pages > 1 && (
-                      <div className="row" style={{ gap: 4 }}>
-                        <button type="button" className="btn btn-icon btn-sm" disabled={at === 0} onClick={() => setPage(at - 1)} aria-label="Previous page"><Icon name="chevronLeft" size={16} /></button>
-                        <button type="button" className="btn btn-icon btn-sm" disabled={at >= pages - 1} onClick={() => setPage(at + 1)} aria-label="Next page"><Icon name="chevronRight" size={16} /></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                </InboxList>
               ) : (
-                <div className="card"><EmptyState inline title="No payments in this period" /></div>
+                <EmptyState icon="dollar" title={term ? `No payments match “${search.trim()}”` : current.key === "all" ? "No payments in this period" : `No ${current.label.toLowerCase()} payments in this period`}>
+                  {term ? "Try a client's name, an invoice number or part of a note." : "Payments show here as they come in, by card, bank transfer, check or cash."}
+                </EmptyState>
               )}
             </section>
 
-            <ReportCard title="Client balances" subtitle="Who owes you, as of today">
+            <ReportCard title="Client balances" subtitle="Who owes you, as of today" count={balances.size ? plural(balances.size, "client") : undefined}>
               <ReportTable
                 rows={[...balances.values()]}
                 rowKey={(r) => r.id}
@@ -602,8 +660,8 @@ function Payments({ range }: { range: Range }) {
                 columns={[
                   { key: "name", label: "Client", value: (r) => r.name, render: (r) => <Link className="cell-link" to={`/clients/${r.id}`}>{r.name}</Link> },
                   { key: "count", label: "Open invoices", num: true, value: (r) => r.count },
-                  { key: "oldest", label: "Oldest due", value: (r) => r.oldest, render: (r) => (r.oldest ? <span style={{ color: r.oldest < today ? "var(--danger)" : undefined, fontWeight: r.oldest < today ? 700 : undefined }}>{formatDate(r.oldest)}</span> : "—") },
-                  { key: "balance", label: "Balance", num: true, value: (r) => Math.round(r.balance * 100) / 100, render: (r) => <strong>{formatMoney(r.balance)}</strong> },
+                  { key: "oldest", label: "Oldest due", value: (r) => r.oldest, render: (r) => (r.oldest ? <span className={styles.tone} data-tone={r.oldest < today ? lateTone(daysBetween(r.oldest, today)) : undefined}>{datesWords(r.oldest, r.oldest, today)}</span> : null) },
+                  { key: "balance", label: "Balance", num: true, value: (r) => Math.round(r.balance * 100) / 100, render: (r) => formatMoney(r.balance) },
                 ]}
               />
             </ReportCard>
@@ -613,7 +671,6 @@ function Payments({ range }: { range: Range }) {
     </TabBody>
   );
 }
-
 
 /* ------------------------------------------------------------------ Profit */
 
@@ -636,27 +693,23 @@ function Profit({ range }: { range: Range }) {
         const below = d.target ? d.jobs.filter((j) => j.margin !== null && j.margin < d.target!) : [];
         return (
           <>
-            <KpiStrip label="Profit this period">
-              <Kpi label="Jobs completed" value={formatNumber(d.jobs.length)} />
-              <Kpi label="Job revenue" value={formatMoney(revenue)} hint="Contract totals" />
-              <Kpi label="Average job" value={d.jobs.length ? formatMoney(revenue / d.jobs.length) : "—"} />
-              {costs && <Kpi label="Job profit" value={formatMoney(profit)} hint={revenue ? `${Math.round((profit / revenue) * 100)}% margin` : undefined} tone={profit < 0 ? "bad" : undefined} />}
-              {costs && <Kpi label="Below target margin" value={d.target ? formatNumber(below.length) : "—"} hint={d.target ? `Target ${d.target}%` : "No target set"} tone={below.length ? "bad" : undefined} />}
-            </KpiStrip>
+            <StatStrip label="Profit this period">
+              <Stat label="Jobs completed" value={formatNumber(d.jobs.length)} />
+              <Stat label="Job revenue" value={formatMoney(revenue)} note="Contract totals" />
+              <Stat label="Average job" value={formatMoney(d.jobs.length ? revenue / d.jobs.length : 0)} note={d.jobs.length ? undefined : "No jobs completed"} />
+              {costs && <Stat label="Job profit" value={formatMoney(profit)} note={revenue ? `${Math.round((profit / revenue) * 100)}% margin` : undefined} tone={profit < 0 ? "danger" : undefined} />}
+              {costs && <Stat label="Below target margin" value={d.target ? formatNumber(below.length) : "No target"} note={d.target ? `Target ${d.target}%` : "Set it with the revenue goal"} tone={below.length ? "warning" : undefined} />}
+            </StatStrip>
             {/* Receipts for any job, or none: each waits as a draft until it's checked and saved as an expense. */}
             {costs && hasRole(session, "admin", "office") && (
-              <ReportCard title="Receipts and supplier invoices" subtitle="Several at once: each is read, then waits here to be checked and saved as an expense on its job">
+              <ReportCard title="Receipts and supplier invoices" subtitle="Add several at once: each is read, then waits here to be checked and saved as an expense on its job.">
                 <ReceiptDrafts onSaved={() => Promise.all([queryClient.invalidateQueries({ queryKey: ["finance", cid, "profit"] }), queryClient.invalidateQueries({ queryKey: costsWithoutJobKey(cid) })])} />
               </ReportCard>
             )}
             {/* The ones saved with no job: nothing else lists them, so they're kept findable here. */}
-            {costs && hasRole(session, "admin", "office") && (
-              <ReportCard title="Costs that aren't on a job" subtitle="Expenses saved without a job. Open one to change it, put it on a job, mark it reimbursed or delete it">
-                <CostsWithoutJob onChanged={() => queryClient.invalidateQueries({ queryKey: ["finance", cid, "profit"] })} />
-              </ReportCard>
-            )}
+            {costs && hasRole(session, "admin", "office") && <CostsWithoutJob onChanged={() => queryClient.invalidateQueries({ queryKey: ["finance", cid, "profit"] })} />}
             {costs && (
-              <ReportCard title="Job profitability" subtitle="Labor, sub and crew pay, expenses and materials against each job's contract total">
+              <ReportCard title="Job profitability" subtitle="Labor, sub and crew pay, expenses and materials against each job's contract total" count={d.jobs.length ? plural(d.jobs.length, "job") : undefined}>
                 <ReportTable
                   rows={d.jobs}
                   rowKey={(r) => r.id}
@@ -664,14 +717,14 @@ function Profit({ range }: { range: Range }) {
                   initialSort={{ key: "margin", desc: false }}
                   empty="No jobs completed in this period"
                   columns={[
-                    { key: "number", label: "Job", value: (r) => r.number, render: (r) => <Link className="cell-link" to={`/jobs/${r.id}`}>#{r.number} {r.title}</Link> },
+                    { key: "number", label: "Job", value: (r) => r.number, render: (r) => <Link className="cell-link" to={`/jobs/${r.id}`}><span className={styles.quiet}>#{r.number}</span> {r.title}</Link> },
                     { key: "client", label: "Client", value: (r) => r.client },
                     { key: "revenue", label: "Revenue", num: true, value: (r) => r.revenue, render: (r) => formatMoney(r.revenue) },
                     { key: "cost", label: "Costs", num: true, value: (r) => Math.round(r.cost * 100) / 100, render: (r) => formatMoney(r.cost) },
-                    { key: "profit", label: "Profit", num: true, value: (r) => Math.round(r.profit * 100) / 100, render: (r) => <span style={{ color: r.profit < 0 ? "var(--danger)" : undefined }}>{formatMoney(r.profit)}</span> },
+                    { key: "profit", label: "Profit", num: true, value: (r) => Math.round(r.profit * 100) / 100, render: (r) => <span className={styles.tone} data-tone={r.profit < 0 ? "danger" : undefined}>{formatMoney(r.profit)}</span> },
                     {
                       key: "margin", label: "Margin", num: true, value: (r) => (r.margin === null ? null : Math.round(r.margin)),
-                      render: (r) => r.margin === null ? "—" : <span className={`chip tabular ${(d.target && r.margin < d.target) || r.margin < 0 ? "chip-red" : "chip-green"}`}>{Math.round(r.margin)}%</span>,
+                      render: (r) => (r.margin === null ? <span className={styles.quiet}>No revenue</span> : <span className={styles.tone} data-tone={r.margin < 0 ? "danger" : d.target && r.margin < d.target ? "warning" : undefined}>{Math.round(r.margin)}%</span>),
                     },
                   ]}
                 />
@@ -723,18 +776,18 @@ function Services({ range }: { range: Range }) {
   });
   const key = (s: ServiceRow) => s.service_id ?? "other";
   const columns: Column<ServiceRow>[] = [
-    { key: "name", label: "Service", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
-    { key: "category", label: "Category", value: (r) => r.category ?? "", render: (r) => r.category ?? "—" },
+    { key: "name", label: "Service", value: (r) => r.name, render: (r) => <span style={{ fontWeight: 500 }}>{r.name}</span> },
+    { key: "category", label: "Category", value: (r) => r.category ?? "", render: (r) => r.category ?? null },
     { key: "count", label: "Times billed", num: true, value: (r) => r.count },
     { key: "revenue", label: "Revenue", num: true, value: (r) => r.revenue, render: (r) => formatMoney(r.revenue) },
   ];
   if (costs)
     columns.push(
       { key: "cost", label: "Costs", num: true, value: (r) => r.cost, render: (r) => formatMoney(r.cost ?? 0) },
-      { key: "profit", label: "Profit", num: true, value: (r) => r.profit, render: (r) => <span style={{ color: (r.profit ?? 0) < 0 ? "var(--danger)" : undefined }}>{formatMoney(r.profit ?? 0)}</span> },
+      { key: "profit", label: "Profit", num: true, value: (r) => r.profit, render: (r) => <span className={styles.tone} data-tone={(r.profit ?? 0) < 0 ? "danger" : undefined}>{formatMoney(r.profit ?? 0)}</span> },
       {
         key: "margin", label: "Margin", num: true, value: (r) => (r.margin_percent === null ? null : Math.round(r.margin_percent)),
-        render: (r) => (r.margin_percent === null ? "—" : <span className={`chip tabular ${r.margin_percent < 0 ? "chip-red" : "chip-green"}`}>{Math.round(r.margin_percent)}%</span>),
+        render: (r) => (r.margin_percent === null ? <span className={styles.quiet}>No revenue</span> : <span className={styles.tone} data-tone={r.margin_percent < 0 ? "danger" : undefined}>{Math.round(r.margin_percent)}%</span>),
       },
     );
   return (
@@ -745,22 +798,35 @@ function Services({ range }: { range: Range }) {
         const profit = d.profit ?? 0;
         return (
           <>
-            <KpiStrip label="Services this period">
-              <Kpi label="Service revenue" value={formatMoney(d.revenue)} hint="Invoiced, paid or not" />
-              <Kpi label="Items billed" value={formatNumber(d.lines.length)} hint={plural(d.services.filter((s) => s.service_id).length, "service")} />
-              {costs && <Kpi label="Service profit" value={formatMoney(profit)} hint={d.revenue ? `${pct(profit, d.revenue)} margin` : undefined} tone={profit < 0 ? "bad" : undefined} />}
-            </KpiStrip>
+            <StatStrip label="Services this period">
+              <Stat label="Service revenue" value={formatMoney(d.revenue)} note="Invoiced, paid or not" />
+              <Stat label="Items billed" value={formatNumber(d.lines.length)} note={plural(d.services.filter((s) => s.service_id).length, "service")} />
+              {costs && <Stat label="Service profit" value={formatMoney(profit)} note={d.revenue ? `${pct(profit, d.revenue)} margin` : undefined} tone={profit < 0 ? "danger" : undefined} />}
+            </StatStrip>
             {top.length > 0 && (
-              <section className="stack" style={{ gap: 14 }} aria-labelledby="fin-top-services">
-                <SectionHead title="Top services" id="fin-top-services"><span className="muted small">{range.label}</span></SectionHead>
-                <div className="fin-grid">
-                  {top.map((s) => (
-                    <ReportCard key={key(s)} as="h3" title={s.name} subtitle={s.category ?? undefined} value={formatMoney(s.revenue)} footer={`Billed ${plural(s.count, "time")}`}>
-                      <TrendChart buckets={buckets} values={bucketize(d.lines.filter((l) => l.key === key(s)), buckets, (l) => l.issued_on, (l) => l.revenue, company.timezone)} format={formatMoney} label={`${s.name} over time`} color="var(--invoice)" />
-                    </ReportCard>
-                  ))}
-                </div>
-              </section>
+              <Section title="Top services">
+                <RelatedList label="Top services by revenue">
+                  {top.map((s) => {
+                    const values = bucketize(d.lines.filter((l) => l.key === key(s)), buckets, (l) => l.issued_on, (l) => l.revenue, company.timezone);
+                    return (
+                      <RelatedRow
+                        key={key(s)}
+                        title={s.name}
+                        detail={s.category ?? undefined}
+                        sub={`Billed ${plural(s.count, "time")}`}
+                        end={
+                          <>
+                            <span className={styles.spark} aria-hidden="true">
+                              <Sparkline data={buckets.map((b, i) => ({ label: b.title, value: values[i] ?? 0 }))} config={{ value: { label: s.name, color: "var(--green)" } }} format={formatMoney} height={28} />
+                            </span>
+                            <b className={styles.endMoney}>{formatMoney(s.revenue)}</b>
+                          </>
+                        }
+                      />
+                    );
+                  })}
+                </RelatedList>
+              </Section>
             )}
             <ReportCard
               title={costs ? "Revenue and profit by service" : "Revenue by service"}

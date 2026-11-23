@@ -186,8 +186,10 @@ function Row({ row, editor, onEdit }: { row: EstimateRow; editor?: EstimateEdito
       {row.detail && <span className={styles.detail}>{row.detail}</span>}
     </>
   );
+  // Just one round button (− to take a measured line off): on a narrow list it sits under the amount, not on a row of its own.
+  const single = Boolean(editor && line && !removed && row.less && row.quantity === null && row.kind !== "count" && row.kind !== "layers");
   return (
-    <li className={styles.row} data-removed={removed || undefined} data-line={row.key}>
+    <li className={styles.row} data-removed={removed || undefined} data-single={single || undefined} data-line={row.key}>
       {onEdit && line && !removed ? (
         <button type="button" className={`${styles.what} ${styles.whatButton}`} disabled={saving} aria-label={`Change ${row.name}`} onClick={() => onEdit(line)}>
           {what}

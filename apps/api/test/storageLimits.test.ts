@@ -16,6 +16,7 @@ import {
   linkOwner,
   reserveStorage,
   routedPath,
+  serverLinkPath,
   signedInUser,
   snapshotsFrom,
   tusMetadata,
@@ -225,6 +226,28 @@ describe("whose upload it is", () => {
     expect(signedTus({ "x-signature": link({}) })).toMatchObject({ user: null });
     expect(signedTus({})).toMatchObject({ user: null });
     expect(upload(tus(`${CO}/plans/a.pdf`, { "x-signature": link({ owner: BEN }) }, "/storage/v1/upload/resumable/sign/x"))).toMatchObject({ user: BEN });
+  });
+
+  it("knows a link the server made by its token: genuine, for uploading, nobody's, and the file it's for", () => {
+    expect(serverLinkPath(link({}), SECRET)).toBe(`${CO}/plans/a.pdf`);
+    expect(serverLinkPath(link({ owner: "" }), SECRET)).toBe(`${CO}/plans/a.pdf`);
+    // A team member's link is held to the storage limits instead.
+    expect(serverLinkPath(link({ owner: ANA }), SECRET)).toBeNull();
+    expect(serverLinkPath(forged({ url: `files/${CO}/plans/a.pdf`, upsert: false, scope: "upload", exp: LATER }), SECRET)).toBeNull();
+    expect(serverLinkPath(link({ scope: "download" }), SECRET)).toBeNull();
+    expect(serverLinkPath(link({ url: `other/${CO}/plans/a.pdf` }), SECRET)).toBeNull();
+    expect(serverLinkPath(link({ exp: Math.floor(Date.now() / 1000) - 1 }), SECRET)).toBeNull();
+    expect(serverLinkPath(link({}), null)).toBeNull();
+  });
+
+  it("marks an upload to a link the server made with the file the link is for, sent whole or resumable", () => {
+    const put = (token: string, headers: Record<string, string> = {}) => upload(request("PUT", `/storage/v1/object/upload/sign/files/${CO}/plans/a.pdf?token=${token}`, { "Content-Length": "7", ...headers }));
+    expect(put(link({}))).toMatchObject({ user: null, bytes: 7, serverLink: `${CO}/plans/a.pdf` });
+    expect(put(link({ owner: ANA }))).not.toHaveProperty("serverLink");
+    expect(put("t")).not.toHaveProperty("serverLink");
+    expect(upload(tus(`${CO}/plans/a.pdf`, { "x-signature": link({}) }, "/storage/v1/upload/resumable/sign"))).toMatchObject({ bytes: 5000, resumable: true, serverLink: `${CO}/plans/a.pdf` });
+    // Not on the resumable route a person signs in to: there Storage goes by Authorization.
+    expect(upload(tus(`${CO}/plans/a.pdf`, { "x-signature": link({}) }))).not.toHaveProperty("serverLink");
   });
 });
 

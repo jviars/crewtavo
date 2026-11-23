@@ -92,7 +92,8 @@ describe("Crewtavo - Marketing in Apps", () => {
   });
 
   it("has Crewtavo's own icon, and installs and uninstalls like the other built-in apps", () => {
-    expect(source("../src/features/apps/AppIcon.tsx")).toContain("marketing: crewtavoLogo");
+    // Each app built into Crewtavo shows its menu icon on Crewtavo's green tile.
+    expect(source("../src/features/apps/AppIcon.tsx")).toContain('marketing: "marketing"');
     const page = source("../src/features/apps/AppDetailPage.tsx");
     expect(page).toContain('app.id === "marketing" ? marketingSwitch');
     expect(page).toContain("<MarketingPanel />");
@@ -198,7 +199,8 @@ describe("Marketing's code", () => {
   it("offers review asks on the job and client pages only the ways they can go, as Ask a client now does", () => {
     for (const page of ["../src/features/jobs/JobPage.tsx", "../src/features/clients/ClientPage.tsx", "../src/features/marketing/Reviews.tsx"]) {
       const text = source(page);
-      expect(text, page).toContain("askRefusal(");
+      // The client page's menu says why a way can't go (sendWays.ts, held to askRefusal in clientMenu.test.ts).
+      expect(text, page).toContain(page.includes("ClientPage") ? "sendWay(c, reach, way, askedNot(c))" : "askRefusal(");
       expect(text, page).toContain("sms: session.config.features.sms");
     }
     expect(source("../src/features/jobs/JobPage.tsx")).toContain("review_opt_out, marketing_opt_out, sms_opt_out_at");
@@ -257,7 +259,7 @@ describe("the automated campaign cards", () => {
     const cards = automatedRules([rule("reengage"), changed]);
     expect(cards.win_back).toMatchObject({ custom: true, missing: false, form: { enabled: true } });
     expect(cards.close_quotes).toMatchObject({ custom: false, missing: true, form: { enabled: false, days: 3 } });
-    expect(source("../src/features/marketing/AutomatedCampaigns.tsx")).toContain("so only the switch above turns it on and off here");
+    expect(source("../src/features/marketing/AutomatedCampaigns.tsx")).toContain("so only its switch turns it on and off here");
   });
 
   it("save the email and days without the switch, and keep the days in range", () => {
@@ -361,12 +363,12 @@ describe("the automated campaign cards' words", () => {
     expect(cards).toContain('win_back: "Quotes already waiting move to the new wait."');
     expect(cards).toContain("hint={DAYS_HINTS[key]}");
     expect(cards).toContain("{canSave && !custom && (");
-    expect(cards).toContain("{queued > 0 && <p className=\"small\" style={{ margin: 0 }}>{waitingLine(queued)}</p>}");
+    expect(cards).toContain("{queued > 0 && <p className={styles.autoNote}>{waitingLine(queued)}</p>}");
   });
 
   it("say why the switch and Send a test are off without email, and say a test went inside the dialog", () => {
     const cards = source("../src/features/marketing/AutomatedCampaigns.tsx");
-    expect(cards).toContain("{canSave && !on && !emailReady && <p className=\"muted small\" style={{ margin: 0 }}>Email isn't connected yet.<ConnectEmailHint /></p>}");
+    expect(cards).toContain("{canSave && !on && !emailReady && <p className={styles.autoNote}>Email isn't connected yet.<ConnectEmailHint /></p>}");
     expect(cards).toContain("Email isn't connected yet, so a test can't be sent.");
     expect(cards).toContain("onSent={setTestedTo}");
     expect(source("../src/features/marketing/EmailEditor.tsx")).toContain("if (onSent) onSent(r.to);");
@@ -414,7 +416,7 @@ describe("the automated campaign cards' words", () => {
 
   it("show a sent campaign's numbers across the page, and its preview as someone who got it", () => {
     const page = source("../src/features/marketing/CampaignPage.tsx");
-    expect(page.indexOf("<CampaignStats")).toBeLessThan(page.indexOf('<div className="two-col">'));
+    expect(page.indexOf("<CampaignStats")).toBeLessThan(page.indexOf("<DetailColumns"));
     expect(page).toContain('queryKey: ["campaign-first-recipient", id]');
     // The segment's fields are the ones postcards use too (AudienceFields), offering the company's own cities.
     expect(page).toContain("<AudienceFields audience={draft.audience} onChange={(audience) => set({ audience })} choices={choices.data} />");
@@ -544,7 +546,8 @@ describe("the Referrals tab's credit, offer and email", () => {
     expect(tab).not.toContain("Show all");
     expect(tab).toContain('{ count: "exact" }');
     expect(tab).toContain("Showing {rows.length.toLocaleString()} of {total.toLocaleString()}");
-    expect(tab).toContain(">Load more</Button>");
+    // The list's foot has Load more (ListFoot's own words) until every referral shows, then Show less.
+    expect(tab).toContain("<ListFoot more={rows.length < total ? { onClick: () => setLimit((l) => (l < PAGE ? PAGE : l + PAGE)), loading: referrals.isFetching } : { onClick: () => setLimit(SHOWN), label: \"Show less\" }}>");
   });
 
   it("counts what was given outside Crewtavo apart from what's left", () => {
@@ -555,7 +558,9 @@ describe("the Referrals tab's credit, offer and email", () => {
 
   it("keeps the pills lined up when a referral has nothing in its menu", () => {
     const tab = source("../src/features/marketing/Referrals.tsx");
-    expect(tab).toContain('return <span aria-hidden="true" style={{ width: "var(--control-sm)", flexShrink: 0 }} />;');
+    expect(tab).toContain('return <span aria-hidden="true" className={styles.menuSpace} />;');
+    // As wide as the row's menu button: 28px, 40px on a phone (Section's related rows).
+    expect(source("../src/features/marketing/Marketing.module.css")).toContain(".menuSpace { flex: none; width: 28px; }");
     expect(tab).toContain("<RowMenu");
   });
 
@@ -799,7 +804,9 @@ describe("Google reviews on the Reviews tab", () => {
     // The status and the menu are on the name's line, inside the column, not columns of their own.
     expect(row.indexOf("<EntityStatus")).toBeGreaterThan(row.indexOf("<strong>{name}</strong>"));
     expect(row.indexOf("<Menu")).toBeLessThan(row.indexOf("{text && ("));
-    expect(row.lastIndexOf("</div>\n    </div>\n  );")).toBeGreaterThan(row.indexOf("<Reply"));
+    // The reply is in the same column as the words, and the row is two columns (the photo, then the rest).
+    expect(row.lastIndexOf("</div>\n    </li>\n  );")).toBeGreaterThan(row.indexOf("<Reply"));
+    expect(source("../src/features/marketing/Presence.module.css")).toContain(".review:global(.il-row) { grid-template-columns: 32px minmax(0, 1fr); }");
   });
 
   it("never calls a reviewer Google sent without a name null", () => {
@@ -844,7 +851,7 @@ describe("Google reviews on the Reviews tab", () => {
     const waiting = g({ state: "approval", first_synced_at: null, google: { average_rating: null, total_reviews: null }, reviews: 0, progress: null });
     expect([showsList(waiting), showsList(g({ state: "not_connected" })), showsList(undefined)]).toEqual([false, false, false]);
     expect([showsList({ ...waiting, reviews: 12 }), showsList(g({ state: "ok", first_synced_at: null, reviews: 0 })), showsList(g({ state: "disconnected" }))]).toEqual([true, true, true]);
-    expect(source("../src/features/marketing/GoogleReviews.tsx")).toContain('{g.reviews > 0 && <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Show">');
+    expect(source("../src/features/marketing/GoogleReviews.tsx")).toContain('{g.reviews > 0 && <div className={styles.reviewTools}><Toolbar\n          label="Show"');
   });
 
   it("gives Check again on the tab to owners and admins, keeps the trend under what's in the way, and says replies wait only when they can post", () => {
@@ -986,6 +993,9 @@ describe("Marketing → Social", () => {
     expect(social).toContain('next.delete("post");');
     expect(social).toContain("}, [highlight]);");
     expect(social).not.toContain("const ref = (el: HTMLDivElement | null)");
+    // A post is the shared row (a button for a draft or scheduled one); the linked post is tinted by its class.
+    expect(social).toContain('className={cx(styles.post, highlight && "post-highlight")}');
+    expect(social).not.toContain('className={cx("il-row"');
   });
 
   it("names its confirms' buttons apart, and its switch", () => {
@@ -1059,10 +1069,11 @@ describe("Marketing → Social", () => {
   it("borders a picked row with a class, never an inline border React can half clear", () => {
     for (const file of ["../src/features/apps/MetaPanel.tsx", "../src/features/marketing/SocialComposer.tsx", "../src/features/apps/GoogleBusinessPanel.tsx", "../src/features/apps/AssistantAccess.tsx", "../src/features/chat/ChatSettingsPage.tsx"]) {
       const code = source(file);
-      expect(code, file).toContain("choice-row");
+      // The app panels pick from radio rows on hairlines (PanelKit's choice); the rest from bordered rows.
+      expect(code, file).toMatch(/choice-row|className=\{kit\.choice\}/);
       expect(code, file).not.toMatch(/border: "1px solid var\(--border\)"[^}]*borderColor: [^}]*undefined/);
     }
-    expect(source("../src/styles/components.css")).toContain(".card-row.choice-row.picked { border-color: var(--green); }");
+    expect(source("../src/styles/components.css")).toContain(".card-row.choice-row.picked { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }");
   });
 
   it("shows OK to share only while Marketing is installed, never to subs, and not on photos that can't be posted", () => {

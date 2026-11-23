@@ -1,17 +1,23 @@
 /**
  * The PDF of an estimate or invoice, made on the server (services/documentPdf.ts, pdf/DocumentPdf.tsx,
  * routes/documentPdf.ts) and read back with pdf.js: its sheets, the words on each, where the
- * business's own letterhead lands, and where its pictures may come from. Storage and the rate limit
- * are stand-ins.
+ * business's own letterhead lands, where its pictures may come from, who may have one made (print
+ * tickets) and how big a document may be. Storage, the database, the sign-in and the rate limit are
+ * stand-ins.
  */
+import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 import { DEFAULT_TEMPLATE, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentCompany, DocumentData } from "../../web/src/features/documents/types";
 import type { Env } from "../src/env";
+import { signToken } from "../src/lib/crypto";
+import { clientLink } from "../src/lib/links";
 import { assetDir } from "../src/lib/reviewCard";
+import { memoryDb, type MemoryDb } from "./fixtures/memoryDb";
 
 const stored = vi.hoisted(() => ({ files: new Map<string, Uint8Array>(), asked: [] as string[], broken: false, reported: [] as unknown[] }));
 vi.mock("../src/lib/storedFile", () => ({
@@ -22,14 +28,35 @@ vi.mock("../src/lib/storedFile", () => ({
   },
 }));
 vi.mock("../src/lib/monitoring", async (original) => ({ ...(await original<typeof import("../src/lib/monitoring")>()), reportError: (error: unknown) => stored.reported.push(error) }));
-vi.mock("../src/lib/supabase", async (original) => ({ ...(await original<typeof import("../src/lib/supabase")>()), adminClient: () => ({}) }));
-vi.mock("../src/lib/limit", () => ({ allow: async () => true }));
+/** The database a Client Hub link is checked against, and who's signed in for the office's print ticket. */
+const world = vi.hoisted(() => ({ db: null as unknown as MemoryDb, company: "00000000-0000-4000-8000-000000000001", role: "office", permissions: ["sales", "invoices", "settings"] as string[] }));
+vi.mock("../src/lib/supabase", async (original) => {
+  const { memoryClient } = await import("./fixtures/memoryDb");
+  return { ...(await original<typeof import("../src/lib/supabase")>()), adminClient: () => memoryClient(() => world.db) };
+});
+vi.mock("../src/lib/limit", async (original) => ({ ...(await original<typeof import("../src/lib/limit")>()), allow: async () => true }));
+vi.mock("../src/lib/auth", async (original) => ({
+  ...(await original<typeof import("../src/lib/auth")>()),
+  requireUser: async (c: { set: (k: string, v: unknown) => void }, next: () => Promise<void>) => {
+    c.set("userId", "00000000-0000-4000-8000-0000000000a1");
+    await next();
+  },
+  // As requireCompany does: the levels a route takes, the business on screen, and the person's areas.
+  requireCompany: (roles: readonly string[]) => async (c: { set: (k: string, v: unknown) => void; json: (b: unknown, s: number) => Response }, next: () => Promise<void>) => {
+    if (!roles.includes(world.role)) return c.json({ error: "You don't have permission to do that. Ask an admin if you need it." }, 403);
+    c.set("companyId", world.company);
+    c.set("role", world.role);
+    c.set("permissions", world.permissions);
+    await next();
+  },
+}));
 
-const { documentPdf, knownTimeZone, pictureFor, pictureSize } = await import("../src/services/documentPdf");
+const { documentPdf, knownTimeZone, pictureFor, pictureSize, printTicket, readPrintTicket, PDF_LIMITS, setPdfWorker } = await import("../src/services/documentPdf");
+const { pngUnpacksToItsSize } = await import("../src/pdf/render");
 const { documentPdfRoutes } = await import("../src/routes/documentPdf");
 
-/** A PNG of `width` × `height` gray pixels. */
-function png(width = 1, height = 1): Uint8Array {
+/** A PNG of `width` × `height` gray pixels; `packed`, its pixel data as packed, when it isn't those pixels. */
+function png(width = 1, height = 1, packed?: Buffer): Uint8Array {
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
     const length = Buffer.alloc(4);
@@ -42,14 +69,26 @@ function png(width = 1, height = 1): Uint8Array {
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header.set([8, 0, 0, 0, 0], 8); // 8-bit gray
-  const rows = Buffer.concat(Array.from({ length: height }, () => Buffer.from([0, ...Array(width).fill(128)])));
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
+  const rows = () => Buffer.concat(Array.from({ length: height }, () => Buffer.from([0, ...Array(width).fill(128)])));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", packed ?? deflateSync(rows())), chunk("IEND", Buffer.alloc(0))]);
 }
 
-const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+/** A PNG whose header says it's `width` × `height`, without the pixels (only its header is read). */
+function sized(width: number, height: number): Uint8Array {
+  const picture = png(1, 1);
+  const view = new DataView(picture.buffer, picture.byteOffset);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return picture;
+}
+const dataUrl = (picture: Uint8Array) => `data:image/png;base64,${Buffer.from(picture).toString("base64")}`;
+
+const COMPANY_ID = world.company;
+/** Another business on the same server. */
+const OTHER_ID = "00000000-0000-4000-8000-000000000002";
 const TOP = "11111111-1111-4111-8111-111111111111";
 const BOTTOM = "22222222-2222-4222-8222-222222222222";
-const env = {} as Env;
+const env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_test", APP_URL: "https://crew.example.com" } as Env;
 const company: DocumentCompany = { name: "Arrington Paving", phone: "(540) 483-5606", email: "info@example.com", website: null, address: ["160 Energy Blvd", "Rocky Mount, VA 24151"], logo: null, settings: {} };
 const line = (name: string, total: number, description?: string) => ({ name, description, quantity: 1, unit: "", unit_price: total, total });
 const invoice: DocumentData = {
@@ -74,6 +113,9 @@ beforeEach(() => {
   stored.asked.length = 0;
   stored.broken = false;
   stored.reported.length = 0;
+  world.db = memoryDb();
+  world.role = "office";
+  world.permissions = ["sales", "invoices", "settings"];
   stored.files.set(`${COMPANY_ID}/letterhead/${TOP}.png`, png(4, 1));
   stored.files.set(`${COMPANY_ID}/letterhead/${BOTTOM}.png`, png(4, 1));
 });
@@ -115,7 +157,7 @@ async function read(pdf: Uint8Array): Promise<Sheet[]> {
 }
 
 const sheets = async (template: Partial<TemplateSettings>, data: DocumentData = invoice, currency = "USD", timeZone?: string) =>
-  read(await documentPdf(env, { template: { ...DEFAULT_TEMPLATE, ...template }, company, data, currency, timeZone }));
+  read(await documentPdf(env, { companyId: COMPANY_ID, template: { ...DEFAULT_TEMPLATE, ...template }, company, data, currency, timeZone }));
 
 const long = { ...invoice, lines: Array.from({ length: 30 }, (_, i) => line(`Item ${i + 1}`, 100, "A line with a description under it")) };
 
@@ -229,40 +271,81 @@ describe("the PDF of a signed estimate", () => {
 describe("where a PDF's pictures come from", () => {
   it("reads the business's own pictures from storage by their paths, and a drawn signature as the PNG it is", async () => {
     stored.files.set(`${COMPANY_ID}/logo/${TOP}.png`, png(3, 2));
-    expect(await pictureFor({} as never, `/api/public/logo/${COMPANY_ID}/${TOP}.png`)).toMatchObject({ width: 3, height: 2, src: { format: "png" } });
-    expect(await pictureFor({} as never, `https://crm.example.com/api/public/logo/${COMPANY_ID}/${TOP}.png`)).toMatchObject({ width: 3, height: 2 });
-    const drawn = `data:image/png;base64,${Buffer.from(png(5, 4)).toString("base64")}`;
-    expect(await pictureFor({} as never, drawn)).toMatchObject({ width: 5, height: 4, src: { format: "png" } });
+    expect(await pictureFor({} as never, `/api/public/logo/${COMPANY_ID}/${TOP}.png`, COMPANY_ID)).toMatchObject({ width: 3, height: 2, src: { format: "png" } });
+    expect(await pictureFor({} as never, `https://crm.example.com/api/public/logo/${COMPANY_ID}/${TOP}.png`, COMPANY_ID)).toMatchObject({ width: 3, height: 2 });
+    expect(await pictureFor({} as never, dataUrl(png(5, 4)), COMPANY_ID)).toMatchObject({ width: 5, height: 4, src: { format: "png" } });
   });
 
   it("never fetches another address, and leaves off anything that isn't the picture it says", async () => {
     stored.asked.length = 0;
     for (const url of ["https://example.com/logo.png", "/api/public/letterhead/../../secrets.png", `/api/public/logo/${COMPANY_ID}/${BOTTOM}.png`, "data:image/svg+xml;base64,PHN2Zz4=", `data:image/png;base64,${Buffer.from("not a png").toString("base64")}`]) {
-      expect(await pictureFor({} as never, url), url).toBeNull();
+      expect(await pictureFor({} as never, url, COMPANY_ID), url).toBeNull();
     }
     // Only the one stored path was looked for (and it isn't there).
     expect(stored.asked).toEqual([`${COMPANY_ID}/logo/${BOTTOM}.png`]);
   });
 
+  it("only takes the pictures of the business the PDF is for", async () => {
+    stored.files.set(`${OTHER_ID}/logo/${TOP}.png`, png(3, 2));
+    stored.files.set(`${OTHER_ID}/letterhead/${TOP}.png`, png(4, 1));
+    stored.asked.length = 0;
+    expect(await pictureFor({} as never, `/api/public/logo/${OTHER_ID}/${TOP}.png`, COMPANY_ID)).toBeNull();
+    // Another business's letterhead on the template sent is never read, and the page goes without.
+    const [page] = await sheets({ letterhead: "custom", letterhead_header: { path: `${OTHER_ID}/letterhead/${TOP}.png`, width: 2550, height: 420 } });
+    expect(page!.pictures).toEqual([]);
+    expect(stored.asked).toEqual([]);
+  });
+
+  it("leaves off a drawn signature bigger than a signature pad draws one", async () => {
+    // 4,000 × 4,000 by its header: twice the most a pad makes (logo.ts DRAWN_MAX_PIXELS).
+    expect(await pictureFor({} as never, dataUrl(sized(4000, 4000)), COMPANY_ID)).toBeNull();
+  });
+
+  it("leaves off a PNG whose pixels unpack to more than its size says", () => {
+    expect(pngUnpacksToItsSize(png(40, 10))).toBe(true);
+    // 1 × 1 by its header, a megabyte once unpacked: about a kilobyte as sent.
+    const packed = png(1, 1, deflateSync(Buffer.alloc(1_000_000)));
+    expect(packed.length).toBeLessThan(5_000);
+    expect(pngUnpacksToItsSize(packed)).toBe(false);
+    expect(pngUnpacksToItsSize(new TextEncoder().encode("not a PNG, nor anything like one"))).toBe(false);
+  });
+
   it("reads a picture's size from its header, and refuses one too big to be any picture here", () => {
     expect(pictureSize(png(7, 9))).toEqual({ width: 7, height: 9 });
-    const huge = png(1, 1);
-    new DataView(huge.buffer, huge.byteOffset).setUint32(16, 50_000);
-    expect(pictureSize(huge)).toBeNull();
+    expect(pictureSize(sized(50_000, 1))).toBeNull();
     // A JPEG's frame header: FFD8, then SOF0 with height 300 and width 400.
     expect(pictureSize(new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x01, 0x2c, 0x01, 0x90, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]))).toEqual({ width: 400, height: 300 });
   });
 });
 
+const INVOICE_ID = "00000000-0000-4000-8000-0000000000e1";
+const QUOTE_ID = "00000000-0000-4000-8000-0000000000e2";
+const CLIENT_ID = "00000000-0000-4000-8000-0000000000c1";
+/** The business's invoice 1042 and quote 77, for one client, as the Client Hub reads them. */
+const hubWorld = (resetAt: string | null = null) =>
+  memoryDb({
+    companies: [{ id: COMPANY_ID, name: "Arrington Paving" }],
+    clients: [{ id: CLIENT_ID, company_id: COMPANY_ID, links_reset_at: resetAt }],
+    invoices: [{ id: INVOICE_ID, company_id: COMPANY_ID, client_id: CLIENT_ID, number: 1042 }],
+    quotes: [{ id: QUOTE_ID, company_id: COMPANY_ID, client_id: CLIENT_ID, number: 77 }],
+  });
+/** A Client Hub link's token, as the address /hub/<token> carries it. */
+const hubToken = async (t: "quote" | "invoice" | "client", id: string) => (await clientLink(env, "https://crew.example.com", { c: COMPANY_ID, t, id })).split("/hub/")[1]!;
+const askTicket = (path: string) => documentPdfRoutes.request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }, env);
+/** The document as a page sends it to print. */
+const sent = (data: unknown, template: unknown = templateSettings({})) => JSON.stringify({ template, company, currency: "USD", data });
+
 describe("POST /api/public/documents/<name>.pdf", () => {
-  const post = (document: string, file = "Invoice%201042.pdf") => {
+  /** A print ticket for the office of the business, unless one is given. */
+  const post = async (document: string, file = "Invoice%201042.pdf", ticket?: string) => {
     const body = new FormData();
+    body.set("ticket", ticket ?? (await printTicket(env, COMPANY_ID)));
     body.set("document", document);
     return documentPdfRoutes.request(`/public/documents/${file}`, { method: "POST", body }, env);
   };
 
   it("answers the document a page sends with its PDF, named for it, shown in the tab", async () => {
-    const res = await post(JSON.stringify({ template: templateSettings({}), company, currency: "USD", data: invoice }));
+    const res = await post(sent(invoice));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/pdf");
     expect(res.headers.get("content-disposition")).toBe('inline; filename="Invoice 1042.pdf"');
@@ -273,8 +356,7 @@ describe("POST /api/public/documents/<name>.pdf", () => {
   const sorry = async (res: Response) => [res.status, res.headers.get("content-type")?.startsWith("text/html") && (await res.text()).includes("Couldn't make the PDF")];
 
   it("is only at a PDF's name", async () => {
-    const document = JSON.stringify({ template: templateSettings({}), company, currency: "USD", data: invoice });
-    for (const file of ["Invoice%201042", "x.html", "%3Cscript%3E.pdf", `${"a".repeat(120)}.pdf`]) expect(await sorry(await post(document, file)), file).toEqual([404, true]);
+    for (const file of ["Invoice%201042", "x.html", "%3Cscript%3E.pdf", `${"a".repeat(120)}.pdf`]) expect(await sorry(await post(sent(invoice), file)), file).toEqual([404, true]);
   });
 
   it("answers anything that isn't a document with a page saying so, in the tab", async () => {
@@ -285,8 +367,130 @@ describe("POST /api/public/documents/<name>.pdf", () => {
 
   it("tells the person printing when the PDF can't be made, and reports why", async () => {
     stored.broken = true;
-    const res = await post(JSON.stringify({ template: { ...DEFAULT_TEMPLATE, ...ownLetterhead(true) }, company, currency: "USD", data: invoice }));
+    const res = await post(sent(invoice, { ...DEFAULT_TEMPLATE, ...ownLetterhead(true) }));
     expect(await sorry(res)).toEqual([500, true]);
     expect(stored.reported).toEqual([expect.objectContaining({ message: "Storage is down" })]);
   });
+
+  it("makes no PDF without a print ticket this server made, still good", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const runOut = await signToken(env, { k: "document-pdf", c: COMPANY_ID, exp: now - 1 });
+    const anotherServer = await signToken({ ...env, SUPABASE_SECRET_KEY: "sb_secret_another_server" }, { k: "document-pdf", c: COMPANY_ID, exp: now + 60 });
+    // A Client Hub link is signed by this server too, but it isn't a print ticket.
+    const hubLink = await hubToken("invoice", INVOICE_ID);
+    for (const ticket of ["", "not.a-ticket", runOut, anotherServer, hubLink]) expect(await sorry(await post(sent(invoice), undefined, ticket)), ticket.slice(0, 20)).toEqual([403, true]);
+    expect(stored.asked).toEqual([]);
+  });
+
+  it("prints only the quote or invoice a Client Hub link's ticket is for", async () => {
+    world.db = hubWorld();
+    const res = await askTicket(`/hub/${await hubToken("invoice", INVOICE_ID)}/print-ticket`);
+    expect(res.status).toBe(200);
+    const { ticket } = (await res.json()) as { ticket: string };
+    expect(await readPrintTicket(env, ticket)).toMatchObject({ c: COMPANY_ID, doc: { kind: "invoice", number: 1042 } });
+    expect((await post(sent(invoice), undefined, ticket)).status).toBe(200);
+    for (const other of [{ ...invoice, number: 1043 }, { ...invoice, kind: "estimate" }, { ...invoice, number: null }]) {
+      expect(await sorry(await post(sent(other), undefined, ticket)), JSON.stringify(other).slice(0, 40)).toEqual([403, true]);
+    }
+    const quote = (await (await askTicket(`/hub/${await hubToken("quote", QUOTE_ID)}/print-ticket`)).json()) as { ticket: string };
+    expect(await readPrintTicket(env, quote.ticket)).toMatchObject({ doc: { kind: "estimate", number: 77 } });
+  });
+
+  it("gives no ticket for a Client Hub link that isn't working, or isn't to a quote or invoice", async () => {
+    world.db = hubWorld();
+    expect((await askTicket(`/hub/${await hubToken("client", CLIENT_ID)}/print-ticket`)).status).toBe(404);
+    expect((await askTicket("/hub/not-a-link/print-ticket")).status).toBe(404);
+    const gone = await hubToken("invoice", "00000000-0000-4000-8000-0000000000ff");
+    expect((await askTicket(`/hub/${gone}/print-ticket`)).status).toBe(404);
+    // The office reset the client's links after this one was made.
+    const old = await hubToken("invoice", INVOICE_ID);
+    world.db = hubWorld(new Date(Date.now() + 60_000).toISOString());
+    expect((await askTicket(`/hub/${old}/print-ticket`)).status).toBe(410);
+  });
+
+  it("gives a member of the business on screen a ticket for any of its documents, when their screens print", async () => {
+    const res = await askTicket("/documents/print-ticket");
+    expect(res.status).toBe(200);
+    const ticket = await readPrintTicket(env, ((await res.json()) as { ticket: string }).ticket);
+    expect(ticket).toMatchObject({ c: COMPANY_ID });
+    expect(ticket!.doc).toBeUndefined();
+    // Field crew have no screen that prints one; a sub isn't on the team.
+    world.role = "field_crew";
+    world.permissions = [];
+    expect((await askTicket("/documents/print-ticket")).status).toBe(403);
+    world.role = "subcontractor";
+    expect((await askTicket("/documents/print-ticket")).status).toBe(403);
+  });
+
+  it("turns down a document bigger than any real one, before it's made", async () => {
+    const section = (i: number, more: Record<string, unknown>) => ({ id: `s${i}`, title: "", html: "<p>Initial here.</p>", place: "signatures", initials: false, ...more });
+    const initialed = (images: string[]) => ({ ...invoice, contract: { sections: images.map((image, i) => section(i, { initials: true, initialed: { image, date: null } })) } });
+    const tooBig = [
+      // Words: two hundred lines of five thousand characters, however they start.
+      { ...invoice, lines: Array.from({ length: 200 }, (_, i) => line(`Item ${i}`, 1, "x".repeat(5_000))) },
+      { ...invoice, lines: Array.from({ length: 200 }, (_, i) => line(`Item ${i}`, 1, `data:image/png;base64,${"x".repeat(4_900)}`)) },
+      // Values: a list longer than any document's.
+      { ...invoice, facts: Array.from({ length: PDF_LIMITS.values + 1 }, () => 1) },
+      // A contract in more pieces than a hundred pages.
+      { ...invoice, contract: { sections: [0, 1, 2].map((i) => section(i, { blocks: Array.from({ length: 2_500 }, () => ({ kind: "hr" })) })) } },
+      // More different initials than any contract has.
+      initialed(Array.from({ length: PDF_LIMITS.drawn + 1 }, (_, i) => dataUrl(png(i + 1, 1)))),
+      // Initials each no bigger than a pad draws them, but more pixels than a PDF takes all told.
+      initialed([dataUrl(sized(2800, 2800)), dataUrl(sized(2800, 2801)), dataUrl(sized(2801, 2800))]),
+    ];
+    for (const data of tooBig) expect(await sorry(await post(sent(data))), JSON.stringify(data).slice(0, 60)).toEqual([413, true]);
+    expect(stored.asked).toEqual([]);
+    // A contract with initials, as a real one has them, is made.
+    expect((await post(sent(initialed([dataUrl(png(30, 10)), dataUrl(png(31, 10))])))).status).toBe(200);
+  });
+});
+
+describe("a PDF made on a thread of its own, as the built server makes it", () => {
+  const out = fileURLToPath(new URL("../../../dist/test/pdf-worker/", import.meta.url));
+  const thread = () => pathToFileURL(`${out}pdf-worker.mjs`);
+
+  beforeAll(async () => {
+    // Bundled as scripts/build-server.mjs bundles it, next to a package.json that says where the PDF's
+    // maker finds its built-in fonts (as scripts/dev-api.mjs writes one).
+    const { build } = await import("esbuild");
+    await build({
+      entryPoints: [fileURLToPath(new URL("../src/pdf/worker.ts", import.meta.url))],
+      outfile: `${out}pdf-worker.mjs`,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node22",
+      logLevel: "warning",
+      banner: { js: "import { createRequire as __testCreateRequire } from 'node:module'; const require = __testCreateRequire(import.meta.url);" },
+    });
+    writeFileSync(`${out}package.json`, `${JSON.stringify({ private: true, imports: { "#standard-fonts/*": "pdfkit/standard-fonts/*" } })}\n`);
+    setPdfWorker(thread());
+  }, 120_000);
+  afterAll(() => setPdfWorker(null));
+
+  it("makes the same PDF there, with its pictures from the business's storage", async () => {
+    // The same document made on this thread, to compare with.
+    setPdfWorker(null);
+    const here = await sheets(ownLetterhead(true), long);
+    setPdfWorker(thread());
+    stored.asked.length = 0;
+
+    const pages = await sheets(ownLetterhead(true), long);
+    expect(pages.length).toBeGreaterThan(1);
+    pages.forEach((page, i) => expect(has(page, `Page ${i + 1} of ${pages.length}`)).toBe(true));
+    // The business's own letterhead is a picture, so its name is in the words from the second sheet on.
+    expect(has(pages[0]!, "Alex Morgan")).toBe(true);
+    expect(has(pages[1]!, "Arrington Paving · Invoice No. 1042 continued")).toBe(true);
+    expect(pages[0]!.pictures).toHaveLength(2);
+    expect(pages.map((p) => [p.width, p.height, p.text, p.pictures])).toEqual(here.map((p) => [p.width, p.height, p.text, p.pictures]));
+    expect(stored.asked.sort()).toEqual([`${COMPANY_ID}/letterhead/${TOP}.png`, `${COMPANY_ID}/letterhead/${BOTTOM}.png`].sort());
+  }, 60_000);
+
+  it("leaves off a PNG there whose pixels unpack to more than its size says, and still makes the PDF", async () => {
+    const packed = dataUrl(png(1, 1, deflateSync(Buffer.alloc(1_000_000))));
+    const signed: DocumentData = { ...invoice, kind: "estimate", signatures: { customer: { name: "Alex Morgan", image: packed, date: null } } };
+    const [page] = await sheets({ company_signs: false }, signed);
+    expect(has(page!, "Alex Morgan")).toBe(true);
+    expect(page!.pictures).toEqual([]);
+  }, 60_000);
 });

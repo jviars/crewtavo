@@ -94,7 +94,7 @@ describe("review asks", () => {
     expect(moreEdges(0, 358, 358)).toBeNull();
     const page = source("../src/features/marketing/MarketingPage.tsx");
     expect(page).toContain("const tabs = useTabStrip<HTMLDivElement>(tab);");
-    expect(page).toContain('<div ref={tabs} className="underline-tabs underline-tabs-compact" role="tablist">');
+    expect(page).toContain('<div ref={tabs} className={cx("underline-tabs underline-tabs-compact", styles.tabs)} role="tablist" aria-label="Marketing sections">');
     const css = source("../src/styles/components.css");
     expect(css).toContain('.underline-tabs[data-more="right"]');
     expect(css).toContain(".underline-tabs-compact > * > svg { display: none; }");
@@ -105,8 +105,9 @@ describe("referrals", () => {
   it("say what credits earned counts, as Marketing's overview does, with friends still to pay on a line of their own", () => {
     const tab = source("../src/features/marketing/Referrals.tsx");
     expect(tab).toContain('export const EARNED_HINT = "Not on an invoice yet";');
-    expect(tab).toContain("<div className=\"hint\">{EARNED_HINT}</div>\n        <div className=\"hint\">{pending}</div>");
-    expect(source("../src/features/marketing/MarketingPage.tsx")).toContain("<div className=\"hint\">{EARNED_HINT}</div>");
+    expect(tab).toContain("note={<>{EARNED_HINT}<span className={styles.noteLine}>{pending}</span></>}");
+    expect(source("../src/features/marketing/Marketing.module.css")).toContain(".noteLine { display: block; }");
+    expect(source("../src/features/marketing/MarketingPage.tsx")).toContain("note={EARNED_HINT} />");
   });
 
   it("say a paid invoice a referral credit covered whole is covered, not paid in full with no payments", () => {
@@ -141,7 +142,7 @@ describe("campaigns", () => {
   });
 
   it("get the company's phone from GET /me, so previews show {{company.phone}} as the email does", () => {
-    expect(source("../../api/src/routes/account.ts")).toContain("company:companies(id, name, slug, trade_preset, timezone, currency, address, phone, settings)");
+    expect(source("../../api/src/routes/account.ts")).toContain("company:companies(id, name, slug, trade_preset, timezone, currency, address, phone)");
   });
 
   it("read a campaign's numbers and list once more when it finishes sending, and keep the page's own copy saved", () => {
@@ -303,8 +304,11 @@ describe("social posts", () => {
 
   it("keep a Page's and a location's name on its line on a phone, the buttons wrapping under it", () => {
     expect(NAME_BASIS).toBe("12rem");
-    expect(source("../src/features/apps/MetaPanel.tsx")).toContain("<span style={{ flex: `1 1 ${NAME_BASIS}`, minWidth: 0 }}>");
-    expect(source("../src/features/apps/GoogleBusinessPanel.tsx")).toContain("<span style={{ flex: `1 1 ${NAME_BASIS}`, minWidth: 0 }}>");
+    // Each is a PanelKit row: its words keep that basis, and the row wraps its buttons onto the next line.
+    expect(source("../src/features/apps/MetaPanel.tsx")).toContain("basis={NAME_BASIS}");
+    expect(source("../src/features/apps/GoogleBusinessPanel.tsx")).toContain("basis={NAME_BASIS}");
+    expect(source("../src/features/apps/PanelKit.tsx")).toContain("style={basis ? { flex: `1 1 ${basis}` } : undefined}");
+    expect(source("../src/features/apps/PanelKit.module.css")).toMatch(/\.row \{[^}]*flex-wrap: wrap;/);
   });
 });
 
@@ -338,7 +342,7 @@ describe("the whole app", () => {
     const page = source("../src/features/apps/AppDetailPage.tsx");
     expect(page).toContain('const OPENS_MARKETING = new Set(["marketing", "google_business", "meta"]);');
     expect(page).toContain("!opens || !metaOpens || !marketingOpens ? null");
-    expect(source("../src/features/apps/MarketingPanel.tsx")).toContain("{opens ? (");
+    expect(source("../src/features/apps/MarketingPanel.tsx")).toContain("to={opens ? `/marketing?tab=${t.tab}` : undefined}");
     expect(reviewCountWords(5, true)).toBe(" · 5 reviews in Marketing → Reviews");
     expect(reviewCountWords(1, false)).toBe(" · 1 review brought in");
     expect(reviewCountWords(0, true)).toBe("");

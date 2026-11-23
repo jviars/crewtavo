@@ -71,7 +71,7 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "aa110000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select wat.check((public.web_analytics_save(:'co', '{"enabled": true, "site": "https://www.pinelawn.com", "host": "www.pinelawn.com", "nope": 1}') -> 'enabled') = 'true',
   'the owner installs it');
-select wat.check((select not (settings -> 'website_analytics' ? 'nope') and settings -> 'website_analytics' ? 'changed_at' from public.companies where id = :'co'),
+select wat.check((select not (public.company_settings(id) -> 'website_analytics' ? 'nope') and public.company_settings(id) -> 'website_analytics' ? 'changed_at' from public.companies where id = :'co'),
   'only its own settings are kept, with when it was turned on');
 select wat.expect_error(format('select public.web_analytics_save(%L, %L)', :'co', '{"enabled": "yes"}'), 'enabled is true or false');
 select wat.expect_error(format('select public.web_analytics_save(%L, %L)', :'other', '{"enabled": true}'), 'nobody installs it for another business');

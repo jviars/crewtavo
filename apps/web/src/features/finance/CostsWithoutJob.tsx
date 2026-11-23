@@ -9,11 +9,12 @@
 import { TRASH_DAYS } from "@crewtavo/core/drive";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
@@ -21,6 +22,7 @@ import { formatDate, formatMoneyCents } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { useSession } from "@/lib/session";
 import { ExpenseDialog } from "../jobs/ExpensesCard";
+import styles from "./Finance.module.css";
 
 export interface LooseExpense {
   id: string;
@@ -99,57 +101,65 @@ export function CostsWithoutJob({ onChanged }: { onChanged?: () => unknown }) {
 
   const rows = costs.data ?? [];
   const shown = all ? rows : rows.slice(0, FIRST_SHOWN);
+  const name = (e: LooseExpense) => e.vendor || e.category || "Expense";
   return (
-    <div className="stack-sm">
-      <div className="row" style={{ justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <span className="muted small">{costs.data ? looseSummary(rows) : " "}</span>
-        <Button size="sm" icon="plus" onClick={() => setEditing("new")}>Add a cost</Button>
-      </div>
+    <Section title="Costs that aren't on a job" count={rows.length || undefined} action={<Button icon="plus" onClick={() => setEditing("new")}>Add a cost</Button>}>
+      {costs.data && rows.length > 0 && <p className={styles.sub}>{looseSummary(rows)}</p>}
       {costs.error ? (
-        <ErrorState error={costs.error} onRetry={() => costs.refetch()} />
+        <ErrorState compact error={costs.error} onRetry={() => costs.refetch()} />
+      ) : costs.isPending ? (
+        <div className="rel" aria-hidden="true">
+          {[0, 1].map((i) => <div key={i} className="rel-row"><span className="grow" style={{ display: "grid", gap: 6 }}><Skeleton width="40%" /><Skeleton width="25%" height={10} /></span><Skeleton width={70} /></div>)}
+        </div>
+      ) : !rows.length ? (
+        <EmptyState inline title="No costs without a job">An expense saved with its Job # left empty shows here</EmptyState>
       ) : (
-        <div className="card">
-          {costs.isPending && [0, 1].map((i) => <div key={i} className="card-row"><span className="grow stack-sm"><Skeleton width="40%" /><Skeleton width="25%" height={10} /></span><Skeleton width={70} /></div>)}
-          {costs.data && !rows.length && <EmptyState inline title="No costs without a job">An expense saved with its Job # left empty shows here</EmptyState>}
+        <RelatedList label="Costs that aren't on a job">
           {shown.map((e) => (
-            <div key={e.id} className="card-row">
-              <span className="n-icon" style={{ width: 36, height: 36, borderRadius: 8, display: "grid", placeItems: "center", background: "var(--fill-2)", color: "var(--text-3)", flex: "none" }}><Icon name="receipt" size={18} /></span>
-              <button type="button" className="grow link-btn" style={{ textAlign: "left", color: "inherit" }} onClick={() => setEditing(e)} aria-label={`Open ${e.vendor || e.category || "expense"}, ${formatMoneyCents(e.amount)}`}>
-                <strong style={{ display: "block" }}>{e.vendor || e.category || "Expense"}</strong>
-                <span className="muted small" style={{ display: "block", fontWeight: 400 }}>{looseDetail(e)}</span>
-              </button>
-              <strong className="tabular">{formatMoneyCents(e.amount)}</strong>
-              <Menu
-                triggerClassName="btn btn-sm btn-ghost btn-icon"
-                label="Expense actions"
-                items={[
-                  { label: "Open and change", icon: "edit", onSelect: () => setEditing(e) },
-                  { label: "Open the receipt", icon: "receipt", hidden: !e.receipt_path, onSelect: () => void openReceipt(e.receipt_path!) },
-                  { label: "Mark reimbursed", icon: "check", hidden: !e.reimbursable || Boolean(e.reimbursed_at), onSelect: () => reimburse.mutate(e.id) },
-                  {
-                    label: "Delete",
-                    icon: "trash",
-                    danger: true,
-                    onSelect: async () => {
-                      const ok = await confirm({
-                        title: "Delete this expense?",
-                        body: `${e.vendor || e.category || "Expense"}, ${formatMoneyCents(e.amount)} on ${formatDate(e.incurred_on)}.${e.receipt_path ? ` Its receipt goes to the Trash for ${TRASH_DAYS} days.` : ""}`,
-                        confirmLabel: "Delete",
-                        danger: true,
-                      });
-                      if (ok) remove.mutate(e.id);
+            <RelatedRow
+              key={e.id}
+              onClick={() => setEditing(e)}
+              lead={<span className="rel-icon" aria-hidden="true"><Icon name="receipt" size={15} /></span>}
+              title={name(e)}
+              sub={looseDetail(e)}
+              end={<b>{formatMoneyCents(e.amount)}</b>}
+              actions={
+                <Menu
+                  triggerClassName="btn btn-sm btn-ghost btn-icon"
+                  label={`More for ${name(e)}`}
+                  title={`${name(e)}, ${formatMoneyCents(e.amount)}`}
+                  items={[
+                    { label: "Open and change", icon: "edit", onSelect: () => setEditing(e) },
+                    { label: "Open the receipt", icon: "receipt", hidden: !e.receipt_path, onSelect: () => void openReceipt(e.receipt_path!) },
+                    { label: "Mark reimbursed", icon: "check", hidden: !e.reimbursable || Boolean(e.reimbursed_at), onSelect: () => reimburse.mutate(e.id) },
+                    { separator: true },
+                    {
+                      label: "Delete",
+                      icon: "trash",
+                      danger: true,
+                      onSelect: async () => {
+                        const ok = await confirm({
+                          title: "Delete this expense?",
+                          body: `${name(e)}, ${formatMoneyCents(e.amount)} on ${formatDate(e.incurred_on)}.${e.receipt_path ? ` Its receipt goes to the Trash for ${TRASH_DAYS} days.` : ""}`,
+                          confirmLabel: "Delete",
+                          danger: true,
+                        });
+                        if (ok) remove.mutate(e.id);
+                      },
                     },
-                  },
-                ]}
-              />
-            </div>
+                  ]}
+                />
+              }
+            />
           ))}
-          {rows.length > FIRST_SHOWN && (
-            <div className="card-row"><Button size="sm" variant="ghost" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${rows.length}`}</Button></div>
-          )}
+        </RelatedList>
+      )}
+      {rows.length > FIRST_SHOWN && (
+        <div className={cx("rel", styles.foot)}>
+          <button type="button" className={styles.footBtn} onClick={() => setAll(!all)} aria-expanded={all}>{all ? "Show fewer" : `Show all ${rows.length}`}</button>
         </div>
       )}
       {editing && <ExpenseDialog jobId={null} expense={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={refresh} />}
-    </div>
+    </Section>
   );
 }

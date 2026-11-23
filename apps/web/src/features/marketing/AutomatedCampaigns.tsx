@@ -1,8 +1,8 @@
 /**
  * Marketing → Campaigns' automated campaigns, Jobber's way: Re-engage past clients, Win back lost
- * quotes and Close pending quotes. Each is a small card: its switch (saved at once), when it goes,
- * emails waiting, what it brought in, who gets it (folded away), and Edit email (the days, the
- * subject and message, a preview and a test, saved without touching the switch).
+ * quotes and Close pending quotes. Each is a row: its switch (saved at once), when it goes, emails
+ * waiting, what it brought in, who gets it (folded away), and Edit email (the days, the subject and
+ * message, a preview and a test, saved without touching the switch).
  *
  * Each is an automation rule underneath (PUT /api/campaigns/automated/:key edits it), so it still
  * shows in Automations. A rule someone changed there into something the card can't show keeps its
@@ -25,14 +25,15 @@ import {
 } from "@crewtavo/core/campaigns";
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
-import { Button, useJustDone } from "@/components/ui/Button";
+import { Link, useNavigate } from "react-router-dom";
+import { Button, cx, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Skeleton } from "@/components/ui/Skeleton";
+import { Menu } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -41,6 +42,8 @@ import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { automatedBody, automatedRules, campaignTokens, dayChoices, daysError, daysWords, lowerWords, sampleVars, timingLine, turnOffWords, waitingLine, type AutomatedCard, type AutomatedRuleRow } from "./automatedForm";
 import { resultsSummary } from "./CampaignResults";
 import { companyAddressLine, EmailPreview, MessageField, SubjectField, TestEmailDialog } from "./EmailEditor";
+import styles from "./Marketing.module.css";
+import { Select } from "@/components/ui/Select";
 
 const TEMPLATE_KEYS = ["reengage_past_clients", "win_back_lost_quotes", "quote_followup"];
 
@@ -64,7 +67,7 @@ const FROM_NOW: Partial<Record<AutomatedKey, string>> = {
   close_quotes: "Turning it on starts with quotes sent from now on.",
 };
 
-const NO_LINK = <p className="small" style={{ margin: 0, color: "var(--warning)", fontWeight: 600 }}>Add a link so clicks and bookings can be counted.</p>;
+const NO_LINK = <p className={styles.autoNote} data-tone="warning">Add a link so clicks and bookings can be counted.</p>;
 
 /** Each automated campaign as its rule has it, with emails waiting, for every card (MarketingPage's off screen too). */
 export function useAutomatedStates(enabled = true) {
@@ -78,7 +81,7 @@ export function useAutomatedStates(enabled = true) {
 
 export function AutomatedCampaigns({ results }: { results: UseQueryResult<CampaignResults[]> }) {
   const session = useSession();
-  // Rules a person can't see (no Automations area) don't come back, so the cards wait on knowing.
+  // Rules a person can't see (no Automations area) don't come back, so the rows wait on knowing.
   const allowed = can(session, "automations");
   const rules = useQuery({
     queryKey: ["automation-rules", session.company.id, "campaigns"],
@@ -96,19 +99,17 @@ export function AutomatedCampaigns({ results }: { results: UseQueryResult<Campai
   const cards = rules.data ? automatedRules(rules.data) : allowed ? null : automatedRules([]);
   const loading = allowed ? rules : states;
   const stateOf = (key: AutomatedKey) => states.data?.find((x) => x.template_key === cards![key].campaign.templateKey);
+  // "2 on" beside the heading (App-Marketing.dc.html), once it's known.
+  const on = loading.isSuccess && cards ? AUTOMATED_KEYS.filter((key) => (allowed ? cards[key].form.enabled : stateOf(key)?.enabled)).length : null;
 
   return (
-    <section className="stack" aria-labelledby="automated-campaigns">
-      <div className="stack-sm">
-        <h2 id="automated-campaigns" className="section-title">Automated campaigns</h2>
-        <p className="muted text-sm" style={{ margin: 0 }}>Sent by themselves to each client at the right time.</p>
-      </div>
+    <Section title="Automated campaigns" count={on === null ? undefined : `${on} on`}>
       {loading.isPending ? (
-        <div className="grid-cards">{AUTOMATED_KEYS.map((key) => <CardSkeleton key={key} lines={4} />)}</div>
+        <SectionSkeleton rows={3} />
       ) : loading.error ? (
-        <div className="card"><ErrorState compact error={loading.error} onRetry={() => loading.refetch()} /></div>
+        <ErrorState compact error={loading.error} onRetry={() => loading.refetch()} />
       ) : (
-        <div className="grid-cards">
+        <ul className="rel" aria-label="Automated campaigns">
           {AUTOMATED_KEYS.map((key) =>
             allowed ? (
               <CampaignCard key={key} card={cards![key]} state={stateOf(key)} results={results} />
@@ -116,37 +117,37 @@ export function AutomatedCampaigns({ results }: { results: UseQueryResult<Campai
               <ReadOnlyCard key={key} card={cards![key]} state={stateOf(key)} results={results} />
             ),
           )}
-        </div>
+        </ul>
       )}
-    </section>
+    </Section>
   );
 }
 
 /** What it brought in, and who got it: a placeholder while the numbers load, and a retry if they don't. */
 function ResultsLine({ templateKey, results }: { templateKey: string; results: UseQueryResult<CampaignResults[]> }) {
-  if (results.isPending) return <Skeleton width="70%" height={14} />;
+  if (results.isPending) return <Skeleton width="60%" height={12} />;
   if (results.error) {
     return (
-      <div className="row wrap" style={{ gap: 8 }}>
-        <span className="muted small">Couldn't load its results.</span>
-        <Button size="sm" variant="ghost" icon="refresh" loading={results.isFetching} onClick={() => void results.refetch()}>Try again</Button>
-      </div>
+      <p className={styles.autoNote}>
+        Couldn't load its results.{" "}
+        <button type="button" className="link-btn" disabled={results.isFetching} onClick={() => void results.refetch()}>Try again</button>
+      </p>
     );
   }
   const mine = results.data?.find((r) => r.kind === "automated" && r.template_key === templateKey);
   return (
-    <p className="small" style={{ margin: 0 }}>
+    <p className={styles.autoNote}>
       {resultsSummary(mine)}
       {mine?.sent ? <>{" · "}<Link to={`/marketing/campaigns/${mine.campaign_id}`}>See who got it</Link></> : null}
     </p>
   );
 }
 
-/** Who it leaves out, folded away so the card leads with when it goes and what it brought in. */
+/** Who it leaves out, folded away so the row leads with when it goes and what it brought in. */
 const WhoGetsIt = ({ campaignKey }: { campaignKey: AutomatedKey }) => (
-  <details className="more-options more-options-sm">
+  <details className={styles.who}>
     <summary>Who gets it</summary>
-    <p className="muted small" style={{ margin: 0 }}>{NOTES[campaignKey]}</p>
+    <p>{NOTES[campaignKey]}</p>
   </details>
 );
 
@@ -154,22 +155,30 @@ const WhoGetsIt = ({ campaignKey }: { campaignKey: AutomatedKey }) => (
 function ReadOnlyCard({ card, state, results }: { card: AutomatedCard; state: AutomatedState | undefined; results: UseQueryResult<CampaignResults[]> }) {
   const on = state?.enabled ?? false;
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{card.campaign.name}</strong>
+    <li className={cx(styles.auto, styles.autoRead)}>
+      <div className={styles.autoBody}>
+        <span className={styles.autoName}>{card.campaign.name}</span>
+        <p className={styles.autoLine}>{state?.days != null ? timingLine(card.key, state.days) : state ? "Its timing was changed in Automations." : "It isn't set up."}</p>
+        {Boolean(state?.waiting) && <p className={styles.autoNote}>{waitingLine(state!.waiting)}</p>}
+        <ResultsLine templateKey={card.campaign.templateKey} results={results} />
+        <WhoGetsIt campaignKey={card.key} />
+        <p className={styles.autoNote}>Owners and admins with the Automations area choose these.</p>
+      </div>
+      <div className={styles.autoEnd}>
         <StatusPill label={on ? "On" : "Off"} tone={on ? "good" : "muted"} />
       </div>
-      <p className="text-sm" style={{ margin: 0 }}>{state?.days != null ? timingLine(card.key, state.days) : state ? "Its timing was changed in Automations." : "It isn't set up."}</p>
-      {Boolean(state?.waiting) && <p className="small" style={{ margin: 0 }}>{waitingLine(state!.waiting)}</p>}
-      <ResultsLine templateKey={card.campaign.templateKey} results={results} />
-      <WhoGetsIt campaignKey={card.key} />
-      <p className="muted small" style={{ margin: 0 }}>Owners and admins with the Automations area choose these.</p>
-    </div>
+    </li>
   );
 }
 
+/**
+ * One automated campaign as a row (App-Marketing.dc.html): its switch (saved at once), its name, when
+ * it goes, what's waiting and what it brought in, who it leaves out folded away, and Edit email on the
+ * right with a menu for the rest. On a phone the switch moves to the right (Mobile-Apps.dc.html).
+ */
 function CampaignCard({ card, state, results }: { card: AutomatedCard; state: AutomatedState | undefined; results: UseQueryResult<CampaignResults[]> }) {
   const session = useSession();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { key, campaign, rule, custom, missing, form } = card;
   const canSave = hasRole(session, "admin") && can(session, "automations");
@@ -197,12 +206,13 @@ function CampaignCard({ card, state, results }: { card: AutomatedCard; state: Au
   // first. Without a choice the server counts again and refuses if any do (the count is shown then).
   const counting = key === "reengage" && !on && (!backlog.isSuccess || backlog.isFetching);
   const queued = state?.waiting ?? 0;
+  const sent = results.data?.find((r) => r.kind === "automated" && r.template_key === campaign.templateKey);
 
   const toggle = async (next: boolean) => {
     // A long list of past clients: email them too, or only those who reach it from now on.
     if (next && key === "reengage" && waiting > 0) return setChoosing(true);
     // Turning off calls off the emails still waiting, and turning it on again doesn't bring them back.
-    // Counted fresh, as the card counts them: only those that would still send (the quote still
+    // Counted fresh, as the row counts them: only those that would still send (the quote still
     // awaiting a response, or still lost), not runs whose quote was approved or lost since.
     if (!next && key !== "reengage" && rule) {
       const { data, error } = await supabase().rpc("automated_campaign_states", { p_company: session.company.id });
@@ -213,44 +223,50 @@ function CampaignCard({ card, state, results }: { card: AutomatedCard; state: Au
   };
 
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{campaign.name}</strong>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" aria-label={campaign.name} checked={on} disabled={!canSave || save.isPending || counting || (!on && !emailReady)} onChange={(e) => void toggle(e.target.checked)} />
-          {on ? "On" : "Off"}
-        </label>
+    <li className={styles.auto}>
+      <span className={styles.autoSwitch}>
+        <input type="checkbox" className="switch" aria-label={campaign.name} checked={on} disabled={!canSave || save.isPending || counting || (!on && !emailReady)} onChange={(e) => void toggle(e.target.checked)} />
+      </span>
+      <div className={styles.autoBody}>
+        <span className={styles.autoName}>{campaign.name}</span>
+        {custom ? (
+          <p className={styles.autoLine}>You changed “{rule!.name}” in Automations, so only its switch turns it on and off here. <Link to={`/automations/${rule!.id}`}>Open the rule</Link></p>
+        ) : (
+          <p className={styles.autoLine}>{timingLine(key, form.days)}</p>
+        )}
+        {canSave && !on && !emailReady && <p className={styles.autoNote}>Email isn't connected yet.<ConnectEmailHint /></p>}
+        {key === "reengage" && !on && backlog.error && (
+          <p className={styles.autoNote} data-tone="warning">
+            Couldn't count the past clients who already qualify, so it can't be turned on yet.{" "}
+            <button type="button" className="link-btn" disabled={backlog.isFetching} onClick={() => void backlog.refetch()}>Try again</button>
+          </p>
+        )}
+        {key === "reengage" && on && waiting > 0 && <BacklogLine count={waiting} />}
+        {queued > 0 && <p className={styles.autoNote}>{waitingLine(queued)}</p>}
+        {!on && FROM_NOW[key] && <p className={styles.autoNote}>{FROM_NOW[key]}</p>}
+        {!custom && !hasTrackableLink(form.body) && NO_LINK}
+        <ResultsLine templateKey={campaign.templateKey} results={results} />
+        <WhoGetsIt campaignKey={key} />
+        {canSave && missing && <p className={styles.autoNote}>Turning it on puts the rule back in Automations.</p>}
+        {!canSave && <p className={styles.autoNote}>Only owners and admins can change these.</p>}
+        <FormError error={save.error} />
       </div>
-      {custom ? (
-        <div className="callout callout-info">
-          <Icon name="info" size={18} />
-          <div className="grow">You changed “{rule!.name}” in Automations, so only the switch above turns it on and off here. <Link to={`/automations/${rule!.id}`}>Open the rule</Link></div>
-        </div>
-      ) : (
-        <p className="text-sm" style={{ margin: 0 }}>{timingLine(key, form.days)}</p>
-      )}
-      {canSave && !on && !emailReady && <p className="muted small" style={{ margin: 0 }}>Email isn't connected yet.<ConnectEmailHint /></p>}
-      {key === "reengage" && !on && backlog.error && (
-        <div className="row wrap" style={{ gap: 8 }}>
-          <span className="muted small">Couldn't count the past clients who already qualify, so it can't be turned on yet.</span>
-          <Button size="sm" variant="ghost" icon="refresh" loading={backlog.isFetching} onClick={() => void backlog.refetch()}>Try again</Button>
-        </div>
-      )}
-      {key === "reengage" && on && waiting > 0 && <BacklogLine count={waiting} />}
-      {queued > 0 && <p className="small" style={{ margin: 0 }}>{waitingLine(queued)}</p>}
-      {!on && FROM_NOW[key] && <p className="muted small" style={{ margin: 0 }}>{FROM_NOW[key]}</p>}
-      {!custom && !hasTrackableLink(form.body) && NO_LINK}
-      <ResultsLine templateKey={campaign.templateKey} results={results} />
-      <WhoGetsIt campaignKey={key} />
-      {canSave && !custom && (
-        <div className="row wrap" style={{ gap: 12 }}>
+      <div className={styles.autoEnd}>
+        {canSave && !custom && (
           <Button size="sm" icon="edit" onClick={() => setEditing(true)}>Edit email</Button>
-          {rule && <Link className="small" to={`/automations/${rule.id}`}>See it in Automations</Link>}
-        </div>
-      )}
-      {canSave && missing && <p className="muted small" style={{ margin: 0 }}>Turning it on puts the rule back in Automations.</p>}
-      {!canSave && <span className="muted small">Only owners and admins can change these.</span>}
-      <FormError error={save.error} />
+        )}
+        {(rule || sent?.sent) && (
+          <Menu
+            triggerClassName="btn btn-sm btn-ghost btn-icon"
+            label={`More for ${campaign.name}`}
+            title={campaign.name}
+            items={[
+              { label: "See who got it", icon: "users", hidden: !sent?.sent, onSelect: () => navigate(`/marketing/campaigns/${sent!.campaign_id}`) },
+              { label: "See it in Automations", icon: "bolt", hidden: !rule, onSelect: () => navigate(`/automations/${rule!.id}`) },
+            ]}
+          />
+        )}
+      </div>
       {editing && <EditEmailDialog card={card} backlog={waiting} onClose={() => setEditing(false)} />}
       {choosing && (
         <BacklogDialog
@@ -262,12 +278,12 @@ function CampaignCard({ card, state, results }: { card: AutomatedCard; state: Au
           }}
         />
       )}
-    </div>
+    </li>
   );
 }
 
 const BacklogLine = ({ count }: { count: number }) => (
-  <p className="small" style={{ margin: 0 }}>{qualifyWords(count)}: they get it {backlogWords(count)}.</p>
+  <p className={styles.autoNote}>{qualifyWords(count)}: they get it {backlogWords(count)}.</p>
 );
 
 /** Turning Re-engage on with past clients who already qualify: email them too, 100 a day, or only those who reach it from now on. */

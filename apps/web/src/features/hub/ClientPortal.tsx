@@ -37,6 +37,8 @@ export interface PortalVisit {
   change_requested?: ChangeKind | null;
   /** A done visit's checklists the business shows clients. Servers that don't send them have none. */
   checklists?: ClientChecklist[];
+  /** A done visit's photos the office marked OK to share, by id (served small by /hub/:token/photos/:id). */
+  photos?: string[];
 }
 type ChangeKind = "reschedule" | "cancel";
 export interface ClientView {
@@ -46,6 +48,12 @@ export interface ClientView {
   arrival_window_min?: number;
   /** The office's look at the page: it shows, and nothing on it can be done. */
   preview?: boolean;
+  /**
+   * false: an office copy made by someone who doesn't see the business's money, so the invoices,
+   * payments and credit are left out, and the page doesn't say nothing is owed. Servers that don't
+   * send it show the money.
+   */
+  money?: boolean;
   /** Their autopay. Null when the business doesn't take autopay; servers that don't send it have none. */
   autopay?: HubAutopay | null;
   client: { name: string; first_name: string; properties: Array<{ id: string; line1: string; city: string | null }> };
@@ -115,11 +123,11 @@ export function ClientPortal({ token, data, hubFetch, onMessage, onChanged }: { 
   );
 }
 
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+function Section({ title, count, action, children }: { title: string; count?: number; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="hub-section">
       <div className="hub-section-head">
-        <h2>{title}</h2>
+        <h2>{title}{count ? ` · ${count}` : null}</h2>
         {action}
       </div>
       {children}
@@ -127,14 +135,23 @@ function Section({ title, action, children }: { title: string; action?: ReactNod
   );
 }
 
-function DateTile({ date }: { date: string }) {
-  const d = new Date(`${date}T12:00:00Z`);
+/** The visit's day in words, where the business is: "Today", "Tomorrow", or "Sunday, Nov 22". */
+function dayWords(date: string, tz: string): string {
+  const today = dateIn(new Date().toISOString(), tz);
+  if (date === today) return "Today";
+  if (date === new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) return "Tomorrow";
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/** Where a visit is on its day, as delivery apps show it: a bar for each step, filled up to this one. */
+const STEPS = ["Scheduled", "On the way", "Working", "Done"] as const;
+const stepOf = (status: string) => (status === "en_route" ? 1 : status === "in_progress" ? 2 : status === "completed" ? 3 : 0);
+function Progress({ status }: { status: string }) {
+  const at = stepOf(status);
   return (
-    <span className="hub-date" aria-hidden="true">
-      <span className="dow">{d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" })}</span>
-      <span className="day">{d.getUTCDate()}</span>
-      <span className="mon">{d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}</span>
-    </span>
+    <ol className="hub-progress" aria-label={`Your visit: ${STEPS[at]}`}>
+      {STEPS.map((s, i) => <li key={s} data-done={i <= at || undefined} aria-current={i === at ? "step" : undefined}>{s}</li>)}
+    </ol>
   );
 }
 
@@ -142,8 +159,26 @@ function Crew({ crew }: { crew: string[] }) {
   if (!crew.length) return null;
   return (
     <span className="hub-crew">
-      <span className="faces">{crew.slice(0, 3).map((n) => <span key={n} className="face">{n.slice(0, 1)}</span>)}</span>
-      {names(crew)}
+      <span className="faces" aria-hidden="true">{crew.slice(0, 3).map((n) => <span key={n} className="face">{n.slice(0, 1)}</span>)}</span>
+      <span className="who"><strong>{names(crew)}</strong><span>Your crew</span></span>
+    </span>
+  );
+}
+
+/** A finished visit's photos: small squares, each opening the photo in full. */
+const photoUrl = (token: string, id: string, full = false) => `/api/hub/${token}/photos/${id}.jpg${full ? "?full" : ""}`;
+function Photos({ token, visit, max = 4 }: { token: string; visit: PortalVisit; max?: number }) {
+  const photos = visit.photos ?? [];
+  if (!photos.length) return null;
+  const more = photos.length - max;
+  return (
+    <span className="hub-photos">
+      {photos.slice(0, max).map((id, i) => (
+        <a key={id} href={photoUrl(token, id, true)} target="_blank" rel="noopener" className="hub-photo">
+          <img src={photoUrl(token, id)} alt={`Photo ${i + 1} from ${visit.title}`} loading="lazy" />
+          {more > 0 && i === max - 1 && <span className="hub-photo-more" aria-hidden="true">+{more}</span>}
+        </a>
+      ))}
     </span>
   );
 }
@@ -153,30 +188,37 @@ interface VisitActions {
   onChange: (visit: PortalVisit, kind: ChangeKind) => void;
 }
 
-function VisitCard({ token, visit, tz, windowMin, phone, onMessage, onChange }: { token: string; visit: PortalVisit; tz: string; windowMin?: number; phone: string | null } & VisitActions) {
-  const live = visit.status === "en_route" ? "On the way" : visit.status === "in_progress" ? "Working now" : visit.change_requested ? "Change requested" : null;
+function VisitCard({ token, visit, tz, windowMin, onMessage, onChange }: { token: string; visit: PortalVisit; tz: string; windowMin?: number } & VisitActions) {
   const online = visit.can_change === true;
+  // On its day (or once the crew is on the way) the visit shows where it is; before then, just when.
+  const onItsDay = visit.scheduled_on === dateIn(new Date().toISOString(), tz) || visit.status === "en_route" || visit.status === "in_progress";
   return (
     <article className="hub-card hub-visit">
-      <div className="hub-visit-body">
-        <DateTile date={visit.scheduled_on} />
-        <div className="grow stack-xs">
-          {live && <span className="hub-live">{live}</span>}
-          <strong className="hub-title">{visit.title}</strong>
-          <span className="hub-meta"><Icon name="clock" size={14} />{when(visit, tz, windowMin)}</span>
-          {visit.address && <span className="hub-meta"><Icon name="pin" size={14} />{visit.address}</span>}
-          <Crew crew={visit.crew} />
-          {visit.change_requested && <span className="hub-meta">We'll let you know by email.</span>}
-          {/* A sentence, not a row of icon and text: hub-meta's flex layout would split it into columns. */}
-          {visit.can_change === false && <span className="hub-meta" style={{ display: "block" }}>To change this visit, {phone ? <>call <a href={`tel:${phone}`} style={{ whiteSpace: "nowrap" }}>{phone}</a></> : "message us"}.</span>}
+      {/* When first, large (Instacart, Angi): the day, then the time or the arrival window. */}
+      <div className="hub-visit-when">
+        {visit.change_requested && <span className="hub-live">Change requested</span>}
+        <strong>{dayWords(visit.scheduled_on, tz)}</strong>
+        <span>{when(visit, tz, windowMin)}</span>
+      </div>
+      {onItsDay && <Progress status={visit.status} />}
+      <div className="hub-visit-text">
+        <span className="hub-title">{visit.title}</span>
+        {visit.address && <span className="hub-sub">{visit.address}</span>}
+        {visit.change_requested && <span className="hub-sub">We'll let you know by email.</span>}
+      </div>
+      <Crew crew={visit.crew} />
+      {/* Two buttons (Client-Phone); a message and cancelling, asked for less often, as quiet words under them. */}
+      <div className="hub-acts">
+        {online && <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={() => onChange(visit, "reschedule")}><Icon name="calendar" size={16} />Reschedule</button>}
+        <a className="hub-btn hub-btn-sm hub-btn-ghost" href={`/api/hub/${token}/visits/${visit.id}.ics`}><Icon name="calendarCheck" size={16} />Add to calendar</a>
+        {!online && <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={() => onMessage(visit)}><Icon name="messages" size={16} />Ask to change</button>}
+      </div>
+      {online && (
+        <div className="hub-visit-links">
+          <button type="button" className="hub-link" onClick={() => onMessage(visit)}>Message us<span className="sr-only"> about this visit</span></button>
+          <button type="button" className="hub-link" onClick={() => onChange(visit, "cancel")}>Cancel visit</button>
         </div>
-      </div>
-      <div className="hub-card-actions" data-count={online ? 4 : undefined}>
-        {online && <button type="button" onClick={() => onChange(visit, "reschedule")}><Icon name="calendar" size={16} />Reschedule</button>}
-        {online && <button type="button" onClick={() => onChange(visit, "cancel")}><Icon name="x" size={16} />Cancel</button>}
-        <a href={`/api/hub/${token}/visits/${visit.id}.ics`}><Icon name="calendar" size={16} />Add to calendar</a>
-        <button type="button" onClick={() => onMessage(visit)}><Icon name="messages" size={16} />{online ? "Message us" : "Ask to change"}</button>
-      </div>
+      )}
     </article>
   );
 }
@@ -188,18 +230,19 @@ function Home({ token, data, go, onMessage, onChange }: { token: string; data: C
   const owed = waitingInvoices(data.invoices);
   // A business that needs a card on file: adding it (or agreeing to the one saved) is waiting on them too.
   const cardStep = Boolean(data.autopay?.card_required && data.autopay.available !== false && (data.autopay.status === "off" || data.autopay.status === "agree"));
+  const waitingCount = waitingQuotes.length + owed.length + (cardStep ? 1 : 0);
   const next = data.visits[0];
   const tz = hubZone(data.company);
   // `day` is the date where the company is: a payment at 8:30 PM on Oct 16 in New York is Oct 17 in UTC.
-  const recent = [
+  const recent: Array<{ at: string; day: string; icon: IconName; tone: string; title: string; detail: string; link: string | undefined; visit?: PortalVisit }> = [
     ...data.payments.map((p) => ({
       at: p.received_at, day: dateIn(p.received_at, tz), icon: (p.auto ? "card" : "dollar") as IconName, tone: "good", title: p.invoice ? `Payment on invoice #${p.invoice}` : "Payment received",
       detail: p.auto ? `${formatMoneyCents(p.amount)} charged automatically to ${p.card ?? "your card"}` : `${formatMoneyCents(p.amount)} by ${METHOD[p.method] ?? "payment"}`,
       link: p.invoice ? data.invoices.find((i) => i.number === p.invoice)?.link : undefined,
     })),
-    ...data.past_visits.map((v) => ({ at: v.completed_at ?? `${v.scheduled_on}T12:00:00Z`, day: doneOn(v, tz), icon: "check" as IconName, tone: "good", title: `${v.title} done`, detail: v.crew.length ? `by ${names(v.crew)}` : "Visit complete", link: undefined })),
-    ...data.quotes.filter((q) => q.approved_at).map((q) => ({ at: q.approved_at!, day: dateIn(q.approved_at!, tz), icon: "quote" as IconName, tone: "blue", title: `You approved quote #${q.number}`, detail: q.title, link: q.link })),
-    ...data.quotes.filter((q) => q.range?.accepted_at).map((q) => ({ at: q.range!.accepted_at!, day: dateIn(q.range!.accepted_at!, tz), icon: "calendar" as IconName, tone: "blue", title: "You asked for a visit", detail: q.title, link: q.link })),
+    ...data.past_visits.map((v) => ({ at: v.completed_at ?? `${v.scheduled_on}T12:00:00Z`, day: doneOn(v, tz), icon: "check" as IconName, tone: "good", title: `${v.title} done`, detail: v.crew.length ? `by ${names(v.crew)}` : "Visit complete", link: undefined, visit: v })),
+    ...data.quotes.filter((q) => q.approved_at).map((q) => ({ at: q.approved_at!, day: dateIn(q.approved_at!, tz), icon: "quote" as IconName, tone: "plain", title: `You approved quote #${q.number}`, detail: q.title, link: q.link })),
+    ...data.quotes.filter((q) => q.range?.accepted_at).map((q) => ({ at: q.range!.accepted_at!, day: dateIn(q.range!.accepted_at!, tz), icon: "calendar" as IconName, tone: "plain", title: "You asked for a visit", detail: q.title, link: q.link })),
     ...data.requests.map((r) => ({ at: r.created_at, day: dateIn(r.created_at, tz), icon: "requests" as IconName, tone: "plain", title: `Request #${r.number} received`, detail: r.title, link: undefined })),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
@@ -224,51 +267,36 @@ function Home({ token, data, go, onMessage, onChange }: { token: string; data: C
         )}
       </section>
 
-      <Section title={waitingQuotes.length || owed.length || cardStep ? "Waiting on you" : "All caught up"}>
-        {waitingQuotes.length === 0 && owed.length === 0 && !cardStep && (
-          <div className="hub-card hub-calm"><Icon name="check" size={20} />Nothing needs your attention right now.</div>
+      <Section title={waitingCount || data.money === false ? "Waiting on you" : "All caught up"} count={waitingCount}>
+        {waitingCount === 0 && (
+          <p className="hub-card hub-calm"><Icon name="check" size={18} />{data.money === false ? "No quotes are waiting on you." : "Nothing needs your attention right now."}</p>
         )}
         {waitingQuotes.map((q) =>
           q.range ? (
             <article key={q.id} className="hub-card hub-todo">
-              <div className="hub-todo-head">
-                <span className="hub-icon-tile blue"><Icon name="quote" size={20} /></span>
-                <span className="grow stack-xs">
-                  <span className="hub-meta">Estimate #{q.number}{q.valid_until ? ` · good until ${formatDate(q.valid_until)}` : ""}</span>
-                  <strong className="hub-title">{q.title}</strong>
-                  <span className="hub-range-line">Between {formatMoney(q.range.low)} and {formatMoney(q.range.high)}</span>
-                </span>
-              </div>
-              <a className="hub-btn hub-btn-brand" href={q.link}>See your estimate</a>
+              <span className="hub-kick">Estimate #{q.number}{q.valid_until ? ` · good until ${formatDate(q.valid_until)}` : ""}</span>
+              <strong className="hub-todo-title">{q.title}</strong>
+              <span className="hub-range-line">Between {formatMoney(q.range.low)} and {formatMoney(q.range.high)}</span>
+              <a className="hub-btn hub-btn-sm" href={q.link}>See your estimate</a>
             </article>
           ) : (
             <article key={q.id} className="hub-card hub-todo">
-              <div className="hub-todo-head">
-                <span className="hub-icon-tile blue"><Icon name="quote" size={20} /></span>
-                <span className="grow stack-xs">
-                  <span className="hub-meta">Quote #{q.number}{q.status === "changes_requested" ? " · you asked for changes" : q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
-                  <strong className="hub-title">{q.title}</strong>
-                  {q.options && <span className="hub-range-line">{q.options.count} options, from {formatMoneyCents(q.options.from)}</span>}
-                </span>
-                {!q.options && q.total !== null && <strong className="hub-amount">{formatMoneyCents(q.total)}{q.per_visit ? " per visit" : ""}</strong>}
-              </div>
-              <a className="hub-btn hub-btn-brand" href={q.link}>{q.options ? "See your options" : "Review and approve"}</a>
+              <span className="hub-kick">Quote #{q.number}{q.status === "changes_requested" ? " · you asked for changes" : q.valid_until ? ` · valid until ${formatDate(q.valid_until)}` : ""}</span>
+              <strong className="hub-todo-title">{q.title}</strong>
+              {q.options && <span className="hub-sub">{q.options.count} options, from {formatMoneyCents(q.options.from)}</span>}
+              {!q.options && q.total !== null && <span className="hub-todo-amount">{formatMoneyCents(q.total)}{q.per_visit ? <span className="hub-sub"> per visit</span> : null}</span>}
+              <a className="hub-btn hub-btn-sm" href={q.link}>{q.options ? "See your options" : "Review and approve"}</a>
             </article>
           ),
         )}
         {owed.map((i) => (
           <article key={i.id} className="hub-card hub-todo">
-            <div className="hub-todo-head">
-              <span className={`hub-icon-tile ${i.status === "overdue" ? "red" : "amber"}`}><Icon name="invoice" size={20} /></span>
-              <span className="grow stack-xs">
-                <span className="hub-meta" style={i.status === "overdue" ? { color: "var(--danger)", fontWeight: 600 } : undefined}>Invoice #{i.number}{i.due_on ? ` · ${i.status === "overdue" ? "was due" : "due"} ${formatDate(i.due_on)}` : ""}</span>
-                <strong className="hub-title">{i.subject ?? "Balance due"}</strong>
-              </span>
-              <strong className="hub-amount">{formatMoneyCents(i.balance_due)}</strong>
-            </div>
-            {needsNewCard(i) && <span className="hub-meta">We couldn't charge your card for this one.</span>}
-            {yoursToPayNote(i.yours_to_pay, i.balance_due) && <span className="hub-meta">{yoursToPayNote(i.yours_to_pay, i.balance_due)}</span>}
-            <a className="hub-btn hub-btn-dark" href={i.link}><Icon name="lock" size={16} />Pay {formatMoneyCents(i.balance_due)}</a>
+            <span className="hub-kick">{i.status === "overdue" && <span className="hub-tag" data-tone="danger">Overdue</span>}Invoice #{i.number}{i.due_on ? ` · ${i.status === "overdue" ? "was due" : "due"} ${formatDate(i.due_on)}` : ""}</span>
+            <strong className="hub-todo-title">{i.subject ?? "Balance due"}</strong>
+            <span className="hub-todo-amount">{formatMoneyCents(i.balance_due)}</span>
+            {needsNewCard(i) && <span className="hub-sub">We couldn't charge your card for this one.</span>}
+            {yoursToPayNote(i.yours_to_pay, i.balance_due) && <span className="hub-sub">{yoursToPayNote(i.yours_to_pay, i.balance_due)}</span>}
+            <a className="hub-btn hub-btn-sm" href={i.link}>Pay now</a>
             {needsNewCard(i) && data.autopay && data.autopay.available !== false && <button type="button" className="hub-link" onClick={() => go("autopay")}>Update your card</button>}
           </article>
         ))}
@@ -279,15 +307,17 @@ function Home({ token, data, go, onMessage, onChange }: { token: string; data: C
 
       {next && (
         <Section title="Next visit" action={data.visits.length > 1 || data.past_visits.length ? <button type="button" className="hub-link" onClick={() => go("visits")}>All visits</button> : undefined}>
-          <VisitCard token={token} visit={next} tz={tz} windowMin={data.arrival_window_min} phone={data.company.phone} onMessage={onMessage} onChange={onChange} />
+          <VisitCard token={token} visit={next} tz={tz} windowMin={data.arrival_window_min} onMessage={onMessage} onChange={onChange} />
         </Section>
       )}
 
-      <section className="hub-actions" aria-label="Quick actions" data-count={data.refer ? 3 : 2}>
-        <button type="button" onClick={() => go("request")}><span className="hub-icon-tile brand"><Icon name="plus" size={20} /></span>Request work</button>
-        <button type="button" onClick={() => onMessage()}><span className="hub-icon-tile plain"><Icon name="messages" size={20} /></span>Message us</button>
-        {data.refer && <button type="button" onClick={share}><span className="hub-icon-tile amber"><Icon name="gift" size={20} /></span>Refer a friend</button>}
-      </section>
+      <Section title="Need something?">
+        <div className="hub-actions" data-count={data.refer ? 3 : 2}>
+          <button type="button" onClick={() => go("request")}><Icon name="plus" size={22} />Request work</button>
+          <button type="button" onClick={() => onMessage()}><Icon name="messages" size={22} />Message us</button>
+          {data.refer && <button type="button" onClick={share}><Icon name="gift" size={22} />Refer a friend</button>}
+        </div>
+      </Section>
 
       {recent.length > 0 && (
         <Section title="Recent" action={!next && data.past_visits.length ? <button type="button" className="hub-link" onClick={() => go("visits")}>All visits</button> : undefined}>
@@ -295,10 +325,11 @@ function Home({ token, data, go, onMessage, onChange }: { token: string; data: C
             {recent.map((r, i) => {
               const body = (
                 <>
-                  <span className={`hub-icon-tile small ${r.tone}`}><Icon name={r.icon} size={16} /></span>
-                  <span className="grow stack-xs">
+                  <span className="hub-list-icon" data-tone={r.tone}><Icon name={r.icon} size={16} /></span>
+                  <span className="hub-list-text">
                     <strong>{r.title}</strong>
-                    <span className="hub-meta">{formatDate(r.day)} · {r.detail}</span>
+                    <span>{formatDate(r.day)} · {r.detail}</span>
+                    {r.visit && <Photos token={token} visit={r.visit} max={3} />}
                   </span>
                   {r.link && <Icon name="chevronRight" size={16} />}
                 </>
@@ -310,12 +341,12 @@ function Home({ token, data, go, onMessage, onChange }: { token: string; data: C
       )}
 
       {data.refer && (
-        <section className="hub-refer">
+        <section className="hub-card hub-refer">
           <h2>Know someone who could use {data.company.name}?</h2>
           {data.refer.offer && <p>{friendOfferLine(data.refer.offer)}</p>}
           {data.refer.rewards && <p>{data.refer.rewards}</p>}
           {Number(data.refer.credit_left ?? 0) > 0 && <p><strong>You have {formatMoneyCents(data.refer.credit_left)} in referral credit.</strong> It goes on your next invoice.</p>}
-          <button type="button" onClick={share}>Share my link</button>
+          <button type="button" className="hub-btn hub-btn-sm" onClick={share}><Icon name="share" size={16} />Share my link</button>
         </section>
       )}
     </>
@@ -335,17 +366,12 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
   const onHold = autopay.available === false;
   if (autopay.status === "active" && !onHold && !autopay.reagree) {
     return (
-      <article className="hub-card hub-autopay" aria-label="Autopay">
-        <div className="hub-autopay-body">
-          <span className="hub-icon-tile good"><Icon name="card" size={20} /></span>
-          <span className="grow stack-xs">
-            <strong className="hub-title">Paid automatically · {label}</strong>
-            <span className="hub-meta">{autopay.next_charge ? `Next charge ${autopayDueText(autopay.next_charge, timeZone)}` : `Charged ${autopay.timing}`}</span>
-          </span>
-        </div>
-        <div className="hub-card-actions">
-          <button type="button" onClick={open}><Icon name="card" size={16} />Change card</button>
-          <button type="button" onClick={open}><Icon name="x" size={16} />Turn off</button>
+      <article className="hub-card hub-todo hub-autopay" aria-label="Autopay">
+        <span className="hub-autopay-head"><Icon name="card" size={18} /><strong className="hub-title">Paid automatically · {label}</strong></span>
+        <span className="hub-sub">{autopay.next_charge ? `Next charge ${autopayDueText(autopay.next_charge, timeZone)}` : `Charged ${autopay.timing}`}</span>
+        <div className="hub-acts">
+          <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={open}><Icon name="card" size={16} />Change card</button>
+          <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={open}><Icon name="x" size={16} />Turn off</button>
         </div>
       </article>
     );
@@ -353,38 +379,27 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
   if (autopay.status === "off") {
     return (
       <article className="hub-card hub-todo" aria-label="Autopay">
-        <div className="hub-todo-head">
-          <span className="hub-icon-tile brand"><Icon name="card" size={20} /></span>
-          <span className="grow stack-xs">
-            <strong className="hub-title">{autopay.card_required ? "Finish setting up: add your card" : "Pay automatically after each visit"}</strong>
-            <span className="hub-meta">{autopay.card_required ? CARD_REQUIRED : `Save a card once, and we charge it ${autopay.timing}.`}</span>
-          </span>
-        </div>
-        <button type="button" className="hub-btn hub-btn-brand" onClick={open}>{autopay.card_required ? "Add your card" : "Pay automatically"}</button>
+        <strong className="hub-todo-title">{autopay.card_required ? "Finish setting up: add your card" : "Pay automatically after each visit"}</strong>
+        <span className="hub-sub">{autopay.card_required ? CARD_REQUIRED : `Save a card once, and we charge it ${autopay.timing}.`}</span>
+        <button type="button" className="hub-btn hub-btn-sm" onClick={open}>{autopay.card_required ? "Add your card" : "Pay automatically"}</button>
       </article>
     );
   }
   // A step left (agree, or agree to today's terms), or a state to know about: one line, with what to
-  // do when there's something. Active gets here only on hold, or to agree again.
+  // do when there's something. Active gets here only on hold, or to agree again. Amber or red words
+  // only where something has gone wrong or waits.
   const state = autopay.reagree && !onHold ? { tone: "brand", title: "Our autopay terms changed", line: "Agree to them to keep paying for your monthly plan automatically.", action: "Review and agree" }
-    : onHold || autopay.status === "active" ? { tone: "amber", title: `Autopay is on hold · ${label}`, line: ON_HOLD_TEXT, action: "Turn off" } : {
+    : onHold || autopay.status === "active" ? { tone: "warning", title: `Autopay is on hold · ${label}`, line: ON_HOLD_TEXT, action: "Turn off" } : {
     agree: { tone: "brand", title: autopay.imported ? `We have your ${label} on file` : `${autopay.method?.label ?? "Your card"} is saved`, line: "Agree to the terms to start paying automatically.", action: "Finish setting up" },
-    pending: { tone: "amber", title: "Your bank account is being checked", line: "This takes a few days. Charges start once it's done.", action: null },
-    paused: { tone: "amber", title: "Autopay is paused", line: "Contact us to turn it back on.", action: null },
-    needs_update: { tone: "red", title: "Your card needs updating", line: `We couldn't charge ${label}. Until it's updated, invoices come to you to pay.`, action: "Update card" },
+    pending: { tone: "plain", title: "Your bank account is being checked", line: "This takes a few days. Charges start once it's done.", action: null },
+    paused: { tone: "warning", title: "Autopay is paused", line: "Contact us to turn it back on.", action: null },
+    needs_update: { tone: "danger", title: "Your card needs updating", line: `We couldn't charge ${label}. Until it's updated, invoices come to you to pay.`, action: "Update card" },
   }[autopay.status];
   return (
-    <article className="hub-card hub-autopay" aria-label="Autopay">
-      <div className="hub-autopay-body">
-        <span className={`hub-icon-tile ${state.tone}`}><Icon name="card" size={20} /></span>
-        <span className="grow stack-xs">
-          <strong className="hub-title">{state.title}</strong>
-          <span className="hub-meta">{state.line}</span>
-        </span>
-      </div>
-      <div className="hub-card-actions" data-count={1}>
-        <button type="button" onClick={open}>{state.action ?? "See autopay"}</button>
-      </div>
+    <article className="hub-card hub-todo hub-autopay" aria-label="Autopay" data-tone={state.tone}>
+      <span className="hub-autopay-head"><Icon name={state.tone === "danger" || state.tone === "warning" ? "alert" : "card"} size={18} /><strong className="hub-title">{state.title}</strong></span>
+      <span className="hub-sub">{state.line}</span>
+      <button type="button" className={state.action && state.tone === "brand" ? "hub-btn hub-btn-sm" : "hub-btn hub-btn-sm hub-btn-ghost"} onClick={open}>{state.action ?? "See autopay"}</button>
     </article>
   );
 }
@@ -395,22 +410,23 @@ function Visits({ token, data, back, onMessage, onChange }: { token: string; dat
     <>
       <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
       <h1 className="hub-h1">Visits</h1>
-      <Section title="Coming up">
-        {data.visits.length === 0 ? <div className="hub-card hub-calm">Nothing scheduled right now.</div> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} tz={tz} windowMin={data.arrival_window_min} phone={data.company.phone} onMessage={onMessage} onChange={onChange} />)}
+      <Section title="Coming up" count={data.visits.length}>
+        {data.visits.length === 0 ? <p className="hub-card hub-calm">Nothing scheduled right now.</p> : data.visits.map((v) => <VisitCard key={v.id} token={token} visit={v} tz={tz} windowMin={data.arrival_window_min} onMessage={onMessage} onChange={onChange} />)}
       </Section>
       {data.past_visits.length > 0 && (
-        <Section title="Done">
+        <Section title="Done" count={data.past_visits.length}>
           <div className="hub-card hub-list">
             {data.past_visits.map((v) => (
               <div key={v.id} className="hub-list-row">
-                <span className="hub-icon-tile small good"><Icon name="check" size={16} /></span>
-                <span className="grow stack-xs">
+                <span className="hub-list-icon" data-tone="good"><Icon name="check" size={16} /></span>
+                <span className="hub-list-text">
                   <strong>{v.title}</strong>
-                  <span className="hub-meta">{formatDate(doneOn(v, tz))}{v.crew.length ? ` · ${names(v.crew)}` : ""}</span>
+                  <span>{formatDate(doneOn(v, tz))}{v.crew.length ? ` · ${names(v.crew)}` : ""}</span>
+                  <Photos token={token} visit={v} />
                   {v.checklists?.map((cl, i) => (
-                    <details key={i}>
-                      <summary className="small">{cl.name}</summary>
-                      <dl className="kv" style={{ margin: "6px 0 0" }}>
+                    <details key={i} className="hub-checklist">
+                      <summary>{cl.name}</summary>
+                      <dl className="hub-facts">
                         {cl.answers.map((a, j) => (
                           <Fragment key={j}>
                             <dt>{a.label}</dt>
@@ -455,11 +471,11 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
     return (
       <>
         <button type="button" className="hub-back" onClick={back}><Icon name="chevronLeft" size={16} />Your account</button>
-        <div className="hub-card hub-done">
-          <span className="success-mark"><Icon name="check" size={30} bold /></span>
+        <div className="hub-card hub-done" role="status">
+          <span className="hub-done-mark"><Icon name="check" size={30} bold /></span>
           <h2>Request sent</h2>
           <p>{data.company.name} will get back to you with a quote or a time to come look. Your reference is #{send.data.reference}.</p>
-          <Button onClick={back}>Back to your account</Button>
+          <div className="hub-done-actions"><button type="button" className="hub-btn hub-btn-ghost" onClick={back}>Back to your account</button></div>
         </div>
       </>
     );
@@ -494,12 +510,12 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
             {data.client.properties.map((p) => (
               <label key={p.id} className="hub-radio" data-on={propertyId === p.id || undefined}>
                 <input type="radio" name="property" checked={propertyId === p.id} onChange={() => setPropertyId(p.id)} />
-                <span><strong>{p.line1}</strong>{p.city && <span className="hub-meta">{p.city}</span>}</span>
+                <span><strong>{p.line1}</strong>{p.city && <span className="hub-sub">{p.city}</span>}</span>
               </label>
             ))}
           </fieldset>
         )}
-        <label className="field">Tell us about it <span className="optional">(optional)</span>
+        <label className="field"><span>Tell us about it <span className="optional">(optional)</span></span>
           <textarea className="textarea" rows={4} value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} placeholder="What's going on, and anything we should know before we come out." />
         </label>
         <fieldset>
@@ -513,11 +529,14 @@ function RequestWork({ token, data, hubFetch, back }: { token: string; data: Cli
             ))}
           </div>
         </fieldset>
-        <label className="field">Promo code <span className="optional">(optional)</span>
+        <label className="field"><span>Promo code <span className="optional">(optional)</span></span>
           <input className="input mono" value={promo} onChange={(e) => setPromo(e.target.value.toUpperCase())} maxLength={24} autoCapitalize="characters" />
         </label>
         <FormError error={send.error} />
-        <Button type="submit" variant="primary" size="lg" icon="send" className="hub-submit" loading={send.isPending}>Send request</Button>
+        {/* On a phone, kept in a bar at the bottom of the screen while the form's in view. */}
+        <div className="hub-bar" data-pinned="">
+          <Button type="submit" variant="primary" size="lg" block icon="send" loading={send.isPending}>Send request</Button>
+        </div>
       </form>
     </>
   );
@@ -558,38 +577,38 @@ function ChangeVisitDialog({ token, data, visit, kind, hubFetch, onClose, onDone
       onClose();
     },
   });
-  const choice = (key: string, on: boolean, label: string, pick: () => void) => (
-    <button key={key} type="button" className="hub-choice" data-on={on || undefined} aria-pressed={on} onClick={pick}>{label}</button>
+  const choice = (key: string, on: boolean, label: string, pick: () => void, className = "hub-choice") => (
+    <button key={key} type="button" className={className} data-on={on || undefined} aria-pressed={on} onClick={pick}>{label}</button>
   );
   return (
     <Dialog open onClose={onClose} title={kind === "cancel" ? "Cancel this visit?" : "Reschedule"} description={`${visit.title}, ${formatDate(visit.scheduled_on)}`}>
-      <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
+      <form className="hub-dialog-form" onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
         {kind === "cancel" ? (
-          <label className="field">Why? <span className="optional">(optional)</span>
+          <label className="field"><span>Why? <span className="optional">(optional)</span></span>
             <textarea className="textarea" rows={3} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} autoFocus />
           </label>
         ) : open.isPending ? (
-          <Skeleton height={120} />
+          <Skeleton height={120} radius={12} />
         ) : writing ? (
           <Field label={open.isSuccess && !days.length ? "We don't have an open time online in the next 3 weeks. Tell us what suits you." : "Tell us what suits you"} requiredMessage="Tell us a day or time that works.">
             <textarea className="textarea" rows={4} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} required autoFocus placeholder="Any weekday morning after the 15th" />
           </Field>
         ) : (
           <>
-            <div className="stack-sm">
+            <div className="hub-pick">
               <strong>Day</strong>
-              <div className="hub-choices" role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay && (!open.data!.anytime || picked?.date === d), slotLabel({ date: d, starts_at: null }, tz), () => { setDay(d); setPicked(open.data!.anytime ? slots.find((s) => s.date === d)! : null); }))}</div>
+              <div className="hub-choices hub-days" role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay && (!open.data!.anytime || picked?.date === d), slotLabel({ date: d, starts_at: null }, tz), () => { setDay(d); setPicked(open.data!.anytime ? slots.find((s) => s.date === d)! : null); }))}</div>
             </div>
             {!open.data!.anytime && (
-              <div className="stack-sm">
+              <div className="hub-pick">
                 <strong>{open.data!.window_min ? "Arrival window" : "Time"}</strong>
-                <div className="hub-choices" role="group" aria-label="Time">{slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, tz, open.data!.window_min), () => setPicked(s)))}</div>
+                <div className="hub-slots" role="group" aria-label="Time">{slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, tz, open.data!.window_min), () => setPicked(s), "hub-slot"))}</div>
               </div>
             )}
-            <button type="button" className="hub-link" style={{ justifySelf: "start" }} onClick={() => setOwnWords(true)}>None of these work? Tell us what suits you</button>
+            <button type="button" className="hub-link hub-link-start" onClick={() => setOwnWords(true)}>None of these work? Tell us what suits you</button>
           </>
         )}
-        <span className="hub-meta">Nothing changes until {data.company.name} confirms.</span>
+        <span className="hub-sub">Nothing changes until {data.company.name} confirms.</span>
         <FormError error={send.error ?? open.error} />
         <div className="form-actions">
           <Button onClick={onClose}>{kind === "cancel" ? "Keep it" : "Back"}</Button>
@@ -614,7 +633,7 @@ export function MessageDialog({ token, company, visit, hubFetch, onClose }: { to
   });
   return (
     <Dialog open onClose={onClose} title={visit ? "Ask to change a visit" : `Message ${company}`} description={visit ? `${visit.title}, ${formatDate(visit.scheduled_on)}` : "They'll reply by email or text."}>
-      <form onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
+      <form className="hub-dialog-form" onSubmit={(e: FormEvent) => { e.preventDefault(); send.mutate(); }}>
         <Field label={visit ? "What works better for you?" : "Your message"} requiredMessage={visit ? "Tell us a day or time that works better." : "Write your message, and we'll get back to you."}>
           <textarea className="textarea" rows={5} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={4000} required autoFocus />
         </Field>

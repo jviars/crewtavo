@@ -4,7 +4,9 @@
  * or words alone (SocialComposer), now or later. Scheduled posts can be changed or cancelled until
  * they start; each post says how it went on each network, with its link or what went wrong, and one
  * that may have posted is settled by a person. In the narrow column: where posts can go, and automatic
- * 5-star posts.
+ * 5-star posts. Laid out as App-Marketing.dc.html's sections: posts are inbox rows on hairlines (a
+ * draft or a scheduled post opens to edit), New post a quiet action on its section's heading; on a
+ * phone each section is an inset card on the grouped screen (Mobile-Apps.dc.html › Marketing).
  *
  * Office staff can't read Apps, so what's connected comes from GET /api/social. ?compose=photos&photos=…
  * (a job's Photos card) and ?compose=review&review=… (Marketing → Reviews) open a new post with those
@@ -14,19 +16,22 @@ import { AUTO_POSTS_PER_DAY, brandColor, cardColors, NETWORK_NAMES, NETWORKS, ne
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DetailColumns } from "@/components/ui/DetailPage";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
-import { CardSkeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { InboxSkeleton, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
-import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
+import styles from "./Presence.module.css";
 import { ShareElsewhere } from "./ShareElsewhere";
 import { SocialComposer, type ComposerStart } from "./SocialComposer";
 import { CHECK_WORDS, networkChoices, networkLine, postSummary, socialKey, sourceWords, useSocialPosts, useSocialState, whenWords, type SocialPost, type SocialState } from "./socialData";
@@ -64,27 +69,32 @@ export function Social() {
     setParams({ tab: "social" }, { replace: true });
   }, [params, state.data, setParams]);
 
-  if (state.isPending) return <div className="two-col"><div className="wide stack"><TableSkeleton columns={3} rows={3} /></div><aside className="narrow stack"><CardSkeleton lines={4} /></aside></div>;
-  if (state.error) return <div className="card"><ErrorState error={state.error} onRetry={() => state.refetch()} /></div>;
+  if (state.isPending) {
+    return (
+      <div className={cx("m-grouped", styles.tab)}>
+        <DetailColumns side={<SectionSkeleton rows={3} />}><InboxSkeleton rows={3} /></DetailColumns>
+      </div>
+    );
+  }
+  if (state.error) return <ErrorState error={state.error} onRetry={() => state.refetch()} />;
   const s = state.data;
   const nothing = !s.networks.facebook.connected && !s.networks.instagram.connected && !s.networks.google.ready;
   // Null while it isn't known yet.
   const noneDone = done.isPending ? null : done.isSuccess && !done.data.pages.some((p) => p.posts.length);
 
   return (
-    <div className="two-col">
-      <div className="wide stack-lg">
-        <div className="row-between">
-          <h2 className="section-title">Social posts</h2>
-          <Button variant="primary" icon="plus" onClick={() => setComposing({})}>New post</Button>
-        </div>
+    <div className={cx("m-grouped", styles.tab)}>
+      <DetailColumns
+        side={
+          <>
+            <WherePosts state={s} />
+            <AutoPosts state={s} timeZone={session.company.timezone} />
+          </>
+        }
+      >
         <PostList list="upcoming" state={s} title="Drafts and scheduled" nothing={nothing} noneDone={noneDone} onNew={() => setComposing({})} onEdit={(post) => setComposing({ post })} highlight={highlight} />
         <PostList list="done" state={s} title="Posts" nothing={nothing} noneDone={noneDone} onNew={() => setComposing({})} onEdit={(post) => setComposing({ post })} highlight={highlight} />
-      </div>
-      <aside className="narrow stack">
-        <WherePosts state={s} />
-        <AutoPosts state={s} timeZone={session.company.timezone} />
-      </aside>
+      </DetailColumns>
       {composing && <SocialComposer key={composing.post?.id ?? "new"} open onClose={() => setComposing(null)} state={s} post={composing.post} start={composing.start} />}
     </div>
   );
@@ -92,30 +102,33 @@ export function Social() {
 
 function PostList({ list, state, title, nothing, noneDone, onNew, onEdit, highlight }: { list: "upcoming" | "done"; state: SocialState; title: string; nothing: boolean; noneDone: boolean | null; onNew: () => void; onEdit: (post: SocialPost) => void; highlight: string | null }) {
   const posts = useSocialPosts(list);
-  const ref = useListAnimation<HTMLDivElement>();
   const rows = posts.data?.pages.flatMap((p) => p.posts) ?? [];
-  if (posts.isPending || (list === "upcoming" && noneDone === null && !rows.length)) return <section className="stack-sm"><h3 className="section-title" style={{ fontSize: 15 }}>{title}</h3><TableSkeleton columns={3} rows={2} header={false} /></section>;
-  if (posts.error) return <div className="card"><ErrorState error={posts.error} onRetry={() => posts.refetch()} /></div>;
+  // New post sits on the first section's heading, as App-Marketing.dc.html's New campaign does.
+  const action = list === "upcoming" ? <Button icon="plus" onClick={onNew}>New post</Button> : undefined;
+  if (posts.isPending || (list === "upcoming" && noneDone === null && !rows.length)) return <Section title={title} action={action} flush><InboxSkeleton rows={2} /></Section>;
+  if (posts.error) return <ErrorState error={posts.error} onRetry={() => posts.refetch()} />;
   if (!rows.length) {
     if (list === "done") return null;
     // The big empty state only when there's nothing at all: posts that went are listed below.
-    if (!noneDone) return <section className="stack-sm" aria-label={title}><h3 className="section-title" style={{ fontSize: 15 }}>{title}</h3><span className="muted small">Nothing scheduled.</span></section>;
+    if (!noneDone) return <Section title={title} action={action}><p className={styles.note}>Nothing scheduled.</p></Section>;
     return (
-      <div className="card">
-        <EmptyState icon="share" title="No posts yet" action={<Button icon="plus" onClick={onNew}>New post</Button>}>
-          {nothing ? "Connect Facebook & Instagram to post here. You can still download photos and share them anywhere." : "Post job photos, a 4 or 5-star review or an update, now or later."}
-        </EmptyState>
-      </div>
+      <EmptyState icon="share" title="No posts yet" action={<Button icon="plus" onClick={onNew}>New post</Button>}>
+        {nothing ? "Connect Facebook & Instagram to post here. You can still download photos and share them anywhere." : "Post job photos, a 4 or 5-star review or an update, now or later."}
+      </EmptyState>
     );
   }
   return (
-    <section className="stack-sm" aria-label={title}>
-      <h3 className="section-title" style={{ fontSize: 15 }}>{title}</h3>
-      <div className="card" ref={ref}>
-        {rows.map((post) => <PostRow key={post.id} post={post} state={state} onEdit={onEdit} highlight={highlight === post.id} />)}
-      </div>
-      {posts.hasNextPage && <Button size="sm" variant="ghost" style={{ justifySelf: "start" }} loading={posts.isFetchingNextPage} onClick={() => posts.fetchNextPage()}>Load more</Button>}
-    </section>
+    <Section title={title} count={posts.hasNextPage ? undefined : rows.length} action={action} flush>
+      <InboxList
+        label={title}
+        inset
+        foot={posts.hasNextPage && <ListFoot more={{ onClick: () => posts.fetchNextPage(), loading: posts.isFetchingNextPage }}>Showing {rows.length}</ListFoot>}
+      >
+        <InboxGroup>
+          {rows.map((post) => <PostRow key={post.id} post={post} state={state} onEdit={onEdit} highlight={highlight === post.id} />)}
+        </InboxGroup>
+      </InboxList>
+    </Section>
   );
 }
 
@@ -154,59 +167,95 @@ function PostRow({ post, state, onEdit, highlight }: { post: SocialPost; state: 
   const results = NETWORKS.map((n) => post.results.find((r) => r.network === n)).filter((r): r is NonNullable<typeof r> => Boolean(r));
   const editable = (post.status === "draft" || post.status === "scheduled") && state.marketing_on;
   const retryable = ["failed", "partly_posted", "check"].includes(post.status) && results.some((r) => r.status === "failed" || r.status === "skipped");
-  const ref = useRef<HTMLDivElement>(null);
+  // The caption, so the post a notification links to can be brought into view (the shared row takes no ref).
+  const ref = useRef<HTMLSpanElement>(null);
   // Once, when it's the post a notification links to: never again on a refetch.
   useEffect(() => {
     if (highlight) ref.current?.scrollIntoView({ block: "center" });
   }, [highlight]);
   // When it goes first; a review's post says whose review on a line of its own.
-  const details = [whenWords(post, session.company.timezone), summary.networks, post.source !== "review" && sourceWords(post), post.automatic && "Automatic"].filter(Boolean).join(" · ");
+  const details = [whenWords(post, session.company.timezone), summary.networks, post.source !== "review" && sourceWords(post), post.automatic && "Automatic"];
+  // Queued says nothing the line above doesn't while a post waits its turn.
+  const shownResults = post.status === "draft" || post.status === "scheduled" ? results.filter((r) => r.status !== "waiting") : results;
+  const posted = shownResults.filter((r) => r.status === "posted");
+  const failed = act.error ?? remove.error;
+  // A draft or a scheduled post opens to edit: the whole row is its button. One that's gone has nothing to open.
+  const target = editable ? { onClick: () => onEdit(post) } : {};
   return (
-    <div ref={ref} className="card-row post-row" style={highlight ? { background: "var(--green-tint)" } : undefined}>
-      <PostThumb post={post} />
-      <div className="grow stack-sm" style={{ gap: 4, minWidth: 0 }}>
-        <span className="ellipsis-2" style={{ fontWeight: 600 }}>{post.caption.trim() || sourceWords(post)}</span>
-        {post.source === "review" && (
-          <span className="muted small ellipsis" title={post.review?.words}>
-            {post.review ? <>{post.review.words ? `“${post.review.words}” ` : ""}— {post.review.name ?? "A Google user"}</> : "A Google review that isn't here anymore"}
-          </span>
-        )}
-        <span className="mobile-only" style={{ justifyItems: "start" }}><EntityStatus kind="post" status={post.status} /></span>
-        <span className="muted small">{details}</span>
-        {post.note && <span className="muted small">{post.note}</span>}
-        {results.map((r) => {
-          const line = networkLine(r);
-          return (
-            <span key={r.network} className="stack-sm" style={{ gap: 2 }}>
-              <span className="row wrap small" style={{ gap: 8 }}>
-                <StatusPill label={`${NETWORK_NAMES[r.network]}: ${line.label}`} tone={r.status === "posted" ? "good" : r.status === "failed" ? "danger" : r.status === "unknown" || r.status === "retry" ? "warning" : "muted"} />
-                {r.status === "posted" && r.permalink ? <a href={r.permalink} target="_blank" rel="noreferrer">{line.text} <Icon name="external" size={12} /></a> : line.text ? <span className="muted">{line.text}</span> : null}
-              </span>
-              {r.status === "unknown" && (
-                <span className="row wrap" style={{ gap: 4 }}>
-                  <Button size="sm" variant="ghost" onClick={() => resolve(r.network, true)}>{CHECK_WORDS[r.network].there}</Button>
-                  <Button size="sm" variant="ghost" onClick={() => resolve(r.network, false)}>It isn't there, post it</Button>
-                </span>
+    <InboxRow
+      {...target}
+      className={cx(styles.post, highlight && "post-highlight")}
+      title={<span ref={ref} className={styles.caption}>{post.caption.trim() || sourceWords(post)}</span>}
+      avatar={<PostThumb post={post} />}
+      subject={post.source === "review" && (
+        <span title={post.review?.words}>
+          {post.review ? <>{post.review.words ? `“${post.review.words}” ` : ""}— {post.review.name ?? "A Google user"}</> : "A Google review that isn't here anymore"}
+        </span>
+      )}
+      // On a phone the status leads the quiet line, so the right edge keeps only the menu.
+      meta={[<span className={cx("mobile-only", styles.metaStatus)}><EntityStatus kind="post" status={post.status} /></span>, ...details]}
+      aside={
+        <>
+          <span className="hide-mobile"><EntityStatus kind="post" status={post.status} /></span>
+          <Menu
+            triggerClassName={cx("btn btn-sm btn-ghost btn-icon", styles.asideMore)}
+            label="Post actions"
+            title={post.caption.trim() ? post.caption.trim().slice(0, 60) : sourceWords(post)}
+            items={[
+              { label: "Edit", icon: "edit", kbd: "E", hidden: !editable, onSelect: () => onEdit(post) },
+              { label: "Post again", icon: "refresh", hidden: !retryable || !state.marketing_on, onSelect: () => act.mutate({ kind: "retry" }) },
+              { label: "Share elsewhere", icon: "share", kbd: "S", onSelect: () => setSharing(true) },
+              { separator: true },
+              { label: "Cancel post", icon: "x", danger: true, hidden: post.status !== "scheduled" && post.status !== "posting", onSelect: cancel },
+              { label: "Delete", icon: "trash", danger: true, hidden: post.status !== "draft", onSelect: deleteDraft },
+            ]}
+          />
+          <ShareElsewhere open={sharing} onClose={() => setSharing(false)} caption={post.caption} post={post} />
+        </>
+      }
+    >
+      {(post.note || shownResults.length > 0 || failed) && (
+        <>
+          {post.note && <p className={styles.postNote}>{post.note}</p>}
+          {shownResults.length > 0 && (
+            <ul className={styles.results} aria-label="Where it went">
+              {/* Where it went, on one line with a link to each; then each place that didn't, saying why. */}
+              {posted.length > 0 && (
+                <li>
+                  <span className={styles.resultLine}>
+                    <StatusPill label="Posted to" tone="good" />
+                    {posted.map((r, i) => (
+                      <span key={r.network} className={styles.resultPlace}>
+                        {r.permalink ? <a href={r.permalink} target="_blank" rel="noreferrer" aria-label={networkLine(r).text ?? NETWORK_NAMES[r.network]}>{NETWORK_NAMES[r.network]} <Icon name="external" size={12} /></a> : NETWORK_NAMES[r.network]}
+                        {i < posted.length - 1 && <span aria-hidden>,</span>}
+                      </span>
+                    ))}
+                  </span>
+                </li>
               )}
-            </span>
-          );
-        })}
-        <FormError error={act.error ?? remove.error} />
-      </div>
-      <span className="hide-mobile"><EntityStatus kind="post" status={post.status} /></span>
-      <Menu
-        triggerClassName="btn btn-sm btn-ghost btn-icon"
-        label="Post actions"
-        items={[
-          { label: "Edit", icon: "edit", hidden: !editable, onSelect: () => onEdit(post) },
-          { label: "Cancel post", icon: "x", hidden: post.status !== "scheduled" && post.status !== "posting", onSelect: cancel },
-          { label: "Post again", icon: "refresh", hidden: !retryable || !state.marketing_on, onSelect: () => act.mutate({ kind: "retry" }) },
-          { label: "Share elsewhere", icon: "share", onSelect: () => setSharing(true) },
-          { label: "Delete", icon: "trash", danger: true, hidden: post.status !== "draft", onSelect: deleteDraft },
-        ]}
-      />
-      <ShareElsewhere open={sharing} onClose={() => setSharing(false)} caption={post.caption} post={post} />
-    </div>
+              {shownResults.filter((r) => r.status !== "posted").map((r) => {
+                const line = networkLine(r);
+                return (
+                  <li key={r.network}>
+                    <span className={styles.resultLine}>
+                      <StatusPill label={`${NETWORK_NAMES[r.network]}: ${line.label}`} tone={r.status === "failed" ? "danger" : r.status === "unknown" || r.status === "retry" ? "warning" : "muted"} />
+                      {line.text ? <span>{line.text}</span> : null}
+                    </span>
+                    {r.status === "unknown" && (
+                      <span className={styles.resultActions}>
+                        <Button size="sm" onClick={() => resolve(r.network, true)}>{CHECK_WORDS[r.network].there}</Button>
+                        <Button size="sm" onClick={() => resolve(r.network, false)}>It isn't there, post it</Button>
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <FormError error={failed} />
+        </>
+      )}
+    </InboxRow>
   );
 }
 
@@ -229,45 +278,57 @@ function PostThumb({ post }: { post: SocialPost }) {
 }
 
 /** Where to go in Apps for what's in Google Business Profile's way, without saying its name twice. */
-const GOOGLE_FIX: Record<string, string> = { not_connected: "Connect it", signin: "Reconnect it", pick: "Pick your location", location: "Pick your location", approval: "See where it's at", not_enabled: "See where it's at" };
+const GOOGLE_FIX: Record<string, string> = { not_connected: "Connect it", approval: "See where it's at", not_enabled: "See where it's at" };
+/** What's in the way already says what to do in Apps ("Pick your location in Apps."): those words are the link, said once. */
+const GOOGLE_SAYS_FIX = new Set(["signin", "pick", "location"]);
 
 /** Where posts can go: each network, or what it needs and who can do it. */
 function WherePosts({ state }: { state: SocialState }) {
   const { facebook, instagram, google } = state.networks;
   const connect = state.can_connect;
-  const ask = (what: string) => <span className="muted small">Ask an owner or admin to {what}.</span>;
+  const ask = (what: string) => <p className={styles.note}>Ask an owner or admin to {what}.</p>;
   // Connected but missing a permission it posts with: it can't post until it's reconnected.
   const missing = [...new Set([...facebook.missing, ...instagram.missing])];
   const pill = (connected: boolean, problem: string | null, lacks: readonly string[]) =>
     connected && !lacks.length ? <StatusPill label="Connected" tone="good" />
     : connected || problem === "signin" ? <StatusPill label="Needs attention" tone={problem === "signin" ? "danger" : "warning"} />
     : <StatusPill label="Not connected" tone="muted" />;
+  const googleWaits = google.reason === "approval" || google.reason === "not_enabled";
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="where-posts">
-      <h2 id="where-posts" className="section-title" style={{ fontSize: 16 }}>Where it posts</h2>
-      <div className="row-between"><span>Facebook{facebook.page_name ? <span className="muted"> · {facebook.page_name}</span> : null}</span>{pill(facebook.connected, facebook.problem, facebook.missing)}</div>
-      <div className="row-between"><span>Instagram{instagram.username ? <span className="muted"> · @{instagram.username}</span> : null}</span>{pill(instagram.connected, instagram.problem, instagram.missing)}</div>
-      {!facebook.connected && (connect ? <Link className="btn btn-sm" style={{ justifySelf: "start" }} to="/apps/meta">{facebook.problem === "signin" ? "Reconnect Facebook & Instagram" : facebook.problem === "pick" ? "Pick your Page" : "Connect Facebook & Instagram"}</Link> : ask(facebook.problem === "signin" ? "reconnect Facebook & Instagram" : "connect Facebook & Instagram"))}
-      {facebook.connected && missing.length > 0 && (
-        <span className="muted small">
-          Meta wasn't given {missing.length === 1 ? "a permission" : "permissions"} posts need: {missing.map((p, i) => <span key={p}>{i ? ", " : ""}<strong>{p}</strong></span>)}.{" "}
-          {connect ? <><Link to="/apps/meta">Reconnect Facebook & Instagram</Link> and allow {missing.length === 1 ? "it" : "them"}.</> : "Ask an owner or admin to reconnect Facebook & Instagram."}
-        </span>
-      )}
-      {facebook.connected && instagram.problem === "not_linked" && <span className="muted small">Your Instagram account isn't linked to your Page.{connect && <> <Link to="/apps/meta">Check again</Link> once it is.</>}</span>}
-      {facebook.connected && instagram.problem === "off" && (
-        <span className="muted small">Instagram is linked to your Page, but posts don't go to it.{connect ? <> In <Link to="/apps/meta">Facebook & Instagram</Link>, choose <strong>Change Page</strong> and tick <strong>Post to Instagram too</strong>.</> : " Ask an owner or admin to turn it on in Apps."}</span>
-      )}
-      {instagram.needs_business_permissions && <span className="muted small">Your Page is in a business portfolio, so Instagram needs two more permissions.{connect ? <> <Link to="/apps/meta">Reconnect with business Page permissions</Link>.</> : " Ask an owner or admin to reconnect."}</span>}
-      {facebook.connected && !facebook.live_confirmed && (
-        <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">Posts stay hidden from the public until your Meta app is Live.{connect && <> <Link to="/apps/meta">Switch it to Live</Link></>}</div></div>
-      )}
-      <div className="row-between"><span>Google Business Profile</span>{google.ready ? <StatusPill label="Connected" tone="good" /> : <StatusPill label={google.reason === "approval" || google.reason === "not_enabled" ? "Waiting on Google" : "Not connected"} tone={google.reason === "approval" || google.reason === "not_enabled" ? "warning" : "muted"} />}</div>
-      {!google.ready && google.message && (connect ? <span className="muted small">{google.message} <Link to="/apps/google_business">{GOOGLE_FIX[google.reason ?? ""] ?? "Open it in Apps"}</Link></span> : <span className="muted small">{google.message} Ask an owner or admin to look at it in Apps.</span>)}
-      {!state.images_public && (
-        <span className="muted small">Crewtavo's address isn't public, so Meta and Google can't fetch photos or review cards from it. Words alone can still post, and Share elsewhere works for the rest.</span>
-      )}
-    </section>
+    <Section title="Where it posts">
+      <RelatedList label="Where posts go">
+        <RelatedRow title="Facebook" detail={facebook.page_name} end={pill(facebook.connected, facebook.problem, facebook.missing)} />
+        <RelatedRow title="Instagram" detail={instagram.username ? `@${instagram.username}` : null} end={pill(instagram.connected, instagram.problem, instagram.missing)} />
+        <RelatedRow title="Google Business Profile" end={google.ready ? <StatusPill label="Connected" tone="good" /> : <StatusPill label={googleWaits ? "Waiting on Google" : "Not connected"} tone={googleWaits ? "warning" : "muted"} />} />
+      </RelatedList>
+      <div className={cx(styles.copy, styles.afterList)}>
+        {!facebook.connected && (connect ? <Link className={cx("btn btn-sm", styles.connect)} to="/apps/meta">{facebook.problem === "signin" ? "Reconnect Facebook & Instagram" : facebook.problem === "pick" ? "Pick your Page" : "Connect Facebook & Instagram"}</Link> : ask(facebook.problem === "signin" ? "reconnect Facebook & Instagram" : "connect Facebook & Instagram"))}
+        {facebook.connected && missing.length > 0 && (
+          <p className={styles.note}>
+            Meta wasn't given {missing.length === 1 ? "a permission" : "permissions"} posts need: {missing.map((p, i) => <span key={p}>{i ? ", " : ""}<strong>{p}</strong></span>)}.{" "}
+            {connect ? <><Link to="/apps/meta">Reconnect Facebook & Instagram</Link> and allow {missing.length === 1 ? "it" : "them"}.</> : "Ask an owner or admin to reconnect Facebook & Instagram."}
+          </p>
+        )}
+        {facebook.connected && instagram.problem === "not_linked" && <p className={styles.note}>Your Instagram account isn't linked to your Page.{connect && <> <Link to="/apps/meta">Check again</Link> once it is.</>}</p>}
+        {facebook.connected && instagram.problem === "off" && (
+          <p className={styles.note}>Instagram is linked to your Page, but posts don't go to it.{connect ? <> In <Link to="/apps/meta">Facebook & Instagram</Link>, choose <strong>Change Page</strong> and tick <strong>Post to Instagram too</strong>.</> : " Ask an owner or admin to turn it on in Apps."}</p>
+        )}
+        {instagram.needs_business_permissions && <p className={styles.note}>Your Page is in a business portfolio, so Instagram needs two more permissions.{connect ? <> <Link to="/apps/meta">Reconnect with business Page permissions</Link>.</> : " Ask an owner or admin to reconnect."}</p>}
+        {facebook.connected && !facebook.live_confirmed && (
+          <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">Posts stay hidden from the public until your Meta app is Live.{connect && <> <Link to="/apps/meta">Switch it to Live</Link></>}</div></div>
+        )}
+        {!google.ready && google.message && (connect ? (
+          <p className={styles.note}>
+            {GOOGLE_SAYS_FIX.has(google.reason ?? "")
+              ? <Link to="/apps/google_business">{google.message}</Link>
+              : <>{google.message} <Link to="/apps/google_business">{GOOGLE_FIX[google.reason ?? ""] ?? "Open it in Apps"}</Link></>}
+          </p>
+        ) : <p className={styles.note}>{google.message} Ask an owner or admin to look at it in Apps.</p>)}
+        {!state.images_public && (
+          <p className={styles.note}>Crewtavo's address isn't public, so Meta and Google can't fetch photos or review cards from it. Words alone can still post, and Share elsewhere works for the rest.</p>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -313,48 +374,54 @@ function AutoPosts({ state, timeZone }: { state: SocialState; timeZone: string }
   // While they're on they need somewhere to go: the last place that can post can't be unticked, only turned off.
   const last = state.auto.enabled && live.length === 1;
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="auto-posts">
-      <h2 id="auto-posts" className="section-title" style={{ fontSize: 16 }}>Post 5-star reviews automatically</h2>
-      <label className="switch-row">
-        <input type="checkbox" className="switch" aria-label="Post 5-star reviews automatically" checked={state.auto.enabled} disabled={save.isPending || !state.marketing_on || (!state.auto.enabled && (!networks.some(ready) || !state.images_public))} onChange={(e) => turn(e.target.checked)} />
-        {paused ? "Paused" : state.auto.enabled ? "On" : "Off"}
-      </label>
-      {paused && (
-        <div className="callout callout-warning">
-          <Icon name="pause" size={20} />
-          <div className="grow">
-            Paused: {networkWords(networks)} can't post now, so new 5-star reviews aren't scheduled. They start again once {networks.length === 1 ? "it's" : "they're"} connected{NETWORKS.some(ready) ? ", or tick another place below" : ""}.
+    <Section
+      title="Post 5-star reviews automatically"
+      action={
+        <label className={styles.headSwitch}>
+          <span>{paused ? "Paused" : state.auto.enabled ? "On" : "Off"}</span>
+          <input type="checkbox" role="switch" className="switch" aria-label="Post 5-star reviews automatically" checked={state.auto.enabled} disabled={save.isPending || !state.marketing_on || (!state.auto.enabled && (!networks.some(ready) || !state.images_public))} onChange={(e) => turn(e.target.checked)} />
+        </label>
+      }
+    >
+      <div className={styles.copy}>
+        {paused && (
+          <div className="callout callout-warning">
+            <Icon name="pause" size={16} />
+            <div className="grow">
+              Paused: {networkWords(networks)} can't post now, so new 5-star reviews aren't scheduled. They start again once {networks.length === 1 ? "it's" : "they're"} connected{NETWORKS.some(ready) ? ", or tick another place below" : ""}.
+            </div>
           </div>
-        </div>
-      )}
-      <span className="muted small">
-        New 5-star reviews with words post at 10 AM, 1 PM or 4 PM ({timeZoneWords(timeZone)}), at most {AUTO_POSTS_PER_DAY} a day, from the next day (the same day for a review in before 8 AM). You can change or cancel each one before it goes.
-      </span>
-      <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-        <legend className="muted small strong">Post to</legend>
-        {choices.map((c) => (
-          <label key={c.network} className="checkbox">
-            <input
-              type="checkbox"
-              checked={networks.includes(c.network) && c.enabled}
-              disabled={!c.enabled || save.isPending || (last && live.includes(c.network))}
-              onChange={(e) => {
-                const next = e.target.checked ? [...networks, c.network] : networks.filter((x) => x !== c.network);
-                setNetworks(next);
-                if (state.auto.enabled && next.some(ready)) save.mutate({ enabled: true, networks: next });
-              }}
-            />
-            <span>
-              {NETWORK_NAMES[c.network]}
-              {state.auto.enabled && networks.includes(c.network) && !c.enabled && c.reason && <span className="muted small" style={{ display: "block", fontWeight: 400 }}>{c.reason}</span>}
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      {!NETWORKS.some(ready) && !paused && <span className="muted small">Connect Facebook & Instagram or Google Business Profile first.</span>}
-      {!state.images_public && <span className="muted small">Crewtavo's address isn't public, so Meta and Google can't fetch the review cards. Automatic posts need it to be.</span>}
-      {last && <span className="muted small">They need one place to post. To stop them, turn them off.</span>}
-      <FormError error={save.error} />
-    </section>
+        )}
+        <p className={styles.note}>
+          New 5-star reviews with words post at 10 AM, 1 PM or 4 PM ({timeZoneWords(timeZone)}), at most {AUTO_POSTS_PER_DAY} a day, from the next day (the same day for a review in before 8 AM). You can change or cancel each one before it goes.
+        </p>
+        <fieldset className={styles.fieldset}>
+          <legend>Post to</legend>
+          {choices.map((c) => (
+            <label key={c.network} className="checkbox">
+              <input
+                type="checkbox"
+                checked={networks.includes(c.network) && c.enabled}
+                disabled={!c.enabled || save.isPending || (last && live.includes(c.network))}
+                onChange={(e) => {
+                  const next = e.target.checked ? [...networks, c.network] : networks.filter((x) => x !== c.network);
+                  setNetworks(next);
+                  if (state.auto.enabled && next.some(ready)) save.mutate({ enabled: true, networks: next });
+                }}
+              />
+              <span>
+                {NETWORK_NAMES[c.network]}
+                {state.auto.enabled && networks.includes(c.network) && !c.enabled && c.reason && <span className={styles.checkNote}>{c.reason}</span>}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        {!NETWORKS.some(ready) && !paused && <p className={styles.note}>Connect Facebook & Instagram or Google Business Profile first.</p>}
+        {/* Why isn't said twice: Where it posts, just before this, says it. */}
+        {!state.images_public && <p className={styles.note}>Automatic posts need Crewtavo's address to be public.</p>}
+        {last && <p className={styles.note}>They need one place to post. To stop them, turn them off.</p>}
+        <FormError error={save.error} />
+      </div>
+    </Section>
   );
 }

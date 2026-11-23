@@ -13,8 +13,9 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, ListFoot, MetaLine } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
-import { TableSkeleton } from "@/components/ui/Skeleton";
+import { InboxSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { downloadLink } from "@/features/files/files";
 import { fileSize, planLink } from "@/features/plans/plans";
@@ -23,7 +24,7 @@ import { errorMessage } from "@/lib/errors";
 import { formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { companyFilesNote, ICON_FOR, iconKind, refreshFiles, seesDrive, SLOTS, useDriveTrash, type TrashItem } from "./data";
+import { companyFilesNote, groupByDay, ICON_FOR, iconKind, refreshFiles, seesDrive, SLOTS, useDriveTrash, type TrashItem } from "./data";
 import styles from "./drive.module.css";
 import { deletedForeverToast, deleteForever, emptyTrash, restoreTrash, TRASH_LIST_MAX, type DeletedForever, type Restored } from "./trash";
 
@@ -115,67 +116,67 @@ export function TrashList() {
     if (ok) empty.mutate(upTo);
   };
 
+  // The newest first, by when each was deleted: Today, This week, Earlier (the company's time zone).
+  const groups = groupByDay(items.map((item) => ({ ...item, created_at: item.deleted_at })), session.company.timezone);
+  // Within three days of going for good: said in amber.
+  const soon = (item: TrashItem) => new Date(item.purge_at).getTime() - Date.now() < 3 * 86_400_000;
+
   return (
-    <section className="stack" aria-labelledby="drive-trash">
-      <div className="section-head">
+    <section className={styles.trash} aria-labelledby="drive-trash">
+      <div className={styles.trashHead}>
         <h2 id="drive-trash" className="sr-only">Trash</h2>
-        <p className="muted grow" style={{ margin: 0 }}>Files you delete stay here for {TRASH_DAYS} days, then they're deleted for good.</p>
-        {owner && items.length > 0 && <Button variant="danger" icon="trash" loading={empty.isPending} onClick={() => void askEmpty()}>Empty Trash</Button>}
+        <p>Files you delete stay here for {TRASH_DAYS} days, then they're deleted for good.</p>
+        {owner && items.length > 0 && <Button variant="danger" size="sm" icon="trash" loading={empty.isPending} onClick={() => void askEmpty()}>Empty Trash</Button>}
       </div>
       {trash.isPending ? (
-        <div className="card"><TableSkeleton rows={4} columns={3} header={false} /></div>
+        <InboxSkeleton rows={4} />
       ) : trash.error && !trash.data ? (
-        <div className="card"><ErrorState error={trash.error} onRetry={() => trash.refetch()} /></div>
+        <ErrorState error={trash.error} onRetry={() => trash.refetch()} />
       ) : items.length === 0 ? (
-        <div className="card">
-          <EmptyState icon="trash" title="The Trash is empty">Files deleted in Crewtavo, from a plan to a visit photo or a receipt, wait here for {TRASH_DAYS} days in case you need them back.</EmptyState>
-        </div>
+        <EmptyState icon="trash" title="The Trash is empty">Files deleted in Crewtavo, from a plan to a visit photo or a receipt, wait here for {TRASH_DAYS} days in case you need them back.</EmptyState>
       ) : (
-        <div className={`card${trash.isFetching && !trash.isPending ? " is-stale" : ""}`}>
-          <table className={`table table-stack ${styles.files}`}>
-            <thead>
-              <tr><th>Name</th><th className={styles.deletedCol}>Deleted</th><th className={styles.trashActionsCol}><span className="sr-only">Actions</span></th></tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={`${item.kind}-${item.id}`} className={styles.trashRow}>
-                  <td className={styles.nameCell}>
-                    <div className={styles.name}>
-                      <span className={styles.icon} data-kind={kindData(item)} aria-hidden="true"><Icon name={kindIcon(item)} size={18} /></span>
-                      <div className={styles.body}>
-                        <span className={styles.titleText}>{item.name}</span>
-                        <span className={styles.meta}>
-                          {[item.kind === "folder" ? "Folder" : item.kind === "version" ? "One version" : (item.versions ?? 1) > 1 ? `${item.versions} versions` : null, item.detail, fileSize(item.size_bytes)].filter(Boolean).join(" · ")}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className={styles.deletedCell}>
+        <InboxList
+          label="In the Trash"
+          stale={trash.isFetching && !trash.isPending}
+          foot={items.length >= TRASH_LIST_MAX ? <ListFoot>Showing the {TRASH_LIST_MAX} most recent. Older ones are still here, and show as these are restored or deleted.</ListFoot> : undefined}
+        >
+          {groups.map((g) => (
+            <InboxGroup key={g.key} label={g.label} count={g.files.length}>
+              {g.files.map((item) => (
+                <li key={`${item.kind}-${item.id}`} className={`${styles.row} ${styles.trashRow}`}>
+                  <span className={styles.icon} data-kind={kindData(item)} aria-hidden="true"><Icon name={kindIcon(item)} size={17} /></span>
+                  <div className={styles.rowBody}>
+                    <span className={styles.titleText} title={item.name}>{item.name}</span>
+                    <MetaLine
+                      className="il-meta"
+                      parts={[item.kind === "folder" ? "Folder" : item.kind === "version" ? "One version" : (item.versions ?? 1) > 1 ? `${item.versions} versions` : null, item.detail, fileSize(item.size_bytes)]}
+                    />
+                  </div>
+                  <span className={styles.deleted}>
                     <span title={formatDate(item.deleted_at)}>Deleted {timeAgo(item.deleted_at)}{item.deleted_by_name ? ` by ${item.deleted_by_name}` : ""}</span>
-                    <span className={styles.meta}>Deletes on {formatDate(item.purge_at)}</span>
-                  </td>
-                  <td className={styles.actionsCell}>
-                    <div className={styles.trashButtons}>
-                      {item.restore === "download" ? (
-                        <Button size="sm" icon="download" onClick={() => void download(item)} aria-label={`Download ${item.name}`} title="Where it was is gone, so it's downloaded rather than restored">Download</Button>
-                      ) : item.restore !== "none" ? (
-                        <Button size="sm" icon="restore" loading={restore.isPending && restore.variables?.id === item.id} onClick={() => restore.mutate(item)} aria-label={`Restore ${item.name}`}>Restore</Button>
-                      ) : null}
-                      {owner && (
-                        <Menu
-                          triggerClassName="btn btn-sm btn-ghost btn-icon"
-                          label={`More for ${item.name}`}
-                          items={[{ label: "Delete forever", icon: "trash", danger: true, onSelect: () => void askDelete(item) }]}
-                        />
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                    <span data-tone={soon(item) ? "warning" : undefined}>Deletes on {formatDate(item.purge_at)}</span>
+                  </span>
+                  <span className={styles.trashButtons}>
+                    {item.restore === "download" ? (
+                      <Button size="sm" icon="download" onClick={() => void download(item)} aria-label={`Download ${item.name}`} title="Where it was is gone, so it's downloaded rather than restored"><span className={styles.btnText}>Download</span></Button>
+                    ) : item.restore !== "none" ? (
+                      <Button size="sm" icon="restore" loading={restore.isPending && restore.variables?.id === item.id} onClick={() => restore.mutate(item)} aria-label={`Restore ${item.name}`}><span className={styles.btnText}>Restore</span></Button>
+                    ) : null}
+                    {owner && (
+                      <Menu
+                        triggerClassName="btn btn-sm btn-ghost btn-icon"
+                        label={`More for ${item.name}`}
+                        title={item.name}
+                        align="end"
+                        items={[{ label: "Delete forever", icon: "trash", danger: true, onSelect: () => void askDelete(item) }]}
+                      />
+                    )}
+                  </span>
+                </li>
               ))}
-            </tbody>
-          </table>
-          {items.length >= TRASH_LIST_MAX && <div className="list-foot">Showing the {TRASH_LIST_MAX} most recent. Older ones are still here, and show as these are restored or deleted.</div>}
-        </div>
+            </InboxGroup>
+          ))}
+        </InboxList>
       )}
     </section>
   );

@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { FileViewer } from "@/features/files/FileViewer";
 import { supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
@@ -37,12 +38,8 @@ export function FieldPlans({ visitId, jobId, propertyId }: { visitId: string; jo
   const links = usePlanLinks([...(files.data ?? []), ...previewCopies(files.data ?? [])]);
   if (!entries.length) return null;
   return (
-    <section className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{t("Plans")}</strong>
-        {jobId && hasRole(session, "admin", "office", "estimator", "crew_lead") && <Link className="small strong field-link" to={`/jobs/${jobId}`}>{t("Add or update")}</Link>}
-      </div>
-      <div>
+    <Section title={t("Plans")} count={entries.length} action={jobId && hasRole(session, "admin", "office", "estimator", "crew_lead") ? <Link to={`/jobs/${jobId}`}>{t("Add or update")}</Link> : undefined}>
+      <div className={styles.fieldList}>
         {entries.map((entry) => {
           const f = entry.file;
           const save = links.data?.save[f.path];
@@ -62,7 +59,7 @@ export function FieldPlans({ visitId, jobId, propertyId }: { visitId: string; jo
           );
         })}
       </div>
-      {!navigator.onLine && <span className="muted small">{t("No signal: plans you saved to this phone are in its Files or Downloads.")}</span>}
+      {!navigator.onLine && <p className={styles.offline}>{t("No signal: plans you saved to this phone are in its Files or Downloads.")}</p>}
       {viewing && (
         <FileViewer
           file={viewing}
@@ -75,6 +72,6 @@ export function FieldPlans({ visitId, jobId, propertyId }: { visitId: string; jo
           }}
         />
       )}
-    </section>
+    </Section>
   );
 }

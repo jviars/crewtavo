@@ -1,9 +1,9 @@
 /**
  * Crewtavo's connection to its own Railway project (services/railway.ts), made in setup or from
  * Settings → Web address or Hosting.
- *   POST   /api/railway/connect   Login with Railway: returns Railway's consent page
+ *   POST   /api/railway/connect   Login with Railway: returns Railway's consent page (password)
  *   GET    /api/railway/callback  Railway sends the browser back here
- *   POST   /api/railway/token     or a project token instead
+ *   POST   /api/railway/token     or a project token instead (password)
  *   DELETE /api/railway           forget the access
  *   POST   /api/railway/setup     the setup step is done or skipped
  *   POST   /api/railway/later     "Ask me tomorrow" about connecting
@@ -13,7 +13,9 @@
  *   GET    /api/railway/storage   where photos and files are kept (the volume or a bucket), and a move's progress (?fresh=1 to ask Railway now)
  *   POST   /api/railway/storage/move       move them into a Railway bucket, or carry on with a move waiting on Railway
  *   POST   /api/railway/storage/move-back  move them back to the volume
- * Only owners and admins, only in an instance on Railway.
+ * Only owners and admins, only in an instance on Railway. Connecting asks for the person's password,
+ * as choosing a web address does (routes/address.ts): with Railway access Crewtavo switches its
+ * address by itself, and the address is where every reset, invite and client link points.
  */
 import { ADMINS } from "@crewtavo/core";
 import { Hono } from "hono";
@@ -28,6 +30,7 @@ import { appUrl, HttpError, readJson } from "../lib/http";
 import { adminClient } from "../lib/supabase";
 import { authorizationUrl, exchangeCode, pkce, RailwayError } from "../integrations/railway";
 import { addressOverview, adoptRailway, stopAutomatic } from "../services/address";
+import { confirmAddressChange, passwordField, RAILWAY_PASSWORD } from "./address";
 import { forgetHosting, hostingOverview } from "../services/hosting";
 import { connectRailwayLater, forgetRailway, forgetRefusedClient, noteRailwayError, railwayClient, saveRailwayAccess, setRailwaySetup } from "../services/railway";
 import { startStorageMove, storageOverview } from "../services/storageBucket";
@@ -50,9 +53,13 @@ const admins = [onRailway, requireUser, requireCompany(ADMINS, "settings")] as c
 const RETURNS = { setup: "/", settings: "/settings?tab=address", hosting: "/settings?tab=hosting" } as const;
 type ReturnTo = keyof typeof RETURNS;
 
-/** Step 1: Railway's consent page. The signed state names who asked; the cookie holds the PKCE verifier. */
+/**
+ * Step 1: Railway's consent page, once the person's password is checked. The signed state names who
+ * asked; the cookie holds the PKCE verifier. The callback only takes a state made here.
+ */
 railway.post("/railway/connect", ...admins, async (c) => {
-  const { return_to } = await readJson(c, z.object({ return_to: z.enum(["setup", "settings", "hosting"]).default("settings") }));
+  const { return_to, password } = await readJson(c, z.object({ return_to: z.enum(["setup", "settings", "hosting"]).default("settings"), password: passwordField }));
+  await confirmAddressChange(c, password, RAILWAY_PASSWORD);
   const admin = adminClient(c.env);
   const { data: company } = await admin.from("companies").select("name").eq("id", c.var.companyId).maybeSingle();
   const client = await railwayClient(c.env, admin, c.var.companyId, callbackUrl(appUrl(c)), `Crewtavo for ${company?.name ?? "your business"}`).catch(plain);
@@ -96,7 +103,8 @@ railway.get("/railway/callback", onRailway, async (c) => {
 });
 
 railway.post("/railway/token", ...admins, async (c) => {
-  const { token } = await readJson(c, z.object({ token: z.string().trim().min(10, "Paste the whole token.").max(400) }));
+  const { token, password } = await readJson(c, z.object({ token: z.string().trim().min(10, "Paste the whole token.").max(400), password: passwordField }));
+  await confirmAddressChange(c, password, RAILWAY_PASSWORD);
   const admin = adminClient(c.env);
   const access = { method: "token" as const, token };
   await saveRailwayAccess(c.env, admin, c.var.companyId, c.var.userId, access).catch(plain);

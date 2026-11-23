@@ -3,7 +3,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
+import { RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { formatMoneyCents, todayIn } from "@/lib/format";
@@ -13,6 +15,7 @@ import { MarkPaidDialog, type ToPay } from "./MarkPaidDialog";
 import { offerChip, offerLine } from "./offers";
 import { payStatusLine, yearPaid } from "./pay";
 import { useSubPays } from "./payData";
+import styles from "./Subs.module.css";
 
 export function SubPayCard({ subId, name }: { subId: string; name: string }) {
   const session = useSession();
@@ -26,56 +29,57 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
   const owed = rows.filter((p) => p.status === "done");
   const toPay = (p: (typeof rows)[number]): ToPay => ({ id: p.id, total: p.total, label: `${name}, job #${p.job?.number ?? ""}` });
   const shown = all ? rows : rows.slice(0, 8);
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
 
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">Pay</h2>
-        {rows.length > 0 && <Link className="small" to={`/subs/1099?year=${year}`}>Year-end totals</Link>}
-      </div>
-      <div className="card" ref={listRef}>
-        {pays.isPending ? (
-          <div className="card-row"><Skeleton width="50%" /></div>
-        ) : pays.error ? (
-          <div className="card-row"><ErrorState compact error={pays.error} onRetry={() => pays.refetch()} /></div>
-        ) : rows.length === 0 ? (
-          <EmptyState inline title="No pay yet">Add their pay from a job's page, under Sub and crew pay.</EmptyState>
-        ) : (
-          <>
-            <div className="card-row" style={{ flexWrap: "wrap", gap: 16 }}>
-              <span className="grow stack-sm" style={{ gap: 2, minWidth: 140 }}>
-                <span className="muted small">Paid in {year}</span>
-                <strong className="tabular" style={{ fontSize: 16 }}><AnimatedNumber value={totals.paid} format={MONEY_CENTS} /></strong>
-                {totals.for1099 !== totals.paid && <span className="muted small">{formatMoneyCents(totals.for1099)} counts toward their 1099: card and payment-app payments are left out.</span>}
-              </span>
-              <span className="grow stack-sm" style={{ gap: 2, minWidth: 140 }}>
-                <span className="muted small">Owed now</span>
-                <strong className="tabular" style={{ fontSize: 16 }}><AnimatedNumber value={totals.owed} format={MONEY_CENTS} /></strong>
-              </span>
-              {owed.length > 1 && <Button size="sm" icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button>}
-            </div>
+    <Section
+      title="Pay"
+      count={rows.length || undefined}
+      action={owed.length > 1 ? <Button icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button> : rows.length > 0 ? <Link to={`/subs/1099?year=${year}`}>Year-end totals</Link> : undefined}
+    >
+      {pays.isPending ? (
+        <Skeleton width="50%" />
+      ) : pays.error ? (
+        <ErrorState compact error={pays.error} onRetry={() => pays.refetch()} />
+      ) : rows.length === 0 ? (
+        <EmptyState inline title="No pay yet">Add their pay from a job's page, under Sub and crew pay.</EmptyState>
+      ) : (
+        <div className={styles.pay}>
+          <StatStrip label={`Pay in ${year}`}>
+            <Stat
+              label={`Paid in ${year}`}
+              value={<AnimatedNumber value={totals.paid} format={MONEY_CENTS} />}
+              note={totals.for1099 !== totals.paid ? `${formatMoneyCents(totals.for1099)} counts toward their 1099: card and payment-app payments are left out.` : undefined}
+              to={`/subs/1099?year=${year}`}
+              title="Year-end totals"
+            />
+            <Stat label="Owed now" value={<AnimatedNumber value={totals.owed} format={MONEY_CENTS} />} />
+          </StatStrip>
+          <ul className={`rel ${styles.payRows}`} role="list" ref={listRef}>
             {shown.map((p) => (
-              <div key={p.id} className="card-row" style={{ flexWrap: "wrap" }}>
-                <span className="grow" style={{ minWidth: 180 }}>
-                  {p.job ? <Link className="strong" to={`/jobs/${p.job.id}`}>Job #{p.job.number} · {p.job.title}</Link> : <strong>A job</strong>}
-                  <span className="muted small" style={{ display: "block" }}>{offerLine(p, tz) ?? payStatusLine(p, tz)}</span>
-                </span>
-                <span className="tabular strong">{formatMoneyCents(p.status === "paid" ? p.paid_amount : p.total)}</span>
-                <StatusPill {...offerChip(p, "sub")} />
-                {p.status === "done" && <Button size="sm" onClick={() => setPaying([toPay(p)])}>Mark paid</Button>}
-              </div>
+              <RelatedRow
+                key={p.id}
+                to={p.job ? `/jobs/${p.job.id}` : undefined}
+                title={p.job ? `Job #${p.job.number} · ${p.job.title}` : "A job"}
+                sub={offerLine(p, tz) ?? payStatusLine(p, tz)}
+                end={
+                  <>
+                    <StatusPill {...offerChip(p, "sub")} />
+                    <b>{formatMoneyCents(p.status === "paid" ? p.paid_amount : p.total)}</b>
+                  </>
+                }
+                actions={p.status === "done" && <Button size="sm" onClick={() => setPaying([toPay(p)])}>Mark paid</Button>}
+              />
             ))}
-            {rows.length > 8 && (
-              <div className="list-foot">
-                <span />
-                <Button size="sm" variant="ghost" onClick={() => setAll(!all)}>{all ? "Show less" : `Show all ${rows.length}`}</Button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          </ul>
+          {rows.length > 8 && (
+            <div className={styles.more}>
+              <button type="button" className="link-btn" onClick={() => setAll(!all)}>{all ? "Show less" : `Show all ${rows.length}`}</button>
+            </div>
+          )}
+        </div>
+      )}
       {paying && <MarkPaidDialog pays={paying} onClose={() => setPaying(null)} />}
-    </section>
+    </Section>
   );
 }

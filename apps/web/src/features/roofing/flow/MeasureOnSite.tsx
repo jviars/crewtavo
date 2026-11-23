@@ -52,7 +52,7 @@ export function CantMeasureButton({ quote, disabled }: { quote: EstimateQuote; d
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" className={`${styles.linkBtn} ${styles.quiet}`} disabled={disabled} onClick={() => setOpen(true)}>
+      <button type="button" className={styles.linkBtn} disabled={disabled} onClick={() => setOpen(true)}>
         Can't measure it from the air?
       </button>
       {open && <MeasureOnSiteDialog quote={quote} onClose={() => setOpen(false)} />}
@@ -113,19 +113,22 @@ export function MeasureOnSiteCard({ quote, measureLink, canSell }: { quote: Esti
   const unflag = useMeasureOnSite(quote.id);
   const who = personName(team.data, quote.salesperson_id);
   return (
-    <div className="stack-sm">
-      <p className={styles.pricingStatus}>
+    <div className={styles.stepBody}>
+      <div className="callout callout-warning" role="status">
         <Icon name="user" size={16} />
-        {who ? `${who} measures it on site` : "To be measured on site"}
-      </p>
+        <div className="grow">
+          <div>{who ? `${who} measures it on site` : "To be measured on site"}</div>
+          {quote.measure_on_site_reason ? `Not from the air: ${quote.measure_on_site_reason.replace(/[.!?]+$/, "")}.` : "It can't be measured from the air."}
+        </div>
+      </div>
       <p className={styles.note}>
-        {quote.measure_on_site_reason ? `Not from the air: ${quote.measure_on_site_reason.replace(/[.!?]+$/, "")}. ` : ""}
         {who ? "Once it's measured, draw the roof on the map with the pitch found on site, or type in the measurements, and the estimate prices from it." : "Nobody covers this address. Pick who goes out."}
       </p>
       <SalespersonSelect quoteId={quote.id} value={quote.salesperson_id} disabled={!canSell} label="Who goes out to measure" />
       <div className={styles.tools}>
-        {measureLink && <Link className="btn" to={measureLink}>Draw the roof</Link>}
-        {canSell && <RoofReportButton quote={quote} label="Enter measurements from a report" />}
+        {/* The first step is the one the project is at until the roof is drawn, so its way on is the page's green button. */}
+        {measureLink && <Link className="btn btn-primary" to={measureLink}><Icon name="area" size={16} />Draw the roof</Link>}
+        {canSell && <RoofReportButton quote={quote} label="Enter measurements from a report" button />}
         {canSell && (
           <button type="button" className={styles.linkBtn} disabled={unflag.isPending} onClick={() => unflag.mutate(null)}>
             Measure it from the air after all

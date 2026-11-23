@@ -92,7 +92,7 @@ export const analytics = new Hono<AppEnv>();
 const scriptUrl = (c: Parameters<typeof appUrl>[0]) => `${appUrl(c)}/v.js`;
 
 analytics.get("/analytics/setup", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
-  const company = must(await c.var.db.from("companies").select("slug, website, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("slug, website, settings").eq("id", c.var.companyId).maybeSingle());
   const saved = analyticsSettings(company.settings);
   const admin = adminClient(c.env);
   // The latest page view: the last two days' are kept one by one, then only each day's counts.
@@ -128,7 +128,7 @@ analytics.post("/analytics/enabled", requireUser, requireCompany(ADMINS, "apps")
  */
 analytics.post("/analytics/check", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const body = await readJson(c, z.object({ site: z.string().trim().min(3, "Type your website's address, like greenlawn.com.").max(500).optional() }));
-  const company = must(await c.var.db.from("companies").select("website, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("website, settings").eq("id", c.var.companyId).maybeSingle());
   const address = body.site ?? websiteOf(company);
   if (!address) throw new HttpError(400, "Type your website's address, like greenlawn.com.");
   let site: string;

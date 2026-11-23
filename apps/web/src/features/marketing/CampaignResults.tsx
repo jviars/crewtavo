@@ -8,13 +8,17 @@ import { bookingWords, campaignRates, nextRecipientPage, RECIPIENT_PAGE, results
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
-import { Skeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { ListFoot } from "@/components/ui/InboxList";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDateTime, formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./Marketing.module.css";
 
 /** Every campaign's numbers, drafts left out: the one-off list and the automated cards read them. */
 export function useCampaignResults() {
@@ -73,31 +77,29 @@ export function CampaignStats({ campaignId, live = false }: { campaignId: string
   });
   const r = results.data;
   const rates = r ? campaignRates(r) : null;
+  const emails = (n: number | undefined) => `${(n ?? 0).toLocaleString()} ${n === 1 ? "email" : "emails"}`;
   return (
-    <div className="stack">
+    <>
       {results.isPending ? <StatsSkeleton count={5} /> : results.error ? (
-        <div className="card"><ErrorState compact error={results.error} onRetry={() => results.refetch()} /></div>
+        <ErrorState compact error={results.error} onRetry={() => results.refetch()} />
       ) : (
-        <div className="stat-row">
-          <div className="card stat"><div className="label">Sent</div><div className="value">{(r?.sent ?? 0).toLocaleString()}</div></div>
-          <div className="card stat"><div className="label">Opened</div><div className="value">{rates?.opened ?? 0}%</div><div className="hint">{(r?.opened ?? 0).toLocaleString()} {r?.opened === 1 ? "email" : "emails"}</div></div>
-          <div className="card stat"><div className="label">Clicked</div><div className="value">{rates?.clicked ?? 0}%</div><div className="hint">{(r?.clicked ?? 0).toLocaleString()} {r?.clicked === 1 ? "email" : "emails"}</div></div>
-          <div className="card stat"><div className="label">Bookings</div><div className="value">{(r?.bookings ?? 0).toLocaleString()}</div><div className="hint">Requests and approved quotes</div></div>
-          <div className="card stat">
-            <div className="label">Revenue</div>
-            <div className="value">{r?.revenue == null ? "—" : formatMoneyCents(r.revenue)}</div>
-            <div className="hint">{r?.revenue == null ? "Needs the Invoices area" : "Paid so far, before tax"}</div>
-          </div>
-        </div>
+        <StatStrip label="What it brought in">
+          <Stat label="Sent" value={(r?.sent ?? 0).toLocaleString()} />
+          <Stat label="Opened" value={`${rates?.opened ?? 0}%`} note={emails(r?.opened)} />
+          <Stat label="Clicked" value={`${rates?.clicked ?? 0}%`} note={emails(r?.clicked)} />
+          <Stat label="Bookings" value={(r?.bookings ?? 0).toLocaleString()} note="Requests and approved quotes" />
+          {/* Someone without the Invoices area has no revenue to see. */}
+          {r?.revenue != null && <Stat label="Revenue" value={formatMoneyCents(r.revenue)} note="Paid so far, before tax" />}
+        </StatStrip>
       )}
       <div className="stack-sm">
-        <p className="muted small" style={{ margin: 0 }}>Opens are approximate: Apple Mail and some others load images to protect privacy, so some emails show as opened when they weren't.</p>
-        <p className="muted small" style={{ margin: 0 }}>
+        <p className={styles.fine}>Opens are approximate: Apple Mail and some others load images to protect privacy, so some emails show as opened when they weren't.</p>
+        <p className={styles.fine}>
           Bookings are requests and approved quotes from people who clicked a link, within 30 days. A request and the quote made from it count once. Revenue is what that work has been paid so far, before tax.
           Work booked another way counts when it was set up after the click and paid within 30 days of it, so invoices for work they already had, like recurring visits, don't.
         </p>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -118,53 +120,42 @@ export function CampaignRecipients({ campaignId, live = false }: { campaignId: s
   const recipients = [...new Map((people.data?.pages ?? []).flatMap((p) => p.recipients).map((p) => [p.id, p])).values()];
 
   return (
-    <div className="card">
-      <div className="card-head wrap" style={{ rowGap: 8 }}>
-        <strong>Recipients</strong>
-        <div className="segmented" role="group" aria-label="Show">
-          {RECIPIENT_FILTERS.map((f) => <button key={f.value} type="button" aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>{f.label}</button>)}
-        </div>
-        <span className="muted small">{people.data ? total.toLocaleString() : ""}</span>
+    <Section title="Recipients" count={people.data ? total.toLocaleString() : undefined} flush>
+      <div className={styles.filters}>
+        <FilterTabs label="Show" value={filter} onChange={setFilter} options={RECIPIENT_FILTERS.map((f) => ({ value: f.value, label: f.label }))} />
       </div>
-      {people.isPending && <div className="card-pad"><Skeleton height={60} /></div>}
+      {people.isPending && <SectionSkeleton rows={3} />}
       {people.error && <ErrorState compact error={people.error} onRetry={() => people.refetch()} />}
       {people.data && recipients.length === 0 && <EmptyState inline title={RECIPIENT_FILTERS.find((f) => f.value === filter)!.empty} />}
-      {recipients.map((p) => {
-        const notes = [
-          p.email,
-          p.quote_number != null ? `Quote #${p.quote_number}` : null,
-          p.sent_at ? `Sent ${formatDateTime(p.sent_at)}` : null,
-          p.clicked_at ? `Clicked ${formatDateTime(p.clicked_at)}${p.click_count > 1 ? ` (${p.click_count} times)` : ""}` : p.opened_at ? `Opened ${formatDateTime(p.opened_at)}` : null,
-          p.error,
-        ].filter(Boolean);
-        const booked = [p.bookings ? bookingWords(p.bookings) : null, p.revenue ? formatMoneyCents(p.revenue) : null].filter(Boolean).join(" · ");
-        return (
-          <div key={p.id} className="card-row" style={{ padding: "10px 20px" }}>
-            <span className="grow" style={{ minWidth: 0 }}>
-              {p.client_id ? <Link to={`/clients/${p.client_id}`} className="strong text-sm" style={{ color: "var(--ink)" }}>{p.name ?? p.email}</Link> : <strong className="text-sm">{p.name ?? p.email}</strong>}
-              <span className="muted small" style={{ display: "block" }}>{notes.join(" · ")}</span>
-              {booked && <span className="small" style={{ display: "block", fontWeight: 600 }}>{booked}</span>}
-            </span>
-            <EntityStatus kind="recipient" status={p.status === "sent" && p.clicked_at ? "clicked" : p.status === "sent" && p.opened_at ? "opened" : p.status} />
-          </div>
-        );
-      })}
-      {people.hasNextPage && (
-        <div className="list-foot">
-          <span>{recipients.length.toLocaleString()} of {total.toLocaleString()}</span>
-          <Button size="sm" variant="ghost" loading={people.isFetchingNextPage} onClick={() => void people.fetchNextPage()}>Show more</Button>
-        </div>
+      {recipients.length > 0 && (
+        <ul className="rel" aria-label="Recipients">
+          {recipients.map((p) => {
+            const notes = [
+              p.email,
+              p.quote_number != null ? `Quote #${p.quote_number}` : null,
+              p.sent_at ? `Sent ${formatDateTime(p.sent_at)}` : null,
+              p.clicked_at ? `Clicked ${formatDateTime(p.clicked_at)}${p.click_count > 1 ? ` (${p.click_count} times)` : ""}` : p.opened_at ? `Opened ${formatDateTime(p.opened_at)}` : null,
+              p.error,
+            ].filter(Boolean);
+            const booked = [p.bookings ? bookingWords(p.bookings) : null, p.revenue ? formatMoneyCents(p.revenue) : null].filter(Boolean).join(" · ");
+            return (
+              <li key={p.id} className={styles.recipient}>
+                <div className={styles.recipientBody}>
+                  {p.client_id ? <Link to={`/clients/${p.client_id}`} className={styles.recipientName}>{p.name ?? p.email}</Link> : <span className={styles.recipientName}>{p.name ?? p.email}</span>}
+                  <div className={styles.recipientMeta}>{notes.join(" · ")}</div>
+                  {booked && <div className={styles.recipientBooked}>{booked}</div>}
+                </div>
+                <EntityStatus kind="recipient" status={p.status === "sent" && p.clicked_at ? "clicked" : p.status === "sent" && p.opened_at ? "opened" : p.status} />
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
-  );
-}
-
-/** Both, one above the other: an automated campaign's page. */
-export function CampaignResults({ campaignId, live = false }: { campaignId: string; live?: boolean }) {
-  return (
-    <div className="stack">
-      <CampaignStats campaignId={campaignId} live={live} />
-      <CampaignRecipients campaignId={campaignId} live={live} />
-    </div>
+      {people.hasNextPage && (
+        <ListFoot more={{ onClick: () => void people.fetchNextPage(), loading: people.isFetchingNextPage, label: "Show more" }}>
+          {recipients.length.toLocaleString()} of {total.toLocaleString()}
+        </ListFoot>
+      )}
+    </Section>
   );
 }

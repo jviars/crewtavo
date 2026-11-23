@@ -7,10 +7,12 @@
  */
 import { buildSimpleRule, occurrenceDates, parseRule, parseSimpleRule, ruleDay, scheduleText, type SimpleRepeat } from "@crewtavo/core/recurrence";
 import { useMemo, useState } from "react";
-import { Select } from "@/components/ui/Select";
-import { NumberInput } from "@/components/ui/NumberInput";
+import { Icon } from "@/components/ui/Icon";
 import { addDaysIso, formatDate, formatDay, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import styles from "./jobs.module.css";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 export interface Recurrence {
   rule: string;
@@ -60,11 +62,11 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
   }, [value.rule]);
 
   return (
-    <div className="stack" style={{ padding: 14, borderRadius: "var(--radius-control)", background: "var(--fill)", border: "1px solid var(--border)" }}>
+    <div className={styles.recur}>
       <div className="form-grid">
         <div className="field">
           <span>Repeats every</span>
-          <div className="row" style={{ gap: 6 }}>
+          <div className={styles.every}>
             <Select className="select" aria-label="How many" value={parsed.interval} onChange={(e) => set({ interval: Number(e.target.value) })}>
               {/* One saved with a longer gap (through the API) keeps it. */}
               {Array.from({ length: Math.max(most, parsed.interval) }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n}</option>)}
@@ -118,7 +120,7 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
       {parsed.freq === "WEEKLY" && (
         <div className="field">
           <span>On</span>
-          <div className="row wrap" style={{ gap: 6 }}>
+          <div className={styles.toggles} role="group" aria-label="Days of the week">
             {DAYS.map(([key, label]) => {
               const on = parsed.days.includes(key);
               return (
@@ -133,7 +135,7 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
       {parsed.freq === "MONTHLY" && (
         <div className="field">
           <span>On</span>
-          <div className="row wrap" style={{ gap: 6 }}>
+          <div className={styles.toggles}>
             <div className="segmented" role="group" aria-label="Monthly on">
               <button type="button" aria-pressed={!parsed.weekday} onClick={() => set({ weekday: null })}>A date</button>
               {/* The first visit's weekday and week, to start from: the 3rd Tuesday for Nov 17. */}
@@ -158,7 +160,7 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
       )}
       <div className="field">
         <span>Season <span className="optional">(leave all off for year-round)</span></span>
-        <div className="row wrap" style={{ gap: 6 }}>
+        <div className={styles.toggles} role="group" aria-label="Season months">
           {MONTHS.map((label, i) => {
             const month = i + 1;
             const on = value.months?.includes(month) ?? false;
@@ -179,10 +181,16 @@ export function RecurrenceEditor({ value, onChange }: { value: Recurrence; onCha
           })}
         </div>
       </div>
-      {!ruleError && <strong className="small">{scheduleText(value.rule, value.months)}{ends === "date" && value.ends_on ? `, until ${formatDate(value.ends_on)}` : ""}</strong>}
-      <div className="small">
-        <span className="muted">Next visits: </span>
-        {ruleError ? <span className="text-danger">{ruleError}</span> : preview === null ? <span className="text-danger">Check the dates.</span> : preview.length ? preview.map((d) => formatDay(`${d}T12:00:00`)).join(" · ") : <span className="muted">none in the next year</span>}
+      {/* What it comes to, said back, and the next days it makes: the check that the rule is the one meant. */}
+      <div className={styles.recurSummary}>
+        <Icon name="calendar" size={16} />
+        <div className="grow">
+          {!ruleError && <div className={styles.recurRule}>{scheduleText(value.rule, value.months)}{ends === "date" && value.ends_on ? `, until ${formatDate(value.ends_on)}` : ""}</div>}
+          <div className={styles.recurNext}>
+            <span>Next visits: </span>
+            {ruleError ? <span className="text-danger">{ruleError}</span> : preview === null ? <span className="text-danger">Check the dates.</span> : preview.length ? preview.map((d) => formatDay(`${d}T12:00:00`)).join(" · ") : "none in the next year"}
+          </div>
+        </div>
       </div>
     </div>
   );

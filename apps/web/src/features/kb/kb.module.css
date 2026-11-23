@@ -1,0 +1,549 @@
+/*
+ * The knowledge base (KB-Home, KB-Search, KB-Category, KB-Insights, KB-Phone.dc.html): flat, on
+ * hairlines. The lists are the shared inbox rows (InboxList) with a guide's tile in place of the
+ * initials; these rules only size the tiles and lay out what's the knowledge base's own.
+ */
+
+/* ---------- Guide tiles: a photo, or the category's flat color and subject icon ---------- */
+.guideTile { display: grid; place-items: center; width: 100%; height: 100%; overflow: hidden; border-radius: inherit; background: var(--fill-3); color: #fff; }
+.guideTile[data-look="none"] { color: var(--text-3); }
+.guideTile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* In a list: a 40px rounded square, where a person's row has initials. */
+.guides :global(.il-row) { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.guides :global(.il-row-flat) { grid-template-columns: minmax(0, 1fr) auto; }
+.guides :global(.il-avatar) { width: 40px; height: 40px; border-radius: 9px; background: none; }
+.guides :global(.il-avatar svg) { width: 18px; height: 18px; color: inherit; }
+.guides :global(.il-unread) { top: 29px; }
+.guides :global(.il-l1 > .tag) { gap: 5px; }
+/* A guide's own state beside its title (Draft, Shared): a small dot and the word in a hairline tag (KB-Category). */
+.stateTag::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--quiet); }
+.stateTag[data-tone="info"]::before { background: var(--info); }
+.guides :global(.il-aside .pill) { font-size: var(--fs-12); }
+
+/* ---------- Search or ask: one field, its two actions inside it ---------- */
+.ask { max-width: 880px; display: flex; align-items: center; gap: 4px; height: 50px; padding: 0 6px 0 16px; border-radius: 12px; background: var(--fill-2); color: var(--quiet); transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+.ask:hover { background: var(--fill-3); }
+.ask:focus-within { background: var(--page); box-shadow: inset 0 0 0 1px var(--green), var(--ring); }
+.ask :global(.search-field) { flex: 1 1 auto; width: auto; min-width: 0; height: 100%; gap: 10px; padding: 0; border-radius: 0; background: none; box-shadow: none; }
+.ask :global(.search-field):is(:hover, :focus-within) { background: none; box-shadow: none; }
+.ask :global(.search-field) svg { width: 18px; height: 18px; }
+.ask :global(.search-field) input { font-size: var(--fs-15); }
+.ask :global(.search-field) input::-webkit-search-cancel-button { display: none; -webkit-appearance: none; }
+.clear { display: grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--quiet); cursor: pointer; }
+.clear:hover { background: var(--fill-3); color: var(--ink); }
+.askSep { flex: none; width: 1px; height: 22px; margin: 0 4px; background: var(--border); }
+.askBtn { flex: none; height: 36px; gap: 6px; color: var(--text-2); }
+.askBtn :global(.kbd) { margin-left: 2px; }
+.askHint { margin: -16px 4px 0; font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---------- The answer: no card, a reading column, its sources as small numbers ---------- */
+.answer { display: grid; gap: 10px; max-width: 640px; padding-bottom: 18px; border-bottom: 1px solid var(--divider); }
+.answerHead { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-13); font-weight: 600; line-height: 20px; color: var(--text-2); }
+.answerHead svg { color: var(--quiet); }
+.answerText { white-space: pre-wrap; font-size: var(--fs-16); line-height: 1.65; color: var(--ink); }
+.cite { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin: 0 1px 0 4px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: var(--fs-11); font-weight: 700; line-height: 1; text-decoration: none; vertical-align: 2px; font-variant-numeric: tabular-nums; }
+a.cite:hover { background: var(--solid); color: var(--on-solid); text-decoration: none; }
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; }
+.sourcesLabel { margin-right: 2px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.source { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 11px 0 6px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); font-size: var(--fs-13); font-weight: 600; color: var(--ink); text-decoration: none; }
+.source:hover { background: var(--fill); color: var(--ink); text-decoration: none; }
+.source .cite { margin: 0; vertical-align: 0; }
+.disclaimer { margin: 4px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---------- Home: what's yours to read beside what the office pinned ---------- */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; min-width: 0; }
+.top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; align-items: start; }
+.topTwo { grid-template-columns: minmax(0, 1fr) 268px; }
+.mustRead :global(.sec-icon) { color: var(--warning); }
+.pinTile { width: 32px; height: 32px; border-radius: 7px; }
+.page :global(.rel-lead):has(.pinTile) { min-width: 0; }
+
+/* Job training sits under the list, not in it: progress, not a guide to read. */
+.job { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; column-gap: 12px; align-items: center; margin-top: 8px; padding: 12px 4px; border-radius: 8px; color: inherit; text-decoration: none; }
+.job:hover { background: var(--fill); color: inherit; text-decoration: none; }
+.job > svg { color: var(--quiet); }
+.jobIcon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 9px; background: var(--fill-2); color: var(--text-2); }
+.jobText { display: grid; min-width: 0; }
+.jobText strong { font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.jobMeta { margin-top: 1px; font-size: var(--fs-12); color: var(--text-3); }
+.jobMeta b { font-weight: 600; color: var(--text-2); }
+.ticks { display: flex; gap: 3px; }
+.ticks > i { display: block; width: 14px; height: 4px; border-radius: 2px; background: var(--border); }
+.ticks > i[data-on] { background: var(--green-solid); }
+.ticks > :global(.progress) { width: 120px; height: 4px; }
+
+/* Categories: a cover and two lines of words, no card around them. */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding-top: 2px; }
+.tile { display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; padding: 0; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tileCover { display: grid; height: 64px; margin-bottom: 8px; border-radius: 10px; }
+.tileCover svg { width: 20px; height: 20px; }
+.tile:hover .tileName { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+.tile:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.tileName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.tileMeta { font-size: var(--fs-12); color: var(--text-3); }
+.todo { font-weight: 600; color: var(--text-2); }
+
+/* Recently updated's filter: a small segmented control in the section's heading. */
+.smallTabs :global(.tabs) { padding: 2px; }
+.smallTabs :global(.tab) { height: 24px; padding: 0 9px; font-size: var(--fs-12); }
+
+/* ---------- A category ---------- */
+.catTitle { display: flex; flex: 1 1 360px; align-items: center; gap: 14px; min-width: 0; }
+.catWords { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.catMeta { font-size: var(--fs-13); color: var(--text-3); }
+.catTile { display: grid; flex: none; width: 56px; height: 56px; border-radius: 13px; }
+.catTile svg { width: 24px; height: 24px; }
+.meterEnd { display: inline-flex; align-items: center; gap: 8px; }
+.meter { display: block; width: 56px; height: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); }
+.meter > b { display: block; height: 100%; background: var(--green-solid); }
+/* The row menu's colors, as small squares (Move to category). */
+.swatch { display: block; width: 14px; height: 14px; border-radius: 4px; background: var(--fill-3); }
+.swatchNone { background: none; box-shadow: inset 0 0 0 1px var(--border-strong); }
+
+/* ---------- Search results ---------- */
+.results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.resultsHead { display: flex; align-items: baseline; gap: 10px; }
+.resultsHead h2 { margin: 0; font-size: var(--fs-15); font-weight: 650; color: var(--ink); }
+.resultList :global(.il-subject) { display: -webkit-box; margin-top: 2px; white-space: normal; font-size: var(--fs-13); line-height: 1.5; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.hit { padding: 0 2px; border-radius: 3px; background: var(--fill-3); color: var(--ink); font-weight: 600; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+/* No match: plain words and one action, no boxed empty. */
+.none { padding: 18px 0 24px; border-bottom: 1px solid var(--divider); }
+.none h2 { margin: 0; font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.015em; }
+.none p { max-width: 560px; margin: 6px 0 0; font-size: var(--fs-14); color: var(--text-2); }
+.noneActions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+.noneHint { font-size: var(--fs-12); color: var(--text-3); }
+
+@media (max-width: 1100px) {
+  .topTwo { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ---------- Phone (KB-Phone): grouped, large targets ---------- */
+@media (max-width: 900px) {
+  .page { gap: 22px; }
+  .ask { height: 44px; margin-top: -8px; padding: 0 2px 0 12px; background: var(--m-card); }
+  .ask:hover { background: var(--m-card); }
+  .ask:focus-within { background: var(--m-card); box-shadow: inset 0 0 0 1px var(--green); }
+  .ask :global(.search-field) { height: 100%; padding: 0; }
+  .ask :global(.search-field) input { font-size: var(--fs-16); }
+  .askSep, .ask button[type="submit"] { display: none; }
+  .clear { width: 40px; height: 40px; }
+  /* Ask is a round sparkle; its words stay its name. */
+  .askBtn:not([type="submit"]) { position: relative; width: 40px; height: 40px; padding: 0; gap: 0; border-radius: var(--radius-pill); font-size: 0; }
+  .askBtn :global(.kbd) { display: none; }
+  .askBtn svg { width: 19px; height: 19px; }
+  .askHint { display: none; }
+  /* Insights' count, on its round button: a green dot at the corner (the count stays in the button's name). */
+  .attention.attention { position: absolute; top: 6px; right: 6px; width: 9px; min-width: 0; height: 9px; padding: 0; overflow: hidden; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--m-card); font-size: 0; }
+  .answer { padding: 16px; border: 0; border-radius: 14px; background: var(--m-card); }
+  .cite { min-width: 20px; height: 20px; position: relative; }
+  .cite::after { content: ""; position: absolute; inset: -12px; }
+  .source { height: 36px; font-size: var(--fs-14); }
+  .disclaimer { font-size: var(--fs-13); }
+  .top { gap: 22px; }
+  .job { margin-top: 6px; padding: 10px 4px; }
+  .job:hover { background: none; }
+  .jobIcon { background: var(--m-card); }
+  .jobText strong { font-size: var(--fs-16); }
+  .jobMeta { font-size: var(--fs-13); }
+  .ticks { display: none; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; }
+  .tileCover { height: 56px; margin-bottom: 6px; border-radius: 12px; }
+  .tileName { font-size: var(--fs-15); white-space: normal; }
+  .tileMeta { font-size: var(--fs-13); }
+  .pinTile { width: 40px; height: 40px; border-radius: 10px; }
+  .catTitle { flex-basis: 100%; order: 2; }
+  .catTile { width: 48px; height: 48px; border-radius: 12px; }
+  .catMeta { font-size: var(--fs-14); }
+  .guides :global(.il-avatar) { border-radius: 10px; }
+  /* The field above already says what was searched; the groups under it carry the counts. Still named for a screen reader. */
+  .resultsHead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .none { padding: 4px 4px 18px; border: 0; }
+  .none h2 { font-size: var(--fs-20); }
+  .noneActions :global(.btn) { height: 44px; }
+}
+
+/* ---------- Reading a guide (KB-Guide.dc.html) ---------- */
+/* A 648px reading column and a 224px rail beside it; one column, the rail under the guide, when there's no room. */
+.reader { container-type: inline-size; min-width: 0; }
+.read { display: grid; grid-template-columns: minmax(0, 648px) 224px; column-gap: 56px; align-items: start; justify-content: center; }
+.readSolo { grid-template-columns: minmax(0, 720px); }
+.readMain { min-width: 0; }
+
+/* Header: the crumb and the actions on one row, so the title has the whole measure. */
+.guideHead { row-gap: 0; column-gap: 4px; }
+.guideHead > :global(.detail-crumb) { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; margin: 0; order: 0; }
+.guideHead :global(.detail-crumb > .crumb > svg:last-child) { display: none; }
+.guideHead :global(.detail-crumb > .crumb) { color: var(--text-2); }
+.crumbRoot { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-13); font-weight: 500; }
+.crumbRoot a { color: var(--text-3); text-decoration: none; }
+.crumbRoot a:hover { color: var(--ink); }
+.crumbRoot svg { color: var(--quiet); }
+.guideHead > :global(.page-actions) { order: 1; gap: 4px; }
+.guideTitle.guideTitle { order: 2; flex: 1 1 100%; margin: 16px 0 0; font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; }
+.guideStatus.guideStatus { order: 3; gap: 6px 18px; margin-top: 14px; }
+.guideStatus :global(.pill) { font-size: var(--fs-13); }
+.guideStatus :global(.pill > svg) { color: var(--quiet); }
+.guideMeta { order: 4; flex-basis: 100%; margin: 8px 0 0; font-size: var(--fs-13); color: var(--text-3); }
+/* "I've read this" keeps its hairline among the ghost actions: it's the reader's own step (KB-Guide). */
+.readBtn.readBtn { border-color: var(--border); color: var(--ink); }
+.readBtn.readBtn:hover:not(:disabled) { border-color: var(--border-strong); background: var(--fill-2); }
+.readOk { display: inline-flex; align-items: center; gap: 6px; height: var(--control); padding: 0 8px; font-size: var(--fs-13); font-weight: 600; color: var(--green-dark); white-space: nowrap; }
+.cover { margin-top: 24px; border-radius: 12px; }
+
+/* The guide's words: no card, high-contrast ink, generous lines. */
+.article { margin-top: 26px; padding: 0; border: 0; background: none; box-shadow: none; font-size: var(--fs-18, 18px); line-height: 1.65; color: var(--ink); }
+.article :global(p) { margin: 0 0 0.9em; }
+.article :global(h2) { display: flex; align-items: center; gap: 10px; margin: 1.8em 0 0.4em; font-size: var(--fs-24); font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+.article :global(h3) { display: flex; align-items: center; gap: 10px; margin: 1.5em 0 0.3em; font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.01em; line-height: 1.35; }
+.article :global(h4) { margin: 1.3em 0 0.3em; font-size: var(--fs-16); font-weight: 700; color: var(--text-2); }
+.article > div > :global(:first-child) { margin-top: 0; }
+.article :global(.heading-anchor) { margin-left: 0; font-size: var(--fs-18, 18px); color: var(--quiet) !important; }
+.article :global(a:not(.heading-anchor)) { color: var(--green-dark); font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+/* Steps: a number in a quiet circle, and a line between the circles so they read as one run. */
+.article :global(ol:not(li ol)) { margin: 0.4em 0 1.2em; }
+.article :global(ol:not(li ol) > li) { min-height: 28px; margin: 18px 0 0; padding-left: 44px; }
+.article :global(ol:not(li ol) > li:first-child) { margin-top: 0; }
+.article :global(ol:not(li ol) > li::before) { width: 28px; height: 28px; background: var(--fill-2); box-shadow: inset 0 0 0 1px var(--border); color: var(--ink); font-size: var(--fs-14); line-height: 2.1214; }
+.article :global(ol:not(li ol) > li:not(:last-child)::after) { content: ""; position: absolute; left: 14px; top: 30px; bottom: -16px; width: 1px; background: var(--border); }
+/* Checklists: hairline rows, a quiet square for each. */
+.article :global(ul[data-type="taskList"]) { margin: 0.4em 0 1.2em; }
+.article :global(ul[data-type="taskList"] > li) { gap: 14px; min-height: 48px; margin: 0; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
+.article :global(ul[data-type="taskList"] > li:last-child) { border-bottom: 0; }
+.article :global(ul[data-type="taskList"] > li:not(:has(> label))::before) { width: 20px; height: 20px; margin-top: calc((1lh - 20px) / 2); border: 1.5px solid var(--check-edge); border-radius: 6px; }
+/* Tables: hairlines, a quiet header, the first column in bold. */
+.article :global(table) { width: 100%; margin: 1em 0 1.4em; border-collapse: collapse; font-size: var(--fs-16); line-height: 1.45; }
+/* base.css makes a table a scrolling block (wide ones scroll sideways on a phone); its rows still span the column. */
+.article :global(table > tbody:only-child) { display: table; width: 100%; }
+.article :global(th) { padding: 0 12px 8px 0; border: 0; border-bottom: 1px solid var(--border); background: none; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); text-align: left; }
+.article :global(td) { padding: 11px 12px 11px 0; border: 0; border-bottom: 1px solid var(--row-divider); vertical-align: top; }
+.article :global(tr > td:first-child) { font-weight: 600; }
+/* Callouts: the tone's tint and an icon in place of the side stripe. */
+.article :global([data-callout]) { position: relative; margin: 1.4em 0; padding: 16px 18px 16px 50px; border: 0; border-radius: 12px; font-size: var(--fs-16); line-height: 1.6; }
+.article :global([data-callout])::before { margin-bottom: 2px; font-size: var(--fs-12); letter-spacing: 0.06em; }
+.article :global([data-callout])::after { content: ""; position: absolute; left: 18px; top: 18px; width: 20px; height: 20px; background: var(--info); -webkit-mask: var(--callout-icon) center / contain no-repeat; mask: var(--callout-icon) center / contain no-repeat; --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 16v-4M12 8h.01'/%3E%3C/svg%3E"); }
+.article :global([data-callout="important"])::after { background: var(--warning); --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 8v4M12 16h.01'/%3E%3C/svg%3E"); }
+.article :global([data-callout="warning"])::after { background: var(--danger); --callout-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/%3E%3Cpath d='M12 9v4M12 17h.01'/%3E%3C/svg%3E"); }
+.article :global(blockquote) { padding: 2px 0 2px 16px; border-left: 2px solid var(--border-strong); border-radius: 0; background: none; color: var(--text-2); }
+.article :global(img) { border-radius: 12px; }
+.article :global(hr) { margin: 2em 0; }
+
+/* After the words: the guides around it, then its tags. */
+.related { margin-top: 44px; }
+.relTile { display: grid; width: 40px; height: 40px; border-radius: 9px; }
+.related :global(.rel-lead):has(.relTile) { min-width: 0; }
+.related :global(.rel-row) { min-height: 64px; }
+.related :global(.rel-title) { font-size: var(--fs-14); }
+.related :global(.rel-end) svg { color: var(--quiet); }
+.tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 14px; font-size: var(--fs-13); color: var(--text-3); }
+.tags a { font-weight: 600; color: var(--text-2); text-decoration: none; }
+.tags a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+
+/* Done reading? between two hairlines, then was it helpful. */
+.done { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; margin-top: 44px; padding: 20px 0; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+.doneIcon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); }
+.doneIcon[data-ok] { background: var(--green-tint); color: var(--green-dark); }
+.doneTitle { margin: 0; font-size: var(--fs-16); font-weight: 700; line-height: 1.3; }
+.doneSub { margin: 2px 0 0; font-size: var(--fs-14); color: var(--text-2); }
+.done :global(.btn-primary) { height: 40px; padding: 0 16px; font-size: var(--fs-14); }
+.help { margin-top: 16px; }
+.helpRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.helpAsk { margin: 0 6px 0 0; font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.helpVotes { display: flex; gap: 6px; }
+.helpVotes :global(.btn[aria-pressed="true"]) { border-color: var(--border-strong); background: var(--fill-3); color: var(--ink); }
+.flip { display: inline-flex; transform: rotate(180deg); }
+.suggest { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: var(--fs-13); }
+.suggestForm { display: grid; gap: 12px; margin-top: 14px; max-width: 560px; }
+.suggestActions { display: flex; gap: 6px; }
+
+/* The rail: contents first, then who has read it and what they said. It sticks while the guide scrolls. */
+.rail { position: sticky; top: calc(var(--topbar-height) + 20px); display: flex; flex-direction: column; gap: 20px; max-height: calc(100vh - var(--topbar-height) - 40px); padding-top: 56px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.railSec + .railSec { padding-top: 20px; border-top: 1px solid var(--divider); }
+.railHead { margin: 0; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.railRow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.railCount { font-size: var(--fs-12); font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.railNote { margin: 6px 0 0; font-size: var(--fs-13); color: var(--text-2); }
+.railToc :global(.toc-list) { margin-top: 10px; }
+.bar { display: block; height: 4px; margin: 10px 0 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); }
+.bar > b { display: block; height: 100%; border-radius: inherit; background: var(--green-solid); }
+.bar[data-tone="danger"] > b { background: var(--danger); }
+.people { display: grid; margin: 6px 0 0; padding: 0; list-style: none; }
+.person { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; min-height: 34px; padding: 4px 0; font-size: var(--fs-13); }
+.face { width: 24px; height: 24px; overflow: hidden; font-size: 10px; }
+.personName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--ink); }
+.personEnd { font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.personSub { grid-column: 2 / -1; font-size: var(--fs-12); color: var(--text-3); }
+.personBar { grid-column: 2 / -1; display: block; height: 4px; margin-top: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-3); }
+.personBar > b { display: block; height: 100%; background: var(--green-solid); }
+.you { font-weight: 400; color: var(--text-3); }
+.toLook { margin: 12px 0 0; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.suggestions { margin: 0; padding: 0; list-style: none; }
+.suggestion { margin-top: 12px; }
+.suggestion + .suggestion { padding-top: 12px; border-top: 1px solid var(--row-divider); }
+.suggestionWho { display: flex; align-items: center; gap: 7px; font-size: var(--fs-12); color: var(--text-3); }
+.suggestionWho b { font-weight: 600; color: var(--ink); }
+.suggestionText { margin: 6px 0 8px; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.suggestion :global(.btn) { height: 26px; padding: 0 9px; font-size: var(--fs-12); }
+
+/* Contents above the guide, folded, when the rail has gone under it. */
+.tocInline { display: none; margin-top: 22px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+.tocInline > summary { padding: 12px 0; font-size: var(--fs-14); font-weight: 600; cursor: pointer; }
+/* Folded contents (here and on a shared guide): a quiet chevron that turns, not the browser's triangle. */
+:is(.tocInline, .sharedTocInline) > summary { display: flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; list-style: none; }
+:is(.tocInline, .sharedTocInline) > summary::-webkit-details-marker { display: none; }
+:is(.tocInline, .sharedTocInline) > summary::after { content: ""; flex: none; width: 7px; height: 7px; margin: -3px 2px 0 auto; border-right: 1.5px solid var(--quiet); border-bottom: 1.5px solid var(--quiet); transform: rotate(45deg); transition: transform var(--dur-fast); }
+:is(.tocInline, .sharedTocInline)[open] > summary::after { margin-top: 3px; transform: rotate(-135deg); }
+:is(.tocInline, .sharedTocInline) > summary:focus-visible { outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { :is(.tocInline, .sharedTocInline) > summary::after { transition: none; } }
+.tocCount { font-weight: 500; color: var(--text-3); }
+.tocInline :global(.toc-list) { margin-bottom: 12px; }
+/* The phone's bar: where you are in the guide, and I've read this. */
+.tocButton { justify-content: flex-start; gap: 10px; }
+.tocButton svg { color: var(--text-3); }
+:global(.action-bar) .tocButton.tocButton.tocButton > svg { display: block; flex: none; }
+.tocNow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A sub-section in the phone's contents sheet sits in under its section. */
+.tocIndent { display: block; width: 4px; }
+.tocOf { flex: none; margin-left: auto; font-size: var(--fs-13); font-weight: 500; color: var(--text-3); }
+
+@container (max-width: 980px) {
+  .read, .readSolo { grid-template-columns: minmax(0, 720px); }
+  .rail { position: static; max-height: none; margin-top: 40px; padding-top: 22px; overflow: visible; border-top: 1px solid var(--divider); }
+  .railToc { display: none; }
+  .railToc + .railSec { padding-top: 0; border-top: 0; }
+  .tocInline { display: block; }
+}
+
+/* ---------- Revision history ---------- */
+.history.history { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 0; min-height: 0; margin-top: 16px; padding: 0; overflow: hidden; border-top: 1px solid var(--divider); }
+.historyMain { display: grid; align-content: start; gap: 12px; min-width: 0; max-height: 68vh; padding: 16px 28px 18px 20px; overflow-y: auto; }
+.historyHead { display: flex; align-items: flex-start; gap: 12px; }
+.historyBack { display: none; }
+.historyWho { flex: 1; min-width: 0; }
+.historyWho h3 { margin: 0; font-size: var(--fs-15); font-weight: 700; letter-spacing: -0.01em; }
+.historyWho p { margin: 2px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+.compare { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); color: var(--text-3); }
+.compare :global(.select) { width: auto; max-width: 100%; }
+.historyRead { font-size: var(--fs-15); }
+.historyRead :global(h2) { font-size: var(--fs-20); }
+.historyRead :global(h3) { font-size: var(--fs-16); }
+.historyList { min-width: 0; max-height: 68vh; padding: 10px 8px; overflow-y: auto; border-left: 1px solid var(--divider); background: var(--fill); }
+.historyListHead { display: flex; align-items: center; gap: 8px; height: 30px; margin: 0; padding: 0 10px; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.historyList ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rev { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; width: 100%; padding: 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.rev:hover { background: var(--fill-2); }
+.rev[aria-pressed="true"] { background: var(--fill-3); }
+.revNumber { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--fill-2); font-size: var(--fs-12); font-weight: 700; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rev[aria-pressed="true"] .revNumber { background: var(--solid); color: var(--on-solid); }
+.revText { display: grid; min-width: 0; }
+.revTitle { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-13); font-weight: 500; line-height: 1.4; }
+.revTitle :global(.tag) { margin-left: auto; }
+.rev[aria-pressed="true"] .revTitle { font-weight: 600; }
+.revSub { margin-top: 4px; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.historyNote { flex: 1; min-width: 0; font-size: var(--fs-12); line-height: 1.4; color: var(--text-3); }
+
+/* ---------- A guide's quiz, one question at a time ---------- */
+.quizTop { display: flex; align-items: center; gap: 12px; }
+.quizBar { display: grid; flex: 1; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
+.quizSeg { display: block; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; cursor: pointer; }
+.quizSeg::before { content: ""; display: block; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--fill-3); }
+.quizSeg[aria-current]::before { background: var(--text-4); }
+.quizSeg[data-state="on"]::before { background: var(--green-solid); }
+.quizSeg[data-state="ok"]::before { background: var(--green); }
+.quizSeg[data-state="no"]::before { height: 6px; margin-top: 5px; background: var(--danger); }
+.quizSeg:hover::before { filter: brightness(1.15); }
+.quizSeg:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.quizCount { font-size: var(--fs-12); font-weight: 600; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.quizFix { color: var(--danger); }
+.quizQuestion { min-width: 0; margin: 0; padding: 0; border: 0; }
+.quizStem { float: left; width: 100%; margin: 0 0 12px; padding: 0; font-size: var(--fs-16); font-weight: 600; line-height: 1.35; color: var(--ink); }
+.quizOptions { display: grid; clear: both; gap: 8px; }
+.quizOption { position: relative; display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 10px 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border); font-size: var(--fs-14); line-height: 1.35; color: var(--ink); cursor: pointer; transition: background var(--dur-fast), box-shadow var(--dur-fast); }
+.quizOption:hover { background: var(--fill); }
+.quizOption input { position: absolute; margin: 0; opacity: 0; pointer-events: none; }
+.quizOption:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.quizOption[data-on] { background: color-mix(in srgb, var(--green-tint) 80%, var(--menu)); box-shadow: inset 0 0 0 1.5px var(--green); }
+.quizKey { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--border-strong); font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.quizOption[data-on] .quizKey { background: var(--green-solid); box-shadow: none; color: #fff; }
+.quizQuestion[data-wrong] .quizOption[data-on] { background: var(--danger-tint); box-shadow: inset 0 0 0 1.5px var(--danger); }
+.quizQuestion[data-wrong] .quizOption[data-on] .quizKey { background: var(--danger); }
+.quizFlag { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: var(--fs-13); line-height: 1.45; color: var(--danger); }
+.quizFlag svg { flex: none; margin-top: 1px; }
+.quizLeft { white-space: nowrap; }
+.quizDone { display: grid; justify-items: start; gap: 12px; }
+.quizDone p { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); }
+.quizNext { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--border); font-size: var(--fs-14); font-weight: 600; color: var(--ink); text-decoration: none; }
+.quizNext:hover { background: var(--fill); color: var(--ink); text-decoration: none; }
+.quizNext > span { flex: 1; min-width: 0; }
+.quizNext svg { color: var(--quiet); }
+
+/* ---------- Reading on a phone (KB-Phone.dc.html) ---------- */
+@media (max-width: 900px) {
+  .ask { overflow: hidden; }
+  /* The first part of a row's quiet line (its category) gives way first, so the rest stays whole. */
+  .guides :global(.il-meta > span) { flex-shrink: 0; }
+  .guides :global(.il-meta > span:first-child) { flex-shrink: 1; }
+  /* In a category a phone keeps when it changed; the revision and tags (on the guide itself) make room for it. */
+  .catRows :global(.il-meta > span:first-child) { flex-shrink: 0; }
+  .catRows .metaMore, .catRows :global(.meta-dot):has(+ .metaMore) { display: none; }
+  /* A guide's title is the row: it takes two lines on a phone rather than being cut, its tag after it. */
+  :is(.guides, .insightRows) :global(.il-l1) { flex-wrap: wrap; row-gap: 2px; }
+  :is(.guides, .insightRows) :global(.il-title) { display: -webkit-box; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .guideHead > :global(.detail-crumb) { flex: 0 0 auto; }
+  .guideHead > :global(.page-actions) { margin-left: auto; }
+  .guideTitle.guideTitle { margin-top: 14px; font-size: var(--fs-30); }
+  .guideStatus.guideStatus { gap: 4px 14px; margin-top: 10px; }
+  .guideStatus :global(.pill) { font-size: var(--fs-14); }
+  .guideMeta { font-size: var(--fs-14); }
+  .readOk { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: var(--radius-pill); background: var(--green-tint); font-size: 0; }
+  .readOk svg { width: 20px; height: 20px; }
+  .article { margin-top: 20px; line-height: 1.6; }
+  .article :global(ol:not(li ol) > li::before) { line-height: 2.0571; }
+  .article :global(h2) { font-size: var(--fs-22); }
+  .article :global(h3) { font-size: var(--fs-18, 18px); }
+  .article :global(ul[data-type="taskList"] > li) { min-height: 52px; }
+  .article :global([data-callout]) { padding: 14px 16px 14px 46px; border-radius: 14px; }
+  .article :global([data-callout])::after { left: 16px; top: 16px; }
+  .tocInline { display: none !important; }
+  .done { grid-template-columns: 40px minmax(0, 1fr); margin-top: 32px; }
+  .doneTitle { font-size: var(--fs-20); }
+  .helpRow { gap: 10px; }
+  .helpAsk { flex-basis: 100%; font-size: var(--fs-16); }
+  .helpVotes :global(.btn) { height: 44px; padding: 0 16px; font-size: var(--fs-15); }
+  .suggest { min-height: 44px; margin-left: 0; font-size: var(--fs-15); }
+  /* Writing a suggestion with the keyboard up: the tab bar steps aside (AppShell), and so does the guide's bar, so it doesn't float over the form. */
+  :global(.content):has(.suggestForm :focus) :global(.action-bar) { display: none; }
+  .rail { margin-top: 32px; }
+  .railHead { font-size: var(--fs-13); }
+  .person { min-height: 44px; font-size: var(--fs-15); }
+  .suggestion :global(.btn) { position: relative; height: 36px; font-size: var(--fs-14); }
+  .suggestion :global(.btn)::after { content: ""; position: absolute; inset: -4px 0; }
+  .toLook { font-size: var(--fs-13); }
+  .tags { font-size: var(--fs-14); }
+  .related :global(.rel-title) { font-size: var(--fs-16); }
+  .history.history { grid-template-columns: minmax(0, 1fr); margin-top: 12px; }
+  .history:not([data-picked]) .historyMain { display: none; }
+  .history[data-picked] .historyList { display: none; }
+  .historyMain, .historyList { max-height: none; }
+  .historyList { padding: 8px; border-left: 0; background: none; }
+  .historyMain { padding: 12px 20px 20px; }
+  .historyHead { flex-wrap: wrap; }
+  .historyBack { display: inline-flex; flex-basis: 100%; justify-content: flex-start; margin-left: -8px; }
+  .rev { min-height: 56px; padding: 12px; }
+  .revTitle { font-size: var(--fs-15); }
+  .revSub { font-size: var(--fs-13); }
+  .quizStem { font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+  .quizOption { min-height: 60px; padding: 12px 16px; border-radius: 14px; font-size: var(--fs-16); }
+  .quizKey { width: 32px; height: 32px; border-radius: var(--radius-pill); font-size: var(--fs-14); }
+  .quizSeg { height: 24px; }
+  .quizSeg::before { margin-top: 10px; }
+  .quizSeg[data-state="no"]::before { margin-top: 9px; }
+  .quizCount { font-size: var(--fs-14); }
+  .quizNext { min-height: 52px; }
+  /* The sheet's own close button goes back to the guide; the bar is the arrows and the green button. */
+  .quizBack, .quizLeft { display: none; }
+  .quiz .quizNav.quizNav { flex: 0 0 52px; padding: 0; }
+}
+
+@media print {
+  .read, .readSolo { display: block; }
+  .article { margin-top: 16px; }
+}
+
+/* ---------- Knowledge base → Insights (KB-Insights.dc.html) ---------- */
+.insights { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 36px; align-items: start; }
+.insightsMain, .insightsSide { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-content: start; min-width: 0; }
+.insightRows :global(.il-subject) { display: -webkit-box; margin-top: 2px; white-space: normal; font-size: var(--fs-14); line-height: 1.45; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.insightRows :global(.il-row) { grid-template-columns: 32px minmax(0, 1fr) auto; }
+.insightRows :global(.il-avatar):has(.guideTile) { border-radius: 8px; background: none; }
+.insightRows :global(.il-avatar):has(.guideTile) svg { width: 16px; height: 16px; color: inherit; }
+.insightRows :global(.il-aside .btn) { height: 26px; padding: 0 9px; font-size: var(--fs-12); }
+.insightRows :global(.il-aside .pill) { font-size: var(--fs-12); }
+.insightFace { width: 32px; height: 32px; overflow: hidden; font-size: var(--fs-12); }
+.quietEnd { font-size: var(--fs-12); font-weight: 500; color: var(--text-3); }
+.hits { display: block; min-width: 24px; font-size: var(--fs-15); font-weight: 700; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.insights :global(.rel-lead):has(.hits) { min-width: 32px; }
+.found { display: inline-flex; align-items: center; gap: 5px; }
+.found svg { color: var(--green-dark); }
+.found a { font-weight: 600; color: var(--ink); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; position: relative; z-index: 1; }
+.helpList { margin: 0; padding: 0; list-style: none; }
+.helpItem { padding: 12px 0 13px; font-size: var(--fs-13); }
+.helpItem + .helpItem { border-top: 1px solid var(--row-divider); }
+.helpTop { display: flex; align-items: baseline; gap: 8px; }
+.helpTop a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); text-decoration: none; }
+.helpTop a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.helpTop span { flex: none; font-size: var(--fs-12); color: var(--quiet); }
+.helpItem .bar { height: 6px; margin: 8px 0 7px; }
+.helpItem .bar > b { background: var(--quiet); }
+.helpItem .bar[data-tone="danger"] > b { background: var(--danger); }
+.helpSub { font-size: var(--fs-12); color: var(--text-3); }
+.helpSub a { font-weight: 600; color: var(--text-2); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+@media (max-width: 1100px) { .insights { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+@media (max-width: 900px) {
+  .insightRows :global(.il-row) { grid-template-columns: 40px minmax(0, 1fr); }
+  .insightRows :global(.il-aside) { grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
+  .insightRows :global(.il-aside .btn) { height: 36px; padding: 0 12px; background: var(--fill-2); font-size: var(--fs-14); }
+  .insightRows :global(.il-aside .btn)::after { content: ""; position: absolute; inset: -4px 0; }
+  .insightFace { width: 40px; height: 40px; font-size: var(--fs-14); }
+  /* Write a guide is in each search's menu too; a phone keeps the row for the words. */
+  .insights :global(.rel-actions > .btn:not(.btn-icon)) { display: none; }
+  .helpItem { font-size: var(--fs-15); }
+  .helpSub { font-size: var(--fs-13); }
+}
+
+/* ---------- A guide shared by link (SharedGuidePage, in the client pages' look) ---------- */
+.shared { min-height: 100vh; min-height: 100dvh; background: var(--m-group); color: var(--ink); }
+.sharedBody { display: grid; gap: 16px; margin: 0 auto; padding: 32px 32px 48px; animation: page-in var(--dur-slow) var(--ease-out); }
+.sharedWide { max-width: 1080px; }
+.sharedNarrow { max-width: 520px; }
+.sharedSheet { min-width: 0; padding: 32px 40px 36px; border-radius: 20px; background: var(--m-card); }
+.sharedRead { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 32px; align-items: start; }
+.sharedSolo { grid-template-columns: minmax(0, 760px); justify-content: center; }
+.sharedKicker { display: block; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); }
+.sharedTitle { margin: 6px 0 0; font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; }
+.sharedRail { position: sticky; top: 24px; padding-top: 8px; }
+.sharedRail :global(.toc-list) { margin-top: 10px; }
+.shared :global(.toc-list a[aria-current])::before { background: var(--brand); }
+/* A link in a shared guide is in the business's color (darkened until it reads on white), never Crewtavo's green. */
+.shared .article :global(a:not(.heading-anchor)) { color: var(--brand-words, var(--ink)); }
+.shared { --focus-ring: var(--brand-words, var(--ink)); --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent); }
+.shared :global(.input:focus) { border-color: var(--brand-words, var(--brand)); }
+.sharedTocInline { display: none; margin-top: 22px; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); }
+.sharedTocInline > summary { padding: 12px 0; font-size: var(--fs-14); font-weight: 600; }
+.sharedTocInline :global(.toc-list) { margin-bottom: 12px; }
+.shared .article :global(h2), .shared .article :global(h3) { scroll-margin-top: 16px; }
+.sharedWho { margin: 28px 0 0; padding-top: 16px; border-top: 1px solid var(--divider); font-size: var(--fs-13); color: var(--text-3); }
+.sharedGone { display: grid; justify-items: start; gap: 10px; }
+.sharedGone h1 { margin: 6px 0 0; font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.015em; }
+.sharedGone p { margin: 0; font-size: var(--fs-14); color: var(--text-2); }
+.shared :global(footer) { color: var(--text-3); }
+/* The door: who sent it, then the address or the code, in the business's color. */
+.gate { display: grid; gap: 20px; }
+.gateIcon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); }
+.gateWords h1 { margin: 0; font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.015em; line-height: 1.25; }
+.gateWords p { margin: 6px 0 0; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
+.gateForm { display: grid; gap: 12px; }
+.gateField { display: grid; gap: 6px; }
+.gateField > :is(span, label) { font-size: var(--fs-13); font-weight: 600; }
+.brandButton.brandButton { border-color: var(--brand); background: var(--brand); color: var(--on-brand); }
+.brandButton.brandButton:hover:not(:disabled) { border-color: var(--brand-hover, var(--brand)); background: var(--brand-hover, var(--brand)); color: var(--on-brand); }
+.gateLinks { display: flex; flex-wrap: wrap; gap: 16px; font-size: var(--fs-14); }
+.gateLinks :global(.link-btn) { color: var(--ink); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+@media (max-width: 980px) {
+  .sharedRead { grid-template-columns: minmax(0, 1fr); }
+  .sharedRail { display: none; }
+  .sharedTocInline { display: block; }
+}
+@media (max-width: 900px) {
+  .sharedBody { padding: 12px 12px 40px; }
+  .sharedSheet { padding: 22px 18px 26px; border-radius: 18px; }
+  .sharedTitle { font-size: var(--fs-30); }
+  .gateForm :global(.btn-lg) { height: 52px; }
+  .gateLinks :global(.link-btn) { min-height: 44px; }
+}
+@media print {
+  .shared { background: none; }
+  .sharedSheet { padding: 0; }
+  .sharedBody { padding: 16px 0; }
+}

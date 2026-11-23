@@ -11,8 +11,10 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
 import type { AppRow } from "./catalog";
+import { Step, Steps, kit } from "./PanelKit";
 
 const LOB_KEYS = "https://dashboard.lob.com/settings/api-keys";
 
@@ -26,10 +28,10 @@ export function LobMode({ mode }: { mode: "test" | "live" | null | undefined }) 
   if (!mode) return null;
   return (
     <div className={`callout ${mode === "live" ? "callout-warning" : "callout-info"}`} role="note">
-      <Icon name={mode === "live" ? "mail" : "info"} size={20} />
+      <Icon name={mode === "live" ? "mail" : "info"} size={16} />
       <div className="grow">
-        <strong>{mode === "live" ? "Live: cards are mailed" : "Test: nothing is mailed"}</strong>
-        <span style={{ display: "block", fontWeight: 400 }}>{LOB_MODE_WORDS[mode]}</span>
+        <div>{mode === "live" ? "Live: cards are mailed" : "Test: nothing is mailed"}</div>
+        {LOB_MODE_WORDS[mode]}
       </div>
     </div>
   );
@@ -52,24 +54,21 @@ export function LobPanel({ app, onChanged }: { app: AppRow; onChanged: () => voi
   return (
     <>
       {connected && <LobMode mode={app.lob?.mode} />}
-      <section id="app-setup" className="card card-pad stack" aria-labelledby="lob-setup-title">
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <h2 id="lob-setup-title" className="section-title" style={{ fontSize: 16 }}>{connected ? "Lob key" : "Connect your Lob account"}</h2>
-          <span className="muted small">
-            {connected
-              ? <>Saved: {app.account_label}. Postcard campaigns are made in <Link to="/marketing?tab=campaigns">Marketing → Campaigns</Link>. Paste a new key to replace this one.</>
-              : "About three minutes. Lob prints and mails each card and bills your Lob account directly. Start with the test key to see your cards without mailing anything."}
-          </span>
-        </div>
+      <Section className={kit.panel} id="app-setup" title={connected ? "Lob key" : "Connect your Lob account"}>
+        <p className={kit.note}>
+          {connected
+            ? <>Saved: {app.account_label}. Postcard campaigns are made in <Link to="/marketing?tab=campaigns">Marketing → Campaigns</Link>. Paste a new key to replace this one.</>
+            : "About three minutes. Lob prints and mails each card and bills your Lob account directly. Start with the test key to see your cards without mailing anything."}
+        </p>
         {!connected && (
-          <ol className="app-steps">
-            <li>
+          <Steps>
+            <Step>
               <a className="btn btn-sm" href={LOB_KEYS} target="_blank" rel="noreferrer">Open your Lob API keys <Icon name="external" size={12} /></a>
-              <span className="muted small" style={{ display: "block", marginTop: 4 }}>No account yet? Sign up at lob.com first. Mailing for real needs a payment method in Lob.</span>
-            </li>
-            <li>Copy the <strong>secret</strong> key: the test one starts with <code>test_</code>, the live one with <code>live_</code>. Not the publishable key.</li>
-            <li>Paste it here. Crewtavo checks it with Lob before saving, at no cost.</li>
-          </ol>
+              <p className={kit.note}>No account yet? Sign up at lob.com first. Mailing for real needs a payment method in Lob.</p>
+            </Step>
+            <Step>Copy the <strong>secret</strong> key: the test one starts with <code>test_</code>, the live one with <code>live_</code>. Not the publishable key.</Step>
+            <Step>Paste it here. Crewtavo checks it with Lob before saving, at no cost.</Step>
+          </Steps>
         )}
         <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (typed.length >= 10) save.mutate(); }}>
           <div className="row" style={{ gap: 8 }}>
@@ -79,10 +78,10 @@ export function LobPanel({ app, onChanged }: { app: AppRow; onChanged: () => voi
             </div>
             <Button type="submit" variant="primary" loading={save.isPending} disabled={typed.length < 10}>{connected ? "Save" : "Connect"}</Button>
           </div>
-          {kind && <span className="small" style={{ fontWeight: 600, color: kind === "live" ? "var(--warning)" : undefined }}>{kind === "live" ? "This is a live key: cards will be mailed and charged." : "This is a test key: nothing will be mailed."}</span>}
+          {kind && <span className="app-status" data-tone={kind === "live" ? "warning" : undefined}>{kind === "live" ? "This is a live key: cards will be mailed and charged." : "This is a test key: nothing will be mailed."}</span>}
           <FormError error={save.error} />
         </form>
-      </section>
+      </Section>
     </>
   );
 }

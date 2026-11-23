@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { initials } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
@@ -13,6 +14,7 @@ import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useCustomFields } from "../customFields/CustomFields";
 import { ClientPicker, type PickedClient } from "./ClientForm";
+import styles from "./clients.module.css";
 
 type Client = { id: string; display_name: string };
 interface Preview {
@@ -78,19 +80,19 @@ export function MergeClientsDialog({ client, other, onClose }: { client: Client;
         )}
         {picked?.id === client.id && <span className="muted small" role="status">Pick a different client.</span>}
         {pair && keep && (
-          <Field label="Keep">
-            <div className="stack-sm">
-              {pair.map((c) => (
-                <label key={c.id} className="checkbox">
-                  <input type="radio" name="merge-keep" checked={keep.id === c.id} onChange={() => setKeepId(c.id)} />
-                  {c.display_name}
-                </label>
-              ))}
-            </div>
-          </Field>
+          <fieldset className={styles.keep}>
+            <legend>Keep</legend>
+            {pair.map((c) => (
+              <label key={c.id} className={styles.keepRow}>
+                <input type="radio" name="merge-keep" checked={keep.id === c.id} onChange={() => setKeepId(c.id)} />
+                <span className={styles.keepFace} aria-hidden="true">{initials(c.display_name)}</span>
+                <span className="grow">{c.display_name}</span>
+              </label>
+            ))}
+          </fieldset>
         )}
         {gone && keep && (
-          <div className="stack-sm" role="status">
+          <div className={styles.preview} role="status">
             {preview.isPending ? (
               <Skeleton width="80%" height={12} />
             ) : p ? (
@@ -99,7 +101,7 @@ export function MergeClientsDialog({ client, other, onClose }: { client: Client;
                 {!!filled.length && <span>{keep.display_name} gets their {filled.join(", ")}.</span>}
                 {!!p.tags.length && <span>Adds the tags {p.tags.join(", ")}.</span>}
                 {p.autopay_off && <span>Both are on autopay: {keep.display_name}&rsquo;s stays and {gone.display_name}&rsquo;s ends.</span>}
-                <span className="muted small">Invoice totals and payments don&rsquo;t change. {gone.display_name} is then deleted, and this can&rsquo;t be undone.</span>
+                <span className={styles.quiet}>Invoice totals and payments don&rsquo;t change. {gone.display_name} is then deleted, and this can&rsquo;t be undone.</span>
               </>
             ) : null}
           </div>

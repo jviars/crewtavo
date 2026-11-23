@@ -10,6 +10,7 @@ import { featureOn } from "@/components/shell/nav";
 import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
+import styles from "./Presence.module.css";
 import { clientShowcaseWords, photoSwitchNote, type ClientShowcase } from "./showcaseWords";
 
 function useClientShowcases(clientId: string) {
@@ -22,13 +23,13 @@ function useClientShowcases(clientId: string) {
   });
 }
 
-/** Among the client's chips: "1 showcase, published", linking to Marketing → Showcases. */
+/** On the quiet line under the client's name: "1 showcase, published", linking to Marketing → Showcases. */
 export function ClientShowcaseChip({ clientId }: { clientId: string }) {
   const showcases = useClientShowcases(clientId).data ?? [];
   if (!showcases.length) return null;
   return (
-    <Link className="chip" to="/marketing?tab=showcases" title={showcases.map((s) => s.title).join(", ")}>
-      <Icon name="image" size={12} />
+    <Link className={styles.flag} to="/marketing?tab=showcases" title={showcases.map((s) => s.title).join(", ")}>
+      <Icon name="image" size={13} />
       {clientShowcaseWords(showcases)}
     </Link>
   );
@@ -37,5 +38,5 @@ export function ClientShowcaseChip({ clientId }: { clientId: string }) {
 /** Under the photos switch: what turning it off does to their showcases, or that it has. */
 export function ClientShowcaseNote({ clientId, optedOut }: { clientId: string; optedOut: boolean }) {
   const note = photoSwitchNote(useClientShowcases(clientId).data ?? [], optedOut);
-  return note ? <span className="muted small" style={{ display: "block" }}>{note}</span> : null;
+  return note ? <span className={styles.switchNote}>{note}</span> : null;
 }

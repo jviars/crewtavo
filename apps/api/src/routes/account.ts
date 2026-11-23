@@ -1,5 +1,5 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
-import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetCustomFields, presetSummaries, presetWeatherRules, ROLE_LABELS, seesPayRates, ROLES, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
+import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetCustomFields, presetSummaries, presetWeatherRules, ROLE_LABELS, seesPayRates, ROLES, settingsFor, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
 import { LOCALES } from "@crewtavo/core/i18n";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -7,11 +7,11 @@ import type { AppEnv, Env } from "../env";
 import { platformOf } from "../lib/address";
 import { confirmAdminGrant, confirmPassword, EMAILED_SIGN_INS, emailAuthLink, passwordIn, requireCompany, requireUser, signedInWithin } from "../lib/auth";
 import { runInBackground } from "../lib/background";
-import { appUrl, asJson, dbError, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, asJson, dbError, HttpError, must, readJson, signInHome, uuid } from "../lib/http";
 import { renderEmail } from "../lib/email";
 import { isDemo } from "../lib/demoMode";
 import { allow } from "../lib/limit";
-import { checkMailbox, emailConfigured, loadMailbox, sendEmail, smsConfigured } from "../lib/notify";
+import { checkMailbox, emailConfigured, loadMailbox, mailboxOwnerSet, sendEmail, smsConfigured } from "../lib/notify";
 import { adminClient, publishableKey, type Db } from "../lib/supabase";
 import { connectedPlans } from "../integrations/chatgptPlan";
 import { timeRates } from "../services/payRates";
@@ -96,16 +96,25 @@ account.get("/presets", (c) => c.json(presetSummaries()));
  */
 account.get("/me", requireUser, async (c) => {
   const { db, userId } = c.var;
-  const [profile, memberships, everyRole] = await Promise.all([
+  const [profile, memberships, everyRole, kept] = await Promise.all([
     db.from("profiles").select("user_id, email, full_name, phone, avatar_url, color, locale").eq("user_id", userId).maybeSingle(),
     db
       .from("memberships")
-      .select("company_id, role, role_id, subcontractor_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, phone, settings)")
+      .select("company_id, role, role_id, subcontractor_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, phone)")
       .eq("user_id", userId)
       .eq("active", true),
     adminClient(c.env).from("memberships").select("company_id, role").eq("user_id", userId),
+    // The prices and targets kept apart from the settings: the database gives them only to those who sell.
+    db.from("company_private_settings").select("company_id, settings"),
   ]);
+  const keptFor = new Map(must(kept).map((k) => [k.company_id, k.settings]));
   const rows = must(memberships);
+  // The browser doesn't read companies.settings: each person gets what their level reads of it
+  // (settingsFor, as public.company_settings() decides in the database). A sub's is in company_basics().
+  const teamRows = rows.filter((m) => m.role !== "subcontractor");
+  const savedSettings = new Map<string, unknown>(
+    teamRows.length ? must(await adminClient(c.env).from("companies").select("id, settings").in("id", teamRows.map((m) => m.company_id))).map((r) => [r.id, r.settings] as const) : [],
+  );
   const roleIds = rows.map((m) => m.role_id).filter((id): id is string => Boolean(id));
   const roles = roleIds.length ? must(await db.from("company_roles").select("id, name, permissions").in("id", roleIds)) : [];
   const byId = new Map(roles.map((r) => [r.id, r]));
@@ -149,13 +158,13 @@ account.get("/me", requireUser, async (c) => {
     memberships: rows.flatMap((m) => {
       const custom = m.role_id ? byId.get(m.role_id) : undefined;
       const sub = m.role === "subcontractor" ? subRecords.find((x) => x.id === m.subcontractor_id) : undefined;
-      const company = m.role === "subcontractor" ? basicsOf.get(m.company_id) : m.company;
+      const company = m.role === "subcontractor" ? basicsOf.get(m.company_id) : m.company && { ...m.company, settings: settingsFor(m.role, savedSettings.get(m.company_id)) };
       // A sub's sign-in whose sub the office turned off reaches nothing, so it isn't offered.
       if (!company || (m.role === "subcontractor" && !sub)) return [];
       const staff = m.role !== "subcontractor";
       return [{
         role: m.role,
-        company,
+        company: withKept(company, keptFor.get(m.company_id)),
         role_name: custom?.name ?? ROLE_LABELS[m.role as Role],
         role_id: custom ? m.role_id : null,
         permissions: memberPermissions(m.role as Role, custom ? custom.permissions : null),
@@ -178,7 +187,7 @@ account.get("/me", requireUser, async (c) => {
         // Only the owner is asked to connect Railway at sign-in.
         railway_needed:
           m.role === "owner" &&
-          railwayNeeded(c.env, railways.find((r) => r.company_id === m.company_id) ?? null, (m.company as { settings?: unknown } | null)?.settings ?? null),
+          railwayNeeded(c.env, railways.find((r) => r.company_id === m.company_id) ?? null, savedSettings.get(m.company_id) ?? null),
       }];
     }),
   });
@@ -190,6 +199,17 @@ account.get("/me", requireUser, async (c) => {
  */
 const ownSignIn = (appMetadata: unknown, companyId: string, subId: string, memberships: ReadonlyArray<{ company_id: string }>) =>
   isSubLogin(appMetadata, companyId, subId) && memberships.every((x) => x.company_id === companyId);
+
+/**
+ * A company with its prices and targets (company_private_settings: the paving calculator, the roofing
+ * price ranges, the revenue goal and margin target) back in its settings, where the app reads them.
+ * Only those who sell get them (the database decides); a crew's sign-in carries none.
+ */
+function withKept<T>(company: T, kept: unknown): T {
+  if (!kept || typeof kept !== "object") return company;
+  const settings = (company as { settings?: unknown }).settings;
+  return { ...company, settings: { ...(settings && typeof settings === "object" ? settings : {}), ...kept } };
+}
 
 /**
  * For a sub's own sign-in (own_sign_in), what's on the office's record for them: a number sign-in
@@ -298,7 +318,7 @@ account.post("/companies", requireUser, async (c) => {
     const set = await db.from("companies").update({ currency }).eq("id", companyId as string);
     if (set.error) console.error("Couldn't set the currency", set.error.message);
   }
-  await applyPreset(db, companyId as string, preset);
+  await applyPreset(db, adminClient(c.env), companyId as string, preset);
   // Where texting is connected (a business this new has no Twilio account of its own yet, so the
   // server's), the starters that tell clients about their visits text as well as email, and the
   // on-my-way text starts on. If this fails they're as every company's start, and can be changed
@@ -350,10 +370,13 @@ const tradeApp = (trade: string) => {
   return app ? { [app]: { enabled: true } } : {};
 };
 
-/** Load a trade preset into a new company. Runs as the new owner, so RLS still applies. */
-export async function applyPreset(db: Db, companyId: string, preset: TradePreset) {
+/**
+ * Load a trade preset into a new company. Runs as the new owner, so RLS still applies; the settings
+ * it adds to are read with `admin` (the browser's role doesn't read companies.settings).
+ */
+export async function applyPreset(db: Db, admin: Db, companyId: string, preset: TradePreset) {
   const formulas = new Map(preset.formulas.map((f) => [f.name, f]));
-  const { data: company, error } = await db.from("companies").select("settings").eq("id", companyId).maybeSingle();
+  const { data: company, error } = await admin.from("companies").select("settings").eq("id", companyId).maybeSingle();
   if (error) throw dbError(error);
   const current = (company?.settings ?? {}) as Record<string, unknown>;
   // The price list's ids, made here so the weather rules can name their items by id in the same go.
@@ -566,6 +589,33 @@ account.patch("/team/:userId/access", requireUser, requireCompany(ADMINS, "team"
   return c.json({ ok: true });
 });
 
+/**
+ * Someone's access given back (Settings → People → Restore). Through here rather than straight to
+ * the database, which refuses admin-level access given back from the browser (the
+ * admin_access_back_and_own_pay migration): giving it back asks for the password, as giving it does.
+ * Written with the person's own client, so the database's other rules hold (only an owner acts for
+ * an owner, nobody gives back areas their own role doesn't have).
+ */
+account.post("/team/:userId/restore", requireUser, requireCompany(ADMINS, "team"), async (c) => {
+  const parsed = uuid.safeParse(c.req.param("userId"));
+  if (!parsed.success) throw new HttpError(404, "That person isn't on your team.");
+  const targetId = parsed.data;
+  const { db, companyId, userId, role } = c.var;
+  const password = await passwordIn(c);
+  const member = must(await db.from("memberships").select("role, role_id, active").eq("company_id", companyId).eq("user_id", targetId).maybeSingle(), "That person isn't on your team.");
+  if (member.role === "subcontractor") throw new HttpError(400, "A sub's sign-in is given and taken away on their page, under Subs.");
+  if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
+  if (member.active) return c.json({ ok: true });
+  // Admin-level access (as the database counts it: their role as it is now) asks for the password.
+  const who = (await adminAccess(db, companyId, member.role, member.role_id)) ? await confirmAdminGrant(c, password) : null;
+  if (who) await allowAdminGrant(c.env, companyId, userId, targetId);
+  const { data, error } = await db.from("memberships").update({ active: true }).eq("company_id", companyId).eq("user_id", targetId).select("user_id");
+  if (error) throw dbError(error);
+  if (!data.length) throw new HttpError(404, "That person isn't on your team.");
+  if (who) noteAdminGrant(c, who, `gave ${await personName(c, targetId)} their access back, as ${await accessName(c, member.role as Role, member.role_id)}`);
+  return c.json({ ok: true });
+});
+
 /** A custom role as Settings → Roles saves it. */
 const roleRow = z.object({
   name: z.string().trim().min(1).max(60),
@@ -687,6 +737,10 @@ async function photoTarget(c: Context<AppEnv>): Promise<string> {
   if (error) throw dbError(error);
   if (!member) throw new HttpError(404, "That person isn't on your team.");
   if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
+  // Their photo is their account's, in every business they're in: one that isn't only this one's isn't this company's to change (as with reset links, routes/recovery.ts).
+  const elsewhere = await adminClient(c.env).from("memberships").select("company_id").eq("user_id", parsed.data).neq("company_id", companyId).limit(1);
+  if (elsewhere.error) throw dbError(elsewhere.error);
+  if (elsewhere.data.length) throw new HttpError(403, "This person also uses Crewtavo with another business, so they change their own photo.");
   return parsed.data;
 }
 
@@ -708,7 +762,8 @@ account.post("/team/:userId/invite-link", requireUser, requireCompany(ADMINS, "t
   // As with changing their role, only an owner acts for an owner.
   if (member.role === "owner" && role !== "owner") throw new HttpError(403, "Only an owner can do that for another owner.");
   // A link into an account with admin-level access asks for the password, as giving that access does.
-  if (await adminAccess(c.var.db, companyId, member.role, member.role_id)) await confirmAdminGrant(c, await passwordIn(c));
+  const adminAccount = await adminAccess(c.var.db, companyId, member.role, member.role_id);
+  if (adminAccount) await confirmAdminGrant(c, await passwordIn(c));
   const invite = await inviteStatus(c.env, companyId, targetId);
   if (invite.status !== "pending") {
     throw invite.status === "joined"
@@ -718,15 +773,18 @@ account.post("/team/:userId/invite-link", requireUser, requireCompany(ADMINS, "t
 
   const link = await welcomeLink(c.env, appUrl(c), invite.email);
   const profile = (await c.var.db.from("profiles").select("full_name").eq("user_id", targetId).maybeSingle()).data;
-  const sent = await sendInvite(teamScope(c), { email: invite.email, name: profile?.full_name }, link);
+  const sent = await sendInvite(teamScope(c), { email: invite.email, name: profile?.full_name }, link, adminAccount);
   return c.json({ emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link });
 });
 
 /**
  * "Forgot password" and "Email me a sign-in link". The link is sent from the person's company
  * mailbox when it has a working one (or the install's own email, which also takes over if the
- * mailbox fails), so it reaches everyone; without either it falls back to Supabase's mailer.
- * Always answers the same way, so it can't reveal who has an account.
+ * mailbox fails), so it reaches everyone; without either it falls back to Supabase's mailer. An
+ * owner's or admin's link only goes through a mailbox an owner connected, since whoever connects
+ * one can read what it sends (lib/notify.ts mailboxOwnerSet).
+ * Always answers the same way, and at once: the link is made and sent after the answer, so neither
+ * the answer nor how long it takes says who has an account.
  */
 account.post("/auth/email-link", async (c) => {
   const body = await readJson(c, z.object({ email: z.email(), kind: z.enum(["recovery", "magiclink"]) }));
@@ -737,62 +795,73 @@ account.post("/auth/email-link", async (c) => {
   }
   // A sub's stand-in address (no email of their own) is never sent anything.
   if (isPlaceholderEmail(email)) return c.json({ sent: true });
-  const admin = adminClient(c.env);
   // A one-business instance that can't send email says so instead of pretending a link went out.
   // The answer is the same for every address, so it doesn't reveal who has an account.
   if (c.env.CREWTAVO_SINGLE_COMPANY === "1" && !emailConfigured(c.env)) {
-    const { data: mailbox } = await admin.from("integrations").select("company_id").eq("provider", "email").eq("status", "connected").limit(1);
+    const { data: mailbox } = await adminClient(c.env).from("integrations").select("company_id").eq("provider", "email").eq("status", "connected").limit(1);
     if (!mailbox?.length) return c.json({ sent: false, reason: "email_off" });
   }
-  const redirectTo = `${appUrl(c)}/`;
-  const { data: userId } = await admin.rpc("user_id_for_email", { p_email: email });
-  if (!userId) return c.json({ sent: true });
+  // The link opens on APP_URL, never this request's own address, which its sender chose.
+  const home = signInHome(c.env);
+  runInBackground(c, emailSignInLink(c.env, home, email, body.kind));
+  return c.json({ sent: true });
+});
 
-  const { data: memberships } = await admin.from("memberships").select("company_id, company:companies(name, email)").eq("user_id", userId).eq("active", true);
+/** The link POST /api/auth/email-link asked for, made and sent after its answer. Nothing for an address with no account. */
+async function emailSignInLink(env: Env, home: string, email: string, kind: "recovery" | "magiclink") {
+  const admin = adminClient(env);
+  const redirectTo = `${home}/`;
+  const { data: userId } = await admin.rpc("user_id_for_email", { p_email: email });
+  if (!userId) return;
+
+  const { data: memberships } = await admin.from("memberships").select("company_id, role, role_id, company:companies(name, email)").eq("user_id", userId).eq("active", true);
   // A company's own mailbox sends the link only when the person belongs to that one company. With
   // several, any of them could have added this person, and whoever runs a mailbox can read the link.
   const only = memberships?.length === 1 ? memberships[0]! : null;
   const onlyCompany = only?.company as unknown as { name: string; email: string | null } | undefined;
+  // For an owner or an admin, only a mailbox an owner connected (lib/notify.ts mailboxOwnerSet).
+  // Taken as admin-level when it can't be told.
+  const adminAccount = only ? (ADMINS as readonly string[]).includes(only.role) || (await adminAccess(admin, only.company_id, only.role, only.role_id).catch(() => true)) : false;
+  const usable = only && (!adminAccount || (await mailboxOwnerSet(env, only.company_id)));
   // And only while it works: one whose sign-in failed (a changed or revoked app password, a refused
   // Resend key) would just fail again.
-  const mailbox = only ? await loadMailbox(c.env, only.company_id).catch(() => null) : null;
+  const mailbox = only && usable ? await loadMailbox(env, only.company_id).catch(() => null) : null;
   let sender: { id: string | null; name: string; email: string | null } | null = null;
   if (only && onlyCompany && mailbox && mailbox.status !== "error") {
     // Without the install's own email, only Supabase's mailer could take over from the mailbox, and
     // only before the link is made: making one starts its wait (a minute by default) before it will
     // email that person. So the mailbox has to sign in first.
-    if (emailConfigured(c.env) || (await checkMailbox(c.env, only.company_id, mailbox))) {
+    if (emailConfigured(env) || (await checkMailbox(env, only.company_id, mailbox))) {
       sender = { id: only.company_id, name: onlyCompany.name, email: onlyCompany.email };
     }
   }
-  if (!sender && emailConfigured(c.env)) {
+  if (!sender && emailConfigured(env)) {
     sender = { id: null, name: onlyCompany?.name ?? "Crewtavo", email: onlyCompany?.email ?? null };
   }
   if (!sender) {
-    const fallback = body.kind === "recovery"
+    const fallback = kind === "recovery"
       ? await admin.auth.resetPasswordForEmail(email, { redirectTo })
       : await admin.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: redirectTo } });
     if (fallback.error) console.error("Supabase auth email failed", fallback.error.message);
-    return c.json({ sent: true });
+    return;
   }
 
-  const { data, error } = await admin.auth.admin.generateLink({ type: body.kind, email, options: { redirectTo } });
+  const { data, error } = await admin.auth.admin.generateLink({ type: kind, email, options: { redirectTo } });
   if (error || !data.properties?.hashed_token) {
     console.error("Couldn't create an auth link", error);
-    return c.json({ sent: true });
+    return;
   }
-  const link = await emailAuthLink(c.env, appUrl(c), data.properties.hashed_token, body.kind);
-  const text = body.kind === "recovery"
+  const link = await emailAuthLink(env, data.properties.hashed_token, kind);
+  const text = kind === "recovery"
     ? `Someone asked to reset the password for your ${sender.name} account on Crewtavo. Choose a new password here:\n\n${link}\n\nIf that wasn't you, ignore this email. Your password stays the same.`
     : `Here's your link to sign in to ${sender.name} on Crewtavo. It works once and expires soon:\n\n${link}\n\nIf you didn't ask for it, ignore this email.`;
-  const message = { to: email, subject: body.kind === "recovery" ? `Reset your ${sender.name} password` : `Your ${sender.name} sign-in link`, ...renderEmail({ companyName: sender.name, text }), replyTo: sender.email ?? undefined, fromName: sender.name };
-  let result = await sendEmail(c.env, message, sender.id);
+  const message = { to: email, subject: kind === "recovery" ? `Reset your ${sender.name} password` : `Your ${sender.name} sign-in link`, ...renderEmail({ companyName: sender.name, text }), replyTo: sender.email ?? undefined, fromName: sender.name };
+  let result = await sendEmail(env, message, sender.id, { adminAccount });
   // The company mailbox didn't take it: the install's own email still can (Supabase's mailer can't
   // now, see above).
-  if (!result.sent && sender.id && emailConfigured(c.env)) {
+  if (!result.sent && sender.id && emailConfigured(env)) {
     console.error("Auth email not sent from the company mailbox", result.reason);
-    result = await sendEmail(c.env, message, null);
+    result = await sendEmail(env, message, null);
   }
   if (!result.sent) console.error("Auth email not sent", result.reason);
-  return c.json({ sent: true });
-});
+}

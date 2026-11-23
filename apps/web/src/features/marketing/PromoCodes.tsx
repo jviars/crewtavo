@@ -1,4 +1,8 @@
-/** Promo codes: a percent or dollar amount off, for quotes, invoices, booking forms and the Client Hub. */
+/**
+ * Promo codes: a percent or dollar amount off, for quotes, invoices, booking forms and the Client Hub.
+ * Each code is a row on the section's hairline (App-Marketing.dc.html): the code, what it takes off,
+ * how it's been used and its rules, and its status; the row opens it, and its menu does the rest.
+ */
 import type { Tables } from "@crewtavo/core/database";
 import { repeatChoices } from "@crewtavo/core/promos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,17 +11,19 @@ import { Button } from "@/components/ui/Button";
 import { choose } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
+import { DetailColumns } from "@/components/ui/DetailPage";
 import { Menu } from "@/components/ui/Menu";
-import { NumberInput } from "@/components/ui/NumberInput";
-import { TableSkeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
-import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import styles from "./Marketing.module.css";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 type Promo = Tables<"promo_codes">;
 
@@ -77,74 +83,72 @@ export function PromoCodes() {
         queryClient.setQueryData<Codes>(key, (old) => (old && !old.rows.some((r) => r.id === promo.id) ? { ...old, rows: [...old.rows, promo].sort((a, b) => b.created_at.localeCompare(a.created_at)) } : old)),
       commit: () => remove.mutateAsync(promo.id),
     });
-  const list = useListAnimation<HTMLDivElement>();
-
   const form = codes.data?.form;
   const bookingLink = (code: string) => (form ? `${window.location.origin}/book/${session.company.slug}/${form.slug}?promo=${encodeURIComponent(code)}` : null);
 
   return (
-    <div className="stack">
-      <div className="row-between">
-        <span className="muted small">Clients can enter a code on your booking form or when they open a quote or invoice. You can also add one for them.</span>
-        <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New promo code</Button>
-      </div>
-      {codes.isPending ? <TableSkeleton columns={4} rows={3} /> : codes.error ? (
-        <div className="card"><ErrorState error={codes.error} onRetry={() => codes.refetch()} /></div>
-      ) : !codes.data.rows.length ? (
-        <div className="card">
+    <DetailColumns grouped>
+      <Section title="Promo codes" count={codes.data?.rows.length || undefined} action={<Button onClick={() => setEditing("new")}>New promo code</Button>}>
+        {codes.isPending ? <SectionSkeleton rows={3} /> : codes.error ? (
+          <ErrorState compact error={codes.error} onRetry={() => codes.refetch()} />
+        ) : !codes.data.rows.length ? (
           <EmptyState inline title="No promo codes yet" action={<Button onClick={() => setEditing("new")}>Create a promo code</Button>}>
-            Offer a percent or dollar amount off, like SPRING10 for 10% off spring cleanups.
+            Offer a percent or dollar amount off, like SPRING10 for 10% off spring cleanups
           </EmptyState>
-        </div>
-      ) : (
-        <div className="card" ref={list}>
-          {codes.data.rows.map((p) => {
-            const usage = codes.data.used.get(p.id);
-            const uses = usage?.uses ?? 0;
-            const status = promoStatus(p, uses, today);
-            const rules = [
-              Number(p.min_subtotal) > 0 && `orders over ${formatMoney(p.min_subtotal)}`,
-              p.new_clients_only ? "new customers only" : p.once_per_client && "once per client",
-              p.every_visit && "every visit",
-              p.starts_on && p.starts_on > today && `starts ${formatDate(p.starts_on)}`,
-              p.ends_on && `${p.ends_on < today ? "ended" : "ends"} ${formatDate(p.ends_on)}`,
-            ].filter(Boolean);
-            const link = bookingLink(p.code);
-            return (
-              <div key={p.id} className="card-row">
-                <span className="promo-code">{p.code}</span>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{offerLabel(p)}</strong>
-                  {p.description && <span className="muted"> · {p.description}</span>}
-                  <span className="muted small ellipsis" style={{ display: "block" }}>
-                    {[`${uses}${p.max_uses ? ` of ${p.max_uses}` : ""} ${uses === 1 && !p.max_uses ? "use" : "uses"}`, Number(usage?.discounted ?? 0) > 0 && `${formatMoney(usage!.discounted)} off so far`, ...rules].filter(Boolean).join(" · ")}
-                  </span>
-                </span>
-                <StatusPill label={status.label} tone={status.tone} />
-                <Menu
-                  triggerClassName="btn btn-sm btn-ghost btn-icon"
-                  label={`Actions for ${p.code}`}
-                  items={[
-                    { label: "Edit", icon: "edit", onSelect: () => setEditing(p) },
-                    { label: "Copy code", icon: "copy", onSelect: () => copyText(p.code, "Code copied") },
-                    { label: "Copy booking link with this code", icon: "link", hidden: !link, onSelect: () => copyText(link!, "Booking link copied") },
-                    { separator: true },
-                    { label: p.active ? "Pause" : "Turn back on", icon: p.active ? "pause" : "play", onSelect: () => update.mutate({ id: p.id, active: !p.active }) },
-                    {
-                      label: "Delete",
-                      icon: "trash",
-                      danger: true,
-                      onSelect: () => deleteCode(p),
-                    },
-                  ]}
+        ) : (
+          <RelatedList label="Promo codes">
+            {codes.data.rows.map((p) => {
+              const usage = codes.data.used.get(p.id);
+              const uses = usage?.uses ?? 0;
+              const status = promoStatus(p, uses, today);
+              const rules = [
+                Number(p.min_subtotal) > 0 && `orders over ${formatMoney(p.min_subtotal)}`,
+                p.new_clients_only ? "new customers only" : p.once_per_client && "once per client",
+                p.every_visit && "every visit",
+                p.starts_on && p.starts_on > today && `starts ${formatDate(p.starts_on)}`,
+                p.ends_on && `${p.ends_on < today ? "ended" : "ends"} ${formatDate(p.ends_on)}`,
+              ].filter(Boolean);
+              const link = bookingLink(p.code);
+              return (
+                <RelatedRow
+                  key={p.id}
+                  onClick={() => setEditing(p)}
+                  title={<><span className={styles.code}>{p.code}</span> {offerLabel(p)}{p.description && <span className={styles.promoWhat}>{p.description}</span>}</>}
+                  sub={[`${uses}${p.max_uses ? ` of ${p.max_uses}` : ""} ${uses === 1 && !p.max_uses ? "use" : "uses"}`, Number(usage?.discounted ?? 0) > 0 && `${formatMoney(usage!.discounted)} off so far`, ...rules]}
+                  end={<StatusPill label={status.label} tone={status.tone} />}
+                  actions={
+                    <Menu
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      label={`Actions for ${p.code}`}
+                      title={p.code}
+                      items={[
+                        { label: "Edit", icon: "edit", kbd: "E", onSelect: () => setEditing(p) },
+                        link
+                          ? { label: "Copy", icon: "copy", items: [
+                              { label: "Code", icon: "copy", kbd: "C", onSelect: () => copyText(p.code, "Code copied") },
+                              { label: "Booking link with this code", icon: "link", kbd: "L", onSelect: () => copyText(link, "Booking link copied") },
+                            ] }
+                          : { label: "Copy code", icon: "copy", kbd: "C", onSelect: () => copyText(p.code, "Code copied") },
+                        { label: p.active ? "Pause" : "Turn back on", icon: p.active ? "pause" : "play", onSelect: () => update.mutate({ id: p.id, active: !p.active }) },
+                        { separator: true },
+                        {
+                          label: "Delete",
+                          icon: "trash",
+                          danger: true,
+                          onSelect: () => deleteCode(p),
+                        },
+                      ]}
+                    />
+                  }
                 />
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </RelatedList>
+        )}
+      </Section>
+      <p className={styles.fine}>Clients can enter a code on your booking form or when they open a quote or invoice. You can also add one for them.</p>
       {editing && <PromoDialog promo={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={refresh} />}
-    </div>
+    </DetailColumns>
   );
 }
 

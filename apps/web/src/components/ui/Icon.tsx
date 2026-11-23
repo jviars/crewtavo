@@ -55,6 +55,12 @@ const FOLDER_MOVE: Own = {
   marks: '<path d="M96 144h64M136 120l24 24-24 24"/>',
 };
 
+/** A mower (equipment, lawn work): a push mower from the side, its handle back over the deck. Phosphor has none. */
+const MOWER: Own = {
+  shape: '<path d="M48 176v-36a20 20 0 0 1 20-20h100a56 56 0 0 1 56 56z"/><circle cx="76" cy="196" r="24"/><circle cx="188" cy="196" r="24"/>',
+  lines: '<path d="M24 32h40l36 88"/>',
+};
+
 const ICONS = {
   plus: "plus",
   minus: "minus",
@@ -73,6 +79,7 @@ const ICONS = {
   clock: "clock",
   bolt: "lightning",
   truck: "truck",
+  mower: MOWER,
   gauge: "gauge",
   globe: "globe-simple",
   book: "book-open-text",
@@ -97,6 +104,8 @@ const ICONS = {
   check: "check",
   arrowLeft: "arrow-left",
   arrowRight: "arrow-right",
+  /** Send, on a phone's round send button. */
+  arrowUp: "arrow-up",
   phone: "phone",
   mail: "envelope-simple",
   logout: "sign-out",
@@ -113,6 +122,8 @@ const ICONS = {
   star: "star",
   gift: "gift",
   alert: "warning",
+  /** A callout that nobody can skip (the knowledge base's "important"). */
+  alertCircle: "warning-circle",
   info: "info",
   external: "arrow-square-out",
   eye: "eye",
@@ -135,6 +146,8 @@ const ICONS = {
   list: "list-bullets",
   map: "map-trifold",
   file: "file",
+  /** A document of words: Word, text, a rich-text file. */
+  fileText: "file-text",
   link: "link",
   code: "code",
   lock: "lock",
@@ -211,6 +224,14 @@ const ICONS = {
   arrowUpRight: "arrow-up-right",
   /** A repair or a tool (equipment); a job is the hard hat. */
   wrench: "wrench",
+  /** A list's order (the sort menu beside its filters). */
+  sort: "arrows-down-up",
+  /** Trades, on first-run setup's tiles: landscaping, lawn care, pest control, plumbing, pools. */
+  tree: "tree-evergreen",
+  plant: "plant",
+  bug: "bug",
+  drop: "drop",
+  waves: "waves",
   /** A client's page: a licensed business and an insured one. */
   certificate: "certificate",
   shieldCheck: "shield-check",
@@ -244,8 +265,10 @@ function drawOwn(own: Own, weight: Weight, id: string): string {
  * `size` snaps to the set above (18, the default, draws at 20). Up to 16px an icon is drawn bold,
  * since Phosphor's regular line is too faint that small; `bold` asks for it at any size (a check that
  * should stand out). `filled` is for something selected: the screen you're on, a chosen star.
+ * `className` goes on the <svg>, for a screen's rule that places or colors it; `data-icon` names it,
+ * so a stage's own icon (a quote, a job) can carry the stage's color (base.css).
  */
-export function Icon({ name, size = 18, label, bold, filled }: { name: IconName; size?: number; label?: string; bold?: boolean; filled?: boolean }) {
+export function Icon({ name, size = 18, label, bold, filled, className }: { name: IconName; size?: number; label?: string; bold?: boolean; filled?: boolean; className?: string }) {
   const id = `icon${useId().replace(/:/g, "")}`;
   const px = iconSize(size);
   const weight: Weight = filled ? "fill" : bold || px <= 16 ? "bold" : "regular";
@@ -258,6 +281,8 @@ export function Icon({ name, size = 18, label, bold, filled }: { name: IconName;
       viewBox="0 0 256 256"
       fill="currentColor"
       focusable="false"
+      className={className}
+      data-icon={name}
       role={label ? "img" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}

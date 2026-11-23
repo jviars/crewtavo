@@ -3,10 +3,11 @@
  * for (lib/auth.ts confirmPassword): it goes to Auth itself, never through the instance's gateway,
  * whose sign-in pause a stranger could set off for the owner's email.
  */
+import type { Context } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
-import type { Env } from "../src/env";
-import { TOO_MANY_SIGN_INS, WRONG_PASSWORD } from "../src/lib/auth";
+import type { AppEnv, Env } from "../src/env";
+import { confirmPassword, TOO_MANY_SIGN_INS, WRONG_PASSWORD } from "../src/lib/auth";
 
 const PAT = "11111111-1111-4111-8111-111111111111";
 const hosted: Env = { SUPABASE_URL: "https://abcd1234.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", SUPABASE_SECRET_KEY: "sb_secret_test", APP_URL: "https://ops.example.com" };
@@ -73,8 +74,8 @@ describe("changing your password", () => {
     expect(calls.updates).toEqual([{ password: "new password 2" }]);
     // The check's throwaway session, then everyone else's but this one.
     expect(calls.logouts).toEqual(["scope=local Bearer throwaway", `scope=others Bearer ${token}`]);
-    // Counted for this sign-in, and for Pat.
-    expect(calls.limits).toEqual(Array(2).fill([`account-password:${PAT}:s-1`, `account-password:${PAT}`]).flat());
+    // Counted for this sign-in, and for Pat (one count for every kind of check).
+    expect(calls.limits).toEqual(Array(2).fill([`account-password:${PAT}:s-1`, `password-check:${PAT}`]).flat());
   });
 
   it("keeps the rules for a new one", async () => {
@@ -122,5 +123,37 @@ describe("the password check", () => {
     const down = await change(session("password"), { current: "old password 1", password: "new password 2" }, instance);
     expect(down.status).toBe(503);
     expect(await errorOf(down)).toBe("Couldn't check your password. Try again in a moment.");
+  });
+});
+
+describe("the tries one person gets", () => {
+  it("are 50 an hour across every kind of check, however the guesses are spread", async () => {
+    const hits = new Map<string, number>();
+    const checked: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      if (url.includes("/rpc/rate_limit_hit")) {
+        const n = (hits.get(body.p_key) ?? 0) + 1;
+        hits.set(body.p_key, n);
+        return Response.json(n <= body.p_max);
+      }
+      if (url.includes("/rest/v1/profiles")) return Response.json([{ email: "pat@example.com", full_name: "Pat Owner" }]);
+      if (url.includes("/token?grant_type=password")) {
+        checked.push(body.password);
+        return Response.json({ code: 400, error_code: "invalid_credentials", msg: "Invalid login credentials" }, { status: 400 });
+      }
+      throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`);
+    });
+    // One sign-in, guessing at each kind of check up to that kind's own limit for the sign-in.
+    const c = { env: hosted, var: { userId: PAT, sessionId: "s-1", appMetadata: { providers: ["email"] } } } as unknown as Context<AppEnv>;
+    const kinds = ["account-password", "admin-grant", "backups", "spare-keys", "stripe-key", "mailbox", "web-address", "railway", "kind-9", "kind-10"];
+    for (const kind of kinds) {
+      for (let i = 0; i < 5; i++) await expect(confirmPassword(c, `guess ${kind} ${i}`, kind, 10)).rejects.toMatchObject({ status: 400, message: WRONG_PASSWORD });
+    }
+    expect(checked).toHaveLength(50);
+    // The 51st is refused before Auth is asked, whatever kind of check it's for.
+    await expect(confirmPassword(c, "old password 1", "another-kind", 10)).rejects.toMatchObject({ status: 429 });
+    expect(checked).toHaveLength(50);
   });
 });

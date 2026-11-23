@@ -1,0 +1,22 @@
+/* A job showcase (/s/:token, ShowcasePage.tsx) in the client kit: the write-up, then its before and after photos. */
+.intro { display: grid; gap: 22px; }
+.introText { min-width: 0; }
+/* The write-up at a reading width; its hairline still spans the card. */
+.introText > p { padding-right: max(0px, 100% - 720px); }
+.photos { display: grid; gap: 12px; align-content: start; min-width: 0; padding-top: 8px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pair .grid { grid-template-columns: minmax(0, 1fr); }
+.photos > h2 { padding: 0 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.grid img { display: block; width: 100%; height: auto; border-radius: 16px; background: var(--fill-2); }
+.ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; }
+.askText { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; }
+
+@media (max-width: 900px) {
+  .pair { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .intro > a { width: 100%; }
+  .grid { gap: 8px; }
+  .grid img { border-radius: 14px; }
+  .ask { flex-direction: column; align-items: stretch; text-align: center; }
+  .ask > a { width: 100%; }
+}

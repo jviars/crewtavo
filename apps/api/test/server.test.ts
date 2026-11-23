@@ -136,4 +136,16 @@ describe("the server", () => {
     expect(await send("/jobs/123")).toBe(200);
     expect((await headersOf("/jobs/123"))["cache-control"]).toBe("no-cache");
   });
+
+  it("refuses a backslash in an address's path rather than reading it as a slash", async () => {
+    // Read as a slash, the gateway would get /auth/v1/user while a web server in front, deciding by
+    // path, saw another address.
+    calls.length = 0;
+    expect(await send("/auth\\v1/user", { headers: behindCaddy })).toBe(400);
+    expect(await send("/api\\health")).toBe(400);
+    expect(calls).toEqual([]);
+    // Written as %5C it's only a character, and a backslash after the ? is part of the query.
+    expect(await send("/jobs/a%5Cb")).toBe(200);
+    expect(await send("/jobs/123?q=a\\b")).toBe(200);
+  });
 });

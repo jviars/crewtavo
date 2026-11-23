@@ -18,7 +18,11 @@ import { useEffect, useState } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { api, supabase, unwrap } from "@/lib/api";
+import { Section } from "@/components/ui/Section";
 import { useSession } from "@/lib/session";
+import p from "./Prefs.module.css";
+import { SwitchRow } from "./SettingsKit";
+import { loadSettings } from "@/lib/companySettings";
 
 interface QuoteForm {
   sendPayments: boolean;
@@ -49,7 +53,10 @@ export function QuoteSettings() {
   const queryClient = useQueryClient();
   const details = useQuery({
     queryKey: ["company", company.id],
-    queryFn: async () => unwrap(await supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, settings, trade_preset").eq("id", company.id).single()),
+    queryFn: async () => {
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
+      return { ...unwrap(row), settings };
+    },
   });
   const [f, setF] = useState<QuoteForm | null>(null);
   useEffect(() => {
@@ -78,39 +85,47 @@ export function QuoteSettings() {
   });
   const aiOn = ((details.data?.settings ?? {}) as { quote_ai?: { on?: boolean } }).quote_ai?.on === true;
   if (!f) return null;
+  // Saved values as the form shows them, to say what's waiting to be saved.
+  const dirty = details.data ? JSON.stringify(f) !== JSON.stringify(quoteForm(details.data.settings)) : false;
   return (
-    <form className="card card-pad stack" onSubmit={(e) => { e.preventDefault(); save.mutate(f); }}>
-      <strong>Quotes and payments</strong>
-      <Field label="Tell me about quotes over" optional hint="When a quote of at least this much is sent, approved, or the client asks for changes, owners, admins and its salesperson hear about it on the bell and their phone, except whoever did it. Empty is off.">
-        <span className="input-group" style={{ maxWidth: 180 }}>
-          <span className="addon">$</span>
-          <input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.alertOver} placeholder="Off" onChange={(e) => setF({ ...f, alertOver: e.target.value.replace(/[^0-9.]/g, "") })} />
-        </span>
-      </Field>
-      <label className="switch-row" style={{ fontWeight: 400 }}>
-        <input type="checkbox" className="switch" checked={ai.isPending ? Boolean(ai.variables) : aiOn} disabled={ai.isPending} onChange={(e) => ai.mutate(e.target.checked)} />
-        Draft quotes with AI
-      </label>
-      <span className="muted small">
-        Draft a quote, on a request, has AI read what the client asked for and pick lines from your price list, with quantities when they gave them. It never makes up an item or a price, and nothing is sent: you look it over. Each draft is an ask of your Claude or OpenAI key from the Apps page (or, when someone presses Draft a quote themselves, of their own ChatGPT plan if they connected one). Off, drafts take the price list items whose names match their answers. Saved as you switch it.
-      </span>
-      <FormError error={ai.error} />
-      <label className="switch-row" style={{ fontWeight: 400 }}>
-        <input type="checkbox" className="switch" checked={f.draftRequests} onChange={(e) => setF({ ...f, draftRequests: e.target.checked })} />
-        Draft a quote when a request comes in
-      </label>
-      <span className="muted small">For requests from your booking forms and the Client Hub. The person the request is assigned to, or else the office, is told when the draft is ready.</span>
-      <label className="switch-row" style={{ fontWeight: 400 }}>
-        <input type="checkbox" className="switch" checked={f.sendPayments} onChange={(e) => setF({ ...f, sendPayments: e.target.checked })} />
-        Send scheduled payments to clients by themselves
-      </label>
-      <span className="muted small">
-        A quote's payment schedule becomes invoices on its job as each payment comes due. Off, each one waits in Drafts and the people who handle invoices are told. On, it's sent to the client the usual way, and they're told only if it couldn't be sent. A payment due when the work starts waits 30 minutes after the first visit is started, and isn't sent if that visit is put back in that time.
-      </span>
-      <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start" }}>
-        <Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save</Button>
-      </div>
+    <form onSubmit={(e) => { e.preventDefault(); save.mutate(f); }}>
+      <Section level={3} title="Quotes and payments">
+        <Field label="Tell me about quotes over" optional hint="When a quote of at least this much is sent, approved, or the client asks for changes, owners, admins and its salesperson hear about it on the bell and their phone, except whoever did it. Empty is off.">
+          <span className="input-group set-narrow">
+            <span className="addon">$</span>
+            <input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.alertOver} placeholder="Off" onChange={(e) => setF({ ...f, alertOver: e.target.value.replace(/[^0-9.]/g, "") })} />
+          </span>
+        </Field>
+        <div className={`set-rows ${p.after}`}>
+          <SwitchRow
+            label="Draft quotes with AI"
+            hint="Draft a quote, on a request, has AI read what the client asked for and pick lines from your price list, with quantities when they gave them. It never makes up an item or a price, and nothing is sent: you look it over. Each draft is an ask of your Claude or OpenAI key from the Apps page (or, when someone presses Draft a quote themselves, of their own ChatGPT plan if they connected one). Off, drafts take the price list items whose names match their answers. Saved as you switch it."
+            checked={ai.isPending ? Boolean(ai.variables) : aiOn}
+            disabled={ai.isPending}
+            onChange={(on) => ai.mutate(on)}
+          >
+            {/* Saved on its own, so what went wrong is said right under it. */}
+            <FormError error={ai.error} />
+          </SwitchRow>
+          <SwitchRow
+            label="Draft a quote when a request comes in"
+            hint="For requests from your booking forms and the Client Hub. The person the request is assigned to, or else the office, is told when the draft is ready."
+            checked={f.draftRequests}
+            onChange={(on) => setF({ ...f, draftRequests: on })}
+          />
+          <SwitchRow
+            label="Send scheduled payments to clients by themselves"
+            hint="A quote's payment schedule becomes invoices on its job as each payment comes due. Off, each one waits in Drafts and the people who handle invoices are told. On, it's sent to the client the usual way, and they're told only if it couldn't be sent. A payment due when the work starts waits 30 minutes after the first visit is started, and isn't sent if that visit is put back in that time."
+            checked={f.sendPayments}
+            onChange={(on) => setF({ ...f, sendPayments: on })}
+          />
+        </div>
+        <FormError error={save.error} />
+        <div className={p.groupSave}>
+          <Button type="submit" size="sm" loading={save.isPending} done={saved} disabled={!dirty && !saved}>Save</Button>
+          {dirty && !save.isPending && <span className="set-save-note">Not saved yet</span>}
+        </div>
+      </Section>
     </form>
   );
 }

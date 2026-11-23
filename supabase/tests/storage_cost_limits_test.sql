@@ -116,8 +116,8 @@ select tcl.check(tcl.limit_of(:'co') = 666666666666, 'a monthly amount doesn''t 
 begin;
 set local role authenticated;
 select tcl.as_user(:'ann');
-update public.companies set settings = jsonb_set(settings, '{storage,limit_dollars}', '99999') where id = :'co';
-update public.companies set settings = jsonb_set(settings, '{storage,price_per_gb}', '0.0001') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{storage,limit_dollars}', '99999') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{storage,price_per_gb}', '0.0001') where id = :'co';
 commit;
 select tcl.check(tcl.limit_of(:'co') = 666666666666, 'an owner saving settings can''t change the amount or the price');
 update public.companies set settings = jsonb_set(jsonb_set(settings, '{storage,limit_dollars}', '1'), '{hosting_alerts}', '{"bucket": "2026-11-18T00:00:00Z"}') where id = :'co';
@@ -145,7 +145,7 @@ set local role authenticated;
 select tcl.as_user(:'ann');
 select public.storage_set_limit(:'co', 'dollars', null, 5);
 select public.storage_set_limit(:'co', 'default');
-select tcl.check((select not (settings -> 'storage' ?| array['limit_dollars', 'limit_bytes']) from public.companies where id = :'co'), 'and the default takes both off');
+select tcl.check((select not (public.company_settings(id) -> 'storage' ?| array['limit_dollars', 'limit_bytes']) from public.companies where id = :'co'), 'and the default takes both off');
 commit;
 
 -- An old app's call, with no amount, still works.
@@ -163,9 +163,9 @@ commit;
 begin;
 set local role authenticated;
 select tcl.as_user(:'ada');
-update public.companies set settings = settings || '{"files": {"videos": "office", "video_max_bytes": 50000000}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"files": {"videos": "office", "video_max_bytes": 50000000}}' where id = :'co';
 select tcl.as_user(:'gus');
-update public.companies set settings = settings || '{"files": {"videos": "everyone", "video_max_bytes": 200000000}, "railway_usage_limit": {"set_at": "2026-11-18T00:00:00Z"}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"files": {"videos": "everyone", "video_max_bytes": 200000000}, "railway_usage_limit": {"set_at": "2026-11-18T00:00:00Z"}}' where id = :'co';
 commit;
 select tcl.check((select settings -> 'files' ->> 'videos' from public.companies where id = :'co') = 'office', 'an admin who doesn''t manage settings can''t loosen the video rules');
 select tcl.check((select settings ? 'railway_usage_limit' from public.companies where id = :'co'), 'while the rest of what they saved is saved');
@@ -175,9 +175,9 @@ select tcl.check((select settings ? 'railway_usage_limit' from public.companies 
 begin;
 set local role authenticated;
 select tcl.as_user(:'ada');
-update public.companies set settings = settings || '{"snow_app": {"enabled": false}, "weather_source": "nws"}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"snow_app": {"enabled": false}, "weather_source": "nws"}' where id = :'co';
 select tcl.as_user(:'gus');
-update public.companies set settings = settings || '{"snow_app": {"enabled": true}, "weather_source": "open_meteo"}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"snow_app": {"enabled": true}, "weather_source": "open_meteo"}' where id = :'co';
 commit;
 select tcl.check((select settings -> 'snow_app' ->> 'enabled' from public.companies where id = :'co') = 'false', 'an admin without the apps area still can''t turn Snow on');
 select tcl.check((select settings ->> 'weather_source' from public.companies where id = :'co') = 'nws', 'nor change where the forecast comes from without the settings area');

@@ -20,17 +20,18 @@ import gravelPhoto from "@/assets/paving/gravel.webp";
 import overlayPhoto from "@/assets/paving/overlay.webp";
 import pavePhoto from "@/assets/paving/pave.webp";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
+import { ActionBar, DetailHeader } from "@/components/ui/DetailPage";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
-import { ErrorState } from "@/components/ui/States";
+import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { addDaysIso, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
@@ -65,7 +66,10 @@ import { sectionsOf as takeoffSections } from "./data";
 import { NumberBox } from "./NumberBox";
 import { EDITABLE } from "./ProjectFlow";
 import { quoteOptionsKey } from "../quotes/options";
+import styles from "./paving.module.css";
 import { worksheetsKey } from "./WorksheetsCard";
+import { loadSettings } from "@/lib/companySettings";
+import { Select } from "@/components/ui/Select";
 
 const UNIT_WORDS: Record<string, string> = { gal: "gal", ton: "tons", "sq yd": "sq yd", "sq ft": "sq ft", ft: "ft", day: "days", ea: "each" };
 /** The standard job types' photos (assets/paving/README.md); one a business adds shows an icon. */
@@ -87,6 +91,11 @@ interface OpenWorksheet {
 }
 
 export function PavingCalculatorPage() {
+  // Its prices and profit are the business's own: only those who sell open it (a crew's sign-in doesn't carry them, routes/account.ts).
+  return hasRole(useSession(), "admin", "office", "estimator") ? <Calculator /> : <NoAccess title="Paving calculator" />;
+}
+
+function Calculator() {
   const session = useSession();
   const { company } = session;
   const navigate = useNavigate();
@@ -170,8 +179,12 @@ export function PavingCalculatorPage() {
 
   // Owner or admin: the business's setup, read fresh so a change someone made meanwhile isn't undone.
   const saveSetup = async (change: (current: CalcSetup) => CalcSetup) => {
-    const current = (unwrap(await supabase().from("companies").select("settings").eq("id", company.id).single()).settings ?? {}) as Record<string, unknown>;
-    const next = change(parseSetup(current.paving_calculator));
+    const [current, kept] = await Promise.all([
+      loadSettings(company.id),
+      // The setup itself is kept apart from the settings crews read (company_private_settings); saving it through the company moves it there.
+      supabase().from("company_private_settings").select("settings").eq("company_id", company.id).maybeSingle().then((r) => (unwrap(r)?.settings ?? {}) as Record<string, unknown>),
+    ]);
+    const next = change(parseSetup(kept.paving_calculator));
     unwrap(await supabase().from("companies").update({ settings: { ...current, paving_calculator: next } as never }).eq("id", company.id));
     await session.refresh();
     return next;
@@ -274,61 +287,73 @@ export function PavingCalculatorPage() {
   const sample = !worksheet.data && (company.settings as Record<string, unknown> | null)?.paving_calculator === undefined;
   const sections = sectionsOf(setup);
 
+  // The way forward: in the summary on a desktop, pinned over the tab bar with the total on a phone.
+  const primary = !canSell ? null : worksheet.data ? (
+    <Button variant="primary" icon="check" disabled={!calc.total || !targetOpen} loading={updateQuote.isPending} onClick={() => updateQuote.mutate()}>Update the quote</Button>
+  ) : asOption ? (
+    <Button variant="primary" icon="plus" disabled={!calc.total || !targetOpen || optionNumber > 3} loading={addOption.isPending} onClick={() => addOption.mutate()}>
+      Add as option {Math.min(optionNumber, 3)}
+    </Button>
+  ) : projectId ? (
+    <Button variant="primary" icon="plus" disabled={!calc.total || !targetOpen} loading={putOnProject.isPending} onClick={() => putOnProject.mutate()}>Put on the estimate</Button>
+  ) : (
+    <Button variant="primary" icon="send" disabled={!calc.total} onClick={() => setQuoting(true)}>Turn into quote</Button>
+  );
+
   return (
     <>
-      <BackLink to={backTo}>{target?.title ?? "Paving"}</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: backTo, label: target?.title ?? "Paving" }}
         title={worksheet.data ? "Worksheet" : "Paving calculator"}
         actions={isAdmin && <Link className="btn" to="/paving/calculator/setup"><Icon name="settings" size={16} />Set up</Link>}
-      />
-      <p className="page-subtitle">
-        {worksheet.data ? "The working behind this quote, at the prices it was priced at. Change anything, then update the quote." : "Pick the job, type the area, and the tons, gallons and price work themselves out. Change any amount or price as you go."}
-      </p>
+      >
+        <p className={cx("page-lede", styles.headLede)}>
+          {worksheet.data ? "The working behind this quote, at the prices it was priced at. Change anything, then update the quote." : "Pick the job, type the area, and the tons, gallons and price work themselves out. Change any amount or price as you go."}
+        </p>
+      </DetailHeader>
 
       {sample && (
-        <div className="callout callout-info calc-first" role="note">
-          <Icon name="dollar" size={20} />
-          <span className="grow stack-sm" style={{ gap: 4 }}>
-            <strong>These are sample prices. Set your own.</strong>
-            <span className="small">
-              {isAdmin
-                ? "It only takes a few minutes: what you call each material, what you pay for it, your crew's day rate and how you take profit. Every estimate uses them after that."
-                : "An owner or admin sets your business's prices in Set up. Until then, change any price here for this job."}
-            </span>
-          </span>
-          {isAdmin && <Link className="btn btn-primary" to="/paving/calculator/setup">Set your prices</Link>}
+        <div className={cx("callout callout-info", styles.callout)} role="note">
+          <Icon name="dollar" size={16} />
+          <div className="grow">
+            <div>These are sample prices. Set your own.</div>
+            {isAdmin
+              ? "It only takes a few minutes: what you call each material, what you pay for it, your crew's day rate and how you take profit. Every estimate uses them after that."
+              : "An owner or admin sets your business's prices in Set up. Until then, change any price here for this job."}
+          </div>
+          {isAdmin && <Link className="btn" to="/paving/calculator/setup">Set your prices</Link>}
         </div>
       )}
 
-      <div className="calc">
-        <div className="stack" style={{ gap: 16 }}>
-          <Section n={1} title="The job">
-            <div className="calc-pad stack" style={{ gap: 18 }}>
+      <div className={styles.calc}>
+        <div className={styles.calcMain}>
+          <Section title="The job" action={isAdmin && setup.jobs.length > 0 && <button type="button" onClick={() => setNamingJob(true)}>Save as a job type</button>}>
+            <div className={styles.jobArea}>
               {setup.jobs.length > 0 && (
-                <div className="stack-sm">
-                  <div className="row wrap" style={{ gap: 10 }}>
-                    <span className="small strong grow" id="calc-job">What kind of job?</span>
-                    {isAdmin && <button type="button" className="link-btn small" onClick={() => setNamingJob(true)}>Save as a job type</button>}
-                  </div>
-                  <div className="calc-jobs" role="group" aria-labelledby="calc-job">
-                    {setup.jobs.map((j) => (
-                      <button key={j.id} type="button" className="calc-job" aria-pressed={input.job === j.id} onClick={() => update(applyJob(setup, input, j.id))}>
-                        <span className="calc-job-picture">
-                          {JOB_PHOTOS[j.id] ? <img src={JOB_PHOTOS[j.id]} alt="" loading="lazy" decoding="async" /> : <Icon name="paving" size={26} />}
-                          {input.job === j.id && <span className="calc-job-check"><Icon name="check" size={14} /></span>}
-                        </span>
-                        <span className="calc-job-name">{j.name}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div className={styles.jobs} role="group" aria-label="What kind of job?">
+                  {setup.jobs.map((j) => (
+                    <button key={j.id} type="button" className={styles.job} aria-pressed={input.job === j.id} onClick={() => update(applyJob(setup, input, j.id))}>
+                      <span className={styles.jobPicture}>
+                        {JOB_PHOTOS[j.id] ? <img src={JOB_PHOTOS[j.id]} alt="" loading="lazy" decoding="async" /> : <Icon name="paving" size={24} />}
+                        {input.job === j.id && <span className={styles.jobCheck}><Icon name="check" size={12} bold /></span>}
+                      </span>
+                      <span className={styles.jobName}>{j.name}</span>
+                    </button>
+                  ))}
                 </div>
               )}
               <Area input={input} calc={calc} fromTakeoff={fromTakeoff} autoFocus={!projectId && !worksheetId} onSqft={(sqft) => update({ ...input, sqft })} onSides={setSides} />
             </div>
           </Section>
 
-          {sections.map((section, i) => (
-            <Section key={section} n={i + 2} title={section} head>
+          {sections.map((section) => (
+            <Section key={section} title={section}>
+              <div className={styles.lineHead} aria-hidden="true">
+                <span />
+                <span>Amount</span>
+                <span>Price</span>
+                <span className="num">Total</span>
+              </div>
               {calc.lines
                 .filter((l) => l.item.section === section)
                 .map((line) => (
@@ -344,66 +369,51 @@ export function PavingCalculatorPage() {
             </Section>
           ))}
 
-          <Section n={sections.length + 2} title="Profit">
+          <Section title="Profit">
             <ProfitPicker input={input} calc={calc} onChange={setInput} />
           </Section>
           {!setup.items.length && (
-            <div className="callout">
-              <Icon name="info" size={18} />
-              <span>There's nothing to price yet. {isAdmin ? <Link to="/paving/calculator/setup">Add your items</Link> : "An owner or admin can add the items in Set up."}</span>
-            </div>
+            <EmptyState inline icon="calculator" title="There's nothing to price yet" action={isAdmin && <Link className="btn" to="/paving/calculator/setup"><Icon name="plus" size={16} />Add your items</Link>}>
+              {isAdmin ? "Add the materials, crews and trucks you price with in Set up." : "An owner or admin can add the items in Set up."}
+            </EmptyState>
           )}
         </div>
 
-        <aside className="card calc-summary" aria-label="The estimate">
+        <aside className={styles.summary} aria-label="The estimate">
           <Summary calc={calc} />
-          <div className="calc-pad stack-sm" style={{ gap: 10, paddingTop: 0 }}>
+          <div className={styles.summaryForm}>
             <label className="field">
               <span>Notes for you <span className="optional">· never on the quote</span></span>
               <textarea className="textarea" rows={2} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Quote 2 · entire driveway, including the circle" />
             </label>
-            {canSell &&
-              (worksheet.data ? (
-                <>
-                  <Button variant="primary" size="lg" block icon="check" disabled={!calc.total || !targetOpen} loading={updateQuote.isPending} onClick={() => updateQuote.mutate()}>Update the quote</Button>
-                  {!targetOpen && <span className="muted small">This quote is signed, so its price can't change.</span>}
-                  <Link className="btn btn-block" to={`/paving/worksheets/${worksheet.data.id}`}><Icon name="printer" size={16} />Print worksheet</Link>
-                  <FormError error={updateQuote.error} />
-                </>
-              ) : asOption ? (
-                <>
-                  <Button variant="primary" size="lg" block icon="plus" disabled={!calc.total || !targetOpen || optionNumber > 3} loading={addOption.isPending} onClick={() => addOption.mutate()}>
-                    Add as option {Math.min(optionNumber, 3)}
-                  </Button>
-                  {project.data && !targetOpen && <span className="muted small">This quote is signed, so its options can't change.</span>}
-                  {project.data && targetOpen && optionNumber > 3 && <span className="muted small">This quote already offers 3 options, the most it can. Take one off on the quote first.</span>}
-                  {project.data && targetOpen && optionNumber === 2 && <span className="muted small">What's on the quote now becomes option 1{project.data.firstJob ? `, ${project.data.firstJob}` : ""}. The client picks one.</span>}
-                  <FormError error={addOption.error ?? project.error} />
-                </>
-              ) : projectId ? (
-                <>
-                  <Button variant="primary" size="lg" block icon="plus" disabled={!calc.total || !targetOpen} loading={putOnProject.isPending} onClick={() => putOnProject.mutate()}>Put on the estimate</Button>
-                  {project.data && !targetOpen && <span className="muted small">Its proposal is already signed, so the estimate can't change.</span>}
-                  <FormError error={putOnProject.error ?? project.error} />
-                </>
-              ) : (
-                <Button variant="primary" size="lg" block icon="send" disabled={!calc.total} onClick={() => setQuoting(true)}>Turn into quote</Button>
-              ))}
+            {primary && <div className={cx(styles.summaryPrimary, "hide-mobile")}>{primary}</div>}
+            {canSell && worksheet.data && !targetOpen && <p className={styles.summaryNote}>This quote is signed, so its price can't change.</p>}
+            {canSell && asOption && project.data && !targetOpen && <p className={styles.summaryNote}>This quote is signed, so its options can't change.</p>}
+            {canSell && asOption && project.data && targetOpen && optionNumber > 3 && <p className={styles.summaryNote}>This quote already offers 3 options, the most it can. Take one off on the quote first.</p>}
+            {canSell && asOption && project.data && targetOpen && optionNumber === 2 && <p className={styles.summaryNote}>What's on the quote now becomes option 1{project.data.firstJob ? `, ${project.data.firstJob}` : ""}. The client picks one.</p>}
+            {canSell && !worksheet.data && !asOption && projectId && project.data && !targetOpen && <p className={styles.summaryNote}>Its proposal is already signed, so the estimate can't change.</p>}
+            {canSell && <FormError error={worksheet.data ? updateQuote.error : asOption ? (addOption.error ?? project.error) : projectId ? (putOnProject.error ?? project.error) : null} />}
+            {canSell && worksheet.data && <Link className="btn btn-block" to={`/paving/worksheets/${worksheet.data.id}`}><Icon name="printer" size={16} />Print worksheet</Link>}
             {pricesDiffer(companySetup, priced) &&
               (isAdmin ? (
                 <Button block icon="check" loading={keepPrices.isPending} onClick={() => keepPrices.mutate()}>Save these prices for every job</Button>
               ) : (
-                <span className="muted small">These prices are for this job. An owner or admin can save them for every job.</span>
+                <p className={styles.summaryNote}>These prices are for this job. An owner or admin can save them for every job.</p>
               ))}
-            {!worksheet.data && <button type="button" className="link-btn small" style={{ justifySelf: "center" }} onClick={startOver}>Start over</button>}
+            {!worksheet.data && <button type="button" className={styles.startOver} onClick={startOver}><Icon name="undo" size={14} />Start over</button>}
           </div>
         </aside>
       </div>
 
-      <div className="calc-bar-mobile" aria-hidden="true">
-        <span className="muted small">Estimate</span>
-        <strong>{formatMoney(calc.total)}</strong>
-      </div>
+      {primary && (
+        <ActionBar label="The estimate">
+          <span className={styles.barTotal}>
+            <span>Estimate</span>
+            <strong>{formatMoney(calc.total)}</strong>
+          </span>
+          {primary}
+        </ActionBar>
+      )}
 
       {quoting && <QuoteDialog setup={setup} input={input} calc={calc} data={data} notes={notes} onClose={() => setQuoting(false)} />}
       {namingJob && <JobTypeDialog pending={keepJob.isPending} error={keepJob.error} onClose={() => setNamingJob(false)} onSave={(name) => keepJob.mutate(name)} />}
@@ -462,40 +472,40 @@ function Area({ input, calc, fromTakeoff, autoFocus, onSqft, onSides }: { input:
   const setSide = (i: number, change: Partial<Side>) => onSides(sides.map((s, j) => (j === i ? { ...s, ...change } : s)));
   const whole = (n: number) => formatNumber(n, Number.isInteger(n) ? 0 : 2);
   return (
-    <div className="stack-sm">
-      <div className="row wrap" style={{ gap: 10 }}>
-        <span className="small strong grow">How big is it?</span>
+    <div className={styles.area}>
+      <div className={styles.areaHead}>
+        <span className={styles.fieldLabel}>How big is it?</span>
         <div className="segmented" role="group" aria-label="How to enter the area">
           <button type="button" aria-pressed={!bySides} onClick={() => onSides(null)}>Total sq ft</button>
           <button type="button" aria-pressed={bySides} onClick={() => !bySides && onSides([{ length: 0, width: 0 }])}>Length × width</button>
         </div>
       </div>
       {!bySides ? (
-        <div className="row wrap" style={{ gap: 12 }}>
+        <div className={styles.areaRow}>
           <NumberBox label="Area in square feet" value={input.sqft} onChange={onSqft} width={160} big autoFocus={autoFocus} />
-          <span className="muted">sq ft</span>
-          {fromTakeoff > 0 && input.sqft === fromTakeoff && <span className="calc-chip"><Icon name="area" size={14} />From the takeoff</span>}
+          <span className={styles.unit}>sq ft</span>
+          {fromTakeoff > 0 && input.sqft === fromTakeoff && <span className="chip"><Icon name="area" size={13} />From the takeoff</span>}
         </div>
       ) : (
-        <div className="stack-sm">
+        <div className={styles.sides}>
           {sides.map((s, i) => (
-            <div key={i} className="row wrap" style={{ gap: 8 }}>
+            <div key={i} className={styles.areaRow}>
               <NumberBox label={`Area ${i + 1} length in feet`} value={s.length} onChange={(v) => setSide(i, { length: v })} width={100} />
-              <span className="muted">ft ×</span>
+              <span className={styles.unit}>ft ×</span>
               <NumberBox label={`Area ${i + 1} width in feet`} value={s.width} onChange={(v) => setSide(i, { width: v })} width={100} />
-              <span className="muted">ft =</span>
-              <strong className="num">{formatNumber(s.length * s.width)} sq ft</strong>
+              <span className={styles.unit}>ft =</span>
+              <span className={styles.sideTotal}>{formatNumber(s.length * s.width)} sq ft</span>
               {sides.length > 1 && (
-                <button type="button" className="icon-btn" aria-label={`Remove area ${i + 1}`} onClick={() => onSides(sides.filter((_, j) => j !== i))}><Icon name="x" size={16} /></button>
+                <button type="button" className="btn btn-icon btn-sm btn-ghost" aria-label={`Remove area ${i + 1}`} onClick={() => onSides(sides.filter((_, j) => j !== i))}><Icon name="x" size={15} /></button>
               )}
             </div>
           ))}
-          <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => onSides([...sides, { length: 0, width: 0 }])}>Add another area</button>
+          <button type="button" className={styles.addLink} onClick={() => onSides([...sides, { length: 0, width: 0 }])}><Icon name="plus" size={14} />Add another area</button>
         </div>
       )}
-      <span className="muted small">
+      <p className={styles.areaNote}>
         {calc.sqft ? <>{whole(calc.sqft)} sq ft is <strong>{whole(calc.sqyd)} sq yd</strong>, which is what the amounts below work from.</> : "Everything below works from the area."}
-      </span>
+      </p>
     </div>
   );
 }
@@ -509,47 +519,27 @@ function Summary({ calc }: { calc: Calc }) {
     ...(calc.toMinimum > 0 ? [{ key: "minimum", label: "Up to your minimum", value: calc.toMinimum }] : []),
   ];
   return (
-    <div className="calc-pad stack" style={{ gap: 14 }}>
-      <div className="stack-sm" style={{ gap: 2 }}>
-        <span className="muted small strong">Estimate</span>
-        <AnimatedNumber value={calc.total} format={MONEY_CENTS} className="calc-total" />
-        <span className="muted small">{calc.sqft && calc.total ? `${formatMoneyCents(calc.perSqft)} per sq ft · ${formatMoneyCents(calc.total / calc.sqyd)} per sq yd` : "Type the area and the days to see the price."}</span>
+    <div className={styles.sum}>
+      <div className={styles.sumHead}>
+        <span className={styles.sumLabel}>Estimate</span>
+        <AnimatedNumber value={calc.total} format={MONEY_CENTS} className={styles.total} />
+        <span className={styles.sumNote}>{calc.sqft && calc.total ? `${formatMoneyCents(calc.perSqft)} per sq ft · ${formatMoneyCents(calc.total / calc.sqyd)} per sq yd` : "Type the area and the days to see the price."}</span>
       </div>
-      <div className="calc-split" aria-hidden="true">
+      <div className={styles.split} aria-hidden="true">
         {parts.map((p) => p.value > 0 && <span key={p.key} data-part={p.key} style={{ flexGrow: p.value }} />)}
       </div>
-      <dl className="calc-sums">
+      <dl className={styles.sums}>
         {parts.map((p) => (
           <div key={p.key}>
             <dt><i data-part={p.key} />{p.label}</dt>
-            <dd className="num">
+            <dd>
               {formatMoney(p.value)}
-              {p.key === "profit" && calc.total > 0 && <span className="muted"> · {Math.round((calc.profit / calc.total) * 100)}%</span>}
+              {p.key === "profit" && calc.total > 0 && <span className={styles.sumPct}> · {Math.round((calc.profit / calc.total) * 100)}%</span>}
             </dd>
           </div>
         ))}
       </dl>
     </div>
-  );
-}
-
-function Section({ n, title, head, children }: { n: number; title: string; head?: boolean; children: ReactNode }) {
-  return (
-    <section className="card calc-section" aria-labelledby={`calc-section-${n}`}>
-      <div className="calc-section-title">
-        <span className="calc-step">{n}</span>
-        <h2 id={`calc-section-${n}`}>{title}</h2>
-      </div>
-      {head && (
-        <div className="calc-line calc-line-head" aria-hidden="true">
-          <span />
-          <span>Amount</span>
-          <span>Price</span>
-          <span className="num">Total</span>
-        </div>
-      )}
-      {children}
-    </section>
   );
 }
 
@@ -564,9 +554,9 @@ function LineRow({ line, typed, onValue, onAmount, onPrice }: { line: CalcLine; 
   const needsPrice = line.quantity > 0 && line.price === 0 && !noPrice;
   const area = item.basis === "area_sqyd" || item.basis === "area_sqft";
   return (
-    <div className="calc-line" data-off={line.total === 0 || undefined}>
-      <div className="calc-line-what">
-        <strong>{item.name}</strong>
+    <div className={styles.line} data-off={line.total === 0 || undefined}>
+      <div className={styles.lineWhat}>
+        <span className={styles.lineName}>{item.name}</span>
         {item.choices?.length ? (
           <Select className="select input-sm" aria-label={`${item.name}: which`} value={String(value)} onChange={(e) => onValue(Number(e.target.value))}>
             <option value="0">None</option>
@@ -579,38 +569,38 @@ function LineRow({ line, typed, onValue, onAmount, onPrice }: { line: CalcLine; 
             {value > 0 && !choice && <option value={String(value)}>Other: {value}</option>}
           </Select>
         ) : area || item.basis === "haul" ? (
-          <label className="row small" style={{ gap: 8 }}>
+          <label className={styles.lineCheck}>
             <input type="checkbox" checked={value > 0} onChange={(e) => onValue(e.target.checked ? 1 : 0)} />
             {area ? "Over the whole area" : "Every ton on the job"}
           </label>
         ) : basis.per ? (
-          <span className="row small" style={{ gap: 6 }}>
+          <span className={styles.inline}>
             <NumberBox label={`${item.name}, ${basis.per}`} value={value} onChange={onValue} width={64} small />
-            <span className="muted">{basis.per}</span>
+            <span className={styles.unit}>{basis.per}</span>
           </span>
         ) : null}
       </div>
-      <div className="calc-line-amount">
-        <span className="row" style={{ gap: 6 }}>
+      <div className={styles.lineCell}>
+        <span className={styles.inline}>
           {workedOut(item.basis) ? <NumberBox label={`${item.name}, ${unit}`} value={line.quantity} onChange={onAmount} /> : <NumberBox label={`${item.name}, ${unit}`} value={value} onChange={onValue} />}
-          <span className="muted small">{unit}</span>
+          <span className={styles.unit}>{unit}</span>
         </span>
         {typed && line.quantity !== line.worked && (
-          <button type="button" className="link-btn small" onClick={() => onAmount(undefined)} title="Go back to the amount the calculator worked out">
+          <button type="button" className={styles.reset} onClick={() => onAmount(undefined)} title="Go back to the amount the calculator worked out">
             Worked out: {formatNumber(line.worked, Number.isInteger(line.worked) ? 0 : 2)}
           </button>
         )}
       </div>
-      <div className="calc-line-price">
+      <div className={styles.lineCell}>
         {!noPrice && (
-          <span className="row" style={{ gap: 6 }}>
+          <span className={styles.inline}>
             <NumberBox label={`${item.name} price per ${line.unit}${choice ? `, ${choice.label}` : ""}`} value={line.price} onChange={onPrice} prefix="$" invalid={needsPrice} />
-            <span className="muted small">/{line.unit}</span>
+            <span className={styles.unit}>/{line.unit}</span>
           </span>
         )}
-        {needsPrice && <span className="calc-warn">Needs a price</span>}
+        {needsPrice && <span className={styles.warn}>Needs a price</span>}
       </div>
-      <strong className="num calc-line-total">{formatMoney(line.total)}</strong>
+      <span className={styles.lineTotal}>{formatMoney(line.total)}</span>
     </div>
   );
 }
@@ -620,37 +610,39 @@ function ProfitPicker({ input, calc, onChange }: { input: CalcInput; calc: Calc;
   const { profit } = input;
   const set = (change: Partial<CalcInput["profit"]>) => onChange({ ...input, profit: { ...profit, ...change } });
   return (
-    <div className="calc-pad stack" style={{ gap: 12 }}>
-      <div className="segmented" role="group" aria-label="How to take profit" style={{ justifySelf: "start" }}>
-        {PROFIT_WAYS.map((w) => <button key={w.id} type="button" aria-pressed={profit.by === w.id} onClick={() => set({ by: w.id })}>{w.label}</button>)}
+    <div className={styles.profit}>
+      <div className={styles.profitRow}>
+        <div className="segmented" role="group" aria-label="How to take profit">
+          {PROFIT_WAYS.map((w) => <button key={w.id} type="button" aria-pressed={profit.by === w.id} onClick={() => set({ by: w.id })}>{w.label}</button>)}
+        </div>
       </div>
-      <div className="row wrap" style={{ gap: 10 }}>
+      <div className={styles.profitRow}>
         {profit.by === "day" ? (
           <>
             <NumberBox label="Profit days" value={calc.profitDays} onChange={(v) => onChange({ ...input, profitDays: v })} width={72} />
-            <span className="muted">days ×</span>
+            <span className={styles.unit}>days ×</span>
             <NumberBox label="Profit per day" value={profit.amount} onChange={(v) => set({ amount: v })} prefix="$" width={120} />
-            <span className="muted small grow">/day</span>
+            <span className={cx(styles.unit, styles.grow)}>/day</span>
             {input.profitDays !== null && input.profitDays !== calc.crewDays && (
-              <button type="button" className="link-btn small" onClick={() => onChange({ ...input, profitDays: null })}>Crew days: {formatNumber(calc.crewDays)}</button>
+              <button type="button" className={styles.reset} onClick={() => onChange({ ...input, profitDays: null })}>Crew days: {formatNumber(calc.crewDays)}</button>
             )}
           </>
         ) : profit.by === "percent" ? (
           <>
             <NumberBox label="Profit percent of cost" value={profit.amount} onChange={(v) => set({ amount: v })} width={72} />
-            <span className="muted grow">% of {formatMoney(calc.cost)}</span>
+            <span className={cx(styles.unit, styles.grow)}>% of {formatMoney(calc.cost)}</span>
           </>
         ) : (
-          <span className="muted small grow">
+          <span className={cx(styles.areaNote, styles.grow)}>
             No profit line: it's in your prices, where Crewtavo can't see it. So this quote and its job show a 0% margin (or just what the minimum charge adds). That's expected, not a mistake.
           </span>
         )}
-        <strong className="num calc-line-total">{formatMoney(calc.profit)}</strong>
+        <span className={styles.lineTotal}>{formatMoney(calc.profit)}</span>
       </div>
-      <div className="row wrap" style={{ gap: 10 }}>
-        <span className="small strong">Minimum charge</span>
+      <div className={styles.profitRow}>
+        <span className={styles.fieldLabel}>Minimum charge</span>
         <NumberBox label="Minimum charge" value={input.minimum} onChange={(minimum) => onChange({ ...input, minimum })} prefix="$" width={120} />
-        <span className="muted small grow">{calc.toMinimum > 0 ? `This job comes up ${formatMoney(calc.toMinimum)} to reach it.` : "A smaller job is brought up to this."}</span>
+        <span className={cx(styles.areaNote, styles.grow)}>{calc.toMinimum > 0 ? `This job comes up ${formatMoney(calc.toMinimum)} to reach it.` : "A smaller job is brought up to this."}</span>
       </div>
     </div>
   );
@@ -716,18 +708,18 @@ function QuoteDialog({ setup, input, calc, data, notes, onClose }: { setup: Calc
           </Field>
           {client && (
             <Field label="Property">
-              <div className="stack-sm">
+              <div className={styles.property}>
                 <PropertySelect clientId={client.id} value={propertyId} onChange={setPropertyId} />
-                <button type="button" className="link-btn small" style={{ justifySelf: "start" }} onClick={() => setAddingAddress(true)}>Add an address</button>
+                <button type="button" className={styles.addLink} onClick={() => setAddingAddress(true)}><Icon name="plus" size={14} />Add an address</button>
               </div>
             </Field>
           )}
           <Field label="Project name" optional hint={`For example: ${job} at 12 Main St.`}>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder={job} />
           </Field>
-          <div className="callout" style={{ fontWeight: 400 }}>
-            <Icon name="lock" size={18} />
-            <span className="small">The client sees one line, <strong>{job}</strong>, with the area and the material amounts. Your worksheet, with its prices, crew days and profit, stays with your office on the quote and its job.</span>
+          <div className="callout">
+            <Icon name="lock" size={16} />
+            <span className="grow">The client sees one line, <strong>{job}</strong>, with the area and the material amounts. Your worksheet, with its prices, crew days and profit, stays with your office on the quote and its job.</span>
           </div>
           <FormError error={create.error} />
           <div className="form-actions">

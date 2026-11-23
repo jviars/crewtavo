@@ -108,7 +108,7 @@ reset role;
 insert into public.memberships (company_id, user_id, role, role_id) values
   (:'co', :'olin', 'office', null), (:'co', :'bree', 'office', :'no_sales'), (:'co', :'eli', 'estimator', null), (:'co', :'cruz', 'field_crew', null);
 set local role authenticated;
-update public.companies set settings = settings || '{"default_tax_rate": 0.1}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"default_tax_rate": 0.1}' where id = :'co';
 insert into public.services (company_id, name, unit, unit_price) values (:'co', 'Pine mowing', 'visit', 45) returning id as mowing \gset
 insert into public.services (company_id, name, unit, unit_price) values (:'co', 'Pine edging', 'visit', 10) returning id as edging \gset
 insert into public.crews (company_id, name) values (:'co', 'Pine crew A') returning id as crew_a \gset
@@ -336,8 +336,10 @@ select tpc.check((:'p_bree'::jsonb -> 'autopay') = 'null'::jsonb and not exists 
 rollback;
 
 -- ===== AI assistants ================================================================================
-select tpc.check(private.assistant_rpc_area('apply_price_change') = 'jobs' and private.assistant_rpc_area('undo_price_change') = 'jobs'
+-- A price change is what clients pay: Prices, which full access without money leaves out
+-- (20261123100600_assistant_prices_are_money.sql).
+select tpc.check(private.assistant_rpc_area('apply_price_change') = 'prices' and private.assistant_rpc_area('undo_price_change') = 'prices'
   and private.assistant_rpc_area('price_change_preview') is null and private.assistant_rpc_area('edit_invoice') = 'invoices' and private.assistant_rpc_area('remove_late_fee') = 'invoices',
-  'an assistant that may change jobs may make and undo a price change; the preview only answers; the rest are where they were');
+  'an assistant that may change prices may make and undo a price change; the preview only answers; the rest are where they were');
 
 \echo 'All price change tests passed.'

@@ -12,13 +12,17 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Menu } from "@/components/ui/Menu";
+import { FilterTabs } from "@/components/ui/Toolbar";
+import { RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
 import { customFieldsKey, customFieldsQuery, type CustomFieldRow } from "../customFields/CustomFields";
 import { moveSection, nextSort } from "./ContractSettings";
+import { SettingsActions } from "./SettingsKit";
+import { Select } from "@/components/ui/Select";
 
 const RECORDS: Array<[CustomFieldRecord, string]> = [["client", "Clients"], ["property", "Properties"], ["job", "Jobs"], ["quote", "Quotes"], ["invoice", "Invoices"]];
 const TYPES: Array<[CustomFieldType, string]> = [["text", "Text"], ["number", "Number"], ["date", "Date"], ["choice", "Choice"], ["yes_no", "Yes or no"]];
@@ -47,8 +51,8 @@ export function CustomFieldSettings() {
     onSettled: refresh,
   });
 
-  if (fields.isPending) return <Loading label="Loading your custom fields"><CardSkeleton lines={4} /></Loading>;
-  if (fields.error) return <div className="card"><ErrorState error={fields.error} onRetry={() => fields.refetch()} /></div>;
+  if (fields.isPending) return <Loading label="Loading your custom fields"><SectionSkeleton rows={4} /></Loading>;
+  if (fields.error) return <ErrorState error={fields.error} onRetry={() => fields.refetch()} />;
   const rows = fields.data.filter((f) => f.record_type === record);
   const active = rows.filter((f) => !f.archived_at);
   const archived = rows.filter((f) => f.archived_at);
@@ -58,66 +62,71 @@ export function CustomFieldSettings() {
     if (changes.length && !move.isPending) move.mutate(changes);
   };
 
+  const counts = Object.fromEntries(RECORDS.map(([r]) => [r, fields.data.filter((f) => f.record_type === r && !f.archived_at).length]));
+
   return (
-    <div className="stack">
-      <div className="card card-pad stack-sm">
-        <h2 className="section-title">Custom fields</h2>
-        <p className="muted" style={{ margin: 0 }}>Your own fields, like a gate code, a permit number or a unit's model. They're filled in where each record is edited, and show on it once they have a value. Crews see a visit's job and property fields.</p>
-      </div>
+    <>
+      {canEdit && <SettingsActions><Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a field</Button></SettingsActions>}
       {!canEdit && (
-        <div className="callout">
-          <Icon name="lock" size={20} />
-          <span className="grow">Only people in the office who manage Settings can change these.</span>
+        <div className="callout callout-info">
+          <Icon name="lock" size={16} />
+          <div className="grow">Only people in the office who manage Settings can change these.</div>
         </div>
       )}
-      <div className="row-between wrap">
-        <div className="segmented" role="group" aria-label="Fields on" style={{ flexWrap: "wrap", maxWidth: "100%" }}>
-          {RECORDS.map(([r, label]) => (
-            <button key={r} type="button" aria-pressed={record === r} onClick={() => setRecord(r)}>{label}</button>
-          ))}
-        </div>
-        {canEdit && <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>Add a field</Button>}
-      </div>
-      <div className="card">
-        {active.map((f, i) => (
-          <div key={f.id} className="card-row">
-            <span className="grow">
-              <strong>{f.label}</strong>
-              <span className="muted small" style={{ display: "block" }}>
-                {typeLabel(f.type)}
-                {f.type === "choice" ? `: ${f.choices.join(", ")}` : ""}
-                {f.show_on_pdf ? " · On the PDF" : ""}
-                {f.show_in_portal ? " · On the Client Hub" : ""}
-              </span>
-            </span>
-            {canEdit && (
-              <>
-                <Button size="sm" variant="ghost" icon="chevronUp" aria-label={`Move ${f.label} up`} disabled={i === 0 || move.isPending} onClick={() => moveRow(f.id, -1)} />
-                <Button size="sm" variant="ghost" icon="chevronDown" aria-label={`Move ${f.label} down`} disabled={i === active.length - 1 || move.isPending} onClick={() => moveRow(f.id, 1)} />
-                <Button size="sm" variant="ghost" icon="edit" aria-label={`Edit ${f.label}`} onClick={() => setEditing(f)} />
-                <Button size="sm" variant="ghost" icon="archive" aria-label={`Archive ${f.label}`} onClick={() => archive.mutate({ id: f.id, archived: true })} />
-              </>
-            )}
-          </div>
-        ))}
-        {!active.length && <EmptyState inline title={`No fields on ${noun} yet`} />}
-      </div>
-      {archived.length > 0 && (
-        <section className="stack-sm">
-          <h3 className="section-title">Archived</h3>
-          <p className="muted small" style={{ margin: 0 }}>Their values stay on each record, hidden. Restore one to show them again.</p>
-          <div className="card">
-            {archived.map((f) => (
-              <div key={f.id} className="card-row">
-                <span className="grow"><strong>{f.label}</strong><span className="muted small" style={{ display: "block" }}>{typeLabel(f.type)}</span></span>
-                {canEdit && <Button size="sm" icon="undo" loading={archive.isPending && archive.variables?.id === f.id} onClick={() => archive.mutate({ id: f.id, archived: false })}>Restore</Button>}
-              </div>
+      <FilterTabs label="Fields on" value={record} onChange={setRecord} options={RECORDS.map(([r, label]) => ({ value: r, label, count: counts[r] || undefined }))} />
+      <Section level={3} title={`Fields on ${noun}`} count={active.length || undefined}>
+        {active.length ? (
+          <ul className="rel" role="list">
+            {active.map((f, i) => (
+              <RelatedRow
+                key={f.id}
+                onClick={canEdit ? () => setEditing(f) : undefined}
+                title={f.label}
+                sub={[
+                  `${typeLabel(f.type)}${f.type === "choice" ? `: ${f.choices.join(", ")}` : ""}`,
+                  f.show_on_pdf && "On the PDF",
+                  f.show_in_portal && "On the Client Hub",
+                ]}
+                actions={canEdit && (
+                  <>
+                    <Button size="sm" variant="ghost" icon="chevronUp" aria-label={`Move ${f.label} up`} disabled={i === 0 || move.isPending} onClick={() => moveRow(f.id, -1)} />
+                    <Button size="sm" variant="ghost" icon="chevronDown" aria-label={`Move ${f.label} down`} disabled={i === active.length - 1 || move.isPending} onClick={() => moveRow(f.id, 1)} />
+                    <Menu
+                      label={`More for ${f.label}`}
+                      title={f.label}
+                      triggerClassName="btn btn-sm btn-ghost btn-icon"
+                      items={[
+                        { label: "Edit field", icon: "edit", kbd: "E", onSelect: () => setEditing(f) },
+                        { separator: true },
+                        { label: "Archive field", icon: "archive", danger: true, onSelect: () => archive.mutate({ id: f.id, archived: true }) },
+                      ]}
+                    />
+                  </>
+                )}
+              />
             ))}
-          </div>
-        </section>
+          </ul>
+        ) : (
+          <EmptyState inline title={`No fields on ${noun} yet`} action={canEdit ? <Button onClick={() => setEditing("new")}>Add a field</Button> : undefined} />
+        )}
+      </Section>
+      {archived.length > 0 && (
+        <Section level={3} title="Archived" count={archived.length}>
+          <p className="set-note">Their values stay on each record, hidden. Restore one to show them again.</p>
+          <ul className="rel" role="list">
+            {archived.map((f) => (
+              <RelatedRow
+                key={f.id}
+                title={f.label}
+                sub={typeLabel(f.type)}
+                actions={canEdit && <Button size="sm" icon="undo" loading={archive.isPending && archive.variables?.id === f.id} onClick={() => archive.mutate({ id: f.id, archived: false })}>Restore</Button>}
+              />
+            ))}
+          </ul>
+        </Section>
       )}
       {editing && <FieldDialog record={record} field={editing === "new" ? null : editing} others={rows} onClose={() => setEditing(null)} onSaved={refresh} />}
-    </div>
+    </>
   );
 }
 

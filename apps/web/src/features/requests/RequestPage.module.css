@@ -1,0 +1,57 @@
+/* A request's page (RequestPage.tsx; Page-Client and Page-Quote boards): the quiet line under the
+   title, what they asked for as words and hairline facts, and the facts beside it. */
+
+/* The quiet line: the client in ink, where it came from with its small icon, and how long it has waited. */
+.client { font-weight: 500; color: var(--ink); text-decoration: none; }
+.client:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.source { display: inline-flex; align-items: center; gap: 5px; }
+.source > svg { flex: none; color: var(--quiet); }
+/* Someone must act: amber words, as the row on Requests says it. */
+.waiting { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); font-weight: 600; }
+.waiting > svg { flex: none; }
+
+/* A one-line callout with a button: its words sit level with the button, not above its middle. */
+:global(.callout).oneLine { align-items: center; }
+
+/* What they said, as they said it: body text, not a quote box. */
+.details { max-width: 68ch; margin: 0 0 12px; color: var(--ink); font-size: var(--fs-14); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.details:last-child { margin-bottom: 0; }
+
+/* A link in a fact reads as the fact, in ink; green on hover. */
+.address { vertical-align: top; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: inherit; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }
+.address:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.address:focus-visible { border-radius: var(--radius-sm); box-shadow: var(--ring); outline: none; }
+.facts :global(.fact-value) > a { color: var(--ink); }
+.facts :global(.fact-value) > a:hover { color: var(--green-dark); }
+
+/* Who has the lead: their face and name, picked from a small menu (Menus board, Assign to). */
+.picker {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 28px; margin: -4px 0 -4px -6px; padding: 0 6px; border: 0; border-radius: 7px;
+  background: none; color: var(--ink); font: inherit; cursor: pointer; transition: background var(--dur-fast);
+}
+.picker:hover, .picker[aria-expanded="true"] { background: var(--fill-2); }
+/* Its face would set the row's baseline low: the label sits level with the picker's middle instead. */
+.facts :global(.fact):has(.picker, .person) { align-items: center; }
+.picker > span:not(:first-child) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker > svg { flex: none; color: var(--quiet); }
+.nobody { color: var(--text-3); }
+.person { display: inline-flex; align-items: center; gap: 7px; }
+
+/* A promo code: set as a code, without a box. */
+.code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-13); font-weight: 600; letter-spacing: 0.04em; color: var(--ink); }
+.rejected { color: var(--text-3); text-decoration: line-through; }
+.why { display: block; margin-top: 2px; font-size: var(--fs-12); color: var(--text-3); }
+
+/* The New request dialog's "How did it come in?": on a phone the switch fills the sheet's width. */
+.sources { justify-self: start; }
+.sources > button > svg { flex: none; }
+
+@media (max-width: 900px) {
+  .details { font-size: var(--fs-15); }
+  /* The facts' values sit on the right on a phone, so the picker's hover fill hangs off that side. */
+  .picker { position: relative; max-width: calc(100% + 8px); height: 36px; margin: -6px -8px -6px 0; padding: 0 8px; font-weight: 500; }
+  .picker::after { content: ""; position: absolute; inset: -4px 0; }
+  .why { font-weight: 400; }
+  :global(.segmented).sources { display: flex; justify-self: stretch; }
+  .sources > button { flex: 1 1 0; }
+}

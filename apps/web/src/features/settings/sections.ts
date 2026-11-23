@@ -1,7 +1,7 @@
 /**
  * The sections of Settings each person sees, grouped the way people look for things (and where
- * Jobber puts them): you, the business, talking to clients, the team, what it connects to, and where
- * it's hosted. Search (the command palette) lists the same ones, with the words people type when
+ * Jobber puts them): you, the business, quotes and invoices, scheduling, talking to clients, the team,
+ * what it connects to, and about (where it's hosted, and its terms). Search (the command palette) lists the same ones, with the words people type when
  * they're looking for them, Jobber's too.
  */
 import { featureOn } from "@/components/shell/nav";
@@ -33,17 +33,27 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
         isAdmin && { tab: "company", label: "Company", icon: "home", keywords: "business name address phone email website brand color sales tax time zone workday hours quotes valid invoice due jobs last visit finished mark work complete requires invoicing numbering next number invoice number quote number job number starting number" },
         // Autopay's terms, timing and cap, and the cards brought in from Stripe: for the people who look after money.
         isAdmin && can(session, "invoices") && { tab: "payments", label: "Payments", icon: "card", keywords: "payments autopay automatic charge card on file saved card bank receipts tips tip stripe limit cap terms refund" },
-        isAdmin && { tab: "schedule", label: "Schedule and routes", icon: "navigation", keywords: "routes route optimize organize order stops lawn mowing drive time driving speed shop automatic time steps 5 minutes 15 minutes precision calendar snap" },
+        session.role === "owner" && { tab: "data", label: "Your data", icon: "download", keywords: "export download backup all data everything spreadsheet spreadsheets csv excel google sheets zip copy move switch leave another app crm jobber housecall pro" },
+      ],
+    },
+    {
+      title: msg("Quotes and invoices"),
+      items: [
         canSell && { tab: "prices", label: "Price list", icon: "list", keywords: "services products prices rates costs catalog formulas materials import products & services" },
         // Roofing → Packages with Roofing installed, as roofing/data.ts packagesPath (not imported: it brings the presets into search).
         sellsPackages && { to: featureOn(session.company?.settings, "roofing_app") ? "/roofing/packages" : "/packages", label: "Packages", icon: "package", keywords: "packages bundles tiers good better best options choices pictures photos highlights warranty sell offer roof systems" },
-        // Changed by the people who change the price list and checklists (set_weather_rules).
-        managesSettings && { tab: "weather", label: "Weather rules", icon: "sun", keywords: "weather rain wind temperature hold forecast cold heat dry time sealcoat asphalt" },
         managesSettings && { tab: "templates", label: "Document style", icon: "palette", keywords: "estimate template quote proposal invoice template letterhead logo color font lettering terms warranty signature signatures license insurance insurer footer print pdf paper look" },
         managesSettings && { tab: "contracts", label: "Contract terms", icon: "file", keywords: "contract builder terms and conditions clauses sections disclaimers fine print agreement warranty payment right to cancel liens permits initials fill-ins legal attorney" },
         managesSettings && { tab: "custom-fields", label: "Custom fields", icon: "table", keywords: "custom fields extra fields your own fields gate code permit number unit model clients properties jobs quotes invoices" },
+      ],
+    },
+    {
+      title: msg("Scheduling"),
+      items: [
+        isAdmin && { tab: "schedule", label: "Schedule and routes", icon: "navigation", keywords: "routes route optimize organize order stops lawn mowing drive time driving speed shop automatic time steps 5 minutes 15 minutes precision calendar snap" },
+        // Changed by the people who change the price list and checklists (set_weather_rules).
+        managesSettings && { tab: "weather", label: "Weather rules", icon: "sun", keywords: "weather rain wind temperature hold forecast cold heat dry time sealcoat asphalt" },
         isAdmin && { tab: "maps", label: "Maps", icon: "map", keywords: "imagery satellite aerial google esri measure key api cloud default map" },
-        session.role === "owner" && { tab: "data", label: "Your data", icon: "download", keywords: "export download backup all data everything spreadsheet spreadsheets csv excel google sheets zip copy move switch leave another app crm jobber housecall pro" },
       ],
     },
     {
@@ -74,16 +84,16 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
       ],
     },
     {
-      // Where this Crewtavo runs: its own domain, its server and its files.
-      title: "Self-hosting",
+      // Where this Crewtavo runs (its files, its own domain, its server), then its terms.
+      title: msg("About"),
       items: [
-        isAdmin && session.config.singleCompany && { tab: "address", label: "Web address", icon: "globe", keywords: "domain url custom domain cloudflare railway link" },
-        isAdmin && session.config.singleCompany && session.config.platform === "railway" && { tab: "hosting", label: "Hosting", icon: "cloud", keywords: "railway cost costs bill billing usage plan hobby pro trial credit card limit upgrade memory cpu disk storage server" },
         // Every Crewtavo has files, on Railway or not.
-        isAdmin && can(session, "settings") && { tab: "storage", label: "Storage", icon: "hardDrive", keywords: "storage space room disk files photos uploads limit quota full gb tb volume bucket who's using usage per person role trash" },
+        isAdmin && can(session, "settings") && { tab: "storage", label: "Storage", icon: "hardDrive", keywords: "self-hosting storage space room disk files photos uploads limit quota full gb tb volume bucket who's using usage per person role trash" },
+        isAdmin && session.config.singleCompany && { tab: "address", label: "Web address", icon: "globe", keywords: "self-hosting domain url custom domain cloudflare railway link" },
+        isAdmin && session.config.singleCompany && session.config.platform === "railway" && { tab: "hosting", label: "Hosting", icon: "cloud", keywords: "self-hosting railway cost costs bill billing usage plan hobby pro trial credit card limit upgrade memory cpu disk storage server" },
+        { tab: "license", label: msg("Terms and license"), icon: "file", keywords: "terms license agpl open source source code version updates about" },
       ],
     },
-    { title: msg("About"), items: [{ tab: "license", label: msg("Terms and license"), icon: "file", keywords: "terms license agpl open source source code version updates about" }] },
   ];
   return groups.map((g) => ({ title: g.title, items: g.items.filter((i): i is SettingsItem => Boolean(i)) })).filter((g) => g.items.length);
 }

@@ -60,7 +60,9 @@ select tpr.check((select settings #>> '{paving_app,enabled}' = 'true' and settin
   'a paving business has Paving, and not Roofing');
 select tpr.check((select settings #>> '{roofing_app,enabled}' = 'true' and settings -> 'paving_app' is null from public.companies where id = :'roofer'),
   'a roofing business has Roofing, and not Paving');
-select tpr.check((select settings -> 'roofing' = '{"range_pct": 15, "range_round": 50}' and settings #>> '{marketing,enabled}' = 'true' from public.companies where id = :'roofer'),
+-- The price ranges are kept where crews don't read them (company_private_settings).
+select tpr.check((select settings -> 'roofing' is null and settings #>> '{marketing,enabled}' = 'true' from public.companies where id = :'roofer')
+  and (select settings -> 'roofing' = '{"range_pct": 15, "range_round": 50}' from public.company_private_settings where company_id = :'roofer'),
   'and keeps its price ranges and the rest of its settings');
 select tpr.check((select settings -> 'paving_app' is null and settings -> 'roofing_app' is null from public.companies where id = :'lawn'),
   'a business in another trade has neither');
@@ -73,10 +75,11 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', format('{"sub": "%s", "role": "authenticated"}', :'rex'), true);
 select tpr.check(public.trade_app_set_enabled(:'roofer', 'paving', true), 'the owner installs Paving too');
-select tpr.check((select settings #>> '{paving_app,enabled}' = 'true' and settings #>> '{roofing_app,enabled}' = 'true' from public.companies where id = :'roofer'),
+select tpr.check((select public.company_settings(id) #>> '{paving_app,enabled}' = 'true' and public.company_settings(id) #>> '{roofing_app,enabled}' = 'true' from public.companies where id = :'roofer'),
   'a business that does both has both');
 select tpr.check(not public.trade_app_set_enabled(:'roofer', 'roofing', false), 'and can uninstall Roofing');
-select tpr.check((select settings #>> '{roofing_app,enabled}' = 'false' and settings -> 'roofing' = '{"range_pct": 15, "range_round": 50}' from public.companies where id = :'roofer'),
+select tpr.check((select public.company_settings(id) #>> '{roofing_app,enabled}' = 'false' from public.companies where id = :'roofer')
+  and (select settings -> 'roofing' = '{"range_pct": 15, "range_round": 50}' from public.company_private_settings where company_id = :'roofer'),
   'which leaves the price ranges as they were');
 select public.trade_app_set_enabled(:'roofer', 'roofing', true);
 select tpr.expect_error(format($q$select public.trade_app_set_enabled(%L, 'gutters', true)$q$, :'roofer'), 'there are only the two apps');
@@ -84,7 +87,7 @@ select tpr.expect_error(format($q$select public.trade_app_set_enabled(%L, 'pavin
 
 -- Changing the trade in Settings → Company leaves the apps installed.
 update public.companies set trade_preset = 'general' where id = :'roofer';
-select tpr.check((select trade_preset = 'general' and settings #>> '{roofing_app,enabled}' = 'true' and settings #>> '{paving_app,enabled}' = 'true' from public.companies where id = :'roofer'),
+select tpr.check((select trade_preset = 'general' and public.company_settings(id) #>> '{roofing_app,enabled}' = 'true' and public.company_settings(id) #>> '{paving_app,enabled}' = 'true' from public.companies where id = :'roofer'),
   'changing the trade turns neither app off');
 
 select set_config('request.jwt.claims', format('{"sub": "%s", "role": "authenticated"}', :'oli'), true);

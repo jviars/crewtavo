@@ -133,11 +133,11 @@ select tdr.as_user(:'oz');
 select tdr.expect_error(format('select public.drive_set_enabled(%L, true)', :'co'), 'nor another business''s owner');
 select tdr.as_user(:'ann');
 select tdr.check(public.drive_set_enabled(:'co', true), 'the owner installs it');
-select tdr.check((select (settings -> 'drive' ->> 'enabled')::boolean and settings -> 'drive' ? 'changed_at' from public.companies where id = :'co'),
+select tdr.check((select (public.company_settings(id) -> 'drive' ->> 'enabled')::boolean and public.company_settings(id) -> 'drive' ? 'changed_at' from public.companies where id = :'co'),
   'installed in the company''s settings, with when');
 select tdr.check((select count(*) = 1 and min(name) = 'Company files' from public.drive_folders where company_id = :'co' and parent_id is null), 'installing makes Company files');
 select public.drive_set_enabled(:'co', false);
-select tdr.check((select not (settings -> 'drive' ->> 'enabled')::boolean from public.companies where id = :'co'), 'the owner uninstalls it');
+select tdr.check((select not (public.company_settings(id) -> 'drive' ->> 'enabled')::boolean from public.companies where id = :'co'), 'the owner uninstalls it');
 select public.drive_set_enabled(:'co', true);
 select tdr.check((select count(*) = 1 from public.drive_folders where company_id = :'co'), 'uninstalling keeps Company files, and installing again doesn''t make another');
 commit;

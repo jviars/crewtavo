@@ -3,15 +3,18 @@
  * on the quote, its job and its paving project: what each priced at, its cost, profit and the
  * estimator's notes, to print or reopen, and which option it is when the quote offers options. While
  * the quote is open, another job priced on the calculator can be added as an option (up to three).
- * The office's only: the table is, and so is this card (callers show it to sales and the office).
- * Nothing shows when a quote has none.
+ * A section on a hairline, its rows small related rows with the print and calculator as quiet icon
+ * buttons, so it fits a record page's side column too. The office's only: the table is, and so is
+ * this section (callers show it to sales and the office). Nothing shows when a quote has none.
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Icon } from "@/components/ui/Icon";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { calculate, parseWorksheet } from "./calculator";
+import styles from "./paving.module.css";
 
 export const worksheetsKey = (quoteId: string) => ["paving-worksheets", quoteId];
 
@@ -30,7 +33,11 @@ export function useWorksheets(quoteId: string) {
   });
 }
 
-export function WorksheetsCard({ quoteId, editable }: { quoteId: string; editable: boolean }) {
+/**
+ * `level` 3 and `flush` when it sits inside another section (a paving project's estimate step), so it
+ * reads as part of it and a phone's grouped page doesn't put a card inside a card.
+ */
+export function WorksheetsCard({ quoteId, editable, level = 2, flush }: { quoteId: string; editable: boolean; level?: 2 | 3; flush?: boolean }) {
   const worksheets = useWorksheets(quoteId);
   if (!worksheets.data?.rows.length) return null;
   const { rows, options } = worksheets.data;
@@ -39,44 +46,52 @@ export function WorksheetsCard({ quoteId, editable }: { quoteId: string; editabl
     return i < 0 ? null : `Option ${i + 1}`;
   };
   return (
-    <div className="card">
-      <div className="card-head">
-        <Icon name="calculator" size={18} />
-        <strong>{rows.length === 1 ? "Worksheet" : "Worksheets"}</strong>
-        <span className="calc-chip"><Icon name="lock" size={12} />Office only</span>
-      </div>
-      {rows.map((w) => {
-        const saved = parseWorksheet(w.data);
-        const calc = saved ? calculate(saved.setup, saved.input, saved.overrides) : null;
-        const option = optionOf(w.line?.option_id);
-        return (
-          <div key={w.id} className="card-row" style={{ display: "grid", gap: 6 }}>
-            <div className="row" style={{ gap: 8 }}>
-              <strong className="grow">{option && <span className="muted">{option} · </span>}{w.name}</strong>
-              {calc && <strong className="num">{formatMoney(calc.total)}</strong>}
-            </div>
-            {calc && (
-              <span className="muted small">
-                {formatNumber(calc.sqft)} sq ft · cost {formatMoney(calc.cost)} · profit {formatMoney(calc.profit + calc.toMinimum)}
-                {calc.total > 0 ? ` (${Math.round(((calc.profit + calc.toMinimum) / calc.total) * 100)}%)` : ""}
-              </span>
-            )}
-            {/* Profit inside the prices reads as no margin everywhere else in Crewtavo. */}
-            {saved?.input.profit.by === "none" && <span className="muted small">Profit is in the prices on this one, where Crewtavo can't see it, so its margin shows as 0% (or just what the minimum charge adds).</span>}
-            {w.notes && <span className="small" style={{ whiteSpace: "pre-wrap" }}>{w.notes}</span>}
-            <div className="row wrap" style={{ gap: 8, marginTop: 2 }}>
-              <Link className="btn btn-sm" to={`/paving/worksheets/${w.id}`}><Icon name="printer" size={14} />Print</Link>
-              {editable && <Link className="btn btn-sm" to={`/paving/calculator?worksheet=${w.id}`}><Icon name="calculator" size={14} />Open in calculator</Link>}
-            </div>
-          </div>
-        );
-      })}
-      {editable && options.length < 3 && (
-        <div className="card-row">
-          <Link className="btn btn-sm" to={`/paving/calculator?quote=${quoteId}&as=option`}><Icon name="plus" size={14} />Add another option</Link>
-          <span className="muted small">Price another way to do it, and the client picks one.</span>
-        </div>
-      )}
-    </div>
+    <Section
+      level={level}
+      flush={flush}
+      title={
+        <span className={styles.worksheetsTitle}>
+          {rows.length === 1 ? "Worksheet" : "Worksheets"}
+          <span className={styles.office}><Icon name="lock" size={12} />Office only</span>
+        </span>
+      }
+      action={editable && options.length < 3 && <Link to={`/paving/calculator?quote=${quoteId}&as=option`} title="Price another way to do it, and the client picks one."><Icon name="plus" size={14} />Add an option</Link>}
+    >
+      <RelatedList label={rows.length === 1 ? "Worksheet" : "Worksheets"}>
+        {rows.map((w) => {
+          const saved = parseWorksheet(w.data);
+          const calc = saved ? calculate(saved.setup, saved.input, saved.overrides) : null;
+          const option = optionOf(w.line?.option_id);
+          const kept = calc ? calc.profit + calc.toMinimum : 0;
+          return (
+            <RelatedRow
+              key={w.id}
+              lead={option ?? undefined}
+              title={w.name}
+              sub={
+                <span className={styles.worksheetSub}>
+                  {calc && (
+                    <span>
+                      {formatNumber(calc.sqft)} sq ft · cost {formatMoney(calc.cost)} · profit {formatMoney(kept)}
+                      {calc.total > 0 ? ` (${Math.round((kept / calc.total) * 100)}%)` : ""}
+                    </span>
+                  )}
+                  {/* Profit inside the prices reads as no margin everywhere else in Crewtavo. */}
+                  {saved?.input.profit.by === "none" && <span>Profit is in the prices on this one, where Crewtavo can't see it, so its margin shows as 0% (or just what the minimum charge adds).</span>}
+                  {w.notes && <span className={styles.worksheetNotes}>{w.notes}</span>}
+                </span>
+              }
+              end={calc && <b>{formatMoney(calc.total)}</b>}
+              actions={
+                <>
+                  <Link className="btn btn-icon btn-sm" to={`/paving/worksheets/${w.id}`} aria-label={`Print ${w.name}`} title="Print"><Icon name="printer" size={15} /></Link>
+                  {editable && <Link className="btn btn-icon btn-sm" to={`/paving/calculator?worksheet=${w.id}`} aria-label={`Open ${w.name} in the calculator`} title="Open in calculator"><Icon name="calculator" size={15} /></Link>}
+                </>
+              }
+            />
+          );
+        })}
+      </RelatedList>
+    </Section>
   );
 }

@@ -1,0 +1,66 @@
+/*
+ * Parts of the settings sections that SettingsKit doesn't draw (Page-Settings.dc.html): a checklist,
+ * a choice of radios, a list of rows to pick from, a status beside its words, and a small save for
+ * a group saved on its own. All flat, on hairlines, in the kit's sizes (13px words, 12px hints; 15px
+ * and 13px on a phone).
+ */
+
+/* A group's own words, then what follows them. */
+.lead { margin-bottom: 14px; }
+.after { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.gapTop { margin-top: 14px; }
+
+/* Words in a row: the thing in ink, a quiet line under it. */
+.rowText { flex: 1; display: grid; gap: 2px; min-width: 0; font-size: var(--fs-13); font-weight: 500; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.hint { display: block; font-size: var(--fs-12); font-weight: 400; line-height: 1.45; color: var(--text-3); }
+.hint a { font-weight: 600; }
+.danger { display: block; margin-top: 2px; font-weight: 600; color: var(--danger); }
+.name { font-weight: 600; color: var(--ink); }
+.quiet { font-weight: 400; color: var(--text-3); }
+
+/* A checklist: done (green tick), not done (red cross), or something to do elsewhere (quiet i). */
+.checks { display: grid; grid-template-columns: minmax(0, 1fr); margin: 6px 0 0; padding: 0; list-style: none; }
+.check { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--row-divider); }
+.checkMark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-3); }
+.checkMark[data-state="done"] { background: var(--green-tint); color: var(--green-dark); }
+.checkMark[data-state="todo"] { background: var(--danger-tint); color: var(--danger); }
+
+/* Rows to choose from: a radio or a check box on the left, the words, anything it brings under them. */
+.choices { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; margin: 0; padding: 0; border: 0; list-style: none; }
+.choices > legend { padding: 0; }
+.choice { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--row-divider); cursor: pointer; }
+.choices > li > .choice { border-bottom: 0; }
+.choices > li { border-bottom: 1px solid var(--row-divider); }
+.choice > input { flex: none; width: 16px; height: 16px; margin: 1px 0 0; }
+.choice:has(> input:disabled) { cursor: default; }
+.choice > .rowText > :global(.input-group) { max-width: 200px; margin-top: 6px; }
+:global(.sec-body) > .choices:first-child { margin-top: -14px; }
+/* With a save bar under the choices, its line closes them: the last choice draws none, so the two never double. */
+.choices:has(~ * > :global(.set-save)) > :last-child { border-bottom: 0; }
+
+/* Under a long list: how many show, and the way to the rest. */
+.more { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; font-size: var(--fs-12); color: var(--quiet); }
+
+/* Read-only words with their status on the right ("Tips are on"). */
+.status { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.status > :global(.pill) { flex: none; margin-top: 1px; }
+
+/* A group saved on its own: its button at the end, quiet. */
+.groupSave { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; }
+.groupSave > :global(.set-save-note) { font-size: var(--fs-12); color: var(--quiet); }
+
+@media (max-width: 900px) {
+  .rowText { font-size: var(--fs-15); }
+  .hint { font-size: var(--fs-13); }
+  .check, .choice { min-height: 48px; }
+  /* The status under its words, so they keep the card's width. */
+  .status { flex-direction: column; gap: 8px; }
+  .choice > .rowText > :global(.input-group) { max-width: none; }
+  :global(.m-grouped) :global(.sec:not(.sec-flush)) > :global(.sec-body) > :is(.checks, .choices) { margin-block: 0; }
+  :global(.m-grouped) :is(.checks > :last-child, .choices > :last-child) { border-bottom: 0; }
+  /* Each as wide as its words or wider; a long one takes a line of its own rather than squeezing. */
+  .groupSave > :global(.btn) { flex: 1 1 auto; height: auto; min-height: 44px; }
+  /* A group's small save shows once there's something to save (and while it saves and says Saved), not as a gray slab in every card. */
+  .groupSave > :global(.btn-sm:disabled:not(.is-loading, .is-done)) { display: none; }
+  .groupSave:not(:has(> :not([hidden], :global(.btn-sm:disabled:not(.is-loading, .is-done))))) { display: none; }
+}

@@ -88,7 +88,7 @@ export function VisitPicks({ quote, editor, quickAdds, services, takeoff, view, 
         />
       </div>
       {groups.length > 1 && (
-        <div className={`tabs ${styles.groups}`} role="group" aria-label="Kinds of work">
+        <div className={styles.groups} role="group" aria-label="Kinds of work">
           {groups.map((g) => {
             const on = g.items.filter((s) => rows.has(s.id)).length;
             return (

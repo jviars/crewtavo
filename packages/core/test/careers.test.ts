@@ -113,6 +113,21 @@ describe("the email for each application", () => {
     expect(email.text).toContain("Message:\nLine one\nLine two");
     expect(email.text).toContain("Résumé: resume.pdf (244 KB)\nOpen it in Crewtavo.");
     expect(email.text).toContain("Reply to this email to answer Jane.");
+    // Without a link (the server doesn't know its own address), it says where the applicant is.
+    const unlinked = applicationEmail({ formName: "Job application", application: a, files: [], link: null }).text;
+    expect(unlinked).toContain("It's in Applicants in Crewtavo.");
+    expect(unlinked).not.toContain("https://");
+  });
+});
+
+describe("what an applicant typed, in the email", () => {
+  it("never stands as a paragraph of its own, where a link alone would be a button", () => {
+    const a = application([["name", "Jane Smith"], ["email", "jane@x.test"], ["message", "Hi\n\nhttps://evil.example/applicants/00000000-0000-4000-8000-000000000001\n\nBye"]]);
+    const email = applicationEmail({ formName: "Job application", application: a, files: [{ name: "cv\n\nhttps://evil.example/z.pdf", field: "resume", size: 1000 }], link: "https://crm.pine.test/applicants/1" });
+    expect(email.text.split(/\n{2,}/).filter((p) => /^https?:\/\/\S+$/.test(p.trim()))).toEqual(["https://crm.pine.test/applicants/1"]);
+    // Its blank lines are a line holding a no-break space, so the paragraphs still read apart.
+    expect(email.text).toContain("Message:\nHi\n\u00a0\nhttps://evil.example/applicants/00000000-0000-4000-8000-000000000001\n\u00a0\nBye");
+    expect(email.text).toContain("Résumé: cv https://evil.example/z.pdf (1 KB)");
   });
 });
 

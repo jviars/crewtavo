@@ -138,6 +138,9 @@ rollback;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "f4100000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+-- Bringing back a removed admin is giving admin access, so the owner's password is asked first
+-- (20261123100300_admin_access_back_and_own_pay.sql): the minute the server opens once it checks out.
+select t41.password_ok(:'co', 'f4100000-0000-0000-0000-000000000011');
 update public.memberships set active = true where company_id = :'co' and user_id = 'f4100000-0000-0000-0000-000000000011';
 update public.company_roles set permissions = '{schedule,timesheets,equipment}' where id = :'foreman_role';
 select t41.check((select active from public.memberships where company_id = :'co' and user_id = 'f4100000-0000-0000-0000-000000000011')

@@ -400,6 +400,8 @@ describe("hourly upkeep", () => {
       if (call.path === "rpc/emit_card_expiry_alerts") return 5;
       if (call.path === "rpc/clock_upkeep") return { reminded: 1, stopped: 0 };
       if (call.path === "rpc/tidy_sign_in_codes") return 4;
+      // An upload link that ran out with its file recorded: nothing to remove.
+      if (call.path === "rpc/expired_upload_links") return [{ company_id: "co-1", links: 1, paths: [] }];
       throw new Error(`unexpected ${call.path}`);
     });
     autopay.reconcile.mockResolvedValueOnce(2);
@@ -422,16 +424,42 @@ describe("hourly upkeep", () => {
       bank_payments: 1,
       clocks: { reminded: 1, stopped: 0 },
       codes: 4,
+      uploads: { removed: 0, kept: 0 },
       problems: ['mark_overdue_invoices: time zone "Not/AZone" not recognized'],
     });
     // Cards expiring next month are flagged before the clocks.
     expect(calls.map((c) => c.path)).toEqual([
       "rpc/mark_overdue_invoices", "rpc/raise_past_due_notices", "rpc/add_late_fees", "rpc/tell_unpaid_deposits", "rpc/make_due_installments", "rpc/emit_invoice_reminders", "rpc/emit_visit_reminders", "rpc/emit_equipment_alerts", "rpc/emit_equipment_document_alerts", "rpc/emit_guide_reviews", "rpc/expire_sub_offers",
-      "rpc/emit_sub_document_alerts", "rpc/emit_card_expiry_alerts", "rpc/clock_upkeep", "rpc/tidy_sign_in_codes",
+      "rpc/emit_sub_document_alerts", "rpc/emit_card_expiry_alerts", "rpc/clock_upkeep", "rpc/tidy_sign_in_codes", "rpc/expired_upload_links",
     ]);
     expect(autopay.reconcile).toHaveBeenCalledWith(env, expect.anything());
     expect(autopay.bank).toHaveBeenCalledWith(env, expect.anything());
     expect(error).toHaveBeenCalled();
+  });
+
+  it("removes the files sent through upload links that ran out and nobody recorded, only the company's own in those folders, and keeps going when it can't", async () => {
+    const CO = "0b0a0000-0000-4000-8000-000000000001";
+    const stray = [`${CO}/plans/a.pdf`, `${CO}/subs/s1/b.jpg`];
+    const calls = serve((call) => {
+      if (call.path === "rpc/emit_sub_document_alerts") return [];
+      if (call.path === "rpc/clock_upkeep") return { reminded: 0, stopped: 0 };
+      // Another company's file, one outside the link folders and one climbing out of them are never removed for it.
+      if (call.path === "rpc/expired_upload_links") return [{ company_id: CO, links: 5, paths: [...stray, "0c0c0000-0000-4000-8000-000000000002/plans/x.pdf", `${CO}/logo/x.png`, `${CO}/plans/../logo/x.png`] }];
+      if (call.url.pathname.startsWith("/storage/v1/object/files")) return [];
+      return call.path.startsWith("rpc/") ? 0 : [];
+    });
+    expect(await runTask("followups", env)).toMatchObject({ uploads: { removed: 2, kept: 0 }, problems: [] });
+    const removed = calls.filter((c) => c.url.pathname.startsWith("/storage/v1/object/files") && c.method === "DELETE");
+    expect(removed.map((c) => c.body.prefixes)).toEqual([stray]);
+
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    serve((call) => {
+      if (call.path === "rpc/expired_upload_links") return Response.json({ message: "the database is busy" }, { status: 503 });
+      if (call.path === "rpc/emit_sub_document_alerts") return [];
+      if (call.path === "rpc/clock_upkeep") return { reminded: 0, stopped: 0 };
+      return call.path.startsWith("rpc/") ? 0 : [];
+    });
+    expect(await runTask("followups", env)).toMatchObject({ uploads: null, problems: ["tidy_expired_uploads: the database is busy"] });
   });
 
   it("asks for monthly jobs' invoice reminders every hour, on the database's clock in each company's zone, and reports what each run made", async () => {
@@ -450,7 +478,7 @@ describe("hourly upkeep", () => {
     autopay.reconcile.mockRejectedValueOnce(new Error("Stripe didn't answer"));
     const out = (await runTask("followups", env)) as { cards: number; autopay_processing: number; problems: string[] };
     expect(out).toMatchObject({ cards: 0, autopay_processing: 0, problems: ["reconcile_autopay_processing: Stripe didn't answer"] });
-    expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+    expect(calls.slice(-3).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes", "rpc/expired_upload_links"]);
   });
 
   it("reads clients' own bank payments back too, and keeps going when Stripe can't be asked", async () => {
@@ -459,7 +487,7 @@ describe("hourly upkeep", () => {
     autopay.bank.mockRejectedValueOnce(new Error("Stripe didn't answer"));
     const out = (await runTask("followups", env)) as { autopay_processing: number; bank_payments: number; problems: string[] };
     expect(out).toMatchObject({ autopay_processing: 0, bank_payments: 0, problems: ["reconcile_bank_payments: Stripe didn't answer"] });
-    expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+    expect(calls.slice(-3).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes", "rpc/expired_upload_links"]);
     autopay.bank.mockResolvedValueOnce(3);
     expect(((await runTask("followups", env)) as { bank_payments: number }).bank_payments).toBe(3);
   });
@@ -480,7 +508,7 @@ describe("hourly upkeep", () => {
     expect(calls.find((c) => c.path === "rpc/emit_sub_document_alerts")?.body).toEqual({ p_can_text: true, p_can_email: false });
     expect(out.subs).toEqual({ alerts: 1, reminded: null });
     expect(out.problems).toEqual([expect.stringMatching(/^remind_subs: canceling statement/)]);
-    expect(calls.slice(-2).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes"]);
+    expect(calls.slice(-3).map((c) => c.path)).toEqual(["rpc/clock_upkeep", "rpc/tidy_sign_in_codes", "rpc/expired_upload_links"]);
     expect(error).not.toHaveBeenCalledWith(expect.stringContaining("clock_upkeep"), expect.anything());
 
     // Without the app's address there's no link to send, so nothing is promised.

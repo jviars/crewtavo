@@ -1,5 +1,5 @@
 /**
- * One message: who sent it (with their role's color and badge), the text with @mentions and links,
+ * One message: who sent it (in their role's color, the role in quiet words), the text with @mentions and links,
  * photos, a linked job, the message it replies to, and reactions. Hovering (or tapping, on a phone)
  * shows what you can do with it: react, reply, edit or delete your own, pin if you manage the channel.
  */
@@ -144,9 +144,10 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
 
   const job = message.job_id ? ctx.jobs?.get(message.job_id) : undefined;
   const nameColor = author ? roleColor(author.color) : undefined;
+  // Each reaction a check box: yours are ticked, and the menu stays open to pick another.
   const reactionMenu = CHAT_REACTIONS.map((r) => {
     const on = message.reactions.find((g) => g.kind === r.key)?.users.includes(ctx.me) ?? false;
-    return { label: on ? t("Remove {tag}", { tag: t(r.label) }) : t(r.label), icon: REACTION_ICONS[r.key], onSelect: () => react.mutate({ kind: r.key, on: !on }) };
+    return { label: t(r.label), icon: REACTION_ICONS[r.key], checkbox: true, checked: on, onSelect: () => react.mutate({ kind: r.key, on: !on }) };
   });
 
   return (
@@ -186,16 +187,16 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             ) : (
               <span className={s.name} style={{ cursor: "default" }}>Crewtavo</span>
             )}
-            {author ? <span className={s.roleBadge} style={badgeStyle(author.color)}>{author.role_label}</span> : <span className={s.appBadge}>{t("App")}</span>}
+            <span className={s.role}>{author ? author.role_label : t("App")}</span>
             <time className={s.time} dateTime={message.created_at} title={new Date(message.created_at).toLocaleString(browserOrSpanish())}>{timeLabel(message.created_at)}</time>
-            {message.pinned_at && <span className={s.time} title={t("Pinned")}><Icon name="pushpin" size={12} /> {t("Pinned")}</span>}
+            {message.pinned_at && <span className={s.time} title={t("Pinned")}><Icon name="pushpin" size={11} />{t("Pinned")}</span>}
           </div>
         )}
 
         {editing !== null ? (
           <div className={s.editBox}>
             <textarea className="textarea" value={editing} autoFocus onChange={(e) => setEditing(e.target.value)} onKeyDown={editKeys} aria-label={t("Edit message")} maxLength={4000} />
-            <div className="row" style={{ marginTop: 6, gap: 6 }}>
+            <div className="row" style={{ marginTop: 6, gap: 6, alignItems: "center" }}>
               <Button size="sm" variant="primary" loading={edit.isPending} onClick={saveEdit}>{t("Save")}</Button>
               <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>{t("Cancel")}</Button>
               <span className={s.editHint}>{t("Enter to save, Esc to cancel")}</span>
@@ -228,18 +229,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         {message.job_id && (
           job ? (
             <Link className={s.jobCard} to={`/jobs/${job.id}`}>
-              <span className={s.jobIcon}><Icon name="job" size={16} /></span>
-              <span className="grow">
-                <strong style={{ display: "block" }}>{job.number ? `${t("Job #{number}", { number: job.number })} · ` : ""}{job.title}</strong>
-                <span className="muted small">{[job.client?.display_name, job.property ? addressLine(job.property) : null].filter(Boolean).join(" · ")}</span>
-              </span>
-              <Icon name="chevronRight" size={16} />
+              <strong>{job.number ? `${t("Job #{number}", { number: job.number })} · ` : ""}{job.title}</strong>
+              {[job.client?.display_name, job.property ? addressLine(job.property) : null].filter(Boolean).join(" · ")}
             </Link>
           ) : (
-            <span className={s.jobCard} style={{ color: "var(--text-3)" }}>
-              <span className={s.jobIcon}><Icon name="job" size={16} /></span>
-              {t("A job you can't open")}
-            </span>
+            <span className={s.jobCard}>{t("A job you can't open")}</span>
           )
         )}
 
@@ -248,11 +242,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             {message.reactions.map((g) => {
               const info = CHAT_REACTIONS.find((r) => r.key === g.kind);
               const on = g.users.includes(ctx.me);
-              const names = g.users.map((u) => (u === ctx.me ? "You" : ctx.personName(u))).join(", ");
+              const names = g.users.map((u) => (u === ctx.me ? t("You") : ctx.personName(u))).join(", ");
+              const label = info ? t(info.label) : g.kind;
               return (
-                <button key={g.kind} type="button" className={s.reaction} aria-pressed={on} title={`${info?.label}: ${names}`} onClick={() => react.mutate({ kind: g.kind, on: !on })}>
-                  <Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={14} />
-                  {g.kind === "thumbs_up" ? g.users.length : `${info?.label} · ${g.users.length}`}
+                <button key={g.kind} type="button" className={s.reaction} aria-pressed={on} aria-label={`${label}, ${g.users.length}`} title={`${label}: ${names}`} onClick={() => react.mutate({ kind: g.kind, on: !on })}>
+                  {g.kind === "thumbs_up" || !info ? <><Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={13} />{g.users.length}</> : `${label} · ${g.users.length}`}
                 </button>
               );
             })}
@@ -262,7 +256,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
 
       {editing === null && (
         <div className={s.tools}>
-          <Menu label={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
+          <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
           {ctx.canPost && (
             <button type="button" className={`icon-btn ${s.icon}`} aria-label={t("Reply")} title={t("Reply")} onClick={() => ctx.onReply(message)}>
               <Icon name="reply" size={16} />
@@ -270,13 +264,15 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )}
           <Menu
             label={t("More")}
+            title={author?.name ?? "Crewtavo"}
             align="end"
             triggerClassName={`icon-btn ${s.icon}`}
             trigger={<Icon name="more" size={16} />}
             items={[
-              { label: t("Edit"), icon: "edit", onSelect: startEdit, hidden: !mine || !ctx.canPost },
-              { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
-              { label: t("Copy text"), icon: "copy", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
+              { label: t("Edit"), icon: "edit", kbd: "E", onSelect: startEdit, hidden: !mine || !ctx.canPost },
+              { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", kbd: "P", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
+              { label: t("Copy text"), icon: "copy", kbd: "C", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
+              { separator: true },
               { label: t("Delete"), icon: "trash", danger: true, onSelect: askDelete, hidden: !(mine || ctx.canManage) },
             ]}
           />

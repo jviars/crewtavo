@@ -7,12 +7,13 @@
 /* ---------- The list ---------- */
 .list { position: relative; container-type: inline-size; display: grid; gap: 4px; }
 .section { display: grid; }
-.section + .section { margin-top: 12px; }
-.sectionTitle { margin: 0; padding: 6px 0 4px; font-size: var(--fs-12); font-weight: 700; letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--text-3); }
-.list[data-size="large"] .sectionTitle { font-size: var(--fs-13); }
+.section + .section { margin-top: 16px; }
+/* A group of lines: quiet words on a hairline, like an inbox list's group heading. */
+.sectionTitle { display: flex; align-items: center; min-height: 32px; margin: 0; border-bottom: 1px solid var(--divider); font-size: var(--fs-12); font-weight: 600; letter-spacing: normal; color: var(--text-2); }
+.list[data-size="large"] .sectionTitle { min-height: 40px; font-size: var(--fs-14); }
 .rows { list-style: none; margin: 0; padding: 0; display: grid; }
 
-.row { display: grid; grid-template-columns: minmax(0, 1fr) auto 96px; gap: 16px; align-items: center; min-height: 56px; padding: 6px 0; border-top: 1px solid var(--row-divider); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto 96px; gap: 16px; align-items: center; min-height: 52px; padding: 7px 0; border-bottom: 1px solid var(--row-divider); }
 .list[data-size="large"] .row { grid-template-columns: minmax(0, 1fr) auto 100px; gap: 14px; min-height: 64px; }
 .what { display: grid; gap: 2px; min-width: 0; }
 .list[data-size="large"] .what { gap: 3px; }
@@ -24,40 +25,42 @@
 }
 .whatButton:hover:not(:disabled) { background: var(--fill-2); }
 .whatButton:active:not(:disabled) { background: var(--fill-3); }
-.whatButton:focus-visible { outline: none; box-shadow: var(--ring); }
+.whatButton:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; box-shadow: none; }
 .whatButton:disabled { cursor: progress; }
 .nameLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-.name { font-size: var(--fs-14); font-weight: 600; overflow-wrap: anywhere; }
+.name { font-size: var(--fs-13); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .list[data-size="large"] .name { font-size: var(--fs-16); }
-.detail { font-size: var(--fs-13); color: var(--text-3); overflow-wrap: anywhere; }
+.detail { font-size: var(--fs-12); color: var(--text-3); overflow-wrap: anywhere; }
 .list[data-size="large"] .detail { font-size: var(--fs-14); }
-.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font-size: var(--fs-11); font-weight: 600; white-space: nowrap; }
-.list[data-size="large"] .tag { height: 22px; padding: 0 9px; font-size: var(--fs-12); }
-.tag[data-tag="added"] { background: var(--green-tint); color: var(--green-dark); }
-.tag[data-tag="changed"] { background: var(--req-tint); color: var(--req-text); }
-.tag[data-tag="removed"] { background: var(--danger-tint); color: var(--danger); }
+/* What changed since the range, as a small outlined word in its color (it changes the price the homeowner agreed to). */
+.tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid color-mix(in srgb, currentColor 32%, transparent); border-radius: 5px; font-size: var(--fs-11); font-weight: 600; line-height: 1; white-space: nowrap; }
+.list[data-size="large"] .tag { height: 22px; padding: 0 8px; font-size: var(--fs-12); }
+.tag[data-tag="added"] { color: var(--green-dark); }
+.tag[data-tag="changed"] { color: var(--warning); }
+.tag[data-tag="removed"] { color: var(--danger); }
 /* Looking at one option: a line on every option. */
-.tag[data-tag="shared"] { background: var(--fill-2); color: var(--text-2); }
+.tag[data-tag="shared"] { border-color: var(--border); font-weight: 500; color: var(--text-3); }
 
 .controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .round {
-  width: var(--control); height: var(--control); flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
-  background: var(--surface); color: var(--ink); transition: background var(--dur-fast), transform var(--dur-fast), box-shadow var(--dur-fast);
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--page); color: var(--ink); transition: background var(--dur-fast), transform var(--dur-fast), border-color var(--dur-fast);
   touch-action: manipulation;
 }
-.round:hover:not(:disabled) { background: var(--fill-2); }
-.round:active:not(:disabled) { transform: scale(0.93); background: var(--fill-2); }
-.round:focus-visible { outline: none; box-shadow: var(--ring); }
+.round:hover:not(:disabled) { border-color: var(--border-strong); background: var(--fill-2); }
+.round:active:not(:disabled) { transform: scale(0.93); background: var(--fill-3); }
+.round:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; box-shadow: none; }
 /* Off, the way every disabled button looks. */
-.round:disabled { border-color: var(--border); background: var(--fill-2); color: var(--text-4); cursor: not-allowed; }
+.round:disabled { border-color: var(--divider); background: var(--fill); color: var(--text-4); cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .round, .chip { transition: none; } .round:active:not(:disabled), .chip:active:not(:disabled) { transform: none; } }
 .list[data-size="large"] .round { width: var(--control-lg); height: var(--control-lg); }
-.qty { min-width: 64px; text-align: center; font-size: var(--fs-14); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.qty { min-width: 64px; text-align: center; font-size: var(--fs-13); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .list[data-size="large"] .qty { min-width: 76px; font-size: var(--fs-16); }
-.putBack { min-height: var(--control); padding: 6px 4px; border: 0; background: none; font: inherit; font-size: var(--fs-13); font-weight: 700; color: var(--green); cursor: pointer; border-radius: var(--radius-control); touch-action: manipulation; }
-.putBack:hover { color: var(--green-dark); text-decoration: underline; }
-.putBack:focus-visible { outline: none; box-shadow: var(--ring); }
+.putBack { min-height: 32px; padding: 6px 4px; border: 0; background: none; font: inherit; font-size: var(--fs-13); font-weight: 600; color: var(--green); cursor: pointer; border-radius: var(--radius-sm); touch-action: manipulation; }
+.putBack:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.putBack:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; box-shadow: none; }
 .list[data-size="large"] .putBack { min-height: var(--control-lg); padding: 10px 8px; font-size: var(--fs-16); }
-.amount { text-align: right; font-size: var(--fs-14); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.amount { text-align: right; font-size: var(--fs-13); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .list[data-size="large"] .amount { font-size: var(--fs-16); }
 
 /* A line taken off: crossed out, with Put back. */
@@ -67,38 +70,44 @@
 .list > :global(.empty-inline) { padding: 16px 0 8px; }
 .list[data-size="large"] > :global(.empty-inline) { font-size: var(--fs-16); }
 
-.saving { position: absolute; top: 6px; right: 0; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-13); color: var(--text-3); pointer-events: none; }
+.saving { position: absolute; top: 8px; right: 0; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-3); pointer-events: none; }
 .saving:empty { display: none; }
 
 /* On a phone, the controls go under the name. */
 @container (max-width: 520px) {
-  .row, .list[data-size="large"] .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "what amount" "controls controls"; gap: 6px 12px; padding: 10px 0; }
+  .row, .list[data-size="large"] .row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "what amount" "controls controls"; gap: 8px 12px; padding: 12px 0; }
   .what { grid-area: what; }
   .amount { grid-area: amount; align-self: start; }
-  .controls { grid-area: controls; justify-content: flex-start; }
+  .controls { grid-area: controls; justify-content: flex-end; }
+  .row[data-single] { grid-template-areas: "what amount" "what controls"; }
+  /* The name level with its amount, the − under the amount. */
+  .row[data-single] .what { align-self: start; }
+  .row[data-single] .controls { align-self: end; }
   .controls:empty { display: none; }
   .saving { position: static; }
 }
 
 /* ---------- Adding to it ---------- */
-.add { display: grid; gap: 10px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--row-divider); }
-.addTitle { margin: 0; font-size: var(--fs-14); font-weight: 600; }
+.add { display: grid; gap: 10px; margin-top: 14px; }
+.addTitle { margin: 0; font-size: var(--fs-13); font-weight: 650; color: var(--ink); }
 .list[data-size="large"] .addTitle { font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A quick add: a quiet filled chip, its price after it. */
 .chip {
-  display: inline-flex; align-items: center; gap: 8px; height: var(--control); padding: 0 14px 0 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius-pill);
-  background: var(--surface); font: inherit; font-size: var(--fs-14); font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap;
-  transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); touch-action: manipulation;
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border: 0; border-radius: 8px;
+  background: var(--fill-2); font: inherit; font-size: var(--fs-13); font-weight: 500; color: var(--ink); cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-fast), transform var(--dur-fast); touch-action: manipulation;
 }
 .chip > svg { color: var(--green); }
-.chip small { font-size: var(--fs-13); font-weight: 400; color: var(--text-3); }
-.chip:hover:not(:disabled) { border-style: solid; border-color: var(--green); background: var(--green-tint); }
+.chip small { font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.chip:hover:not(:disabled) { background: var(--fill-3); }
 .chip:active:not(:disabled) { transform: scale(0.97); }
-.chip:focus-visible { outline: none; box-shadow: var(--ring); }
+.chip:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; box-shadow: none; }
 .chip:disabled { opacity: 0.6; cursor: progress; }
-.list[data-size="large"] .chip { height: var(--control-lg); padding: 0 16px 0 12px; border-width: 1.5px; font-size: var(--fs-16); }
+.list[data-size="large"] .chips { gap: 8px; }
+.list[data-size="large"] .chip { height: var(--control-lg); padding: 0 16px 0 12px; border-radius: 12px; font-size: var(--fs-16); }
 .list[data-size="large"] .chip small { font-size: var(--fs-14); }
-.hint { margin: 0; font-size: var(--fs-13); color: var(--text-3); }
+.hint { margin: 0; font-size: var(--fs-12); color: var(--text-3); }
 
 .search { position: relative; max-width: 420px; }
 .list[data-size="large"] .search { max-width: 520px; }
@@ -113,74 +122,85 @@
 .search .searchInput { width: 100%; padding-left: 36px; }
 /* 16px keeps iPad Safari from zooming in when it's tapped. */
 .list[data-size="large"] .search .searchInput { height: var(--control-lg); font-size: var(--fs-16); border-radius: var(--radius-control); }
+/* The price list's matches: a small menu under the box (Menus.dc.html). */
 .options {
-  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; max-height: min(340px, 50vh); overflow-y: auto; margin: 0; padding: 6px; list-style: none;
-  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-lg); animation: pop-in var(--dur-fast) var(--ease-out);
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; max-height: min(340px, 50vh); overflow-y: auto; margin: 0; padding: 4px; list-style: none;
+  border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); animation: pop-in var(--dur-fast) var(--ease-out);
 }
-.option { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 10px; border-radius: var(--radius-control); cursor: pointer; }
-.option[aria-selected="true"] { background: var(--fill-2); }
+@media (prefers-reduced-motion: reduce) { .options { animation: none; } }
+.option { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 5px 8px; border-radius: 6px; font-size: var(--fs-13); cursor: pointer; }
+.option[aria-selected="true"] { background: var(--menu-hi); }
 .optionText { display: grid; gap: 1px; flex: 1; min-width: 0; }
-.optionName { font-weight: 600; overflow-wrap: anywhere; }
+.optionName { font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .optionDetail { font-size: var(--fs-12); color: var(--text-3); }
 .list[data-size="large"] .option { min-height: 52px; }
 .list[data-size="large"] .optionName { font-size: var(--fs-16); }
 .list[data-size="large"] .optionDetail { font-size: var(--fs-13); }
-.noMatch { padding: 12px; font-size: var(--fs-13); color: var(--text-3); }
+.noMatch { padding: 10px 8px; font-size: var(--fs-13); color: var(--text-3); }
 
 /* ---------- Your numbers ---------- */
-.numbers { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--fill); }
-.numbersTitle { margin: 0; font-size: var(--fs-13); font-weight: 600; color: var(--text-3); }
-.figures { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; font-size: var(--fs-14); }
+/* Your numbers: hairline rows under a small heading (the Quote board's Profit estimate). */
+.numbers { display: grid; gap: 10px; min-width: 0; }
+.numbersTitle { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 12px; min-height: 36px; border-bottom: 1px solid var(--divider); }
+.numbersHeading { margin: 0; font-size: var(--fs-13); font-weight: 650; letter-spacing: normal; color: var(--ink); }
+.figures { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: -10px 0 0; font-size: var(--fs-13); }
+.figures dt, .figures dd { display: flex; align-items: center; min-height: 34px; border-bottom: 1px solid var(--row-divider); }
 .figures dt { color: var(--text-2); }
-.figures dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.figures .strong { font-weight: 700; color: var(--ink); }
+.figures dd { justify-content: flex-end; margin: 0; padding-left: 12px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.figures .strong { font-weight: 650; color: var(--ink); }
 .figures dd[data-low] { color: var(--warning); }
-.abc { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-13); line-height: 1.45; color: var(--text-2); }
-.abcBadge { flex: none; margin-top: 1px; padding: 2px 5px; border: 1px solid var(--button-border); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font-size: var(--fs-11); font-weight: 700; letter-spacing: var(--tracking-caps); line-height: 1.2; }
-.note { margin: 0; font-size: var(--fs-13); line-height: 1.45; color: var(--text-3); }
+.private { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--text-3); }
+.private > svg { flex: none; color: var(--quiet); }
+.abc { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.abcBadge { flex: none; margin-top: 1px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: none; color: var(--text-2); font-size: var(--fs-11); font-weight: 600; letter-spacing: 0.02em; line-height: 1.3; }
+.note { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
 
 /* ---------- The range bar ---------- */
 .rangeBar { display: grid; gap: 6px; }
-.track { position: relative; height: 14px; border-radius: var(--radius-pill); background: var(--green-tint-2); }
-.marker { position: absolute; top: -5px; width: 6px; height: 24px; margin-left: -3px; border-radius: var(--radius-pill); background: var(--green-dark); box-shadow: 0 0 0 2px var(--surface); transition: left var(--dur) var(--ease-out); }
-.marker[data-where="above"] { background: var(--req); }
+.track { position: relative; height: 10px; border-radius: var(--radius-pill); background: var(--green-tint-2); }
+.marker { position: absolute; top: -5px; width: 4px; height: 20px; margin-left: -2px; border-radius: var(--radius-pill); background: var(--green-dark); box-shadow: 0 0 0 2px var(--page); transition: left var(--dur) var(--ease-out); }
+.marker[data-where="above"] { background: var(--warning); }
 @media (prefers-reduced-motion: reduce) { .marker { transition: none; } }
-.ends { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ends { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* ---------- What changed ---------- */
 .changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.change { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: var(--fs-14); }
+.change { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: var(--fs-13); }
 .changes[data-size="large"] .change { font-size: var(--fs-16); }
 .changeWhat { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .changeText { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
-.changeDetail { font-size: var(--fs-13); color: var(--text-3); }
-.sign { flex: none; width: 14px; font-weight: 700; }
+.changeDetail { font-size: var(--fs-12); color: var(--text-3); }
+.sign { flex: none; width: 14px; font-weight: 600; }
 .sign[data-sign="plus"] { color: var(--green-dark); }
 .sign[data-sign="minus"] { color: var(--danger); }
 .changeAmount { flex: none; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ---------- Notes and photos ---------- */
-.notes { display: grid; gap: 12px; }
+.notes { display: grid; gap: 12px; min-width: 0; }
 .notesHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
-.notesTitle { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); }
-.notes[data-size="site"] .notesTitle { font-size: var(--fs-20); }
-.private { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-13); color: var(--text-3); }
+/* In the office: a small heading on a hairline, like the step's other parts. */
+.notes[data-size="office"] .notesHead { align-items: center; min-height: 36px; border-bottom: 1px solid var(--divider); }
+.notesTitle { margin: 0; font-size: var(--fs-13); font-weight: 650; letter-spacing: normal; color: var(--ink); }
+.notes[data-size="site"] .notesTitle { font-size: var(--fs-20); font-weight: 700; letter-spacing: var(--tracking-tight); }
+.notes[data-size="site"] .private { font-size: var(--fs-13); }
 .thread { list-style: none; margin: 0; padding: 0; display: grid; }
 .item { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); }
 .thread > .item:first-child { border-top: 0; }
-.notes[data-size="office"] .thread > .item:first-child { padding-top: 0; }
-.face { width: 34px; height: 34px; font-size: var(--fs-13); }
+.notes[data-size="office"] .thread > .item { border-top: 0; border-bottom: 1px solid var(--row-divider); }
+.notes[data-size="office"] .thread { margin-top: -12px; }
+.face { width: 32px; height: 32px; font-size: var(--fs-12); }
 .itemBody { display: grid; gap: 6px; flex: 1; min-width: 0; }
-.itemMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: var(--fs-13); color: var(--text-3); }
-.itemMeta strong { color: var(--ink); }
-.itemText { margin: 0; font-size: var(--fs-14); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.itemMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: var(--fs-12); color: var(--text-3); }
+.itemMeta strong { font-weight: 600; color: var(--ink); }
+.notes[data-size="site"] .itemMeta { font-size: var(--fs-13); }
+.itemText { margin: 0; font-size: var(--fs-13); line-height: 1.55; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .notes[data-size="site"] .itemText { font-size: var(--fs-16); }
 .itemDelete { margin-left: auto; width: var(--control-sm); height: var(--control-sm); display: grid; place-items: center; border: 0; border-radius: var(--radius-control); background: none; color: var(--text-3); }
 .itemDelete:hover { background: var(--fill-2); color: var(--danger); }
-.itemDelete:focus-visible { outline: none; box-shadow: var(--ring); }
+.itemDelete:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; box-shadow: none; }
 .notes[data-size="site"] .itemDelete { width: var(--control-lg); height: var(--control-lg); }
 .photos { display: flex; flex-wrap: wrap; gap: 8px; }
-.photo { position: relative; width: 88px; height: 64px; flex: none; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--fill-2); }
+.photo { position: relative; width: 88px; height: 64px; flex: none; overflow: hidden; border: 1px solid var(--divider); border-radius: 8px; background: var(--fill-2); }
 .notes[data-size="site"] .photo { width: 104px; height: 76px; }
 .photo a, .photo img { display: block; width: 100%; height: 100%; }
 .photo img { object-fit: cover; }
@@ -196,3 +216,25 @@
 .notes[data-size="site"] .composer textarea { min-height: 120px; padding: 12px 14px; border-radius: var(--radius-control); font-size: var(--fs-16); line-height: 1.5; }
 .notes[data-size="site"] .composerActions :global(.btn) { height: var(--control-lg); padding: 0 16px; font-size: var(--fs-16); }
 .notes[data-size="site"] :global(.empty-inline) { font-size: var(--fs-16); }
+
+/* ---------- A phone: 44px targets in the office list too ---------- */
+@media (max-width: 900px) {
+  /* 36px to look at, 44px to tap. */
+  .round { position: relative; width: 36px; height: 36px; }
+  .round::after { content: ""; position: absolute; inset: -4px; }
+  /* Deleting a note: 32px to look at, 44px to tap. */
+  .itemDelete { position: relative; }
+  .itemDelete::after { content: ""; position: absolute; inset: -6px; }
+  /* The package's quick adds scroll sideways to the card's edges, like a phone's filter chips. */
+  .list:not([data-size="large"]) .chips { flex-wrap: nowrap; overflow-x: auto; margin-inline: -16px; padding: 2px 16px; scrollbar-width: none; scroll-padding-inline: 16px; }
+  .list:not([data-size="large"]) .chips::-webkit-scrollbar { display: none; }
+  .list:not([data-size="large"]) .chip { flex: none; }
+  .putBack { min-height: 44px; font-size: var(--fs-14); }
+  .chip { height: 40px; padding: 0 12px 0 10px; border-radius: 10px; font-size: var(--fs-14); }
+  .chip small { font-size: var(--fs-13); }
+  .name, .amount, .qty, .itemText, .change, .figures, .option { font-size: var(--fs-15); }
+  .detail, .itemMeta, .abc, .note, .private, .hint, .changeDetail, .ends, .optionDetail { font-size: var(--fs-13); }
+  .sectionTitle, .addTitle, .numbersHeading, .notesTitle { font-size: var(--fs-14); }
+  .figures dt, .figures dd { min-height: 44px; }
+  .option { min-height: 48px; }
+}

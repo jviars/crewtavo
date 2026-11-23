@@ -37,12 +37,23 @@ function buttonLabel(url: string): string {
   return "Open";
 }
 
-function paragraph(p: string, code: string | null | undefined, href: (url: string) => string, buttons: Record<string, string> | undefined, shown: readonly string[] | undefined, label: string | null | undefined): string {
+const originOf = (url: string) => {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+};
+
+/** Whether a link on its own line may be a button: any link, with `base` only one to that address, and with `base` null none. */
+const buttonFor = (url: string, base: string | null | undefined) => base === undefined || (base !== null && originOf(url) === originOf(base));
+
+function paragraph(p: string, code: string | null | undefined, href: (url: string) => string, buttons: Record<string, string> | undefined, shown: readonly string[] | undefined, label: string | null | undefined, base: string | null | undefined): string {
   const trimmed = p.trim();
   if (code && trimmed === code) {
     return `<p style="margin:0 0 20px;font-size:32px;font-weight:800;letter-spacing:0.2em;font-variant-numeric:tabular-nums">${escape(code)}</p>`;
   }
-  if (/^https?:\/\/\S+$/.test(trimmed)) {
+  if (/^https?:\/\/\S+$/.test(trimmed) && buttonFor(trimmed, base)) {
     const url = escape(href(trimmed));
     const button = `<p style="margin:0 0 20px"><a href="${url}" style="display:inline-block;background:#3b7d23;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">${escape(buttons?.[trimmed] ?? label ?? buttonLabel(trimmed))}</a></p>`;
     // A link the client is meant to pass on (their referral link) is written out under it, to copy.
@@ -71,10 +82,17 @@ export interface EmailParts {
   showUrls?: readonly string[];
   /** The label for the message's link buttons, in place of the one the link's address picks (an autopay invite's "Save your card"). */
   button?: string | null;
+  /**
+   * This Crewtavo's own address (APP_URL), for an email that carries what an outsider typed (a
+   * website form's message, a job application): only a link to it becomes a button, and any other
+   * link stays a link in the text, so nobody can make their own link look like the email's button.
+   * Null when the address isn't known (no APP_URL): then no link is a button.
+   */
+  base?: string | null;
 }
 
-export function renderEmail({ companyName, logo, text, footer, unsubscribeUrl, code, href = asIs, pixel, buttons, showUrls, button }: EmailParts): { html: string; text: string } {
-  const paragraphs = text.trim().split(/\n{2,}/).map((p) => paragraph(p, code, href, buttons, showUrls, button)).join("");
+export function renderEmail({ companyName, logo, text, footer, unsubscribeUrl, code, href = asIs, pixel, buttons, showUrls, button, base }: EmailParts): { html: string; text: string } {
+  const paragraphs = text.trim().split(/\n{2,}/).map((p) => paragraph(p, code, href, buttons, showUrls, button, base)).join("");
   const foot = [footer ? escape(footer) : null, unsubscribeUrl ? `<a href="${escape(unsubscribeUrl)}" style="color:#5f6f76">Unsubscribe</a>` : null].filter(Boolean).join(" · ");
   const html = `<!doctype html><html><body style="margin:0;padding:24px 12px;background:#f6f5f1;font-family:-apple-system,'Segoe UI',Helvetica,Arial,sans-serif;color:#0f2a35">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">

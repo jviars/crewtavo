@@ -56,8 +56,8 @@ export interface GridColumn {
 }
 
 export const PPM = 0.8; // pixels per minute: 48 px an hour
-/** On phones the hours are twice as tall, so a short visit still has room for its time and name. */
-const PHONE_PPM = 1.6;
+/** On phones the hours are half again as tall (72 px), so a short visit still has room for its time and name. */
+const PHONE_PPM = 1.2;
 const PHONE = "(max-width: 700px)";
 const MIN_HEIGHT = 22;
 
@@ -96,16 +96,25 @@ export function fitBlock(height: number, has: { time?: boolean; people?: boolean
   return { time, title: people === "inline" ? 1 : 1 + Math.min(2, Math.floor(room / ROW.line)), people, hold, client };
 }
 
-/** Pixels per minute for this screen, following it when the phone turns or the window resizes. */
-export function useGridScale() {
-  const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
+/** Whether a media query matches, following the screen as it turns or resizes. */
+export function useMedia(media: string) {
+  const [on, setOn] = useState(() => window.matchMedia(media).matches);
   useEffect(() => {
-    const query = window.matchMedia(PHONE);
-    const changed = () => setPhone(query.matches);
+    const query = window.matchMedia(media);
+    const changed = () => setOn(query.matches);
+    changed();
     query.addEventListener("change", changed);
     return () => query.removeEventListener("change", changed);
-  }, []);
-  return phone ? PHONE_PPM : PPM;
+  }, [media]);
+  return on;
+}
+
+/** Whether this is a phone's grid: taller hours, and one column for a day. */
+export const usePhoneGrid = () => useMedia(PHONE);
+
+/** Pixels per minute for this screen. */
+export function useGridScale() {
+  return usePhoneGrid() ? PHONE_PPM : PPM;
 }
 
 export const minutesOf = (iso: string, tz: string) => {
@@ -217,6 +226,27 @@ function useNowMinutes(tz: string) {
   return now;
 }
 
+/**
+ * Whether the board is wider than its place (a big team's People day: a lane each at its narrowest),
+ * so it scrolls sideways there instead of running under the Unscheduled list.
+ */
+function useWide(columns: number, minColumn: number) {
+  const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    if (!wrap || typeof ResizeObserver === "undefined") return;
+    const check = () => {
+      const grid = wrap.firstElementChild as HTMLElement | null;
+      setWide(Boolean(grid && grid.offsetWidth > wrap.clientWidth + 1));
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [wrap, columns, minColumn]);
+  return [setWrap, wide] as const;
+}
+
 export function TimeGrid<V extends GridVisit>({
   columns,
   visitsFor,
@@ -237,6 +267,7 @@ export function TimeGrid<V extends GridVisit>({
   selected,
   externalFor,
   onOpenExternal,
+  bare,
 }: {
   columns: GridColumn[];
   visitsFor: (column: GridColumn) => V[];
@@ -262,8 +293,11 @@ export function TimeGrid<V extends GridVisit>({
   stale?: boolean;
   /** The visit open in a dialog, drawn a little stronger so it's easy to find again. */
   selected?: string | null;
+  /** One column with no heading over it (a phone's day, under its week strip). */
+  bare?: boolean;
 }) {
   const now = useNowMinutes(tz);
+  const [setWrap, wide] = useWide(columns.length, minColumn);
   const height = (endMin - startMin) * ppm;
   const hours = Array.from({ length: Math.ceil((endMin - startMin) / 60) }, (_, i) => startMin + i * 60);
   const style = { "--cols": columns.length, "--min-col": `${minColumn}px`, "--hour": `${60 * ppm}px` } as CSSProperties;
@@ -278,13 +312,13 @@ export function TimeGrid<V extends GridVisit>({
   };
 
   return (
-    <div className={`tg-wrap${stale ? " is-stale" : ""}`}>
+    <div ref={setWrap} className={`tg-wrap${stale ? " is-stale" : ""}${bare ? " tg-bare" : ""}`} data-wide={wide || undefined}>
       <div className="tg" style={style} role="grid" aria-label={t("Schedule")}>
         <div className="tg-row tg-head" role="row">
           <div className="tg-gutter" />
           {columns.map((col) => (
-            <div key={col.key} className="tg-colhead" role="columnheader" data-today={col.today || undefined} style={col.color ? ({ "--lane": col.color } as CSSProperties) : undefined}>
-              {col.onHeaderClick ? <button type="button" className="link-btn" onClick={col.onHeaderClick}>{col.label}</button> : col.label}
+            <div key={col.key} className="tg-colhead" role="columnheader" data-today={col.today || undefined}>
+              {col.onHeaderClick ? <button type="button" className="tg-colhead-label link-btn" onClick={col.onHeaderClick}>{col.label}</button> : <span className="tg-colhead-label">{col.label}</span>}
               {col.headerExtra}
             </div>
           ))}
@@ -319,7 +353,7 @@ export function TimeGrid<V extends GridVisit>({
                     {e.title}
                   </button>
                 ))}
-                {canDispatch && !items.length && <button type="button" className="tg-anyadd" aria-label={t("Add an anytime visit")} onClick={() => onCreate(col, null)}>+</button>}
+                {canDispatch && !items.length && <button type="button" className="tg-anyadd" aria-label={t("Add an anytime visit")} onClick={() => onCreate(col, null)}><Icon name="plus" size={14} /></button>}
               </div>
             );
           })}
@@ -360,7 +394,7 @@ export function TimeGrid<V extends GridVisit>({
                       <button key={item.id} type="button" className="tg-event tg-ext" data-free={!e.busy || undefined} title={`${e.title} · ${e.calendar}`} style={{ ...box, "--cal": e.color ?? undefined } as CSSProperties} onClick={() => onOpenExternal?.(e)}>
                         {fit.time && <span className="tg-t"><TimeRange start={clock(start)} end={clock(end)} /></span>}
                         <span className="tg-n" style={{ WebkitLineClamp: fit.title }}>{e.title}</span>
-                        {fit.client && <span className="tg-m"><Icon name="calendar" size={12} /> {e.calendar}</span>}
+                        {fit.client && <span className="tg-m"><Icon name="calendar" size={12} />{e.calendar}</span>}
                       </button>
                     );
                   }

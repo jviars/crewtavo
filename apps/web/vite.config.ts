@@ -52,6 +52,9 @@ export default defineConfig({
       "^/v(\\.js)?$": { target: API, changeOrigin: true },
       // Website forms: the address the business's own form sends to, and its thank-you page.
       "^/f/": { target: API, changeOrigin: true },
+      // Pointed at a whole instance (CREWTAVO_API_URL=http://localhost:8260), whose Auth, data and files
+      // answer on its own address: with the regular API they're Supabase's, and never asked for here.
+      "^/(auth|rest|storage)/v1(/|$)": { target: API, changeOrigin: true },
     },
   },
 });

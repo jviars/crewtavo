@@ -18,38 +18,39 @@
   flex: none; display: flex; align-items: center; gap: 12px;
   min-height: calc(60px + env(safe-area-inset-top));
   padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
-  border-bottom: 1px solid var(--divider); background: var(--surface);
+  border-bottom: 1px solid var(--divider); background: var(--page);
 }
 .headText { flex: 1; min-width: 0; display: grid; gap: 2px; padding: 8px 0; }
-.title { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--text-3); font-size: 12px; }
+.title { margin: 0; font-size: var(--fs-15); font-weight: 700; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--text-3); font-size: var(--fs-12); }
 .meta > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .headActions { flex: none; display: flex; align-items: center; gap: 8px; }
-.close { width: 44px; height: 44px; color: var(--text-2); }
+.close { width: 40px; height: 40px; border-radius: var(--radius-pill); color: var(--text-2); }
+.close:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
 .close:disabled { opacity: 0.4; cursor: default; }
 
 /* ---------- Toolbar ---------- */
 .toolbar {
   flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
   padding: 6px max(12px, env(safe-area-inset-right)) 6px max(12px, env(safe-area-inset-left));
-  border-bottom: 1px solid var(--divider); background: var(--surface);
+  border-bottom: 1px solid var(--divider); background: var(--page);
 }
 .group { display: flex; align-items: center; gap: 2px; }
 .tool {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-width: 40px; height: 40px; padding: 0 9px;
-  border: 0; border-radius: 9px; background: none; color: var(--text-2);
-  font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer;
+  min-width: 36px; height: 36px; padding: 0 9px;
+  border: 0; border-radius: 8px; background: none; color: var(--text-2);
+  font: inherit; font-size: var(--fs-13); font-weight: 600; white-space: nowrap; cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background var(--dur-fast), color var(--dur-fast);
 }
 .tool:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
 .tool:focus-visible { outline: none; box-shadow: var(--ring); }
-.tool[aria-pressed="true"] { background: var(--green-solid); color: #fff; }
+.tool[aria-pressed="true"] { background: var(--solid); color: var(--on-solid); }
 .tool:disabled { opacity: 0.4; cursor: default; }
-.zoomLabel { min-width: 48px; text-align: center; font-size: 13px; font-weight: 700; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.zoomLabel { min-width: 48px; text-align: center; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .pageInput { width: 56px; height: 36px; padding: 0 6px; text-align: center; font-variant-numeric: tabular-nums; }
-.pageCount { padding: 0 6px 0 4px; color: var(--text-3); font-size: 13px; white-space: nowrap; }
+.pageCount { padding: 0 6px 0 4px; color: var(--text-3); font-size: var(--fs-13); white-space: nowrap; }
 
 /* Color swatches: a ring around the one in use. */
 .swatch {
@@ -57,7 +58,7 @@
   display: grid; place-items: center; -webkit-tap-highlight-color: transparent;
 }
 .swatch::before { content: ""; width: 22px; height: 22px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--green); }
+.swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--page), 0 0 0 4px var(--ink); }
 .swatch:focus-visible { outline: none; box-shadow: var(--ring); }
 
 /* ---------- Where the file goes ---------- */
@@ -73,6 +74,7 @@
   background: var(--fill-2);
 }
 .message { width: min(460px, 100%); }
+.message :global(.empty-state) { padding: 24px 0; }
 /* A letter-size sheet that fits the stage on an iPad held either way. */
 .loadingSheet { display: grid; gap: 14px; width: min(560px, 100%, calc((100dvh - 200px) * 8.5 / 11)); }
 .paper { display: grid; gap: 16px; align-content: start; aspect-ratio: 8.5 / 11; padding: 9% 10%; border-radius: 4px; background: var(--surface); box-shadow: var(--shadow-md); overflow: hidden; }
@@ -116,6 +118,7 @@
   .swatch { width: 44px; }
   .pageInput { height: 40px; }
   .headActions :global(.btn) { height: 44px; }
+  .close { width: 44px; height: 44px; }
 }
 @media (max-width: 700px) {
   .toolLabel { display: none; }
@@ -125,4 +128,24 @@
   .head { gap: 8px; padding-left: max(14px, env(safe-area-inset-left)); }
   .wide { display: none; }
   .headActions { gap: 4px; }
+}
+
+/* ---------- A job's or a client's photos (PhotosCard), in a Section ---------- */
+.photoBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.photoSet { display: grid; gap: 8px; }
+.photoHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 20px; }
+.photoGroup { margin: 0; color: var(--text-3); font-size: var(--fs-12); font-weight: 600; letter-spacing: normal; }
+.photoGroupLink { color: var(--text-3); font-size: var(--fs-12); font-weight: 600; text-decoration: none; }
+.photoGroupLink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.photoGrid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.photo { display: grid; align-content: start; gap: 4px; min-width: 0; }
+/* OK to share under a photo: green words, no box. */
+.okToShare { font-size: var(--fs-12); font-weight: 600; color: var(--green-dark); }
+.photoNote { font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.photoNote :global(.link-btn) { font-size: inherit; }
+@media (max-width: 900px) {
+  .photoGrid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .photoGroup, .photoGroupLink, .okToShare, .photoNote { font-size: var(--fs-13); }
+  /* A finger's 44px for the group's Open job. */
+  .photoGroupLink { display: inline-flex; align-items: center; min-height: 44px; margin: -12px 0; }
 }

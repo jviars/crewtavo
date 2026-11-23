@@ -7,6 +7,7 @@
  * approves the estimate, only while it's still the option and the price on the paper.
  */
 import { shownCustomFields } from "@crewtavo/core/customFields";
+import { documentColor } from "@crewtavo/core/documents";
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useBlocker, useNavigate, useParams } from "react-router-dom";
@@ -273,20 +274,22 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
       back={{ to: visitPath(quote.id, "visit"), label: "Back to the price" }}
       me={false}
       pageTitle={`Sign together · ${quote.title}`}
+      brand={documentColor(template, session.company.settings)}
+      step={2}
     >
       <div className={styles.sign}>
         <div className={styles.docArea}>
           <div className={styles.docHint}>
             <span>{first ? `${first}, look it over, then sign below.` : "Look it over, then sign below."}</span>
             <button type="button" className={`btn ${styles.touch}`} onClick={() => panel.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })}>
-              <Icon name="pen" size={16} />
+              <Icon name="pen" size={18} />
               Sign now
             </button>
           </div>
           {docReady ? (
             <DocumentSheet template={contractTemplate(template, paper)} company={letter} data={data} />
           ) : detailsFailed ? (
-            <div className="card">
+            <div className={styles.centeredCard}>
               <ErrorState error={details.error} title="The estimate didn't load" onRetry={() => void details.refetch()} />
             </div>
           ) : (
@@ -365,7 +368,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
                           </>
                         ) : (
                           <button type="button" className={`btn ${styles.touch}`} disabled={!initials} onClick={() => initial(s, true)}>
-                            <Icon name="pen" size={16} />
+                            <Icon name="pen" size={18} />
                             Add my initials<span className="sr-only"> to {title}</span>
                           </button>
                         )}
@@ -377,7 +380,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
             )}
 
             <div className={styles.padBlock}>
-              <span className={styles.padLabel}>Your signature</span>
+              <span className={styles.padLabel}>Your signature <span className={styles.padHint}>· with your finger</span></span>
               <Pad value={signature} onChange={setSignature} label="Sign here with your finger" height={170} />
             </div>
 

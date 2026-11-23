@@ -20,6 +20,7 @@ import { isStorageFull, type ApiError } from "@/lib/errors";
 import { isAbort } from "@/lib/resumable";
 import { can, hasRole, isSub, useSession, type Session } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { loadSettings } from "@/lib/companySettings";
 
 /** Where a person's limit comes from: their own, their role's, or none. */
 export type LimitSource = "person" | "role" | null;
@@ -141,7 +142,7 @@ export function useFileSettings() {
   const session = useSession();
   return useQuery({
     queryKey: settingsKey(session.company.id),
-    queryFn: async () => unwrap(await supabase().from("companies").select("settings").eq("id", session.company.id).single()).settings as Record<string, unknown> | null,
+    queryFn: async (): Promise<Record<string, unknown> | null> => loadSettings(session.company.id),
     select: (settings) => fileSettings(settings),
   });
 }
@@ -161,7 +162,7 @@ export function filesPatch(change: Partial<FileSettings>): Record<string, unknow
  * settings area.
  */
 export async function saveFileSettings(companyId: string, change: Partial<FileSettings>) {
-  const current = (unwrap(await supabase().from("companies").select("settings").eq("id", companyId).single()).settings ?? {}) as Record<string, unknown>;
+  const current = await loadSettings(companyId);
   const files = current.files && typeof current.files === "object" && !Array.isArray(current.files) ? (current.files as Record<string, unknown>) : {};
   unwrap(await supabase().from("companies").update({ settings: { ...current, files: { ...files, ...filesPatch(change) } } as never }).eq("id", companyId));
 }
@@ -404,7 +405,7 @@ export const bucketTipDismissed = (settings: Record<string, unknown> | null | un
 
 /** Puts the bucket suggestion aside, reading the settings fresh so every other setting stays as it is now. */
 export async function dismissBucketTip(session: Pick<Session, "company" | "userId">) {
-  const current = (unwrap(await supabase().from("companies").select("settings").eq("id", session.company.id).single()).settings ?? {}) as Record<string, unknown>;
+  const current = await loadSettings(session.company.id);
   const next = { ...current, bucket_tip: { dismissed_at: new Date().toISOString(), dismissed_by: session.userId } };
   unwrap(await supabase().from("companies").update({ settings: next as never }).eq("id", session.company.id));
 }

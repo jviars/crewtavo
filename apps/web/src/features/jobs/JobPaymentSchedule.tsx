@@ -9,10 +9,12 @@
 import { scheduleDueText, schedulePaymentName } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { MetaLine } from "@/components/ui/InboxList";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoneyCents } from "@/lib/format";
+import styles from "./jobMoney.module.css";
 
 export interface InstallmentRow {
   id: string;
@@ -109,41 +111,44 @@ export function JobPaymentSchedule({ jobId, finalInvoice }: { jobId: string; fin
   });
   if (!rows.data?.length) return null;
   return (
-    <div className="card card-pad stack-sm">
-      <strong>Payment schedule</strong>
-      {rows.data.map((row) => {
-        const shared = !!row.invoice && rows.data.some((other) => other.id !== row.id && other.invoice?.id === row.invoice?.id);
-        const state = installmentState(row, finalInvoice, shared);
-        return (
-          <div key={row.id} className="stack-sm" style={{ gap: 4, paddingTop: 6, borderTop: "1px solid var(--divider)" }}>
-            <div className="row-between">
-              <span className="small strong">{schedulePaymentName(row.position, row.count)}</span>
-              <span className="tabular">{formatMoneyCents(row.amount)}</span>
-            </div>
-            <div className="row-between small">
-              <span className="muted">{scheduleDueText({ due: row.due, on: row.due_on }, (iso) => formatDate(iso))}</span>
-              {state.kind === "invoiced" ? (
-                <span className="row" style={{ gap: 6 }}>
-                  <Link to={`/invoices/${state.invoice.id}`}>Invoice #{state.invoice.number}</Link>
-                  <EntityStatus kind="invoice" status={state.invoice.status} />
-                </span>
-              ) : state.kind === "final" ? (
-                <Link to={`/invoices/${state.invoice.id}`}>On the final invoice #{state.invoice.number}</Link>
-              ) : state.kind === "voided" ? (
-                <span className="muted">Invoice #{state.invoice.number} was voided</span>
-              ) : (
-                <span className="muted">To come</span>
+    <Section className="rel-figures" title="Payment schedule" count={rows.data.length}>
+      <RelatedList label="Payment schedule">
+        {rows.data.map((row) => {
+          const shared = !!row.invoice && rows.data.some((other) => other.id !== row.id && other.invoice?.id === row.invoice?.id);
+          const state = installmentState(row, finalInvoice, shared);
+          const problem = row.problem && state.kind !== "invoiced" && state.kind !== "final" ? row.problem : null;
+          return (
+            <RelatedRow
+              key={row.id}
+              title={schedulePaymentName(row.position, row.count)}
+              sub={(
+                <>
+                  <span className={styles.subLine}>{scheduleDueText({ due: row.due, on: row.due_on }, (iso) => formatDate(iso))}</span>
+                  <MetaLine
+                    className={styles.subLine}
+                    parts={[
+                      state.kind === "invoiced" ? (
+                        <span className={styles.inline}><Link to={`/invoices/${state.invoice.id}`}>Invoice #{state.invoice.number}</Link><EntityStatus kind="invoice" status={state.invoice.status} /></span>
+                      ) : state.kind === "final" ? (
+                        <Link to={`/invoices/${state.invoice.id}`}>On the final invoice #{state.invoice.number}</Link>
+                      ) : state.kind === "voided" ? (
+                        `Invoice #${state.invoice.number} was voided`
+                      ) : "To come",
+                      problem && <span className={styles.danger}>{problem}</span>,
+                      canInvoiceNow(state, finalInvoice) && (
+                        <button type="button" className="link-btn" disabled={invoiceNow.isPending} aria-busy={(invoiceNow.isPending && invoiceNow.variables === row.id) || undefined} onClick={() => invoiceNow.mutate(row.id)}>
+                          {invoiceNow.isPending && invoiceNow.variables === row.id ? "Making it…" : state.kind === "voided" ? "Invoice it again" : "Invoice now"}
+                        </button>
+                      ),
+                    ]}
+                  />
+                </>
               )}
-            </div>
-            {row.problem && state.kind !== "invoiced" && state.kind !== "final" && <span className="small text-danger">{row.problem}</span>}
-            {canInvoiceNow(state, finalInvoice) && (
-              <Button size="sm" variant="ghost" style={{ justifySelf: "start" }} loading={invoiceNow.isPending && invoiceNow.variables === row.id} onClick={() => invoiceNow.mutate(row.id)}>
-                {state.kind === "voided" ? "Invoice it again" : "Invoice now"}
-              </Button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+              end={<b>{formatMoneyCents(row.amount)}</b>}
+            />
+          );
+        })}
+      </RelatedList>
+    </Section>
   );
 }

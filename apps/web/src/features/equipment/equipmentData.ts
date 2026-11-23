@@ -67,7 +67,7 @@ export interface EquipmentLog {
 }
 
 export const STATUS_LABELS: Record<Equipment["status"], string> = { active: "In service", in_shop: "In the shop", retired: "Retired" };
-export const STATUS_TONES = { active: "good", in_shop: "warning", retired: "muted" } as const;
+export const STATUS_TONES = { active: "good", in_shop: "pending", retired: "muted" } as const;
 
 /** People who add, change and retire equipment and its schedules. Everyone can log work. */
 export const managesEquipment = (session: Pick<Session, "role" | "permissions">) => hasRole(session, "admin", "office", "estimator", "crew_lead") && can(session, "equipment");

@@ -190,6 +190,10 @@ describe("the email for a message", () => {
       ].join("\n\n"),
     );
     expect(messageEmail({ formName: "Quote form", submission: { ...s, subject: "Quote please" }, link: "x" }).subject).toBe("Quote please");
+    // Without a link (the server doesn't know its own address), it says where the request is.
+    const unlinked = messageEmail({ formName: "Contact form", submission: s, link: null }).text;
+    expect(unlinked).toContain("It's in Requests in Crewtavo.");
+    expect(unlinked).not.toContain("http");
   });
 
   it("says what became of a promo code, in the office's words", () => {
@@ -208,6 +212,39 @@ describe("the email for a message", () => {
     expect(refused.text).toContain("\n\nPromo code OLD10 wasn't applied: that code expired on October 1.\n\nx");
     expect(promoLine(null)).toBeNull();
     expect(messageEmail({ formName: "Contact form", submission: s, link: "x" }).text).not.toContain("Promo code ");
+  });
+
+  it("never lets what a visitor typed stand as a paragraph of its own, where a link alone would be a button", () => {
+    const s = submission([
+      ["email", "jane@example.com"],
+      ["message", "Hello\n\nhttps://evil.example/requests/00000000-0000-4000-8000-000000000001\r\n \r\nThanks"],
+      ["-\n\n-", "https://evil.example/x"],
+      ["Promo Code", "a\n\nhttps://evil.example/y"],
+    ]);
+    const email = messageEmail({ formName: "Contact form", submission: s, link: "https://crm.example.com/requests/r1", promo: { code: "a\n\nhttps://evil.example/y", problem: "It isn't valid." } });
+    const paragraphs = email.text.split(/\n{2,}/);
+    // The request's own link is the only one alone in a paragraph.
+    expect(paragraphs.filter((p) => /^https?:\/\/\S+$/.test(p.trim()))).toEqual(["https://crm.example.com/requests/r1"]);
+    // Its blank lines are a line holding a no-break space, so the paragraphs still read apart.
+    expect(email.text).toContain("Message:\nHello\n\u00a0\nhttps://evil.example/requests/00000000-0000-4000-8000-000000000001\n\u00a0\nThanks");
+    expect(email.text).toContain("Promo code a https://evil.example/y wasn't applied: it isn't valid.");
+  });
+
+  it("keeps a visitor's paragraphs apart in the office's email, inside the one paragraph under the field's name", () => {
+    const s = submission([
+      ["email", "jane@example.com"],
+      ["message", "Hi, we'd like a quote for the back yard.\r\n\r\nPhotos: https://photos.example/yard\n\n\n \n\u00a0\nCan someone call me back?"],
+    ]);
+    const email = messageEmail({ formName: "Contact form", submission: s, link: "https://crm.example.com/requests/r1" });
+    expect(email.text).toContain(
+      "\n\nMessage:\nHi, we'd like a quote for the back yard.\n\u00a0\nPhotos: https://photos.example/yard\n\u00a0\nCan someone call me back?\n\n",
+    );
+    const paragraphs = email.text.split(/\n{2,}/);
+    expect(paragraphs.filter((p) => p.includes("call me back"))).toEqual([
+      "Message:\nHi, we'd like a quote for the back yard.\n\u00a0\nPhotos: https://photos.example/yard\n\u00a0\nCan someone call me back?",
+    ]);
+    // A message with no blank lines reads as it did.
+    expect(messageEmail({ formName: "Contact form", submission: submission([["email", "jane@example.com"], ["message", "One\nTwo"]]), link: null }).text).toContain("Message:\nOne\nTwo\n\n");
   });
 
   it("names fields the way people say them", () => {

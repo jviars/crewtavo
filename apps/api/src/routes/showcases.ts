@@ -46,7 +46,7 @@ const NAMES_CLIENT_SHOWCASE = "The title or write-up names the client or their s
 export const showcaseUrl = (base: string, token: string) => `${base.replace(/\/$/, "")}/s/${token}`;
 
 async function requireMarketing(c: Ctx) {
-  const company = must(await c.var.db.from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("settings").eq("id", c.var.companyId).maybeSingle());
   if (!marketingOn(company.settings as Record<string, unknown> | null)) throw new HttpError(409, "Marketing is off, so showcases can't be published. An owner or admin can install it again in Apps.");
 }
 

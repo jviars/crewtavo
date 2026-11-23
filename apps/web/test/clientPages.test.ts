@@ -58,4 +58,20 @@ describe("the pages clients open", () => {
     expect(html).toContain('if (!/^\\/(hub|book|u|refer|s|g)\\//.test(location.pathname) && (theme === "dark"');
     expect(html).toContain('localStorage.getItem("crewtavo.locale") === "es" && !/^\\/(hub|book|u|refer|s|g)\\//.test(location.pathname)) document.documentElement.lang = "es";');
   });
+
+  it("include, for the light theme only, the roofing visit's screens a homeowner reads and signs on the salesperson's iPad", () => {
+    const theme = read("src/lib/theme.ts");
+    const homeowner = new RegExp(theme.match(/const HOMEOWNER = \/(.+)\/;/)![1]!);
+    for (const path of ["/roofing/8442f1b2/visit", "/roofing/8442f1b2/sign", "/roofing/8442f1b2/signed"]) expect(homeowner.test(path), path).toBe(true);
+    for (const path of ["/roofing", "/roofing/8442f1b2", "/roofing/8442f1b2/visit/x", "/roofing/packages"]) expect(homeowner.test(path), path).toBe(false);
+    expect(theme).toContain("!CLIENT_FACING.test(pathname) && !HOMEOWNER.test(pathname)");
+    // Opened from inside the app, not by a fresh load: every signed-in screen looks again as the path changes.
+    expect(read("src/lib/session.tsx")).toContain("useThemeForPage();");
+    // index.html's theme check has the same list, so reloading one in dark mode doesn't flash dark first; its language check doesn't.
+    const [themeCheck, localeCheck] = read("index.html").split('localStorage.getItem("crewtavo.locale")');
+    expect(themeCheck).toContain(`!/${theme.match(/const HOMEOWNER = \/(.+)\/;/)![1]}/.test(location.pathname)`);
+    expect(localeCheck).not.toContain("roofing");
+    // Still the team's app otherwise: its language, the install prompt and offline.
+    for (const [path] of FILES.slice(1)) if (path !== "index.html") expect(read(path), path).not.toMatch(/roofing\\?\/\[\^/);
+  });
 });

@@ -126,14 +126,14 @@ insert into public.memberships (company_id, user_id, role, role_id) values (:'co
 begin;
 set local role authenticated;
 select t_cgp.as_user(:'bea');
-update public.companies set settings = settings || '{"ai": {"team_plans": false, "service": "chatgpt"}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"ai": {"team_plans": false, "service": "chatgpt"}}' where id = :'co';
 reset role;
 select t_cgp.check((select settings -> 'ai' = '{"team_plans": true}'::jsonb from public.companies where id = :'co'),
   'an admin without the apps area can''t change which key the AI uses or whether the team may connect their plans');
 select t_cgp.check((select status = 'connected' from public.chatgpt_plans where user_id = :'olive'), 'so nobody''s connection ends over it');
 set local role authenticated;
 select t_cgp.as_user(:'pat');
-update public.companies set settings = settings || '{"ai": {"team_plans": true, "service": "chatgpt"}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"ai": {"team_plans": true, "service": "chatgpt"}}' where id = :'co';
 reset role;
 select t_cgp.check((select settings -> 'ai' ->> 'service' = 'chatgpt' from public.companies where id = :'co'), 'the owner can');
 rollback;

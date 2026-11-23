@@ -15,7 +15,7 @@ describe("AI answers and drafts say they're AI's, and to check them", () => {
   it("under an answer from the guides, in the crew's language", () => {
     const page = source("kb/KnowledgeBasePage.tsx");
     const line = "Written by AI from your guides. It can be wrong: check the guide before you rely on it.";
-    expect(page).toContain(`{ask.data && <p className="muted small" style={{ margin: 0 }}>{t("${line}")}</p>}`);
+    expect(page).toContain(`{ask.data && <p className={s.disclaimer}>{t("${line}")}</p>}`);
     expect((parts.team as Record<string, unknown>)[line]).toBe("Escrita por IA a partir de tus guías. Puede estar equivocada: revisa la guía antes de confiar en ella.");
   });
 

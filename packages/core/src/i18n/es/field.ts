@@ -27,7 +27,6 @@ export default {
   "Day {day} of {days}": "Día {day} de {days}",
   "Weather: {reason}": "Clima: {reason}",
   "On my way": "En camino",
-  "Done today ({count})": "Terminadas hoy ({count})",
   "Tomorrow": "Mañana",
 
   // The clock (ClockCard.tsx, CrewClockCard.tsx, clockTaps.ts)
@@ -42,7 +41,6 @@ export default {
   "Clocking in and out saves where you are, for the office.": "Al marcar entrada y salida se guarda dónde estás, para la oficina.",
   "Stop for the day": "Terminar el día",
   "Stop": "Parar",
-  "Start a timer": "Iniciar un reloj",
   "Switch": "Cambiar",
   "Start timer": "Iniciar reloj",
   "Crew member": "Miembro de la cuadrilla",
@@ -250,7 +248,6 @@ export default {
   "Record {amount}": "Registrar {amount}",
   "Record payment": "Registrar pago",
   "Extra work on this visit": "Trabajo extra en esta visita",
-  "sends when you have signal": "se envía cuando tengas señal",
 
   // A sub's My jobs (MyJobsPage.tsx, myJobs.ts, YourPrice.tsx, core subOffers.ts)
   "This is what you had when you last had signal. Accepting or declining a job needs signal, so it reaches the office right away.": "Esto es lo que tenías la última vez que hubo señal. Aceptar o rechazar un trabajo necesita señal, para que le llegue a la oficina de inmediato.",
@@ -411,9 +408,6 @@ export default {
   "No expenses yet": "Todavía no hay gastos",
   "Open receipt": "Abrir recibo",
   "Expense": "Gasto",
-  " · reimbursed": " · reembolsado",
-  " · to reimburse": " · por reembolsar",
-  " · already in the line items, not counted again": " · ya está en las partidas, no se cuenta otra vez",
   "Expense actions": "Acciones del gasto",
   "Mark reimbursed": "Marcar como reembolsado",
   "Delete": "Eliminar",
@@ -614,7 +608,6 @@ export default {
   "No visits yet. A crew ticks Serviced on the visit.": "Todavía no hay visitas. La cuadrilla marca Con servicio en la visita.",
   "Not set": "Sin poner",
   "Edit": "Editar",
-  "Nothing filled in yet.": "Todavía no se ha llenado nada.",
   "Details saved": "Detalles guardados",
   "Scope of work": "Alcance del trabajo",
   "Plans": "Planos",
@@ -697,4 +690,22 @@ export default {
   "The office is waiting to hear. Your snow customers are in the notice you got.": "La oficina espera tu respuesta. Tus clientes de nieve están en el aviso que recibiste.",
   "I can't after all": "Al final no puedo",
   "I can after all": "Al final sí puedo",
+
+  // My day, the visit and its details (features/field, customFields/CustomFields.tsx)
+  "Edit details": "Editar detalles",
+  "Nothing filled in yet": "Todavía no se ha llenado nada",
+  "{on} of {count} on the clock": "{on} de {count} en el reloj",
+  "Everyone": "Todos",
+  "Sends when you have signal": "Se envía cuando tengas señal",
+  "Route in maps": "Ruta en el mapa",
+  "Done today": "Terminadas hoy",
+  "Stop {number} of {count}": "Parada {number} de {count}",
+
+  // Receipts, expenses and materials (features/jobs/ExpensesCard.tsx, JobMaterials.tsx, ReceiptDrafts.tsx)
+  "Saved expenses": "Gastos guardados",
+  "reimbursed": "reembolsado",
+  "to reimburse": "por reembolsar",
+  "in line item costs": "en los costos de las partidas",
+  "Actions for {name}": "Acciones para {name}",
+  "Add several receipts or supplier invoices": "Agrega varios recibos o facturas de proveedores",
 } satisfies Catalog;

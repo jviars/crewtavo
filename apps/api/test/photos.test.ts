@@ -8,6 +8,8 @@ const VIEWER = vi.hoisted(() => "00000000-0000-4000-8000-0000000000a1");
 const state = vi.hoisted(() => ({
   viewer: { role: "field_crew", role_id: null as string | null },
   target: { role: "field_crew" } as { role: string } | null,
+  // The teammate's memberships in other businesses (the photo is their account's, everywhere).
+  elsewhere: [] as Array<{ company_id: string }>,
   photos: {} as Record<string, string | null>,
   uploads: [] as Array<{ path: string; size: number; contentType?: string }>,
   removed: [] as string[],
@@ -31,7 +33,8 @@ vi.mock("../src/lib/supabase", () => {
         return null;
       };
       const builder: Record<string, unknown> = {};
-      for (const name of ["select", "eq", "in"]) builder[name] = (...args: unknown[]) => (calls.push([name, ...args]), builder);
+      for (const name of ["select", "eq", "in", "neq", "limit"]) builder[name] = (...args: unknown[]) => (calls.push([name, ...args]), builder);
+      builder.then = (resolve: (value: unknown) => void) => resolve({ data: table === "memberships" ? state.elsewhere : [], error: null });
       builder.update = (row: { avatar_url: string | null }) => {
         const done = { eq: (_: string, id: string) => ((state.photos[id] = row.avatar_url), Promise.resolve({ data: null, error: null })) };
         return done;
@@ -59,6 +62,7 @@ const pathOf = (who: string, id = "11111111-1111-4111-8111-111111111111") => `${
 beforeEach(() => {
   state.viewer = { role: "field_crew", role_id: null };
   state.target = { role: "field_crew" };
+  state.elsewhere = [];
   state.photos = {};
   state.uploads = [];
   state.removed = [];
@@ -98,6 +102,16 @@ describe("profile photos", () => {
     expect((await put(TEAMMATE)).status).toBe(403);
     state.target = null;
     expect((await put(TEAMMATE)).status).toBe(404);
+  });
+
+  it("doesn't change a teammate's photo who's also in another business, where it would change too", async () => {
+    state.viewer = { role: "admin", role_id: null };
+    state.elsewhere = [{ company_id: "other-company" }];
+    expect((await put(TEAMMATE)).status).toBe(403);
+    expect((await remove(TEAMMATE)).status).toBe(403);
+    expect(state.uploads).toEqual([]);
+    state.elsewhere = [];
+    expect((await put(VIEWER)).status).toBe(200);
   });
 
   it("removes a photo, and never deletes a file that isn't the person's photo", async () => {

@@ -1,13 +1,15 @@
 /**
  * Clients, their properties and contacts, and importing them from another system. Saved the way
  * the Clients screens save them (apps/web/src/features/clients), and imported with the same rules
- * as Clients → Import (packages/core/src/clientImport.ts).
+ * as Clients → Import (packages/core/src/clientImport.ts). A client's tax exemption and payment
+ * terms decide what they pay and when, so they're money: they go with invoices, which "Full access,
+ * no money" leaves out (the assistant_prices_are_money migration).
  */
-import { CLIENT_STATUSES, customValues, planImport, recordsToClients, type ExistingClient } from "@crewtavo/core";
+import { assistantRefusal, CLIENT_STATUSES, customValues, planImport, recordsToClients, type ExistingClient } from "@crewtavo/core";
 import { z } from "zod";
 import { geocodeLater, geocodeProperty } from "../services/properties";
 import { customFieldsArg, customFieldsPatch, fieldValues } from "./customFields";
-import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
+import { areaAllows, changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
 
 const text = (max: number) => z.string().trim().max(max);
 const optional = (max: number) => text(max).nullable().optional();
@@ -25,9 +27,9 @@ const clientFields = {
   billing_address: address.nullable().optional(),
   marketing_opt_out: z.boolean().optional().describe("True: no marketing emails or texts, and no review requests."),
   review_opt_out: z.boolean().optional().describe("True: don't ask them for reviews."),
-  tax_exempt: z.boolean().optional().describe("True: no tax on their quotes and invoices; their PDFs say Tax exempt."),
+  tax_exempt: z.boolean().optional().describe("True: no tax on their quotes and invoices; their PDFs say Tax exempt. Money: needs the Invoices and payments area."),
   tax_exempt_note: optional(200).describe("Their exemption certificate number or a note, printed with Tax exempt."),
-  payment_terms_days: z.number().int().min(0).max(365).nullable().optional().describe("Days until their invoices are due, in place of the company's payment terms (0: due on receipt). Null: the company's."),
+  payment_terms_days: z.number().int().min(0).max(365).nullable().optional().describe("Days until their invoices are due, in place of the company's payment terms (0: due on receipt). Null: the company's. Money: needs the Invoices and payments area."),
   ...customFieldsArg,
 };
 
@@ -47,6 +49,13 @@ const propertyFields = {
     .describe("Gate, lockbox and alarm codes and access instructions. Office and up only."),
   ...customFieldsArg,
 };
+
+/** Refuses a client's tax exemption or payment terms to an assistant that may not change invoices. */
+function requireMoneyFields(ctx: ToolContext, a: { tax_exempt?: unknown; tax_exempt_note?: unknown; payment_terms_days?: unknown }) {
+  if ([a.tax_exempt, a.tax_exempt_note, a.payment_terms_days].some((v) => v !== undefined) && !areaAllows(ctx, "invoices")) {
+    throw new Error(`${assistantRefusal("invoices", false, ctx.access ?? undefined)} A client's tax exemption and payment terms go with invoices.`);
+  }
+}
 
 /** A client's row from the fields given; undefined fields are left as they are. */
 function clientRow(a: z.infer<z.ZodObject<typeof clientFields>>) {
@@ -151,6 +160,7 @@ export const clientTools = {
     }),
     area: "clients",
     run: async (ctx, a) => {
+      requireMoneyFields(ctx, a);
       const client = await one(
         ctx.db
           .from("clients")
@@ -172,6 +182,7 @@ export const clientTools = {
     input: z.object({ client_id: z.uuid(), ...clientFields, ...companyArg }),
     area: "clients",
     run: async (ctx, { client_id, company_id: _, ...a }) => {
+      requireMoneyFields(ctx, a);
       const patch = { ...clientRow(a), ...(await customFieldsPatch(ctx, "client", { id: client_id }, a.custom_fields)) };
       if (!Object.keys(patch).length) throw new Error("Nothing to change: send at least one field.");
       await changed(ctx.db.from("clients").update(patch).eq("id", client_id).eq("company_id", ctx.companyId).select("id"), "That client");

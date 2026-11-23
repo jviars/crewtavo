@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
+import { NO_APP_URL } from "../src/lib/http";
 
 // Stand-ins for the signed-in admin's Supabase client and the service-role client. Memberships
 // answer by who's asked about: the viewer (`viewer`), anyone else (`target`), the team list
@@ -106,6 +107,15 @@ describe("inviting someone", () => {
     expect(await res.json()).toEqual({ user_id: "new-person", invited: true, emailed: true, reason: null, link: "https://ops.example.com/?token_hash=tok-1&type=invite" });
     expect(state.sent).toEqual([expect.objectContaining({ to: "new@juliet.test", subject: "Join Juliet Lawn on Crewtavo" })]);
     expect(state.sent[0]!.text).toContain("Hi Robin,");
+  });
+
+  it("makes no account when it couldn't make the link to set it up, without the instance's own address", async () => {
+    const res = await app.request("/api/team/invite", { method: "POST", headers, body: JSON.stringify({ email: "new@juliet.test" }) }, { ...env, APP_URL: undefined });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe(NO_APP_URL);
+    expect(state.links).toEqual([]);
+    expect(state.upserts).toEqual([]);
+    expect(state.sent).toEqual([]);
   });
 
   it("still gives the link when email isn't connected", async () => {

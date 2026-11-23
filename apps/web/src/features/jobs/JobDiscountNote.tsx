@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
+import styles from "./jobMoney.module.css";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 
@@ -111,13 +112,13 @@ export function JobDiscountNote({ jobId, lines, seesInvoices, canSwitch, onChang
 
   const shown = own.map((d) => placed.data?.find((p) => p.key === d.key) ?? d);
   return (
-    <div className="card card-pad stack-sm" role="group" aria-label="Promo code discounts">
+    <div className={styles.discounts} role="group" aria-label="Promo code discounts">
       {shown.map((d) => {
         const { rule, where } = jobDiscountWords(d, currency);
         return (
-          <div key={d.key} className="row wrap" style={{ gap: 8, alignItems: "flex-start" }}>
-            <span className="muted" style={{ display: "inline-flex", marginTop: 2 }}><Icon name="tag" size={16} /></span>
-            <span className="grow small" style={{ minWidth: 0, flexBasis: 220 }}>
+          <div key={d.key} className={styles.discount}>
+            <Icon name="tag" size={16} />
+            <span className={styles.discountText}>
               <strong>{d.name}</strong> {rule}
               {where ? <> <Said words={where} /></> : seesInvoices && placed.isPending && d.billing === "once" ? <Skeleton width="60%" style={{ display: "block", marginTop: 4 }} /> : null}
             </span>
@@ -130,7 +131,7 @@ export function JobDiscountNote({ jobId, lines, seesInvoices, canSwitch, onChang
         );
       })}
       {/* A line, not a whole error block: the rule above still shows, only where it went is missing. */}
-      {placed.error && <span className="field-error">Couldn't load which invoices have it. <button type="button" className="link-btn" onClick={() => placed.refetch()}>Try again</button></span>}
+      {placed.error && <span className="field-error" style={{ paddingTop: 8 }}>Couldn't load which invoices have it. <button type="button" className="link-btn" onClick={() => placed.refetch()}>Try again</button></span>}
     </div>
   );
 }

@@ -83,9 +83,17 @@ export async function signToken(env: Env, payload: Record<string, unknown> & { e
   return `${body}.${toBase64Url(mac)}`;
 }
 
-/** `expired`: one that has run out is read too (its signature still has to be this server's), for a caller that only needs to know it made the token. */
+/**
+ * `expired`: one that has run out is read too (its signature still has to be this server's), for a
+ * caller that only needs to know it made the token. The two parts signToken makes and nothing more:
+ * anything added after them would make one token many different strings, and whatever is counted or
+ * kept by the token's text would start afresh for each. One full stop at the end is the end of the
+ * sentence a link was written in (a text or chat app takes it into the link), so it's left off.
+ */
 export async function verifyToken<T extends { exp: number }>(env: Env, token: string, options: { expired?: boolean } = {}): Promise<T | null> {
-  const [body, mac] = token.split(".");
+  const parts = (token.endsWith(".") ? token.slice(0, -1) : token).split(".");
+  if (parts.length !== 2) return null;
+  const [body, mac] = parts as [string, string];
   if (!body || !mac) return null;
   const key = await deriveKey(env, "sign");
   let signature: Uint8Array;

@@ -105,10 +105,10 @@ export function SendDialog({
               {config.features.devMail && <span className="muted small">{t("Development mode: it's in the local Mailpit inbox.")}</span>}
             </div>
           ) : (
-            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{translateError(getLocale(), done.reason)} {t("Copy the link and send it yourself.")}</div></div>
+            done.reason && done.reason !== "Link only" && <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{translateError(getLocale(), done.reason)} {t("Copy the link and send it yourself.")}</div></div>
           )}
           {done.not_sent?.map((missed) => (
-            <div key={missed.to} className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow">{t("It didn't reach {who}.", { who: missed.to })} <span style={{ fontWeight: 400 }}>{translateError(getLocale(), missed.reason)}</span></div></div>
+            <div key={missed.to} className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{t("It didn't reach {who}.", { who: missed.to })} <span style={{ fontWeight: 400 }}>{translateError(getLocale(), missed.reason)}</span></div></div>
           ))}
           <div className="field">
             <span>{t("Client link")}</span>
@@ -138,7 +138,7 @@ export function SendDialog({
           {textsOffSince && <p className="muted small" style={{ margin: 0 }}>{t("Their texts are off, so their own number can't be texted. You can text a different one.")}</p>}
           {unavailable && (
             <div className="callout callout-info">
-              <Icon name="info" size={20} />
+              <Icon name="info" size={16} />
               <div className="grow">{channel === "email" ? t("Email isn't turned on yet. Use “Copy link” and send it yourself.") : t("Texting isn't turned on yet. Use “Copy link” and send it yourself.")}</div>
             </div>
           )}

@@ -29,11 +29,10 @@ const paused = new Map<string, number>();
 const queues = new Map<string, { tail: Promise<unknown>; waiting: number }>();
 const MAX_WAITING = 5;
 
-/** Requests that carry an email and a secret someone could guess: a password. */
+/** Requests that carry an email and a secret someone could guess: a password. The path as Auth's router reads it (authRoute). */
 export function isGuessable(method: string, url: URL, prefix: string): boolean {
-  if (method !== "POST") return false;
-  const path = url.pathname.slice(prefix.length);
-  return path === "/token" && url.searchParams.get("grant_type") === "password";
+  if (method.toUpperCase() !== "POST") return false;
+  return authRoute(url, prefix) === "/token" && url.searchParams.get("grant_type") === "password";
 }
 
 /**

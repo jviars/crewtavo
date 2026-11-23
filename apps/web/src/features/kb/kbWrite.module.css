@@ -1,0 +1,273 @@
+/*
+ * Writing guides (KB-Edit.dc.html, KB-Extras.dc.html): the guide editor's page, its settings, and the
+ * dialogs for a guide's quiz, sharing it, its categories and starting a new one.
+ */
+
+/* ---------- The guide editor ---------- */
+/* It fills the page under the top bar: its own bar, then the page being written beside its settings. */
+:global(.content):has(> .editor) { padding: 0; gap: 0; max-width: none; }
+.editor { --bar-h: 52px; --rte-top: calc(var(--topbar-height) + var(--bar-h)); display: flex; flex-direction: column; min-height: calc(100dvh - var(--topbar-height)); }
+
+/* The bar: back, whether it's saved, then what saving does and the one green button; the settings switch last. */
+.bar { position: sticky; top: var(--topbar-height); z-index: 4; display: flex; align-items: center; gap: 4px; height: var(--bar-h); padding: 0 12px 0 10px; border-bottom: 1px solid var(--divider); background: var(--page); }
+.back { flex: none; color: var(--text-2); }
+.vr { flex: none; width: 1px; height: 20px; margin: 0 8px; background: var(--divider); }
+.state { display: flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; font-size: var(--fs-13); font-weight: 500; color: var(--text-2); white-space: nowrap; }
+.stateText { overflow: hidden; text-overflow: ellipsis; }
+.state .dim { font-weight: 400; color: var(--text-3); }
+.short { display: none; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); }
+.grow { flex: 1; min-width: 8px; }
+.note { display: flex; flex-direction: column; align-items: flex-end; margin-right: 8px; font-size: var(--fs-12); line-height: 17px; color: var(--text-2); white-space: nowrap; }
+.note .dim { color: var(--text-3); }
+.save .saveKbd { margin-left: 2px; }
+/* Nothing to save: the key hint greys with the button rather than staying white on grey. */
+.save:disabled .saveKbd { border-color: var(--border); color: var(--text-4); }
+.panelBtn { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-3); }
+.panelBtn:hover, .panelBtn[aria-pressed="true"] { background: var(--fill-3); color: var(--ink); }
+
+/* The page being written beside its settings, a hairline between them. */
+.work { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.work[data-panel] { grid-template-columns: minmax(0, 1fr) 300px; }
+.main { min-width: 0; }
+.error { margin-bottom: 16px; }
+
+/* The cover, as the guide shows it, with its two buttons on it; without one, a quiet way to add one (or drop it). */
+.cover { position: relative; margin-bottom: 20px; }
+.cover > :global(.guide-cover) { aspect-ratio: 21 / 9; border-radius: 12px; }
+.coverActs { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
+.coverBtn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: rgba(17, 17, 16, 0.72); color: #fff; font-size: var(--fs-12); font-weight: 600; }
+.coverBtn:hover { background: rgba(17, 17, 16, 0.86); }
+.coverBtn:disabled { opacity: 0.6; }
+.addCover { display: inline-flex; align-items: center; gap: 6px; height: 30px; margin: 0 0 8px -8px; padding: 0 8px; border: 1px dashed transparent; border-radius: 7px; background: none; color: var(--text-3); font-size: var(--fs-13); font-weight: 600; }
+.addCover:hover { background: var(--fill-2); color: var(--ink); }
+.addCover[data-over] { border-color: var(--green); background: var(--green-tint); color: var(--green-dark); }
+.coverError { margin: -4px 0 12px; font-size: var(--fs-12); color: var(--danger); }
+/* The title, at the size the guide shows it. */
+.title { box-sizing: border-box; display: block; width: 100%; margin: 0 0 22px; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden; background: none; font: inherit; font-size: var(--fs-32); font-weight: 700; letter-spacing: var(--tracking-display); line-height: 1.15; color: var(--ink); field-sizing: content; }
+.title::placeholder { color: var(--quiet); }
+.title[aria-invalid="true"]::placeholder { color: var(--danger); }
+.title:focus-visible { outline: none; }
+
+/* Settings: flat key and value rows, grouped under quiet headings on hairlines. Its own scroll, beside the page. */
+.panel { min-width: 0; border-left: 1px solid var(--divider); }
+.panelIn { position: sticky; top: var(--rte-top); box-sizing: border-box; max-height: calc(100dvh - var(--rte-top)); overflow-y: auto; padding: 0 20px 28px; overscroll-behavior: contain; }
+.phead { display: flex; align-items: center; height: 44px; margin: 0 -20px; padding: 0 20px; border-bottom: 1px solid var(--divider); font-size: var(--fs-13); font-weight: 600; }
+.psec { padding: 12px 0 14px; border-bottom: 1px solid var(--divider); }
+.psec:last-child { border-bottom: 0; }
+.psh { display: flex; align-items: center; gap: 8px; min-height: 22px; margin: 0 0 4px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.psh > h2 { margin: 0; font: inherit; color: inherit; letter-spacing: 0; }
+.pact { margin-left: auto; padding: 0; border: 0; background: none; font-size: var(--fs-12); font-weight: 600; color: var(--green-dark); }
+.pact:hover { text-decoration: underline; }
+.prow { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; column-gap: 8px; min-height: 34px; font-size: var(--fs-13); }
+.prowTop { align-items: start; }
+.prowTop > .k { padding-top: 9px; }
+.k { color: var(--text-3); }
+.v { min-width: 0; color: var(--ink); }
+/* A value that opens a menu: its icon, its words, a chevron. */
+.pv { box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: calc(100% + 8px); min-height: 30px; margin-left: -8px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; font-size: var(--fs-13); font-weight: 500; line-height: 18px; color: var(--ink); text-align: left; }
+/* A long category name wraps under itself rather than being cut, its icon level with the first line. */
+.pv:has(> .pvText) { align-items: flex-start; }
+.pv:has(> .pvText) > svg, .pv:has(> .pvText) > .chev { margin-top: 1px; }
+.pv:hover, .pv[aria-expanded="true"] { background: var(--fill-2); }
+.pv > svg { flex: none; color: var(--quiet); }
+.pvText { min-width: 0; overflow-wrap: anywhere; }
+.chev { margin-left: auto; display: inline-flex; color: var(--quiet); }
+/* Visibility: a small segmented control. */
+.segSm { justify-self: start; padding: 2px; border-radius: 8px; }
+.segSm > button { height: 26px; padding: 0 10px; font-size: var(--fs-12); }
+/* Tags as tokens with a small field after them, no box. */
+.tags > :global(.input) { min-height: 30px; padding: 3px 0; gap: 5px; border-color: transparent; background: none; box-shadow: none; }
+.tags > :global(.input):hover, .tags > :global(.input):focus-within { border-color: transparent; box-shadow: none; }
+.tags > :global(.input) > input { flex: 1 0 72px; min-width: 64px; font-size: var(--fs-12); }
+.tags > :global(.input) > input::placeholder { color: var(--quiet); }
+.hint { margin: 6px 0 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.hint a { color: var(--text-2); font-weight: 600; text-underline-offset: 2px; }
+.warn { color: var(--warning); font-weight: 600; }
+.swrow { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: var(--fs-13); color: var(--text-3); cursor: pointer; }
+.swrow > :global(.switch) { margin-left: auto; }
+.sub { margin-top: 8px; font-size: var(--fs-12); color: var(--text-3); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: none; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.chip:hover { border-color: var(--border-strong); color: var(--ink); }
+.chip[aria-pressed="true"] { padding-left: 8px; border-color: var(--border-strong); background: var(--fill-2); color: var(--ink); }
+/* Who has read this revision: a count, a thin bar, and who's still to. */
+.readst { margin-top: 2px; font-size: var(--fs-12); color: var(--text-2); }
+.readst b { font-weight: 600; color: var(--ink); }
+.meter { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: var(--fill-3); }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--green-solid); }
+.still { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: var(--fs-12); line-height: 1.4; color: var(--text-3); }
+.qline { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: var(--fs-13); color: var(--ink); }
+.qline > svg { flex: none; color: var(--quiet); }
+.shareBtn { margin-top: 8px; }
+.pfoot { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 8px; margin: 0; padding: 14px 0 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.pfoot > svg { margin-top: 1px; color: var(--quiet); }
+
+/* Under 1100px the settings open as a dialog (a sheet on a phone): the same rows, made for a finger there. */
+.sheet .psec:first-child { padding-top: 0; }
+:global(.dialog) .sheet { gap: 0; }
+.sheet .psec:last-of-type { border-bottom: 0; }
+
+@media (max-width: 900px) {
+  /* Clear of the tab bar and the home indicator under it. */
+  :global(.content):has(> .editor) { padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); }
+  .editor { --bar-h: 60px; min-height: 0; }
+  .bar { gap: 8px; padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
+  .back { position: relative; width: 40px; height: 40px; padding: 0; border-radius: 50%; background: var(--fill-2); color: var(--ink); }
+  .back::after { content: ""; position: absolute; inset: -2px; }
+  .back > span, .vr, .cancel, .note, .saveKbd, .state .dim, .long { display: none; }
+  .short { display: inline; }
+  .panelBtn { position: relative; width: 40px; height: 40px; border-radius: 50%; background: var(--fill-2); color: var(--ink); }
+  .panelBtn::after { content: ""; position: absolute; inset: -2px; }
+  /* Save as tall as the round buttons beside it, with the same 44px target. */
+  .save { position: relative; height: 40px; padding: 0 18px; border-radius: var(--radius-pill); font-size: var(--fs-15); }
+  .save::after { content: ""; position: absolute; inset: -2px; }
+  .title { font-size: var(--fs-30); margin-bottom: 18px; }
+  .coverBtn { height: 40px; padding: 0 14px; font-size: var(--fs-14); }
+  .addCover { height: 44px; font-size: var(--fs-15); }
+  .prow { min-height: 48px; font-size: var(--fs-15); grid-template-columns: 116px minmax(0, 1fr); }
+  .pv { min-height: 44px; padding-block: 12px; font-size: var(--fs-15); line-height: 20px; }
+  .pv:has(> .pvText) > svg, .pv:has(> .pvText) > .chev { margin-top: 2px; }
+  .swrow { min-height: 48px; font-size: var(--fs-15); }
+  /* 36px chips, each with the 44px target drawn around it. */
+  .chips { gap: 8px; }
+  .chip { position: relative; height: 36px; padding: 0 14px; font-size: var(--fs-14); }
+  .chip::after { content: ""; position: absolute; inset: -4px 0; }
+  /* The track and its choices at the size every segmented control has on a phone. */
+  .segSm { justify-self: stretch; padding: 3px; border-radius: 10px; }
+  .segSm > button { flex: 1; height: calc(var(--control) - 6px); font-size: var(--fs-14); }
+  /* The phone's tag sizes (components.css), over this field's small ones above. */
+  .tags > :global(.input) { gap: 8px; }
+  .tags > :global(.input) > input { font-size: var(--fs-16); }
+  .shareBtn { height: var(--control); padding: 0 16px; font-size: var(--fs-15); }
+  .hint, .readst, .still, .pfoot { font-size: var(--fs-13); }
+  .psh { font-size: var(--fs-13); }
+  .pact { min-height: 44px; font-size: var(--fs-13); }
+}
+
+/* ---------- The quiz, written (a dialog from the settings) ---------- */
+.quiz { display: grid; }
+.q { min-width: 0; margin: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--divider); }
+.q:first-child { padding-top: 2px; }
+.qhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.qnum { font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.qhead > :last-child { margin-left: auto; }
+.answers { display: grid; gap: 6px; margin-top: 10px; }
+.ans { display: flex; align-items: center; gap: 8px; }
+.ans > :global(.input) { flex: 1; min-width: 0; }
+.ans[data-right] > :global(.input) { border-color: color-mix(in srgb, var(--green) 50%, var(--border)); }
+/* The answer's letter is its "this one's right" choice, as people answering see the letters. */
+.key { position: relative; display: grid; flex: none; place-items: center; width: 26px; height: 26px; border-radius: 7px; box-shadow: inset 0 0 0 1px var(--border-strong); font-size: var(--fs-12); font-weight: 600; color: var(--text-2); cursor: pointer; }
+.key > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.key:hover { background: var(--fill-2); }
+.key:has(input:checked) { background: var(--green-solid); color: #fff; box-shadow: none; }
+.key:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.iconBtn { display: grid; flex: none; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-3); }
+.iconBtn:hover { background: var(--fill-3); color: var(--ink); }
+.iconBtn:disabled { opacity: 0.4; background: none; }
+.qfoot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; padding-left: 34px; font-size: var(--fs-12); color: var(--text-3); }
+.linkBtn { padding: 0; border: 0; background: none; font-size: var(--fs-12); font-weight: 600; color: var(--green-dark); }
+.linkBtn:hover { text-decoration: underline; }
+.addQ { justify-self: start; margin-top: 14px; }
+.footNote { flex: 1; min-width: 0; font-size: var(--fs-12); line-height: 1.4; color: var(--text-3); }
+.footNote[data-tone="warning"] { color: var(--warning); font-weight: 600; }
+@media (max-width: 900px) {
+  .key { width: 36px; height: 36px; font-size: var(--fs-14); }
+  .iconBtn { width: 44px; height: 44px; }
+  .qfoot { padding-left: 44px; font-size: var(--fs-13); }
+  .linkBtn { min-height: 44px; font-size: var(--fs-14); }
+  .qnum { font-size: var(--fs-13); }
+}
+
+/* ---------- Categories ---------- */
+.cats { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--row-divider); }
+/* No words get selected while a row is dragged over them. */
+.cats[data-dragging] { -webkit-user-select: none; user-select: none; cursor: grabbing; }
+.cats[data-dragging] .name:hover { border-color: transparent; }
+.cat { display: grid; grid-template-columns: 24px 40px minmax(0, 1fr) auto 30px; gap: 10px; align-items: center; min-height: 56px; border-bottom: 1px solid var(--row-divider); background: var(--menu); }
+.cat[data-dragging] { position: relative; z-index: 1; border-radius: 8px; border-bottom-color: transparent; box-shadow: var(--menu-shadow); }
+.grip { display: grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--quiet); cursor: grab; touch-action: none; }
+.grip:hover { background: var(--fill-2); color: var(--ink); }
+.cat[data-dragging] .grip { cursor: grabbing; }
+.photo { box-sizing: border-box; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; overflow: hidden; border: 0; border-radius: 8px; background: var(--fill-2); color: var(--text-3); cursor: pointer; }
+.photo:hover { color: var(--ink); }
+/* No photo: the card's color and icon, and a picture icon over it on hover or focus (always, small, on a touch screen). */
+.photo[data-look] { position: relative; }
+.photo[data-look] > :first-child svg { width: 16px; height: 16px; }
+.photoAdd { position: absolute; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 0.5); color: #fff; opacity: 0; transition: opacity var(--dur-fast); }
+.photo:is(:hover, :focus-visible) > .photoAdd { opacity: 1; }
+@media (hover: none) {
+  .photoAdd { inset: auto 2px 2px auto; width: 18px; height: 18px; border-radius: 5px; opacity: 1; }
+  .photoAdd svg { width: 11px; height: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .photoAdd { transition: none; } }
+.photo > :global(.guide-cover) { width: 40px; height: 40px; aspect-ratio: auto; }
+.name { box-sizing: border-box; width: calc(100% + 6px); height: 32px; margin-left: -6px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; background: none; font: inherit; font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.name:hover { border-color: var(--border); }
+.name:focus { border-color: var(--green); background: var(--page); outline: 0; box-shadow: var(--ring); }
+.cnt { display: flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.addrow { display: flex; gap: 8px; }
+.addrow > :global(.input) { flex: 1; min-width: 0; }
+.err { margin: 6px 0 0; font-size: var(--fs-12); line-height: 1.45; color: var(--danger); }
+.catsSkel { display: grid; gap: 8px; padding: 10px 0; }
+@media (max-width: 900px) {
+  /* The count goes under the name, so a long name has the row's width. */
+  .cat { grid-template-columns: 44px 40px minmax(0, 1fr) 44px; grid-template-areas: "grip photo name remove" "grip photo cnt remove"; column-gap: 8px; row-gap: 0; min-height: 68px; padding: 6px 0; }
+  .grip { grid-area: grip; width: 44px; height: 44px; }
+  .photo { grid-area: photo; }
+  .name { grid-area: name; align-self: end; height: 34px; font-size: var(--fs-16); }
+  .cnt { grid-area: cnt; align-self: start; padding-left: 1px; font-size: var(--fs-13); }
+  .cat .iconBtn { grid-area: remove; width: 44px; height: 44px; }
+}
+
+/* ---------- Share with a link ---------- */
+:global(.dialog) .shareBody, :global(.dialog) .catsBody { gap: 0; }
+.hintP { margin: 6px 0 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.hintP[data-tone="danger"] { color: var(--danger); }
+.fl { margin: 20px 0 4px; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.plist { list-style: none; margin: 0; padding: 0; }
+.person { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: 50px; padding: 5px 0; border-bottom: 1px solid var(--row-divider); }
+.person:last-child { border-bottom: 0; }
+.ava { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--fill-3); color: var(--text-2); font-size: var(--fs-13); font-weight: 700; }
+.avaSq { border-radius: 8px; }
+.who { display: block; overflow: hidden; font-size: var(--fs-13); font-weight: 600; color: var(--ink); white-space: nowrap; text-overflow: ellipsis; }
+.ps { font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.acts { display: flex; gap: 2px; }
+.gax { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; align-items: start; padding-top: 6px; }
+.selbtn { display: inline-flex; align-items: center; gap: 6px; height: 30px; margin: 1px 0 0 -8px; padding: 0 8px; border: 0; border-radius: 7px; background: none; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.selbtn:hover, .selbtn[aria-expanded="true"] { background: var(--fill-2); }
+.selbtn > svg { color: var(--text-3); }
+.urlf { display: flex; align-items: center; gap: 6px; height: 34px; margin-top: 10px; padding: 0 3px 0 10px; border-radius: 8px; background: color-mix(in srgb, var(--ink) 5%, transparent); box-shadow: inset 0 0 0 1px var(--border); }
+.urlf > input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-size: var(--fs-13); color: var(--text-2); text-overflow: ellipsis; }
+.urlf > :global(.btn) { height: 28px; padding: 0 9px; border-radius: 6px; font-size: var(--fs-12); }
+.shareBody > :global(.callout) { margin-bottom: 14px; }
+@media (max-width: 900px) {
+  .person { min-height: 60px; }
+  .who { font-size: var(--fs-15); }
+  .ps, .hintP { font-size: var(--fs-13); }
+  .fl { font-size: var(--fs-13); }
+  .acts .iconBtn { width: 44px; height: 44px; }
+  .selbtn { height: 44px; font-size: var(--fs-15); }
+  .urlf { height: 48px; }
+  .urlf > :global(.btn) { height: 40px; }
+}
+
+/* ---------- New guide: how to start it ---------- */
+.starts { display: grid; }
+:global(.dialog-content) > .starts { gap: 0; padding-left: 12px; padding-right: 12px; }
+.startHead { margin: 10px 8px 4px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.start { display: grid; grid-template-columns: 36px minmax(0, 1fr) 16px; gap: 12px; align-items: center; padding: 9px 8px; border-radius: 8px; color: inherit; text-decoration: none; }
+.start:hover { background: var(--fill-2); }
+.start:focus-visible { outline: none; box-shadow: var(--ring); }
+.startIcon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--fill-2); color: var(--text-2); }
+.start:hover .startIcon { background: var(--fill-3); color: var(--ink); }
+.startName { display: block; font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.startDesc { display: block; margin-top: 1px; font-size: var(--fs-13); line-height: 1.4; color: var(--text-3); }
+.start > :last-child { color: var(--quiet); }
+@media (max-width: 900px) {
+  .start { min-height: 60px; grid-template-columns: 40px minmax(0, 1fr) 16px; }
+  .startIcon { width: 40px; height: 40px; }
+  .startName { font-size: var(--fs-16); }
+  .startDesc { font-size: var(--fs-14); }
+  .startHead { font-size: var(--fs-13); }
+}

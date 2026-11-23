@@ -42,7 +42,7 @@ messages.post("/messages/send", requireUser, requireCompany(SALES), async (c) =>
   );
   const { db, companyId } = c.var;
   const client = must(await db.from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("id", body.client_id).eq("company_id", companyId).maybeSingle(), "Client not found.");
-  const company = must(await db.from("companies").select("name, email, phone, address, settings").eq("id", companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, email, phone, address, settings").eq("id", companyId).maybeSingle());
   let result: { sent: boolean; id?: string; reason?: string };
   let to: string;
   if (body.channel === "email") {

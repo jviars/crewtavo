@@ -2,20 +2,22 @@
  * Settings → Web address (services/address.ts): moving an instance to the owner's own address.
  *   GET    /api/address                  where things stand, with live DNS checks
  *   POST   /api/address/check            what Crewtavo can tell about an address before starting
- *   POST   /api/address/start            start setting up an address
+ *   POST   /api/address/start            start setting up an address (password)
  *   POST   /api/address/finish           check again now (and switch over if it's ready)
  *   DELETE /api/address                  stop setting it up
  *   POST   /api/address/cloudflare       add the records in Cloudflare with a one-time token
  *   GET    /.well-known/crewtavo-instance  this instance's fingerprint (lib/address.ts)
  * Only owners and admins, and only in an instance (one business per deployment). Railway access,
- * which lets Crewtavo add the address and switch over by itself, is routes/railway.ts.
+ * which lets Crewtavo add the address and switch over by itself, is routes/railway.ts. The address
+ * is where every reset, invite and client link points, so choosing one asks for the person's
+ * password, as connecting Railway does: a session left open somewhere can't move it.
  */
 import { ADMINS } from "@crewtavo/core";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import type { AppEnv } from "../env";
-import { requireCompany, requireUser } from "../lib/auth";
+import { confirmPassword, requireCompany, requireUser } from "../lib/auth";
 import { instanceFingerprint } from "../lib/crypto";
 import { HttpError, readJson } from "../lib/http";
 import { allow } from "../lib/limit";
@@ -41,6 +43,23 @@ function plain(error: unknown): never {
 
 const domainBody = z.object({ domain: z.string().trim().min(1).max(300) });
 
+/** Choosing the address without the password. */
+export const ADDRESS_PASSWORD = "Enter your password to change Crewtavo's web address.";
+/** Connecting Railway, which switches the address by itself, without the password. */
+export const RAILWAY_PASSWORD = "Enter your password to connect Railway.";
+/** The password a request carries, if any (checked by confirmAddressChange). */
+export const passwordField = z.string().max(200).optional();
+
+/**
+ * The person's own password (lib/auth.ts confirmPassword), before anything that can move where
+ * Crewtavo's links point: choosing an address here, and giving Crewtavo Railway access
+ * (routes/railway.ts), which switches over by itself. One count of tries for both.
+ */
+export async function confirmAddressChange(c: Context<AppEnv>, given: string | undefined, missing = ADDRESS_PASSWORD) {
+  if (!given) throw new HttpError(400, missing);
+  return confirmPassword(c, given, "web-address", 10);
+}
+
 address.get("/address", ...admins, async (c) => c.json(await addressOverview(c.env, adminClient(c.env), c.var.companyId), 200, { "Cache-Control": "no-store" }));
 
 address.post("/address/check", ...admins, async (c) => {
@@ -50,7 +69,8 @@ address.post("/address/check", ...admins, async (c) => {
 });
 
 address.post("/address/start", ...admins, async (c) => {
-  const { domain } = await readJson(c, domainBody);
+  const { domain, password } = await readJson(c, domainBody.extend({ password: passwordField }));
+  await confirmAddressChange(c, password);
   return c.json(await startChange(c.env, adminClient(c.env), c.var.companyId, c.var.userId, domain).catch(plain));
 });
 

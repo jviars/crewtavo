@@ -19,19 +19,19 @@ export function RailwayConnect({ railway, returnTo }: { railway: Railway; return
     <div className="stack">
       {railway.error && !railway.connected && (
         <div className="callout callout-danger" role="alert">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <div className="grow">
             <div>Railway isn't connected</div>
-            <div style={{ fontWeight: 400 }}>{railway.error}</div>
+            <div>{railway.error}</div>
           </div>
         </div>
       )}
       {railway.oauth ? (
         <div className={styles.split}>
           <div className="stack-sm">
-            <span>
-              Railway runs Crewtavo and bills you for it. Once you log in, Crewtavo shows what it costs and warns you before your trial runs out or the bill goes over your plan, so it
-              never stops by surprise. It can set up your own web address too.
+            <span className={styles.lead}>
+              Railway runs Crewtavo and bills you for it. Once you log in, Crewtavo shows what it costs under Settings → Hosting and warns you before your trial runs out or the bill
+              goes over your plan, so it never stops by surprise. It can set up your own web address too.
             </span>
             <ConnectRailway returnTo={returnTo} projectName={railway.projectName} />
           </div>
@@ -40,8 +40,8 @@ export function RailwayConnect({ railway, returnTo }: { railway: Railway; return
       ) : (
         <RailwayTokenForm tokensUrl={railway.tokensUrl} intro={TOKEN_INTRO} />
       )}
-      <span className="row muted small" style={{ gap: 6, flexWrap: "nowrap", alignItems: "flex-start" }}>
-        <span style={{ flex: "none", marginTop: 1 }}><Icon name="lock" size={14} /></span>
+      <span className={styles.lockNote}>
+        <Icon name="lock" size={13} />
         <span>
           Crewtavo only uses {railway.projectName ? <strong>{railway.projectName}</strong> : "its own project"}, and never sees your card or billing, so it can't set a spending limit for you:
           once you're in, Settings → Hosting shows where to set one in Railway. You can take the access back any time there too.

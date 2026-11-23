@@ -10,14 +10,13 @@ import { APPROVAL_MESSAGE, GOOGLE_ACCESS_FORM, OWN_APP_APPROVAL_MESSAGE } from "
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { formatTime, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -25,6 +24,7 @@ import { changeLocationWords, locationSavedWords, progressWords, reviewCountWord
 import { BUSINESS_SCOPE, CopyRow } from "./AppKeysCard";
 import { NAME_BASIS } from "./MetaPanel";
 import { usesMarketing, type AppRow } from "./catalog";
+import { CodeRow, CopyButton, kit, Row, RowsSkeleton, Step, Steps } from "./PanelKit";
 
 interface PickedLocation { name: string; title: string; address: string | null; verified: boolean }
 interface Accounts { accounts: Array<{ name: string; title: string; locations: PickedLocation[] }>; problem: string | null }
@@ -75,29 +75,29 @@ export function ApprovalCallout({ own, projectNumber, admin, notEnabled = false,
   const project = own ? "your Google app's" : "this server's";
   return (
     <div className="callout callout-warning" role="status">
-      <Icon name="clock" size={20} />
-      <div className="grow stack-sm" style={{ gap: 8 }}>
-        <strong>{notEnabled ? `The Business Profile APIs aren't turned on in ${project} Google Cloud project yet.` : own ? OWN_APP_APPROVAL_MESSAGE : APPROVAL_MESSAGE}</strong>
+      <Icon name="clock" size={16} />
+      <div className={cx("grow", kit.calloutBody)}>
+        <div>{notEnabled ? `The Business Profile APIs aren't turned on in ${project} Google Cloud project yet.` : own ? OWN_APP_APPROVAL_MESSAGE : APPROVAL_MESSAGE}</div>
         {!admin ? (
-          <span style={{ fontWeight: 400 }}>Review asks keep working meanwhile. An owner or admin can {notEnabled ? "fix this" : "request access"} in Apps.</span>
+          <span>Review asks keep working meanwhile. An owner or admin can {notEnabled ? "fix this" : "request access"} in Apps.</span>
         ) : notEnabled ? (
-          <span style={{ fontWeight: 400 }}>Whoever owns {project} Google Cloud project turns on the {APIS}, then Check again.</span>
+          <span>Whoever owns {project} Google Cloud project turns on the {APIS}, then Check again.</span>
         ) : (
           <>
-            <span style={{ fontWeight: 400 }}>
+            <span>
               Whoever owns {project} Google Cloud project fills in Google's access request form, using an email that manages your Business Profile. The profile needs to have
               been verified for 60 days or more, and Google takes about 2 weeks. Review asks keep working meanwhile, and Crewtavo checks again every 6 hours.
             </span>
             {projectNumber && (
-              <span className="row wrap" style={{ gap: 8, fontWeight: 400 }}>
-                Project number: <code className="code-pill">{projectNumber}</code>
-                <Button size="sm" icon="copy" onClick={() => copyText(projectNumber, "Project number copied")}>Copy</Button>
+              <span className={kit.inlineCopy}>
+                Project number: <code className={kit.code}>{projectNumber}</code>
+                <CopyButton value={projectNumber} what="Project number" done="Project number copied" />
               </span>
             )}
           </>
         )}
         {admin && (
-          <div className="row wrap" style={{ gap: 8 }}>
+          <div className={kit.actions}>
             {!notEnabled && <a className="btn btn-sm" href={GOOGLE_ACCESS_FORM} target="_blank" rel="noreferrer">Google's access request form <Icon name="external" size={12} /></a>}
             {onCheck && <Button size="sm" variant="ghost" icon="refresh" loading={checking} onClick={onCheck}>Check again</Button>}
           </div>
@@ -128,11 +128,11 @@ export function ReviewLinkOffer({ link, title, onUse, onDone }: { link: string; 
   });
   return (
     <div className="callout callout-info">
-      <Icon name="link" size={20} />
-      <div className="grow stack-sm" style={{ gap: 8, minWidth: 0 }}>
-        <span>Google's review link for {title ?? "your business"}</span>
-        <code className="code-pill ellipsis" style={{ fontWeight: 400 }}>{link}</code>
-        <div className="row wrap" style={{ gap: 8 }}>
+      <Icon name="link" size={16} />
+      <div className={cx("grow", kit.calloutBody)} style={{ minWidth: 0 }}>
+        <div>Google's review link for {title ?? "your business"}</div>
+        <code className={cx(kit.code, kit.ellipsis)} title={link}>{link}</code>
+        <div className={kit.actions}>
           <Button size="sm" variant="primary" loading={decide.isPending && decide.variables === true} onClick={() => decide.mutate(true)}>Use this link</Button>
           <Button size="sm" variant="ghost" loading={decide.isPending && decide.variables === false} onClick={() => decide.mutate(false)}>Keep mine</Button>
         </div>
@@ -150,36 +150,28 @@ export function ReviewLinkOffer({ link, title, onUse, onDone }: { link: string; 
 export function GoogleBeforeSignIn({ app, onConnect, connecting }: { app: AppRow; onConnect: () => void; connecting: boolean }) {
   const project = app.google_business?.project_number ?? null;
   return (
-    <section id="app-setup" className="card card-pad stack" aria-labelledby="google-business-setup">
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="google-business-setup" className="section-title" style={{ fontSize: 16 }}>Before you sign in</h2>
-        <span className="muted small">Your reviews come in through this server's Google Cloud project, the one Google Calendar sign-in uses. Google approves each project's access to reviews first.</span>
-      </div>
-      <ol className="app-steps" style={{ gap: 14 }}>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+    <Section id="app-setup" title="Before you sign in" className={kit.panel}>
+      <p className={kit.text}>Your reviews come in through this server's Google Cloud project, the one Google Calendar sign-in uses. Google approves each project's access to reviews first.</p>
+      <Steps>
+        <Step>
           <span>
             Ask Google for access first: it takes about 2 weeks. Whoever owns the Google Cloud project fills in Google's form with an email that manages your Business Profile,
             which must have been verified for 60 days or more.
           </span>
-          {project && (
-            <span className="row wrap small" style={{ gap: 8 }}>
-              Project number: <code className="code-pill">{project}</code>
-              <Button size="sm" icon="copy" onClick={() => copyText(project, "Project number copied")}>Copy</Button>
-            </span>
-          )}
-          <a className="btn btn-sm" style={{ justifySelf: "start" }} href={GOOGLE_ACCESS_FORM} target="_blank" rel="noreferrer">Google's access request form <Icon name="external" size={12} /></a>
-        </div></li>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+          {project && <CodeRow label="Project number" value={project} done="Project number copied" />}
+          <a className="btn btn-sm" href={GOOGLE_ACCESS_FORM} target="_blank" rel="noreferrer">Google's access request form <Icon name="external" size={12} /></a>
+        </Step>
+        <Step>
           <span>In that Google Cloud project, add this redirect address to its OAuth client, add the scope to its consent screen, and turn on the {APIS}.</span>
           {app.redirect_uri && <CopyRow label="Authorized redirect URI" value={app.redirect_uri} />}
           <CopyRow label="Scope" value={BUSINESS_SCOPE} />
-        </div></li>
-        <li><div className="stack-sm" style={{ gap: 8 }}>
+        </Step>
+        <Step>
           <span>Sign in with a Google account that manages your Business Profile. You can sign in before Google approves: Crewtavo checks every 6 hours and starts once it does.</span>
-          <Button variant="primary" style={{ justifySelf: "start" }} loading={connecting} onClick={onConnect}>Sign in with Google</Button>
-        </div></li>
-      </ol>
-    </section>
+          <Button variant="primary" loading={connecting} onClick={onConnect}>Sign in with Google</Button>
+        </Step>
+      </Steps>
+    </Section>
   );
 }
 
@@ -203,11 +195,10 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
   const pick = listable && (picking || problem === "pick" || !g.location);
 
   return (
-    <section id="app-setup" className="card card-pad stack" aria-labelledby="google-business-panel">
-      <h2 id="google-business-panel" className="section-title" style={{ fontSize: 16 }}>Your reviews</h2>
+    <Section id="app-setup" title="Your reviews" className={kit.panel}>
       {!g.marketing_on && (
         <div className="callout callout-warning">
-          <Icon name="pause" size={20} />
+          <Icon name="pause" size={16} />
           <div className="grow">
             Marketing is off, so reviews aren't brought in and replies can't be posted. Reviews already here are kept.{" "}
             <Link to="/apps/marketing">Install Marketing</Link>
@@ -216,10 +207,11 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
       )}
       {app.status === "error" && (
         <div className="callout callout-danger" role="alert">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>Google sign-in expired, so reviews aren't coming in. Reconnect with an owner or manager of the Business Profile.</span>
-            <Button size="sm" variant="primary" icon="refresh" style={{ justifySelf: "start" }} loading={reconnecting} onClick={onReconnect}>Reconnect</Button>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Google sign-in expired, so reviews aren't coming in.</div>
+            <span>Reconnect with an owner or manager of the Business Profile.</span>
+            <div className={kit.actions}><Button size="sm" variant="primary" icon="refresh" loading={reconnecting} onClick={onReconnect}>Reconnect</Button></div>
           </div>
         </div>
       )}
@@ -228,10 +220,10 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
       )}
       {problem === "location" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 8 }}>
-            <span>{g.problem_message}</span>
-            <div className="row wrap" style={{ gap: 8 }}>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>{g.problem_message}</div>
+            <div className={kit.actions}>
               <Button size="sm" variant="ghost" icon="refresh" loading={check.isPending} onClick={() => check.mutate()}>Check again</Button>
               {g.problem_detail === "no_access" && <Button size="sm" variant="ghost" loading={reconnecting} onClick={onReconnect}>Reconnect</Button>}
             </div>
@@ -240,8 +232,11 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
       )}
       {problem === "error" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow">{g.problem_message} {g.next_sync_at ? `Crewtavo tries again at ${formatTime(g.next_sync_at, session.company.timezone)}.` : null}</div>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>{g.problem_message}</div>
+            {g.next_sync_at && <span>Crewtavo tries again at {formatTime(g.next_sync_at, session.company.timezone)}.</span>}
+          </div>
         </div>
       )}
       <FormError error={check.error} />
@@ -258,13 +253,15 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
           reconnecting={reconnecting}
         />
       ) : g.location ? (
-        <div className="row wrap" style={{ gap: 10 }}>
-          <Icon name="pin" size={18} />
-          <span style={{ flex: `1 1 ${NAME_BASIS}`, minWidth: 0 }}>
-            <strong style={{ display: "block" }}>{g.location.title}</strong>
-            <span className="muted small">{g.location.address ?? "Service area business"}{g.location.maps_uri && <> · <a href={g.location.maps_uri} target="_blank" rel="noreferrer">On Google Maps</a></>}</span>
-          </span>
-          {listable && <Button size="sm" onClick={() => setPicking(true)}>Change location</Button>}
+        <div className={kit.rows}>
+          {/* A basis for the name, so on a phone the button wraps under it rather than squeezing it to a word a line. */}
+          <Row
+            basis={NAME_BASIS}
+            lead={<span className={kit.roundIcon}><Icon name="pin" size={16} /></span>}
+            title={g.location.title}
+            sub={<>{g.location.address ?? "Service area business"}{g.location.maps_uri && <> · <a href={g.location.maps_uri} target="_blank" rel="noreferrer">On Google Maps</a></>}</>}
+            end={listable && <Button size="sm" onClick={() => setPicking(true)}>Change location</Button>}
+          />
         </div>
       ) : null}
 
@@ -272,8 +269,8 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
       {g.review_url?.suggested && g.location && app.status === "connected" && <ReviewLinkOffer link={g.review_url.suggested} title={g.location.title} onDone={onChanged} />}
 
       {g.location && app.status === "connected" && (
-        <div className="row wrap" style={{ gap: 10 }}>
-          <span className="muted small grow">
+        <div className={kit.statusLine}>
+          <span className={kit.note}>
             {progressWords(g.progress ?? null) ?? (g.last_synced_at ? `Last synced ${timeAgo(g.last_synced_at)}` : "Not synced yet")}
             {/* Marketing → Reviews isn't there while Marketing is off, nor for someone without the marketing area. */}
             {g.marketing_on ? reviewCountWords(g.review_count, usesMarketing(session)) : ""}
@@ -282,7 +279,7 @@ export function GoogleBusinessPanel({ app, onChanged, onReconnect, reconnecting 
         </div>
       )}
       <FormError error={tooSoon(sync.error) ? null : sync.error} />
-    </section>
+    </Section>
   );
 }
 
@@ -324,42 +321,44 @@ function LocationPicker({ current, kept, reviewCount, marketingOn, onDone, onCan
     }
     save.mutate({ account: chosen.account, location: chosen.location });
   };
-  if (list.isPending) return <CardSkeleton lines={3} title={false} />;
+  if (list.isPending) return <RowsSkeleton rows={2} />;
   if (list.error) return <ErrorState compact error={list.error} onRetry={() => list.refetch()} />;
   const accounts = list.data.accounts.filter((a) => a.locations.length);
-  if (!accounts.length && list.data.problem && list.data.problem !== "pick") return <span className="muted small">Google isn't letting Crewtavo see your locations yet.</span>;
+  if (!accounts.length && list.data.problem && list.data.problem !== "pick") return <p className={kit.note}>Google isn't letting Crewtavo see your locations yet.</p>;
   if (!accounts.length) {
     return (
-      <div className="stack-sm" style={{ gap: 8 }}>
-        <span className="muted small">The Google account you signed in with doesn't manage a Business Profile. Sign in with the one that does.</span>
-        <Button size="sm" variant="primary" style={{ justifySelf: "start" }} loading={reconnecting} onClick={onReconnect}>Sign in with another Google account</Button>
+      <div className={kit.form}>
+        <p className={kit.note}>The Google account you signed in with doesn't manage a Business Profile. Sign in with the one that does.</p>
+        <div className={kit.actions}><Button variant="primary" loading={reconnecting} onClick={onReconnect}>Sign in with another Google account</Button></div>
       </div>
     );
   }
   return (
-    <form className="stack-sm" onSubmit={submit}>
-      <strong className="small">Pick your business's location</strong>
-      <span className="muted small">Crewtavo brings in one location's reviews.</span>
+    <form className={kit.form} onSubmit={submit}>
+      <div>
+        <p className={kit.label}>Pick your business's location</p>
+        <p className={kit.note}>Crewtavo brings in one location's reviews.</p>
+      </div>
       {accounts.map((account) => (
-        <fieldset key={account.name} className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-          {accounts.length > 1 && <legend className="muted small strong" style={{ marginBottom: 6 }}>{account.title}</legend>}
+        <fieldset key={account.name} className={kit.choices}>
+          {accounts.length > 1 ? <legend>{account.title}</legend> : <legend className="sr-only">Locations</legend>}
           {account.locations.map((l) => {
             const on = chosen?.location === l.name || (!chosen && current?.id === l.name);
             return (
-              <label key={l.name} className={`card-row choice-row${on ? " picked" : ""}`} style={{ cursor: "pointer" }}>
+              <label key={l.name} className={kit.choice}>
                 <input type="radio" name="google-location" checked={on} onChange={() => setChosen({ account: account.name, location: l.name, title: l.title })} />
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong style={{ display: "block" }}>{l.title}</strong>
-                  <span className="muted small">{l.address ?? "Service area business"}{l.verified ? "" : " · Not verified on Google yet"}</span>
+                <span className={kit.rowText}>
+                  <span className={kit.rowTitle}><span>{l.title}</span></span>
+                  <span className={kit.rowSub}>{l.address ?? "Service area business"}{l.verified ? "" : " · Not verified on Google yet"}</span>
                 </span>
               </label>
             );
           })}
         </fieldset>
       ))}
-      {!marketingOn && <span className="muted small">Reviews start coming in once Marketing is installed again.</span>}
+      {!marketingOn && <p className={kit.note}>Reviews start coming in once Marketing is installed again.</p>}
       <FormError error={save.error} />
-      <div className="row wrap" style={{ gap: 8 }}>
+      <div className={kit.actions}>
         <Button type="submit" variant="primary" loading={save.isPending} disabled={!chosen || chosen.location === current?.id}>Use this location</Button>
         {onCancel && <Button variant="ghost" onClick={onCancel}>Cancel</Button>}
         <Button variant="ghost" loading={reconnecting} onClick={onReconnect}>Sign in with another Google account</Button>

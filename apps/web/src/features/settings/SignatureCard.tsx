@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
+import { Section } from "@/components/ui/Section";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { useSession } from "@/lib/session";
@@ -23,18 +24,18 @@ export function SignatureCard() {
   const drawing = signing || (!mine.isPending && !mine.error && !saved);
 
   return (
-    <div className="card card-pad stack-sm">
-      <strong id="my-signature-title">Your signature</strong>
-      <span className="muted small">It goes on the estimates you sign for {company.name}. Sign once here, or the first time you sign on site.</span>
+    <Section level={3} title="Your signature">
+      <div className="set-signature">
+      <p className="set-note">It goes on the estimates you sign for {company.name}. Sign once here, or the first time you sign on site.</p>
       {mine.isPending ? (
-        <Loading label="Loading your signature"><Skeleton height={100} radius={8} style={{ maxWidth: 420 }} /></Loading>
+        <Loading label="Loading your signature"><Skeleton height={110} radius={10} style={{ maxWidth: 420 }} /></Loading>
       ) : mine.error ? (
         <ErrorState compact error={mine.error} onRetry={() => mine.refetch()} />
       ) : drawing ? (
         <>
           <SignaturePad value={draft} onChange={setDraft} label="Sign with your finger or mouse" />
           <FormError error={save.error} />
-          <div className="row wrap">
+          <div className="row wrap" style={{ gap: 8 }}>
             <Button
               size="sm"
               icon="check"
@@ -61,14 +62,15 @@ export function SignatureCard() {
         </>
       ) : (
         <>
-          <img src={saved!} alt="Your saved signature" style={{ width: "100%", maxWidth: 420, height: 110, objectFit: "contain", background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }} />
-          <div className="row wrap">
+          <img className="set-signature-img" src={saved!} alt="Your saved signature" />
+          <div className="row wrap" style={{ gap: 8 }}>
             <Button size="sm" icon="pen" onClick={() => { setDraft(null); setSigning(true); }}>Sign again</Button>
             <Button size="sm" variant="ghost" icon="trash" loading={remove.isPending} onClick={() => remove.mutate()}>Remove</Button>
           </div>
-          <span className="muted small">Estimates you already signed keep the signature they were signed with.</span>
+          <p className="set-note">Estimates you already signed keep the signature they were signed with.</p>
         </>
       )}
-    </div>
+      </div>
+    </Section>
   );
 }

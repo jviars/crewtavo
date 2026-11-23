@@ -1,6 +1,8 @@
 /**
  * Rule builder: WHEN (trigger) → WAIT (optional delay) → IF (conditions) → THEN (actions), with a
- * plain-language summary, validation, and a preview against a real recent record.
+ * plain-language summary, validation, and a preview against a real recent record. The steps run down
+ * a quiet rail of round markers (features.css, Automations builder), not boxed; each action is its own
+ * hairline block. The test and the rule's recent runs sit in the side column.
  */
 import {
   actionsFor,
@@ -36,17 +38,20 @@ import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Menu } from "@/components/ui/Menu";
-import { NumberInput } from "@/components/ui/NumberInput";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { NoAccess, PageError } from "@/components/ui/States";
 import { TagInput } from "@/components/ui/TagInput";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
 import { useClientTags } from "../clients/ClientForm";
+import styles from "./Automations.module.css";
 import { RunHistory, type RuleRow } from "./AutomationsPage";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 interface Draft {
   name: string;
@@ -71,7 +76,6 @@ const BLANK: Draft = {
 // Who a rule can notify: the team's levels (automations never notify subs).
 const ROLE_OPTIONS: Array<[string, string]> = STAFF.map((r) => [r, ROLE_GROUP_LABELS[r] ?? r]);
 const ACTION_ICON: Record<ActionType, IconName> = { notify: "bell", send_email: "mail", send_sms: "messages", add_tag: "tag", remove_tag: "tag", add_note: "note", create_task: "calendarCheck", request_review: "star", request_referral: "gift", update_status: "archive", invite_autopay: "card" };
-const STEP_COLORS = { when: "#3474d4", wait: "#8b5cf6", if: "#c9852a", then: "#3b7d23" };
 
 function blankAction(type: ActionType, subject: SubjectKind): Action {
   switch (type) {
@@ -207,27 +211,64 @@ function RulePageScreen() {
 
   const delay = delayParts(draft.delay_minutes);
 
+  const side = (
+    <>
+      <Section title="Test this rule" flush>
+        <div className={styles.test}>
+          <p className={styles.note}>Runs it against a recent {subject} to show what it would do. Nothing is sent.</p>
+          <div><Button size="sm" icon="eye" loading={preview.isPending} disabled={errors.length > 0} onClick={() => preview.mutate()}>Test with a recent {subject}</Button></div>
+          <FormError error={preview.error} />
+          {preview.data && !preview.data.record && <p className={styles.note}>There's no {subject} to test with yet.</p>}
+          {preview.data?.record && (
+            <>
+              <span className={styles.testRecord}>Using <Link to={preview.data.record.path}>{preview.data.record.label}</Link></span>
+              {preview.data.pass ? (
+                <span className={styles.verdict} data-tone="good"><Icon name="check" size={14} />Conditions met: it would run</span>
+              ) : (
+                <span className={styles.verdict} data-tone="warning"><Icon name="alert" size={14} />Skipped: {(preview.data.failed ?? "").charAt(0).toLowerCase() + (preview.data.failed ?? "").slice(1)} isn't true</span>
+              )}
+              {preview.data.warnings?.map((w) => <p key={w} className={styles.note} data-tone="warning">{w}</p>)}
+              {preview.data.previews.map((p, i) => (
+                <div key={i} className={styles.sample}>
+                  <span className={styles.sampleHead}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={13} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</span>
+                  {p.title && <span className={styles.sampleTitle}>{p.title}</span>}
+                  {p.body && <p className={styles.sampleBody}>{p.body}</p>}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </Section>
+      {!isNew && (
+        <Section title="Recent runs" flush>
+          <RunHistory ruleId={id} />
+        </Section>
+      )}
+    </>
+  );
+
   return (
     <>
-      <BackLink to="/automations">Automations</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: "/automations", label: "Automations" }}
         title={isNew ? "New rule" : draft.name || "Rule"}
+        meta={!isNew && rule.data && (rule.data.last_run_at ? `Ran ${rule.data.run_count} ${rule.data.run_count === 1 ? "time" : "times"}` : "Hasn't run yet")}
         actions={
           <>
-            <label className="switch-row" style={{ marginRight: 4 }}>
+            <label className={styles.toggle}>
               <input type="checkbox" className="switch" checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
               {draft.enabled ? "On" : "Off"}
             </label>
             <Button icon="eye" loading={preview.isPending} disabled={errors.length > 0} onClick={() => preview.mutate()}>Test</Button>
             <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !isNew && !justSaved} onClick={submit}>{isNew ? "Create rule" : "Save changes"}</Button>
-            {!isNew && <Menu items={[{ label: "Delete rule", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Delete this rule?", body: "Follow-ups it has waiting are cancelled.", confirmLabel: "Delete", danger: true })) && remove.mutate() }]} />}
           </>
         }
+        more={isNew ? undefined : [{ label: "Delete rule", icon: "trash", danger: true, onSelect: async () => (await confirm({ title: "Delete this rule?", body: "Follow-ups it has waiting are cancelled.", confirmLabel: "Delete", danger: true })) && remove.mutate() }]}
       />
-      <div className="callout callout-info"><Icon name="bolt" size={20} /><div className="grow" style={{ fontWeight: 600 }}>{describeRuleSentence(draft)}</div></div>
+      <p className={styles.summary}><Icon name="bolt" size={16} />{describeRuleSentence(draft)}</p>
       {campaign && (
         <div className="callout callout-info">
-          <Icon name="mail" size={20} />
+          <Icon name="mail" size={16} />
           <div className="grow">
             {campaign.marketing && !marketingOn(session.company.settings) && <div>Marketing is off, so this rule is skipped.</div>}
             <span style={{ fontWeight: 400 }}>
@@ -244,15 +285,17 @@ function RulePageScreen() {
         </div>
       )}
 
-      <div className="two-col">
-        <div className="wide stack">
-          <div className="card card-pad form-grid">
+      <DetailColumns grouped side={side}>
+        <Section title="Rule" flush>
+          <div className={styles.nameFields}>
             <Field label="Rule name"><input className="input" value={draft.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} placeholder="Follow up on quotes after 3 days" /></Field>
             <Field label="Description" optional><input className="input" value={draft.description} onChange={(e) => set({ description: e.target.value })} maxLength={300} /></Field>
           </div>
+        </Section>
 
+        <Section title="Steps" flush>
           <div className="rule-flow">
-            <Step color={STEP_COLORS.when} icon="bolt" title="When">
+            <Step icon="bolt" title="When">
               <Select className="select" value={draft.trigger} onChange={(e) => {
                 const next = triggerDef(e.target.value);
                 // Who can be told about it may be fewer (a sub's offer or autopay: the office only).
@@ -271,24 +314,24 @@ function RulePageScreen() {
                 ))}
               </Select>
               {draft.trigger === "client.inactive" && (
-                <p className="muted small" style={{ margin: 0 }}>Checked each morning at 10. Set the number of days under Only if.</p>
+                <p className={styles.note}>Checked each morning at 10. Set the number of days under Only if.</p>
               )}
               {isVisitNotice(draft.trigger) && (
-                <p className="muted small" style={{ margin: 0 }}>
+                <p className={styles.note}>
                   Runs {VISIT_NOTICE_SETTLE_MIN} minutes after the change, with the visit as it is then: a visit changed twice is one message, and one put back is none. Not for the visits a
                   recurring job's schedule makes or changes, or a change the client asked for in the Client Hub.{draft.trigger === "visit.rescheduled" ? ` ${VISIT_MOVED_WORDS}` : ""}
                   {draft.trigger === "visit.cancelled" ? " Cancelled, deleted or taken off the schedule all count." : ""}
                 </p>
               )}
               {draft.trigger === RECURRING_TRIGGER && (
-                <p className="muted small" style={{ margin: 0 }}>
+                <p className={styles.note}>
                   The {ordinal(reviewSettings(session.company.settings).recurringAfterVisits)} visit, set in <Link to="/marketing?tab=reviews">Marketing → Reviews</Link>.
                 </p>
               )}
             </Step>
 
             {trigger?.delayable && (
-              <Step color={STEP_COLORS.wait} icon="clock" title="Wait">
+              <Step icon="clock" title="Wait">
                 <div className="rule-line">
                   <Select className="select" value={draft.delay_minutes ? "later" : "now"} onChange={(e) => set({ delay_minutes: e.target.value === "now" ? 0 : 3 * 1440 })} aria-label="When to run">
                     <option value="now">Run right away</option>
@@ -305,12 +348,12 @@ function RulePageScreen() {
                     </>
                   )}
                 </div>
-                {!isNew && <p className="muted small" style={{ margin: 0 }}>Runs already waiting move to the new wait.</p>}
+                {!isNew && <p className={styles.note}>Runs already waiting move to the new wait.</p>}
               </Step>
             )}
 
-            <Step color={STEP_COLORS.if} icon="filter" title="Only if" optional>
-              {draft.conditions.length === 0 && <p className="muted text-sm" style={{ margin: 0 }}>Runs every time.</p>}
+            <Step icon="filter" title="Only if" optional>
+              {draft.conditions.length === 0 && <p className={styles.note}>Runs every time.</p>}
               {draft.conditions.map((c, i) => (
                 <ConditionRow
                   key={i}
@@ -329,7 +372,7 @@ function RulePageScreen() {
               )}
             </Step>
 
-            <Step color={STEP_COLORS.then} icon="check" title="Then">
+            <Step icon="check" title="Then">
               {draft.actions.map((a, i) => (
                 <ActionEditor
                   key={i}
@@ -349,13 +392,16 @@ function RulePageScreen() {
                 />
               ))}
               {draft.actions.length < 10 && (
-                <Menu
-                  label="Add action"
-                  align="start"
-                  triggerClassName="btn btn-sm btn-ghost"
-                  trigger={<><Icon name="plus" size={14} />Add action</>}
-                  items={actionsForTrigger(draft.trigger).map((a) => ({ label: a.label, icon: ACTION_ICON[a.type], onSelect: () => set({ actions: [...draft.actions, blankAction(a.type, subject)] }) }))}
-                />
+                <div>
+                  <Menu
+                    label="Add action"
+                    title="Add action"
+                    align="start"
+                    triggerClassName="btn btn-sm btn-ghost"
+                    trigger={<><Icon name="plus" size={14} />Add action</>}
+                    items={actionsForTrigger(draft.trigger).map((a) => ({ label: a.label, icon: ACTION_ICON[a.type], onSelect: () => set({ actions: [...draft.actions, blankAction(a.type, subject)] }) }))}
+                  />
+                </div>
               )}
             </Step>
           </div>
@@ -363,55 +409,21 @@ function RulePageScreen() {
             <div className="form-error" role="alert"><Icon name="alert" size={16} /><div>{errors.map((e) => <div key={e}>{e}</div>)}</div></div>
           )}
           <FormError error={save.error} />
-        </div>
-
-        <aside className="narrow stack">
-          <div className="card card-pad stack-sm">
-            <strong>Test this rule</strong>
-            <p className="muted text-sm" style={{ margin: 0 }}>Nothing is sent.</p>
-            <Button icon="eye" loading={preview.isPending} disabled={errors.length > 0} onClick={() => preview.mutate()} style={{ justifySelf: "start" }}>Test with a recent {subject}</Button>
-            <FormError error={preview.error} />
-            {preview.data && !preview.data.record && <p className="muted text-sm" style={{ margin: 0 }}>There's no {subject} to test with yet.</p>}
-            {preview.data?.record && (
-              <div className="stack-sm" style={{ borderTop: "1px solid var(--divider)", paddingTop: 10 }}>
-                <span className="small">Using <Link to={preview.data.record.path}>{preview.data.record.label}</Link></span>
-                {preview.data.pass ? (
-                  <span className="chip chip-green" style={{ justifySelf: "start" }}>Conditions met: it would run</span>
-                ) : (
-                  <span className="chip chip-amber" style={{ justifySelf: "start", height: "auto", whiteSpace: "normal", padding: "4px 8px" }}>Skipped: {(preview.data.failed ?? "").charAt(0).toLowerCase() + (preview.data.failed ?? "").slice(1)} isn't true</span>
-                )}
-                {preview.data.warnings?.map((w) => <span key={w} className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{w}</span>)}
-                {preview.data.previews.map((p, i) => (
-                  <div key={i} className="email-preview" style={{ padding: 10 }}>
-                    <div className="small strong" style={{ marginBottom: 4 }}><Icon name={ACTION_ICON[p.type as ActionType] ?? "bolt"} size={14} /> {actionsFor(subject).find((a) => a.type === p.type)?.label}{p.to ? ` → ${p.to}` : ""}</div>
-                    {p.title && <div className="strong text-sm">{p.title}</div>}
-                    {p.body && <div className="pre-wrap text-sm muted" style={{ marginTop: 2 }}>{p.body}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          {!isNew && (
-            <div className="stack-sm">
-              <h2 className="section-title" style={{ fontSize: 16 }}>Recent runs</h2>
-              <RunHistory ruleId={id} />
-            </div>
-          )}
-        </aside>
-      </div>
+        </Section>
+      </DetailColumns>
     </>
   );
 }
 
-function Step({ color, icon, title, optional, children }: { color: string; icon: IconName; title: string; optional?: boolean; children: React.ReactNode }) {
+function Step({ icon, title, optional, children }: { icon: IconName; title: string; optional?: boolean; children: React.ReactNode }) {
   return (
-    <section className="rule-step">
-      <div className="rule-step-head">
-        <span className="step-icon" style={{ background: color }}><Icon name={icon} size={14} /></span>
+    <section className="rule-step" aria-label={title}>
+      <span className="rule-step-mark" aria-hidden="true"><Icon name={icon} size={14} /></span>
+      <h3 className="rule-step-head">
         {title}
-        {optional && <span className="muted small" style={{ fontWeight: 400 }}>(optional)</span>}
-      </div>
-      {children}
+        {optional && <span className="optional">(optional)</span>}
+      </h3>
+      <div className="rule-step-body">{children}</div>
     </section>
   );
 }
@@ -424,7 +436,7 @@ function ConditionRow({ subject, value, invalid, onChange, onRemove }: { subject
   const multi = value.op === "in" || def.kind === "tags";
   const asList = Array.isArray(value.value) ? value.value : String(value.value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   return (
-    <div className="rule-line" style={invalid ? { outline: "2px solid var(--danger-tint)", borderRadius: "var(--radius-control)" } : undefined}>
+    <div className="rule-line" data-invalid={invalid || undefined}>
       <Select className="select" value={def.field} aria-label="Field" onChange={(e) => {
         const f = fields.find((x) => x.field === e.target.value)!;
         const firstChoice = f.kind === "status" ? statusChoices(subject)[0].value : f.choices?.[0]?.value ?? "";
@@ -438,7 +450,7 @@ function ConditionRow({ subject, value, invalid, onChange, onRemove }: { subject
       {def.kind === "tags" ? (
         <span style={{ flex: "1 1 200px" }}><TagInput value={asList} onChange={(t) => onChange({ ...value, value: t })} suggestions={tags.data} placeholder="Tag" /></span>
       ) : choices && multi ? (
-        <span className="row wrap" style={{ flex: "1 1 220px", gap: 4 }}>
+        <span className={styles.chips} style={{ flex: "1 1 220px" }}>
           {choices.map((c) => {
             const on = asList.includes(c.value);
             return <button key={c.value} type="button" className="tab" aria-pressed={on} onClick={() => onChange({ ...value, value: on ? asList.filter((x) => x !== c.value) : [...asList, c.value] })}>{c.label}</button>;
@@ -521,10 +533,10 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
   const def = actionsFor(subject).find((a) => a.type === value.type);
   const session = useSession();
   return (
-    <div className="card" style={{ padding: 14, display: "grid", gap: 10, boxShadow: "none", background: "var(--fill)" }}>
-      <div className="row">
-        <Icon name={ACTION_ICON[value.type]} size={16} />
-        <strong className="grow">{def?.label ?? value.type}</strong>
+    <div className="rule-action">
+      <div className="rule-action-head">
+        <Icon name={ACTION_ICON[value.type]} size={15} />
+        <span className="grow">{def?.label ?? value.type}</span>
         <Button size="sm" variant="ghost" icon="chevronUp" aria-label="Move up" disabled={index === 0} onClick={() => onMove(-1)} />
         <Button size="sm" variant="ghost" icon="chevronDown" aria-label="Move down" disabled={index === count - 1} onClick={() => onMove(1)} />
         <Button size="sm" variant="ghost" icon="trash" aria-label="Remove action" disabled={count === 1} onClick={onRemove} />
@@ -534,7 +546,7 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
         <>
           <div className="field">
             <span>Who</span>
-            <div className="row wrap" style={{ gap: 6 }}>
+            <div className={styles.chips} role="group" aria-label="Who">
               {whoToTell(verb, subject).map(([role, label]) => {
                 const on = value.roles?.includes(role) ?? false;
                 return <button key={role} type="button" className="tab" aria-pressed={on} onClick={() => onChange({ ...value, roles: on ? (value.roles ?? []).filter((r) => r !== role) : [...(value.roles ?? []), role] })}>{label}</button>;
@@ -553,7 +565,7 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
           <Field label="Message"><textarea ref={bodyRef} className="textarea" style={{ minHeight: 140 }} value={value.body} maxLength={8000} onFocus={() => setTarget("body")} onChange={(e) => onChange({ ...value, body: e.target.value })} /></Field>
           <Tokens verb={verb} target={tokenTarget} onInsert={insertToken} />
           {/* A rule's own email has no unsubscribe link, so promotions belong in Campaigns. */}
-          {!campaign && <span className="muted small">{RULE_EMAIL_HINT}</span>}
+          {!campaign && <p className={styles.note}>{RULE_EMAIL_HINT}</p>}
         </>
       )}
 
@@ -563,7 +575,7 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
             <textarea ref={bodyRef} className="textarea" style={{ minHeight: 80 }} value={value.body} maxLength={640} onChange={(e) => onChange({ ...value, body: e.target.value })} />
           </Field>
           <Tokens verb={verb} target={bodyRef} onInsert={(text) => onChange({ ...value, body: text })} />
-          <span className="muted small">{RULE_TEXT_CONSENT_HINT}{textQuietHint(verb) ? ` ${textQuietHint(verb)}` : ""}</span>
+          <p className={styles.note}>{RULE_TEXT_CONSENT_HINT}{textQuietHint(verb) ? ` ${textQuietHint(verb)}` : ""}</p>
         </>
       )}
 
@@ -596,7 +608,7 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
       {value.type === "request_review" && (
         <>
           {!marketingOn(session.company.settings) && (
-            <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Marketing is off, so this action is skipped.</div></div>
+            <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Marketing is off, so this action is skipped.</div></div>
           )}
           <Field label="Send by">
             <Select className="select" value={value.channel} onChange={(e) => onChange({ ...value, channel: e.target.value as "email" | "sms" | "both" })}>
@@ -605,16 +617,16 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
               <option value="both">Text and email</option>
             </Select>
           </Field>
-          <p className="muted small" style={{ margin: 0 }}>Uses your <Link to="/marketing?tab=reviews">review settings</Link>, and asks each client at most once every 6 months.</p>
+          <p className={styles.note}>Uses your <Link to="/marketing?tab=reviews">review settings</Link>, and asks each client at most once every 6 months.</p>
         </>
       )}
 
       {value.type === "request_referral" && (
         <>
           {!marketingOn(session.company.settings) && (
-            <div className="callout callout-info"><Icon name="info" size={18} /><div className="grow">Marketing is off, so this action is skipped.</div></div>
+            <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Marketing is off, so this action is skipped.</div></div>
           )}
-          <p className="muted small" style={{ margin: 0 }}>
+          <p className={styles.note}>
             Emails each client their referral link, at most once every 6 months. The message is in your <Link to="/marketing?tab=referrals">referral settings</Link>.
           </p>
         </>
@@ -628,7 +640,7 @@ function ActionEditor({ index, count, subject, verb, campaign = false, value, on
               <option value="sms">Text message</option>
             </Select>
           </Field>
-          <p className="muted small" style={{ margin: 0 }}>Skipped for clients already on autopay or invited in the last week. Uses your <Link to="/settings?tab=payments">autopay settings</Link>.</p>
+          <p className={styles.note}>Skipped for clients already on autopay or invited in the last week. Uses your <Link to="/settings?tab=payments">autopay settings</Link>.</p>
         </>
       )}
 

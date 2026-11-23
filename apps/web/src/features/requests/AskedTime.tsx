@@ -19,7 +19,7 @@ export function askedFor(request: AskedRequest, timeZone: string): string | null
   return request.status === "new" && request.asked_starts_at ? bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone) : null;
 }
 
-export function BookAskedTime({ request, size, onBooked }: { request: AskedRequest; size?: "sm"; onBooked?: () => void }) {
+export function BookAskedTime({ request, size, className, onBooked }: { request: AskedRequest; size?: "sm"; className?: string; onBooked?: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const when = askedFor(request, session.company.timezone);
@@ -44,7 +44,7 @@ export function BookAskedTime({ request, size, onBooked }: { request: AskedReque
   if (!when) return null;
   const passed = Date.parse(request.asked_starts_at!) <= Date.now();
   return (
-    <Button size={size} variant="primary" icon="calendar" loading={book.isPending} disabled={passed} title={passed ? "That time has passed" : undefined} onClick={(e) => { e.stopPropagation(); book.mutate(); }}>
+    <Button size={size} className={className} variant="primary" icon="calendar" loading={book.isPending} disabled={passed} title={passed ? "That time has passed" : undefined} onClick={(e) => { e.stopPropagation(); book.mutate(); }}>
       Book it
     </Button>
   );

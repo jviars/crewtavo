@@ -7,6 +7,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
+import { RelatedList, RelatedRow } from "@/components/ui/Section";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -64,20 +65,18 @@ export function RoofSchedule({ quote, extras, invoices, canSell, current, refres
   if (job) {
     return (
       <div className={styles.stepBody}>
-        <Link to={`/jobs/${job.id}`} className="card-row paving-row">
-          <Icon name="job" size={16} />
-          <span className="grow">Job #{job.number}</span>
-          <EntityStatus kind="job" status={job.status} />
-        </Link>
+        <RelatedList label="The job">
+          <RelatedRow to={`/jobs/${job.id}`} lead={<span className="rel-icon"><Icon name="job" size={15} /></span>} title={`Job #${job.number}`} end={<EntityStatus kind="job" status={job.status} />} />
+        </RelatedList>
         <div className={styles.actions}>
           <Link className={current ? "btn btn-primary" : "btn"} to={`/jobs/${job.id}`}><Icon name="calendar" size={16} /> Schedule the visits</Link>
           {depositButton}
         </div>
-        <span className="muted small">Put it on a crew's day; the crew app shows them the scope, checklist and photos.</span>
+        <p className={styles.note}>Put it on a crew's day; the crew app shows them the scope, checklist and photos.</p>
       </div>
     );
   }
-  if (!canSell) return <span className="muted small">The office turns it into a job once it's signed.</span>;
+  if (!canSell) return <p className={styles.note}>The office turns it into a job once it's signed.</p>;
   if (SIGNED.includes(quote.status)) {
     return (
       <div className={styles.stepBody}>
@@ -90,18 +89,18 @@ export function RoofSchedule({ quote, extras, invoices, canSell, current, refres
     );
   }
   const early = quote.lines.length > 0 && OPEN.includes(quote.status);
-  if (!early) return <span className="muted small">After it's signed, the estimate becomes the crew's job.</span>;
+  if (!early) return <p className={styles.note}>After it's signed, the estimate becomes the crew's job.</p>;
   // An estimate with options becomes the job of the one they chose, so that's marked first (the quote's Mark approved asks which).
   if (quote.options.length) {
     return (
-      <span className="muted small">
+      <p className={styles.note}>
         Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, <Link to={`/quotes/${quote.id}`}>mark it approved on the quote</Link> with the option they chose, then make the job here.
-      </span>
+      </p>
     );
   }
   return (
     <div className={styles.stepBody}>
-      <span className="muted small">Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, you can make the job now.</span>
+      <p className={styles.note}>Usually after it's signed. If {quote.client?.display_name ?? "the client"} said yes another way, you can make the job now.</p>
       <div className={styles.actions}>
         <Button size="sm" icon="job" loading={convert.isPending} onClick={() => convert.mutate()}>Create the job</Button>
       </div>

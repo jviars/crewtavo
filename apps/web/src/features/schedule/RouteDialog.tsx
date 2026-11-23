@@ -118,16 +118,16 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
               {p.stops.length ? (
                 <>
                   <span>
-                    <Icon name="navigation" size={14} /> About <strong>{p.miles_after} miles</strong> of driving
-                    {p.miles_before > p.miles_after + 0.05 && <span className="muted"> (now {p.miles_before})</span>}
+                    <Icon name="navigation" size={15} />
+                    <span>About <strong>{p.miles_after} miles</strong> of driving{p.miles_before > p.miles_after + 0.05 && <> (now {p.miles_before})</>}</span>
                   </span>
-                  {p.times && p.finish && <span style={p.late_finish ? { color: "var(--warning)" } : undefined}><Icon name="clock" size={14} /> Done around <strong>{p.finish}</strong></span>}
-                  <span className="muted">{saved ? "This is the saved route." : order ? "Your order" : "Shortest order"}</span>
+                  {p.times && p.finish && <span className={p.late_finish ? "route-late" : undefined}><Icon name="clock" size={15} /><span>Done around <strong>{p.finish}</strong></span></span>}
+                  <span className="pill" data-tone={saved ? "good" : undefined}>{saved ? "This is the saved route." : order ? "Your order" : "Shortest order"}</span>
                 </>
               ) : (
-                <span className="muted">No open stops on this day.</span>
+                <span>No open stops on this day.</span>
               )}
-              {preview.isFetching && <span className="spinner" style={{ width: 14, height: 14 }} aria-label="Updating" />}
+              {preview.isFetching && <span className="spinner" aria-label="Updating" />}
             </div>
 
             {p.stops.some((s) => s.located) && <RouteSketch shop={p.shop} back={p.return_to_shop} stops={p.stops} />}
@@ -135,10 +135,10 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
             {p.warnings.length > 0 && (
               <div className="callout callout-warning">
                 <Icon name="alert" size={16} />
-                <div className="grow small stack-sm" style={{ fontWeight: 400 }}>{p.warnings.map((w) => <span key={w}>{w}</span>)}</div>
+                <div className="grow">{p.warnings.map((w) => <div key={w}>{w}</div>)}</div>
               </div>
             )}
-            {!p.times && <p className="muted small" style={{ margin: 0 }}>Stops are numbered and left as anytime that day, as Settings → Schedule says. Fixed times stay.</p>}
+            {!p.times && <p className="route-note">Stops are numbered and left as anytime that day, as Settings → Schedule says. Fixed times stay.</p>}
 
             <ol className="route-list" aria-label="Stops in order">
               {p.started.map((s) => (
@@ -146,7 +146,7 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
                   <span className="route-num"><Icon name="check" size={12} bold /></span>
                   <span style={{ minWidth: 0 }}>
                     <strong>{s.title}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{statusText("visit", s.status)}{s.address ? ` · ${s.address}` : ""}</span>
+                    <span className="route-sub">{statusText("visit", s.status)}{s.address ? ` · ${s.address}` : ""}</span>
                   </span>
                   <span />
                 </li>
@@ -154,12 +154,12 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
               {p.stops.map((s, i) => (
                 <li key={s.id} className="route-stop" data-fixed={s.fixed || undefined} data-late={s.late || undefined}>
                   {(s.drive_min ?? 0) > 0 && (
-                    <span className="route-drive"><Icon name="truck" size={12} /> {s.drive_min} min drive · {s.drive_miles} mi</span>
+                    <span className="route-drive"><Icon name="truck" size={13} />{s.drive_min} min drive · {s.drive_miles} mi</span>
                   )}
                   <span className="route-num">{s.order}</span>
                   <span style={{ minWidth: 0 }}>
                     <strong>{timeOf(s)}</strong> · {s.title}
-                    <span className="muted small" style={{ display: "block" }}>
+                    <span className="route-sub">
                       {[s.client, s.address].filter(Boolean).join(" · ") || "No address"}
                       {s.fixed && " · fixed time"}
                       {s.located === false && " · no map location"}
@@ -173,7 +173,7 @@ export function RouteDialog({ date, crewId, crewName, onClose }: { date: string;
                 </li>
               ))}
             </ol>
-            <p className="muted small" style={{ margin: 0 }}>
+            <p className="route-note">
               Times count each visit's length and the drive between stops ({p.return_to_shop ? "starting and ending at the shop" : "starting at the shop"}). Use the arrows to set the order by hand.
             </p>
           </>

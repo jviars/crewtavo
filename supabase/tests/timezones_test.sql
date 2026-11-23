@@ -50,9 +50,9 @@ update public.companies set timezone = 'Asia/Kolkata' where id = :'quebec';
 select t23.check((select timezone from public.companies where id = :'quebec') = 'Asia/Kolkata', 'owners can move the business to another zone');
 insert into public.memberships (company_id, user_id, role) values (:'quebec', 'd7000000-0000-0000-0000-000000000002', 'field_crew');
 -- Settings people typed by hand: clock limits that aren't usable hours and a workday end that isn't a time.
-update public.companies set settings = settings || '{"clock": {"remind_after_hours": "ten", "stop_after_hours": 1e12}, "working_hours": {"end": "late"}}'
+update public.companies set settings = public.company_settings(id) || '{"clock": {"remind_after_hours": "ten", "stop_after_hours": 1e12}, "working_hours": {"end": "late"}}'
 where id = :'quebec';
-select t23.check((select settings -> 'working_hours' ->> 'end' from public.companies where id = :'quebec') = 'late', 'other settings save as before');
+select t23.check((select public.company_settings(id) -> 'working_hours' ->> 'end' from public.companies where id = :'quebec') = 'late', 'other settings save as before');
 
 select set_config('request.jwt.claims', '{"sub": "d7000000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
 select public.create_company('Romeo Lawn', 'lawn_exterior', 'Europe/London') as romeo \gset

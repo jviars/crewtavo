@@ -49,7 +49,9 @@ shows that to owners in red as "full control of your account", and a sign-in ask
 refused the project. Until Railway is connected, the owner sees this step whenever they open
 Crewtavo; **Ask me tomorrow** lets them in for a day, for when Railway is down or someone else
 looks after it (`railwayNeeded` in `apps/api/src/services/railway.ts`). A pasted project token
-counts too.
+counts too. Connecting Railway, either way, and choosing a web address ask for the person's
+Crewtavo password first: with Railway access Crewtavo switches its address by itself, and the
+address is in every link it sends.
 
 **Settings → Hosting** (`apps/api/src/services/hosting.ts`) shows what Railway charges: this month
 so far against what the plan includes, the last day's rate and a forecast for the month at it,
@@ -239,7 +241,7 @@ lists them all).
 
 | Name | Turns on |
 | --- | --- |
-| `APP_URL` | Your own domain (see above; **Settings → Web address** sets it on Railway). Defaults to the instance's address. Postcard campaigns need it to be a public https address: Lob fetches each card's front picture from it while it makes the cards. Lob itself needs nothing here: each business connects its own Lob account under **Apps → Lob**. |
+| `APP_URL` | Your own domain (see above; **Settings → Web address** sets it on Railway). Defaults to the instance's address on Railway and with `npm run instance`; set it yourself anywhere else, since sign-in, reset and invitation links are only made for it. Postcard campaigns need it to be a public https address: Lob fetches each card's front picture from it while it makes the cards. Lob itself needs nothing here: each business connects its own Lob account under **Apps → Lob**. |
 | `ENCRYPTION_KEY` | A separate key for encrypting app tokens and signing client links: 32+ random bytes in base64, or any 32+ characters. Without it, one is derived from the instance's secret. **Keep it stable once set**: changing it disconnects every app and invalidates links already sent to clients. |
 | `ANTHROPIC_API_KEY` (optional `AI_MODEL`) | AI rewrite and SOP answers, with Claude. Companies can also add their own Claude or OpenAI key on the Apps page. |
 | `OPENAI_MODEL` (optional) | The OpenAI model used with a company's own OpenAI key or a person's ChatGPT plan, instead of the one picked on Apps → ChatGPT. There is no server-wide OpenAI key. |
@@ -255,6 +257,7 @@ lists them all).
 | `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | Bot protection on public booking and referral forms. |
 | `CREWTAVO_SCHEDULER` | Set to `off` on extra replicas of `crewtavo`, so background tasks run in one place. |
 | `CREWTAVO_VISITOR_IP` | Only when something other than Railway's edge or one web server is in front of Crewtavo: where visitors' addresses come from (see [Visitors' addresses](#visitors-addresses)). |
+| `CREWTAVO_SMTP_PRIVATE_HOSTS` | Self-hosting only, when the business sends email through a mail server on your own network (an office relay at `192.168.1.10`, a mail container beside Crewtavo): its name or address, exactly as the business types it in **Settings → Email**, separated by commas, e.g. `192.168.1.10,mail.office.lan`. Without it, Settings → Email only connects to mail servers on the internet, so nobody can use it to look around the network Crewtavo runs on; only the servers listed here are let through. |
 | `CREWTAVO_BIND` | Docker only: the address port 8080 answers on. Defaults to `127.0.0.1`, the computer itself, which is all a web server there needs; read [Visitors' addresses](#visitors-addresses) before changing it. |
 | `CREWTAVO_SENTRY_DSN` | Error tracking for the API and the web app (see below). Unset turns it off. |
 | `CREWTAVO_SENTRY_WEB_DSN` | Optional: send the web app's errors to a separate project. Defaults to `CREWTAVO_SENTRY_DSN`. |
@@ -331,7 +334,7 @@ the Sentry project's security settings so the server never infers them.
   which block SMTP): the screen walks through making a free Resend account, adding the domain and creating a
   Sending access API key, with a button to each page. Or, self-hosted or on Railway Pro, connect the business
   mailbox (Gmail, Google Workspace, Zoho, Microsoft 365, Yahoo, iCloud or any SMTP server) with an app password.
-  Crewtavo sends you a test before saving. Quotes, invoices, reminders, team invites, password resets and team
+  A mail server on your own network needs `CREWTAVO_SMTP_PRIVATE_HOSTS` (above). Crewtavo sends you a test before saving. Quotes, invoices, reminders, team invites, password resets and team
   notifications then go out from that address. (Until it's connected, invites show a link to copy and text instead.)
 - **Settings → People and Roles**: invite the team. Starter roles: General manager, Office manager
   (invoices and payroll), Operations manager, Foreman (runs their own crew, no prices) and Employee.
@@ -607,7 +610,10 @@ read), on Railway or not (`apps/api/src/lib/linkBudget.ts`). `PUBLIC_LINK_GB_A_D
 GB; `0` for no limit), for a business whose showcase is shared widely. Past that its pictures pause until the
 day is over: the page still opens, and owners and admins hear once a day which link it was. A
 guide's new link (**Share → Get a new link**) starts afresh; a showcase can be unpublished, and a
-client's links reset from their page. Visitors also have their own per-address limits.
+client's links reset from their page. Visitors also have their own per-address limits. A business's
+own pictures (its logo, letterhead, and packages' and price list items' pictures, which are on every
+email and estimate it sends) have no limit for the business as a whole, so nobody can pause them for
+everyone: each visitor's address is sent at most that much of them a day.
 
 **Warnings:** the `storage` task (every 6 hours, on Railway or not) tells owners and admins, by the
 bell, when the company's files reach 80% and then 95% of the limit (or that storage is full, when
@@ -810,11 +816,15 @@ point here.
 
 Each person signs in to Crewtavo and approves access on `/oauth/consent`. The assistant can then
 look up whatever that person can see, but can't add or change anything until they choose what it
-can change (by area: customers, jobs, the schedule, time, quotes, invoices, pay, setup, team), or
-give it full access, which also lets it delete, with or without money (Settings > AI assistants,
-which everyone has whatever their role). It never gets more than the person's own permissions, and
-it can't change anyone's sign-in or spare keys, connected apps or its own access, or refund or
-delete a payment. Invitation links are emailed by Crewtavo and never returned to the assistant,
+can change (by area: customers, jobs, the schedule, time, prices, quotes, invoices, pay, setup,
+team), or give it full access, which also lets it delete, with or without money (Settings > AI
+assistants, which everyone has whatever their role). Money is what clients pay as well as quotes,
+invoices, payments, pay and promo codes: the price list, a job's lines and billing, extra work, and
+tax, payment terms, minimum charges, late fees and tips. It never gets more than the person's own
+permissions, and it can't change anyone's sign-in or spare keys, connected apps or its own access,
+or refund or delete a payment. It sends quotes and invoices only to the client and their contacts
+on file, in Crewtavo's own words, and invites people, or gives them access back, only as crew
+leads or field crew. Invitation links are emailed by Crewtavo and never returned to the assistant,
 and owners get a notice for every team change an assistant makes. The database holds it to the
 same areas as well, through PostgREST's pre-request setting (`pgrst.db_pre_request` on the
 `authenticator` role, which the migrations set), with triggers for pay rates, payments, team

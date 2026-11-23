@@ -6,8 +6,10 @@
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
 import { escapeHtml } from "@/lib/html";
 import { KEY_FILE_NAME, keyFileText } from "@/lib/keyFile";
+import styles from "./auth.module.css";
 
 /** Prints just the keys, from a hidden frame, so the rest of the page stays out of it. */
 function printKeys(keys: string[], email: string) {
@@ -37,37 +39,45 @@ function downloadKeyFile(keys: string[], email: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function SpareKeysSheet({ keys, email, doneLabel, onDone, busy = false }: { keys: string[]; email: string; doneLabel: string; onDone: () => void; busy?: boolean }) {
+/**
+ * The key file to download (or the keys to print), then "I saved it" before going on. `bar` puts
+ * the last button in the screen's action bar (a setup screen, not a dialog).
+ */
+export function SpareKeysSheet({ keys, email, doneLabel, onDone, busy = false, bar = false }: { keys: string[]; email: string; doneLabel: string; onDone: () => void; busy?: boolean; bar?: boolean }) {
   const [kept, setKept] = useState(false);
   const [saved, setSaved] = useState(false);
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <p style={{ margin: 0, lineHeight: 1.5 }}>
+  const done = <Button variant={saved ? "primary" : "secondary"} disabled={!saved} loading={busy} onClick={onDone}>{doneLabel}</Button>;
+  const sheet = (
+    <div className={styles.keySheet}>
+      <p className={styles.sub} style={{ margin: 0 }}>
         This is your key file. If you ever forget your password, you'll upload it on the sign-in page to get back in.
         Save it somewhere you won't lose it, like your phone's Files app or Google Drive. You won't see it again.
       </p>
-      <Button variant="primary" size="lg" icon="download" onClick={() => { downloadKeyFile(keys, email); setKept(true); }}>Download key file</Button>
-      <details>
-        <summary className="muted small" style={{ cursor: "pointer" }}>Rather keep it on paper? See the keys</summary>
-        <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-          <ol
-            aria-label="Spare keys"
-            // Each key on one line (a key split across lines is easy to copy wrong); two columns when they fit.
-            style={{ margin: 0, padding: "12px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", columnGap: 16, listStylePosition: "inside", whiteSpace: "nowrap", borderRadius: "var(--radius-card)", background: "var(--fill)", font: "600 16px/2 ui-monospace, Menlo, Consolas, monospace" }}
-          >
-            {keys.map((key) => <li key={key}>{key}</li>)}
-          </ol>
-          <Button icon="printer" onClick={() => { printKeys(keys, email); setKept(true); }} style={{ justifySelf: "start" }}>Print the keys</Button>
-        </div>
+      <div className={styles.keyFile}>
+        <span className={styles.keyIcon} aria-hidden="true"><Icon name="lock" size={20} /></span>
+        <span className="grow" style={{ minWidth: 0 }}>
+          <span className={styles.keyName}>{KEY_FILE_NAME}</span>
+          <span className={styles.hint}>{keys.length} keys, each works once</span>
+        </span>
+        <Button variant={kept ? "secondary" : "primary"} icon="download" onClick={() => { downloadKeyFile(keys, email); setKept(true); }}>Download</Button>
+      </div>
+      <details className={styles.fold}>
+        <summary>Rather keep it on paper? See the keys</summary>
+        {/* Each key on one line (a key split across lines is easy to copy wrong); two columns when they fit. */}
+        <ol className={styles.keys} aria-label="Spare keys">
+          {keys.map((key) => <li key={key}>{key}</li>)}
+        </ol>
+        <div className={styles.foldActs}><Button size="sm" icon="printer" onClick={() => { printKeys(keys, email); setKept(true); }}>Print the keys</Button></div>
       </details>
-      <p className="muted small" style={{ margin: 0 }}>
+      <p className={styles.note}>
         Each key in the file works once, so the file gets you in up to {keys.length} times. It only works while Crewtavo can't email you; once your email is connected, Forgot password sends you a link instead. Anyone who has the file can get into your account, so don't share it.
       </p>
-      <label className="row" style={{ gap: 10, alignItems: "flex-start", cursor: kept ? "pointer" : "default", opacity: kept ? 1 : 0.6 }}>
-        <input type="checkbox" checked={saved} disabled={!kept} onChange={(e) => setSaved(e.target.checked)} style={{ marginTop: 3 }} />
+      <label className={styles.saved} data-off={!kept || undefined}>
+        <input type="checkbox" checked={saved} disabled={!kept} onChange={(e) => setSaved(e.target.checked)} />
         <span>{kept ? "I saved my key file somewhere safe" : "Download the key file (or print the keys) first"}</span>
       </label>
-      <Button variant={saved ? "primary" : "secondary"} size="lg" disabled={!saved} loading={busy} onClick={onDone}>{doneLabel}</Button>
+      {!bar && done}
     </div>
   );
+  return bar ? <>{sheet}<div className={styles.acts}>{done}</div></> : sheet;
 }

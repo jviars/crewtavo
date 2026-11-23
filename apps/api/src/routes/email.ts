@@ -5,6 +5,10 @@
  * encrypted with ENCRYPTION_KEY and never sent back to the browser. Connecting, changing or
  * disconnecting it asks for the person's own password and tells every owner: the owners hear about
  * Stripe changes by this email, so it mustn't be swapped out quietly first.
+ *
+ * Only an owner connects, changes or disconnects it: whoever connects a mailbox can read what goes
+ * out through it, sign-in and reset links included. Admins with the Apps or Settings area still see
+ * how it stands and send a test.
  */
 import { ADMINS, MAIL_PRESETS, mailPreset } from "@crewtavo/core";
 import { Hono, type Context } from "hono";
@@ -16,15 +20,15 @@ import { runInBackground } from "../lib/background";
 import { encryptJson } from "../lib/crypto";
 import { renderEmail } from "../lib/email";
 import { appUrl, dbError, HttpError, must, readJson } from "../lib/http";
-import { emailConfigured, forgetMailbox, loadMailbox, sendEmail, sendingWorks, sendWithMailbox, type MailboxSecret, type MailboxSettings } from "../lib/notify";
-import { smtpSend, SmtpError } from "../lib/smtp";
+import { emailConfigured, forgetMailbox, loadMailbox, mailboxOwnerSet, sendEmail, sendingWorks, sendWithMailbox, type MailboxSecret, type MailboxSettings } from "../lib/notify";
+import { smtpReach, smtpSend, SmtpError } from "../lib/smtp";
 import { adminClient } from "../lib/supabase";
 import { logoImage } from "../services/logo";
 import { tellOwners } from "./apps";
 
 export const email = new Hono<AppEnv>();
 
-/** Admins with the Apps or Settings area set up the company's email. */
+/** Admins with the Apps or Settings area see the company's email and send a test. */
 const emailAdmin = createMiddleware<AppEnv>(async (c, next) => {
   if (c.var.role !== "owner" && !c.var.permissions.some((p) => p === "apps" || p === "settings")) {
     throw new HttpError(403, "Ask an owner to connect the company's email.");
@@ -32,6 +36,14 @@ const emailAdmin = createMiddleware<AppEnv>(async (c, next) => {
   await next();
 });
 const requireEmailAdmin = [requireUser, requireCompany(ADMINS), emailAdmin] as const;
+
+export const OWNERS_CONNECT_EMAIL = "Only an owner can connect, change or disconnect the company's email. Ask an owner to do it.";
+/** Only an owner connects, changes or disconnects it (see above); an admin is told so. */
+const emailOwner = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.var.role !== "owner") throw new HttpError(403, OWNERS_CONNECT_EMAIL);
+  await next();
+});
+const requireEmailOwner = [requireUser, requireCompany(ADMINS), emailOwner] as const;
 
 const PRESET_IDS = MAIL_PRESETS.map((p) => p.id) as [string, ...string[]];
 
@@ -55,7 +67,19 @@ email.get("/email", ...requireEmailAdmin, async (c) => {
     .maybeSingle();
   if (error) throw dbError(error);
   return c.json({
-    mailbox: row && row.status !== "disconnected" ? { ...(row.settings as unknown as MailboxSettings), status: row.status, last_error: row.last_error, connected_at: row.connected_at } : null,
+    mailbox: row && row.status !== "disconnected"
+      ? {
+          ...(row.settings as unknown as MailboxSettings),
+          status: row.status,
+          last_error: row.last_error,
+          connected_at: row.connected_at,
+          // False when someone who isn't an owner now connected it: owners' and admins' sign-in and
+          // reset links don't go through it until an owner connects it again (lib/notify.ts).
+          owner_connected: await mailboxOwnerSet(c.env, c.var.companyId),
+        }
+      : null,
+    // Who may connect, change or disconnect it.
+    can_change: c.var.role === "owner",
     // What happens without a mailbox: the install's own Resend account, the dev inbox, or nothing.
     fallback: c.env.RESEND_API_KEY && c.env.EMAIL_FROM ? "server" : c.env.MAILPIT_URL ? "dev" : null,
     // Railway's trial and Hobby plans block mail servers, so the screen points people to Resend.
@@ -80,12 +104,12 @@ const connectSchema = z.object({
   current_password: currentPassword,
 });
 
-email.put("/email", ...requireEmailAdmin, async (c) => {
+email.put("/email", ...requireEmailOwner, async (c) => {
   const body = await readJson(c, connectSchema);
   const who = await confirmPassword(c, body.current_password, "mailbox", 10);
   const preset = mailPreset(body.preset)!;
   const saved = await loadMailbox(c.env, c.var.companyId).catch(() => null);
-  const company = must(await c.var.db.from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
   const me = must(await c.var.db.from("profiles").select("email").eq("user_id", c.var.userId).maybeSingle());
 
   let settings: MailboxSettings;
@@ -109,7 +133,7 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
     secret = { password };
     // Sign in first: a wrong password should say so plainly, before anything is saved.
     try {
-      await smtpSend({ host, port, security, username, password }, null);
+      await smtpSend({ host, port, security, username, password }, null, undefined, smtpReach(c.env));
     } catch (error) {
       const message = error instanceof SmtpError ? error.message : "Couldn't sign in to the mail server.";
       throw new HttpError(400, c.env.RAILWAY_PROJECT_ID && /^Couldn't connect/.test(message) ? message + RAILWAY_SMTP : message);
@@ -125,7 +149,7 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
       ...renderEmail({ companyName: company.name, logo: logoImage(appUrl(c), c.var.companyId, company.settings), text: `This is a test from Crewtavo.\n\nQuotes, invoices, reminders and team notifications for ${company.name} will now be sent from ${settings.from_email}. Replies go to ${company.email || settings.from_email}.` }),
       replyTo: company.email ?? undefined,
       fromName: company.name,
-    });
+    }, smtpReach(c.env));
     if (!result.sent) throw new HttpError(400, result.reason ?? "The test email wasn't sent.");
   }
 
@@ -157,7 +181,7 @@ email.put("/email", ...requireEmailAdmin, async (c) => {
 email.post("/email/test", ...requireEmailAdmin, async (c) => {
   const body = await readJson(c, z.object({ to: z.email().optional() }));
   const me = must(await c.var.db.from("profiles").select("email").eq("user_id", c.var.userId).maybeSingle());
-  const company = must(await c.var.db.from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, email, settings").eq("id", c.var.companyId).maybeSingle());
   const to = body.to ?? me.email;
   if (!to) throw new HttpError(400, "Add an address to send the test to.");
   forgetMailbox(c.var.companyId);
@@ -170,7 +194,7 @@ email.post("/email/test", ...requireEmailAdmin, async (c) => {
   return c.json({ sent: true, to });
 });
 
-email.delete("/email", ...requireEmailAdmin, async (c) => {
+email.delete("/email", ...requireEmailOwner, async (c) => {
   const who = await confirmPassword(c, (await readJson(c, z.object({ current_password: currentPassword }))).current_password, "mailbox", 10);
   const { data: removed, error } = await adminClient(c.env).from("integrations").delete().eq("company_id", c.var.companyId).eq("provider", "email").select("account_label");
   if (error) throw dbError(error);

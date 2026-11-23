@@ -18,9 +18,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
+import { SearchField } from "@/components/ui/Toolbar";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { formatMoneyCents, formatNumber } from "@/lib/format";
@@ -40,8 +43,11 @@ export function RoofCatalogPage() {
   const canOpenApps = hasRole(session, "admin") && can(session, "apps");
   const header = (
     <>
-      <PageHeader title="Roofing" documentTitle="Catalog" />
-      <p className="page-subtitle">ABC Supply's catalog at your branch, at your prices. Find what you buy, see its colors and sizes, and put it in your price list.</p>
+      <PageHeader
+        title="Roofing"
+        documentTitle="Catalog"
+        lede={<span className="hide-mobile">ABC Supply's catalog at your branch, at your prices. Find what you buy, see its colors and sizes, and put it in your price list.</span>}
+      />
       <RoofingTabs />
     </>
   );
@@ -51,24 +57,27 @@ export function RoofCatalogPage() {
       <>
         {header}
         <Loading className={styles.layout} label="Loading the catalog">
-          <CardSkeleton lines={8} title={false} />
-          <CardSkeleton lines={6} />
+          <div className={styles.nav}>
+            {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} height={12} width={`${60 + ((i * 17) % 30)}%`} style={{ margin: "10px 8px" }} />)}
+          </div>
+          <div className={styles.main}>
+            <Skeleton height={32} width="50%" radius={8} />
+            <CardsSkeleton />
+          </div>
         </Loading>
       </>
     );
   }
-  if (supplier.error) return <>{header}<div className="card"><ErrorState error={supplier.error} onRetry={() => supplier.refetch()} /></div></>;
+  if (supplier.error) return <>{header}<ErrorState error={supplier.error} onRetry={() => supplier.refetch()} /></>;
   if (!supplier.data) {
     return (
       <>
         {header}
-        <div className="card">
-          <EmptyState icon="truck" title="Connect ABC Supply to see its catalog" action={canOpenApps && <Link className="btn btn-primary" to="/apps/abc_supply">Set up ABC Supply</Link>}>
-            {canOpenApps
-              ? "Once your ABC Supply account is connected, its catalog shows here at your branch's prices, with what you buy most up front."
-              : "An owner or admin can connect your ABC Supply account in Apps. Its catalog then shows here at your branch's prices."}
-          </EmptyState>
-        </div>
+        <EmptyState icon="truck" title="Connect ABC Supply to see its catalog" action={canOpenApps && <Link className="btn btn-primary" to="/apps/abc_supply">Set up ABC Supply</Link>}>
+          {canOpenApps
+            ? "Once your ABC Supply account is connected, its catalog shows here at your branch's prices, with what you buy most up front."
+            : "An owner or admin can connect your ABC Supply account in Apps. Its catalog then shows here at your branch's prices."}
+        </EmptyState>
       </>
     );
   }
@@ -119,10 +128,19 @@ function Catalog({ supplier }: { supplier: Supplier }) {
       next.delete("item");
       return next;
     }, { replace: true });
+  // On a phone the list is a row of chips: the one picked scrolls into sight (sideways only).
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = navRef.current;
+    const on = nav?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!nav || !on || nav.scrollWidth <= nav.clientWidth) return;
+    const [chip, row] = [on.getBoundingClientRect(), nav.getBoundingClientRect()];
+    if (chip.left < row.left || chip.right > row.right) nav.scrollLeft += chip.left - row.left - 16;
+  }, [view]);
 
   return (
     <div className={styles.layout}>
-      <nav className={styles.nav} aria-label="Catalog">
+      <nav ref={navRef} className={styles.nav} aria-label="Catalog">
         <NavItem current={view === "usual"} icon="star" onClick={() => go({ view: "usual" })}>What you usually buy</NavItem>
         <NavItem current={view === "yours"} icon="list" badge={flagged} onClick={() => go({ view: "yours" })}>Your materials</NavItem>
         <span className={styles.navTitle}>Categories</span>
@@ -140,7 +158,10 @@ function Catalog({ supplier }: { supplier: Supplier }) {
           </span>
         </div>
         {supplier.status === "error" && (
-          <span className="field-error" role="alert">{supplier.last_error ?? "ABC Supply needs attention."} The catalog may not answer until it's fixed in Apps.</span>
+          <div className={`callout callout-danger ${styles.barError}`} role="alert">
+            <Icon name="alert" size={16} />
+            <div className="grow">{supplier.last_error ?? "ABC Supply needs attention."} The catalog may not answer until it's fixed in Apps.</div>
+          </div>
         )}
 
         {view === "yours" ? (
@@ -177,7 +198,7 @@ function NavItem({ current, icon, badge, onClick, children }: { current: boolean
     <button type="button" className={styles.navItem} aria-current={current ? "true" : undefined} onClick={onClick}>
       <Icon name={icon} size={16} />
       <span>{children}</span>
-      {badge ? <span className={styles.navBadge} aria-label={`${badge} need a look`}>{badge}</span> : null}
+      {badge ? <span className={styles.navBadge} aria-label={`${badge} ${badge === 1 ? "needs" : "need"} a look`}>{badge}</span> : null}
     </button>
   );
 }
@@ -196,18 +217,7 @@ function SearchBox({ query, onSearch }: { query: string; onSearch: (text: string
     return () => clearTimeout(wait);
   }, [text, query]);
   return (
-    <div className={`input-group ${styles.search}`}>
-      <span className="addon"><Icon name="search" size={16} /></span>
-      <input
-        className="input"
-        type="search"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Search ABC's catalog: brand, product, color or item number"
-        aria-label="Search ABC Supply's catalog"
-        style={{ paddingLeft: 34 }}
-      />
-    </div>
+    <SearchField value={text} onChange={setText} placeholder="Search brand, product, color or item #" label="Search ABC Supply's catalog" />
   );
 }
 
@@ -244,16 +254,16 @@ function PricesNote({ prices }: { prices: ReturnType<typeof useCardPrices> }) {
     return (
       <div className="callout callout-warning" role="alert">
         <Icon name="alert" size={16} />
-        <span className="grow" style={{ fontWeight: 400 }}>Today's prices didn't come. {errorMessage(prices.error)}</span>
+        <div className="grow">Today's prices didn't come. {errorMessage(prices.error)}</div>
         <button type="button" className="btn btn-sm" onClick={() => prices.refetch()}><Icon name="refresh" size={14} />Try again</button>
       </div>
     );
   }
   if (!slow) return null;
   return (
-    <div className="callout callout-info" role="status">
+    <div className="callout" role="status">
       <Icon name="clock" size={16} />
-      <span className="grow" style={{ fontWeight: 400 }}>ABC Supply is slow to send prices right now. Still asking…</span>
+      <div className="grow">ABC Supply is slow to send prices right now. Still asking…</div>
     </div>
   );
 }
@@ -279,25 +289,53 @@ function Card({ item, eyebrow, price, unit, note, used, icon, onOpen }: {
       </span>
       <span className={styles.cardFoot}>
         {price === undefined ? (
-          <Skeleton width={84} height={18} />
+          <Skeleton width={84} height={14} />
         ) : price !== null ? (
           <span className={styles.price}>{formatMoneyCents(price)} <small>/ {unit.toLowerCase()}</small></span>
         ) : (
           <span className={styles.noPrice}>{note ?? "No price"}</span>
         )}
-        {used && <span className="chip chip-green"><Icon name="check" size={12} bold />In your price list</span>}
+        {used && <span className={styles.used}><Icon name="check" size={12} bold />In your price list</span>}
       </span>
     </button>
   );
 }
 
-const CardsLoading = () => (
-  <Loading className={styles.grid} label="Asking ABC Supply">
+/** The cards' shape while ABC answers. */
+const CardsSkeleton = () => (
+  <div className={styles.grid} aria-hidden="true">
     {Array.from({ length: 8 }, (_, i) => (
-      <div key={i} className="card card-pad stack-sm"><Skeleton height={120} radius={8} /><Skeleton width="80%" /><Skeleton width="50%" /></div>
+      <div key={i} className={styles.cardBody} style={{ gap: 8 }}><Skeleton height={130} radius={10} /><Skeleton width="80%" /><Skeleton width="50%" /></div>
     ))}
+  </div>
+);
+const CardsLoading = () => (
+  <Loading label="Asking ABC Supply">
+    <CardsSkeleton />
   </Loading>
 );
+
+/**
+ * Narrowing by one of ABC's product types or brands: a quiet button saying which, opening a menu of
+ * them with how many of each, the one picked checked.
+ */
+function PickMenu({ label, all, icon, options, value, onChange }: { label: string; all: string; icon: IconName; options: Array<[string, number]>; value: string | null; onChange: (value: string | null) => void }) {
+  const items: MenuEntry[] = [
+    { label: all, checked: !value, onSelect: () => onChange(null) },
+    { separator: true },
+    ...options.map(([name, n]): MenuEntry => ({ label: name, end: String(n), checked: value === name, onSelect: () => onChange(value === name ? null : name) })),
+  ];
+  return (
+    <Menu
+      items={items}
+      label={`${label}: ${value ?? all}`}
+      title={label}
+      align="end"
+      triggerClassName={`btn ${styles.pick}`}
+      trigger={<><Icon name={icon} size={14} /><span className={styles.pickText}>{value ?? all}</span><Icon name="chevronDown" size={12} /></>}
+    />
+  );
+}
 
 /** How many of each value there are, most first: ABC's product types or brands on a page of items. */
 function countsOf(values: Array<string | null | undefined>): Array<[string, number]> {
@@ -327,63 +365,50 @@ function Results({ query, title, icon, usedIn, onOpen }: { query: string; title:
   const gridRef = useListAnimation<HTMLDivElement>();
 
   return (
-    <section className="stack" aria-labelledby="catalog-results" style={{ gap: 14 }}>
-      <div className={styles.head}>
-        <div>
-          <h2 id="catalog-results">{title}</h2>
-          <p>{results.data ? `${shown.length} ${shown.length === 1 ? "item" : "items"} at ${results.data.branch_name}` : "Asking ABC Supply…"}</p>
-        </div>
+    <Section
+      title={title}
+      icon={icon}
+      count={results.data ? shown.length : undefined}
+      action={
+        kinds.length > 1 || brands.length > 1 ? (
+          <>
+            {kinds.length > 1 && <PickMenu label="Type" all="All types" icon="filter" options={kinds} value={kind} onChange={(k) => { setKind(k); setBrand(null); }} />}
+            {brands.length > 1 && <PickMenu label="Brand" all="All brands" icon="tag" options={brands} value={brand} onChange={setBrand} />}
+          </>
+        ) : undefined
+      }
+    >
+      <p className={styles.lede}>{results.data ? `${shown.length} ${shown.length === 1 ? "item" : "items"} at ${results.data.branch_name}` : "Asking ABC Supply…"}</p>
+      <div className={styles.stack}>
+        {shown.length > 0 && <PricesNote prices={prices} />}
+        {results.isPending ? (
+          <CardsLoading />
+        ) : results.error ? (
+          <ErrorState error={results.error} onRetry={() => results.refetch()} />
+        ) : !shown.length ? (
+          <EmptyState inline title="Nothing at your branch matches">Try fewer words, the brand's name, or an ABC item number.</EmptyState>
+        ) : (
+          <div ref={gridRef} className={styles.grid}>
+            {shown.map((item) => {
+              const { price, note } = item.dimensional ? { price: null, note: "Pick a length to see its price." } : priceOf(prices, item);
+              return (
+                <Card
+                  key={item.item_number}
+                  item={item}
+                  eyebrow={[item.brand, item.kind].filter(Boolean).join(" · ") || null}
+                  price={price}
+                  unit={item.uoms.find((u) => u.code === item.uom)?.name ?? uomWord(item.uom)}
+                  note={note}
+                  used={usedIn.has(item.item_number)}
+                  icon={icon}
+                  onOpen={() => onOpen(item.item_number, item)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
-      {(kinds.length > 1 || brands.length > 1) && (
-        <div className={styles.filters}>
-          {kinds.length > 1 && (
-            <div className={styles.filterRow} role="group" aria-label="Narrow by type">
-              <span className={styles.filterLabel}>Type</span>
-              <button type="button" className={styles.filter} aria-pressed={!kind} onClick={() => { setKind(null); setBrand(null); }}>All</button>
-              {kinds.map(([name, n]) => (
-                <button key={name} type="button" className={styles.filter} aria-pressed={kind === name} onClick={() => { setKind(kind === name ? null : name); setBrand(null); }}>{name}<small>{n}</small></button>
-              ))}
-            </div>
-          )}
-          {brands.length > 1 && (
-            <div className={styles.filterRow} role="group" aria-label="Narrow by brand">
-              <span className={styles.filterLabel}>Brand</span>
-              <button type="button" className={styles.filter} aria-pressed={!brand} onClick={() => setBrand(null)}>All</button>
-              {brands.map(([name, n]) => (
-                <button key={name} type="button" className={styles.filter} aria-pressed={brand === name} onClick={() => setBrand(brand === name ? null : name)}>{name}<small>{n}</small></button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {shown.length > 0 && <PricesNote prices={prices} />}
-      {results.isPending ? (
-        <CardsLoading />
-      ) : results.error ? (
-        <div className="card"><ErrorState error={results.error} onRetry={() => results.refetch()} /></div>
-      ) : !shown.length ? (
-        <div className="card"><EmptyState inline title="Nothing at your branch matches">Try fewer words, the brand's name, or an ABC item number.</EmptyState></div>
-      ) : (
-        <div ref={gridRef} className={styles.grid}>
-          {shown.map((item) => {
-            const { price, note } = item.dimensional ? { price: null, note: "Pick a length to see its price." } : priceOf(prices, item);
-            return (
-              <Card
-                key={item.item_number}
-                item={item}
-                eyebrow={[item.brand, item.kind].filter(Boolean).join(" · ") || null}
-                price={price}
-                unit={item.uoms.find((u) => u.code === item.uom)?.name ?? uomWord(item.uom)}
-                note={note}
-                used={usedIn.has(item.item_number)}
-                icon={icon}
-                onOpen={() => onOpen(item.item_number, item)}
-              />
-            );
-          })}
-        </div>
-      )}
-    </section>
+    </Section>
   );
 }
 
@@ -400,54 +425,52 @@ function Usual({ usedIn, onOpen, onCategory }: { usedIn: Map<string, ServiceMate
   const prices = useCardPrices(items);
   const looks = useCardLooks(items.map((i) => i.item_number));
   return (
-    <section className="stack" aria-labelledby="catalog-usual" style={{ gap: 14 }}>
-      <div className={styles.head}>
-        <div>
-          <h2 id="catalog-usual">What you usually buy</h2>
-          <p>From ABC's record of your account's invoices, most often first, at today's prices.</p>
-        </div>
+    <Section title="What you usually buy" count={usual.data && items.length ? items.length : undefined}>
+      <p className={styles.lede}>From ABC's record of your account's invoices, most often first, at today's prices.</p>
+      <div className={styles.stack}>
+        {items.length > 0 && <PricesNote prices={prices} />}
+        {usual.isPending ? (
+          <CardsLoading />
+        ) : usual.error ? (
+          <ErrorState error={usual.error} onRetry={() => usual.refetch()} />
+        ) : items.length ? (
+          <div className={styles.grid}>
+            {items.map((item) => {
+              const look = looks[item.item_number];
+              const { price, note } = priceOf(prices, item);
+              return (
+                <Card
+                  key={item.item_number}
+                  item={{ ...item, image: look?.image, color: look?.color }}
+                  eyebrow={item.at_branch === false ? "Not at your branch" : item.count ? `On ${formatNumber(item.count)} ${item.count === 1 ? "invoice" : "invoices"} lately` : null}
+                  price={price}
+                  unit={item.uom_name ?? uomWord(item.uom)}
+                  note={note}
+                  used={usedIn.has(item.item_number)}
+                  onOpen={() => onOpen(item.item_number, { item_number: item.item_number, name: item.name, image: look?.image, color: look?.color, brand: look?.brand })}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <div className="callout" role="note">
+              <Icon name="info" size={16} />
+              <div className="grow">{usual.data?.note ?? "Nothing yet."}</div>
+            </div>
+            <Section title="Start from a category" level={3}>
+              <div className={styles.tiles}>
+                {CATALOG_CATEGORIES.map((c) => (
+                  <button key={c.key} type="button" className={styles.tile} onClick={() => onCategory(c)}>
+                    <Icon name={c.icon} size={18} />
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </Section>
+          </>
+        )}
       </div>
-      {items.length > 0 && <PricesNote prices={prices} />}
-      {usual.isPending ? (
-        <CardsLoading />
-      ) : usual.error ? (
-        <div className="card"><ErrorState error={usual.error} onRetry={() => usual.refetch()} /></div>
-      ) : items.length ? (
-        <div className={styles.grid}>
-          {items.map((item) => {
-            const look = looks[item.item_number];
-            const { price, note } = priceOf(prices, item);
-            return (
-              <Card
-                key={item.item_number}
-                item={{ ...item, image: look?.image, color: look?.color }}
-                eyebrow={item.at_branch === false ? "Not at your branch" : item.count ? `On ${formatNumber(item.count)} ${item.count === 1 ? "invoice" : "invoices"} lately` : null}
-                price={price}
-                unit={item.uom_name ?? uomWord(item.uom)}
-                note={note}
-                used={usedIn.has(item.item_number)}
-                onOpen={() => onOpen(item.item_number, { item_number: item.item_number, name: item.name, image: look?.image, color: look?.color, brand: look?.brand })}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <>
-          <div className="callout callout-info" role="note">
-            <Icon name="info" size={20} />
-            <span className="grow" style={{ fontWeight: 400 }}>{usual.data?.note ?? "Nothing yet."}</span>
-          </div>
-          <h3 className="section-title" style={{ margin: "4px 0 0" }}>Start from a category</h3>
-          <div className={styles.tiles}>
-            {CATALOG_CATEGORIES.map((c) => (
-              <button key={c.key} type="button" className={styles.tile} onClick={() => onCategory(c)}>
-                <Icon name={c.icon} size={20} />
-                {c.name}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </section>
+    </Section>
   );
 }

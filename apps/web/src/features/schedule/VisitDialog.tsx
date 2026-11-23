@@ -588,11 +588,11 @@ function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (jo
     return (
       <div className="field">
         <span>Job</span>
-        <div className="row" style={{ gap: 8, padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }}>
+        <div className="visit-pick-row" data-picked>
           <Icon name="job" size={16} />
-          <span className="grow" style={{ minWidth: 0 }}>
+          <span className="visit-pick-text">
             <strong>{value.title}</strong>
-            <span className="muted small" style={{ display: "block" }}>Job #{value.number}{value.client ? ` · ${value.client.display_name}` : ""}</span>
+            <span className="visit-pick-sub">Job #{value.number}{value.client ? ` · ${value.client.display_name}` : ""}</span>
           </span>
           <Button size="sm" variant="ghost" onClick={() => onChange(null)}>Change</Button>
         </div>
@@ -604,13 +604,14 @@ function JobPicker({ value, onChange }: { value: PickedJob | null; onChange: (jo
   return (
     <Field label="Job">
       <input ref={search} className="input" placeholder="Search by job, client or number" value={term} onChange={(e) => setTerm(e.target.value)} aria-label="Search jobs" autoFocus />
-      <div className="card" style={{ boxShadow: "none" }}>
-        {jobs.isPending && <div className="card-row"><Skeleton width="60%" /></div>}
+      <div className="visit-pick-list visit-pick-jobs">
+        {jobs.isPending && <div className="visit-pick-row"><Skeleton width="60%" /></div>}
         {matches.map((j) => (
-          <button key={j.id} type="button" className="card-row" style={{ width: "100%", border: 0, background: "transparent", textAlign: "left", cursor: "pointer", font: "inherit" }} onClick={() => onChange(j)}>
-            <span className="grow" style={{ minWidth: 0 }}>
+          <button key={j.id} type="button" className="visit-pick-row" onClick={() => onChange(j)}>
+            <Icon name="job" size={16} />
+            <span className="visit-pick-text">
               <strong>{j.title}</strong>
-              <span className="muted small" style={{ display: "block" }}>Job #{j.number}{j.client ? ` · ${j.client.display_name}` : ""}</span>
+              <span className="visit-pick-sub">Job #{j.number}{j.client ? ` · ${j.client.display_name}` : ""}</span>
             </span>
           </button>
         ))}

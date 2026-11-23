@@ -106,9 +106,9 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
               <input ref={fileInput} type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) load(f); }} />
             </label>
             <div className="callout">
-              <Icon name="info" size={20} />
-              <div className="grow small" style={{ fontWeight: 400 }}>
-                <div style={{ fontWeight: 700 }}>Coming from Jobber?</div>
+              <Icon name="info" size={16} />
+              <div className="grow">
+                <div style={{ fontWeight: 600 }}>Coming from Jobber?</div>
                 In Jobber, open Clients, choose Export and download the CSV; import it here. Then export Properties the same way and import that file too: each property is added to its client. Clients already here aren't duplicated.
                 {session.role === "owner" && <> Open quotes, unpaid invoices and active jobs come over in <Link to="/settings?tab=data">Settings → Your data</Link>.</>}
               </div>
@@ -142,16 +142,16 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
                 <span className="muted small">Text fields on clients, for the ones with something in them: {columns.others.map((i) => headers[i]).join(", ")}</span>
               </div>
             )}
-            <div className="card" style={{ overflow: "auto", boxShadow: "none" }}>
+            <div className="table-scroll">
               <table className="table" style={{ fontSize: 13 }}>
                 <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Properties</th></tr></thead>
                 <tbody>
                   {clients.slice(0, 5).map((c) => (
                     <tr key={c.key}>
                       <td>{c.display_name}</td>
-                      <td>{c.email || <span className="muted">—</span>}</td>
-                      <td>{c.phone || <span className="muted">—</span>}</td>
-                      <td>{c.properties.map((p) => [p.line1, p.city].filter(Boolean).join(", ")).join("; ") || <span className="muted">—</span>}</td>
+                      <td>{c.email}</td>
+                      <td>{c.phone}</td>
+                      <td>{c.properties.map((p) => [p.line1, p.city].filter(Boolean).join(", ")).join("; ")}</td>
                     </tr>
                   ))}
                 </tbody>

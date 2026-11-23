@@ -15,6 +15,7 @@ import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { normalizePitch, pitchFactor } from "@crewtavo/core/geo";
 import { chosenTotals, lineTotal, optionLabels, toCents, type Amount } from "@crewtavo/core/money";
 import { dateIn, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
+import { linkToken } from "@/lib/linkToken";
 import {
   hasContract,
   inkOn,
@@ -29,6 +30,9 @@ import {
   type QuoteContract,
 } from "../documents/build";
 import type { DocumentCompany, DocumentData } from "../documents/types";
+
+/** A Client Hub link's token as the server made it (lib/linkToken.ts). */
+export const hubToken = linkToken;
 
 export interface HubLine {
   id?: string;

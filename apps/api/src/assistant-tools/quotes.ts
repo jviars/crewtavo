@@ -8,13 +8,14 @@
  * approved" does (services/contracts.ts manualApproval). Quote templates (quotes.is_template) are
  * listed apart, and new quotes start from them as "New from template" does (duplicate_quote).
  */
-import { addDays, localDate, optionTotals, taxRateFromPercent } from "@crewtavo/core";
+import { addDays, localDate, optionTotals, SALES, seesInvoices, taxRateFromPercent } from "@crewtavo/core";
 import { z } from "zod";
 import { asJson } from "../lib/http";
 import { isPriced, manualApproval, OPTION_FIELDS, type ManualApproval, type OptionRow } from "../services/contracts";
-import { convertQuote, keepDepositInCap, quoteFromRequest, sendQuote, sendSchema } from "../services/sales";
+import { assistantSendSchema, convertQuote, keepDepositInCap, quoteFromRequest, sendQuote } from "../services/sales";
 import { customFieldsArg, customFieldsPatch } from "./customFields";
-import { changed, companyArg, friendly, one, rows, tool, type ToolContext } from "./tool";
+import { changed, companyArg, friendly, one, requireRole, rows, tool, type ToolContext } from "./tool";
+import { settingsAs } from "../lib/companySettings";
 
 const quoteLine = z.object({
   service_id: z.uuid().optional().describe("A price list item (list_services): its name, unit, price and tax come with it."),
@@ -74,7 +75,8 @@ async function replaceLines(ctx: ToolContext, quoteId: string, lines: ReadonlyAr
   }
 }
 
-const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId: ctx.companyId, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, "") });
+/** The sending the quote and invoice screens do, as an assistant: only to addresses on file (services/sales.ts). */
+const salesScope = (ctx: ToolContext) => ({ db: ctx.db, env: ctx.env, companyId: ctx.companyId, baseUrl: (ctx.env.APP_URL ?? ctx.origin).replace(/\/$/, ""), noMoney: !seesInvoices(ctx.role, ctx.permissions), assistant: true });
 
 const OFFERS_OPTIONS = "This quote offers options; edit its lines in Crewtavo.";
 /** Approving a quote that's signed (or a job) already: its approval stays the client's. */
@@ -179,8 +181,7 @@ export const quoteTools = {
         if (a.title || a.message || fields.custom_fields) await ctx.db.from("quotes").update({ ...(a.title && { title: a.title }), ...(a.message && { message: a.message }), ...fields }).eq("id", quote.id);
       } else {
         if (!a.client_id || !a.title) throw new Error("Give a request_id, or a client_id and a title.");
-        const company = await one(ctx.db.from("companies").select("settings").eq("id", ctx.companyId).maybeSingle(), "The company");
-        const settings = (company.settings ?? {}) as { default_tax_rate?: number; quote_valid_days?: number };
+        const settings = (await settingsAs(ctx.db, ctx.companyId)) as { default_tax_rate?: number; quote_valid_days?: number };
         quote = await one(
           ctx.db
             .from("quotes")
@@ -243,10 +244,17 @@ export const quoteTools = {
     },
   }),
   send_quote: tool({
-    description: "Send a quote to the client by email (default) or text, with their link to review, choose options and approve it; or just make the link (channel link) to share another way. It goes to the client and their contacts ticked for emails or texts, unless recipients names the addresses or numbers to send it to instead (10 at most). It's then marked sent.",
-    input: z.object({ quote_id: z.uuid(), ...sendSchema.shape, ...companyArg }),
+    description:
+      "Send a quote to the client by email (default) or text, in Crewtavo's usual words, with their link to review, choose options and approve it. It goes to the client and their contacts ticked for emails or texts, or to the ones recipients names from the client's own email or phone and their contacts' (get_client, 10 at most). An assistant never sends one to any other address, or to one an assistant put on file (the person sends those from Crewtavo), never with words of its own, and doesn't get the link. It's then marked sent.",
+    input: z.object({ quote_id: z.uuid(), ...assistantSendSchema.shape, ...companyArg }).strict(),
     area: "quotes",
-    run: async (ctx, { quote_id, company_id: _, ...body }) => sendQuote(salesScope(ctx), quote_id, body),
+    // It goes out with the server's own email and texting, so the role is checked here, as POST /quotes/:id/send does.
+    run: async (ctx, { quote_id, company_id: _, ...body }) => {
+      requireRole(ctx, SALES, "sales");
+      // The link opens Crewtavo without anyone signing in, so it isn't handed back (lib/noAssistants.ts).
+      const { link: _link, ...sent } = await sendQuote(salesScope(ctx), quote_id, body);
+      return sent;
+    },
   }),
   convert_quote_to_job: tool({
     description:

@@ -16,11 +16,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./QuotePage.module.css";
+import { Select } from "@/components/ui/Select";
 
 /** When a payment is due as the editor asks it: a schedule's five, with "on a date" asked two ways. */
 export type DraftDue = ScheduleDue | "after";
@@ -110,16 +111,15 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
     const problem = scheduleProblem(rows, quote.total) ?? scheduleDateProblem(rows, today, (iso) => formatDate(iso));
     const set = (i: number, change: Partial<DraftRow>) => setDraft(draft.map((d, n) => (n === i ? { ...d, ...change } : d)));
     return (
-      <div className="card card-pad stack-sm">
-        <strong>Payment schedule</strong>
-        <p className="muted small">The payments have to come to the total, {formatMoneyCents(Number(quote.total ?? 0))}. The one due when they approve is the deposit. {DEPOSIT_LAW_NOTE}</p>
+      <Section title="Payment schedule" className={styles.schedule}>
+        <p className={styles.quiet}>The payments have to come to the total, {formatMoneyCents(Number(quote.total ?? 0))}. The one due when they approve is the deposit. {DEPOSIT_LAW_NOTE}</p>
         {draft.map((d, i) => {
           const last = i === draft.length - 1;
           return (
             <div key={i} className={styles.scheduleRow}>
-              <span className="small strong">Payment {i + 1}</span>
-              <div className="row" style={{ gap: 6 }}>
-                <Select className="select input-sm" aria-label={`Payment ${i + 1} as`} value={d.kind} onChange={(e) => set(i, { kind: e.target.value as DraftRow["kind"] })}>
+              <span className={styles.paymentName}>Payment {i + 1}</span>
+              <div className={styles.paymentLine}>
+                <Select className={`select input-sm ${styles.paymentKind}`} aria-label={`Payment ${i + 1} as`} value={d.kind} onChange={(e) => set(i, { kind: e.target.value as DraftRow["kind"] })}>
                   <option value="percent">%</option>
                   <option value="amount">$</option>
                   {last && <option value="rest">The rest</option>}
@@ -128,10 +128,10 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
                   <input className="input input-sm" style={{ width: 96, textAlign: "right" }} inputMode="decimal" aria-label={d.kind === "percent" ? `Payment ${i + 1} percent` : `Payment ${i + 1} amount`}
                     value={d.value} onChange={(e) => set(i, { value: e.target.value.replace(/[^0-9.]/g, "") })} />
                 )}
-                <span className="muted small tabular">{formatMoneyCents(sums.rows[i]?.amount ?? 0)}</span>
+                <span className={styles.paymentAmount}>{formatMoneyCents(sums.rows[i]?.amount ?? 0)}</span>
               </div>
-              <div className="row" style={{ gap: 6 }}>
-                <Select className="select input-sm" aria-label={`Payment ${i + 1} due`} value={d.due} onChange={(e) => set(i, { due: e.target.value as DraftDue })}>
+              <div className={styles.paymentLine}>
+                <Select className={`select input-sm ${styles.paymentDue}`} aria-label={`Payment ${i + 1} due`} value={d.due} onChange={(e) => set(i, { due: e.target.value as DraftDue })}>
                   {DRAFT_DUE.map((due) => <option key={due} value={due}>{DUE_LABELS[due]}</option>)}
                 </Select>
                 {d.due === "date" && <input className="input input-sm" type="date" min={today} aria-label={`Payment ${i + 1} date`} value={d.on} onChange={(e) => set(i, { on: e.target.value })} />}
@@ -154,29 +154,30 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
           </Button>
         )}
         {/* .line lays out as a row only inside .totals (components.css). */}
-        <div className="totals"><div className="line"><span>{sums.left < 0 ? "Over the total by" : "Left to place"}</span><strong className="tabular">{formatMoneyCents(Math.abs(sums.left))}</strong></div></div>
+        <div className={`totals ${styles.sum}`}><div className="line"><span>{sums.left < 0 ? "Over the total by" : "Left to place"}</span><strong className="tabular">{formatMoneyCents(Math.abs(sums.left))}</strong></div></div>
         {problem && <p className={styles.warn} role="status">{problem}</p>}
         <FormError error={save.error} />
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <Button size="sm" variant="primary" loading={save.isPending} disabled={Boolean(problem)} onClick={() => save.mutate(rows)}>Save schedule</Button>
-          <Button size="sm" onClick={() => setDraft(null)}>Cancel</Button>
-          {shown.rows.length > 0 && <Button size="sm" variant="ghost" onClick={() => save.mutate(null)}>Take the schedule off</Button>}
+        <div className={styles.scheduleActions}>
+          {/* Inside the column, the page's next step keeps the one solid green button. */}
+          <Button size="sm" loading={save.isPending} disabled={Boolean(problem)} onClick={() => save.mutate(rows)}>Save schedule</Button>
+          <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>Cancel</Button>
+          {shown.rows.length > 0 && <Button size="sm" variant="ghost" className={styles.takeOff} onClick={() => save.mutate(null)}>Take the schedule off</Button>}
         </div>
-      </div>
+      </Section>
     );
   }
 
   // A day to set again (a copy's, a template's) or one that has gone by: said here, before Send says it.
   const dateProblem = shown.signed ? null : scheduleDateProblem(shown.rows, today, (iso) => formatDate(iso));
   return (
-    <div className="card card-pad stack-sm">
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>Payment schedule</strong>
-        {editable && <Button size="sm" variant="ghost" onClick={() => setDraft(shown.rows.length ? scheduleRows(quote.payment_schedule).map(toDraft) : STARTER)}>{shown.rows.length ? "Edit" : "Add"}</Button>}
-      </div>
+    <Section
+      title="Payment schedule"
+      className={styles.schedule}
+      action={editable && <button type="button" onClick={() => setDraft(shown.rows.length ? scheduleRows(quote.payment_schedule).map(toDraft) : STARTER)}>{shown.rows.length ? "Edit" : "Add"}</button>}
+    >
       {shown.rows.length ? (
         <>
-          <div className="totals">
+          <div className={`totals ${styles.sum}`}>
             {shown.rows.map((r, i) => (
               <div key={i} className="line"><span>Payment {i + 1}: {scheduleDueText(r, (iso) => formatDate(iso))}</span><span className="tabular">{formatMoneyCents(r.amount)}</span></div>
             ))}
@@ -191,11 +192,11 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
               <Icon name="alert" size={14} /> {dateProblem} The quote can't be sent until then.
             </p>
           )}
-          {shown.signed && <p className="muted small">As it was approved. The job invoices each payment when it's due.</p>}
+          {shown.signed && <p className={styles.quiet}>As it was approved. The job invoices each payment when it's due.</p>}
         </>
       ) : (
-        <p className="muted small">One deposit, or payments over the job: when they approve, on a date, when the work starts or when it's done.</p>
+        <p className={styles.quiet}>One deposit, or payments over the job: when they approve, on a date, when the work starts or when it's done.</p>
       )}
-    </div>
+    </Section>
   );
 }

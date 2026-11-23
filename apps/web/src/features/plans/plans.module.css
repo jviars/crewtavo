@@ -1,41 +1,54 @@
-/* Plans and files: the card on quotes, jobs and clients, and the list on a crew's visit. */
+/* Plans and files: the section on requests, quotes, jobs and clients, and the list on a crew's visit. */
+
+/* The section's body takes dropped files; it shows a dashed edge while files are over it. */
+.zone { display: grid; border-radius: 10px; transition: background var(--dur-fast), outline-color var(--dur-fast); }
+.zone[data-dropping] { outline: 2px dashed var(--green); outline-offset: 4px; background: color-mix(in srgb, var(--green) 6%, transparent); }
+.empty { display: grid; gap: 4px; }
+.empty > p { margin: 0; font-size: var(--fs-13); color: var(--text-3); }
+.zone[data-dropping] .empty { padding: 18px 12px; }
 
 .list { display: grid; }
 .row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); }
 .list > .row:first-child, .list > .upload:first-child { border-top: 0; padding-top: 2px; }
-.icon { position: relative; overflow: hidden; flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-control); background: var(--fill-2); color: var(--text-2); }
-.icon[data-kind="pdf"] { background: var(--danger-tint); color: var(--danger); }
-.icon[data-kind="image"] { background: var(--info-tint); color: var(--info); }
+/* A file's kind: a quiet tile, the kind in its glyph's color (Page-Drive.dc.html). */
+.icon { position: relative; overflow: hidden; flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--fill-2); color: var(--text-3); }
+.icon[data-kind="pdf"] { color: var(--danger); }
+.icon[data-kind="image"] { color: var(--info); }
 /* A picture's preview over its icon. White behind it, like paper, so a plan with a see-through background still reads. */
 .preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; background: #fff; opacity: 0; outline: 1px solid var(--border); outline-offset: -1px; transition: opacity var(--dur-fast); }
 .preview[data-shown] { opacity: 1; }
 .iconButton { flex: none; display: block; padding: 0; border: 0; border-radius: var(--radius-control); background: none; cursor: pointer; }
 .body { display: grid; gap: 3px; flex: 1; min-width: 0; }
-.title { color: inherit; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
+.title { color: var(--ink); font-size: var(--fs-13); font-weight: 600; overflow-wrap: anywhere; text-decoration: none; }
 /* The name opens the file in the viewer. */
 button.title { justify-self: start; padding: 0; border: 0; background: none; text-align: left; }
 a.title:hover, button.title:hover { color: var(--green-dark); }
 .meta { color: var(--text-3); font-size: var(--fs-12); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 1px; }
+/* Office only, archived: quiet words with their icon. */
+.flag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); font-weight: 500; color: var(--text-2); }
+.flag > svg { color: var(--quiet); }
 .notes { margin: 2px 0 0; color: var(--text-2); font-size: var(--fs-13); white-space: pre-wrap; overflow-wrap: anywhere; }
 .actions { display: flex; align-items: center; gap: 4px; flex: none; }
 
 .olderToggle { justify-self: start; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; }
+.zone > .olderToggle { margin-top: 10px; }
 .olderToggle:hover { color: var(--ink); }
-.older { display: grid; gap: 6px; margin-top: 4px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--fill); }
+.older { display: grid; gap: 6px; margin-top: 4px; padding: 2px 0 2px 12px; border-left: 2px solid var(--divider); }
 .olderRow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-12); }
 .olderRow > span:first-child { flex: 1; min-width: 160px; color: var(--text-2); }
 .olderRow a, .olderRow button { font-weight: 600; }
 
-.group { margin: 14px 0 0; color: var(--text-3); font-size: var(--fs-12); font-weight: 700; letter-spacing: var(--tracking-caps); text-transform: uppercase; }
+.group { margin: 14px 0 4px; color: var(--text-3); font-size: var(--fs-12); font-weight: 600; }
 .group:first-child { margin-top: 0; }
+.zone > div:first-of-type > .group:first-child { margin-top: 2px; }
 
 .upload { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--row-divider); font-size: var(--fs-13); }
 .uploadBody { display: grid; gap: 6px; flex: 1; min-width: 0; }
 .uploadHead { display: flex; align-items: center; gap: 8px; }
 .uploadHead > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 
-.dropping { outline: 2px dashed var(--green); outline-offset: -6px; background: color-mix(in srgb, var(--green) 6%, var(--surface)); }
+.dropping { outline: 2px dashed var(--green); outline-offset: 2px; border-radius: 10px; background: color-mix(in srgb, var(--green) 6%, transparent); }
 .dropHint { color: var(--text-3); font-size: var(--fs-12); }
 
 .fieldRow { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--row-divider); }
@@ -47,3 +60,22 @@ a.title:hover, button.title:hover { color: var(--green-dark); }
   .fieldButtons { flex-basis: 100%; padding-left: 50px; }
   .fieldButtons > :first-child { flex: 1; }
 }
+
+@media (max-width: 900px) {
+  .title { font-size: var(--fs-15); }
+  .meta, .flag { font-size: var(--fs-13); }
+  .empty > p { font-size: var(--fs-14); }
+  .icon { width: 40px; height: 40px; }
+  /* Download, the file's menu, Stop and the section's Add files: a finger's 44px. */
+  :is(.actions, .uploadHead) :global(.btn) { width: 44px; height: 44px; }
+  .olderToggle { min-height: 44px; }
+  .zone > .olderToggle { margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .zone { transition: none; } }
+
+/* A crew's visit: the plans in the section's inset card, Open and save on each. */
+.fieldList { display: grid; }
+.offline { margin: 8px 0 0; font-size: var(--fs-13); color: var(--text-3); }
+/* A crew card's buttons: quiet fills, as the visit's other ones. */
+.fieldButtons :global(.btn) { border-color: transparent; background: var(--fill-2); }
+.fieldButtons :global(.btn:hover) { background: var(--fill-3); }

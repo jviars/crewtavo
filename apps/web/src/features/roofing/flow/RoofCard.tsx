@@ -1,13 +1,12 @@
 /**
- * The measured roof, short: its squares and pitch, its edges with their colors from the map, the roof
- * area and what to order with waste, and the picture. "Measure again" goes back to the map. A roof
- * typed in from a report (RoofReport.tsx) says so in place of the picture and the word "Measured",
- * and `action` is its way back to the numbers.
+ * The measured roof, short: the picture, and beside it hairline rows of its squares and pitch, the
+ * roof area, what to order with waste, the steep part, and each edge with its color from the map. A
+ * roof typed in from a report (RoofReport.tsx) says so in place of the word "Measured" and has no
+ * picture. The step's heading has the way back: "Measure again", or "Change the numbers".
  */
 import { edgeLengths, ROOF_EDGES, type RoofEdge } from "@crewtavo/core/geo";
 import { isReportRoof, ROOF_EDGE_COLORS, savedRoofingQuantities, STEEP_RISE } from "@crewtavo/core/roofing";
-import type { CSSProperties, ReactNode } from "react";
-import { Link } from "react-router-dom";
+import type { CSSProperties } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { formatNumber } from "@/lib/format";
 import { sectionsOf, type TakeoffRow } from "../../paving/data";
@@ -23,7 +22,7 @@ function pitchWords(takeoff: TakeoffRow): string | null {
   return words.length < 3 ? words.join(" and ") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
 }
 
-export function RoofCard({ takeoff, picture, editLink, action }: { takeoff: TakeoffRow; picture?: string; editLink: string | null; action?: ReactNode }) {
+export function RoofCard({ takeoff, picture }: { takeoff: TakeoffRow; picture?: string }) {
   const fromReport = isReportRoof(takeoff);
   const sections = sectionsOf(takeoff);
   const edges = edgeLengths({ sections });
@@ -34,48 +33,48 @@ export function RoofCard({ takeoff, picture, editLink, action }: { takeoff: Take
   const steep = values.steep_squares ?? 0;
 
   return (
-    <div className={styles.roof}>
-      {picture ? (
+    <div className={styles.roof} data-picture={picture ? "" : undefined}>
+      {picture && (
         <a href={picture} target="_blank" rel="noreferrer" className={styles.roofPicture} aria-label="Open the roof report picture">
           <img src={picture} alt={`The roof drawn on the aerial photo, ${takeoff.title}`} />
         </a>
-      ) : (
-        <div className={`${styles.roofPicture} ${styles.roofEmpty}`}>{fromReport ? "Entered from a report, not drawn on the map." : "No picture yet. Save the roof on the map to make the report."}</div>
       )}
       <div className={styles.roofInfo}>
-        <div className={styles.roofHead}>
-          <h3 className={styles.roofTitle}>
-            {pitched ? (
-              <>
-                <span className={styles.roofCheck} aria-hidden="true"><Icon name="check" size={14} bold /></span>
-                {fromReport ? "From a report" : "Measured"}: {formatNumber(values.roof_squares!, 1)} squares{pitch ? (pitch === "flat" ? ", flat" : ` at ${pitch}`) : ""}
-              </>
-            ) : (
-              <>
-                <span className={styles.roofWarn} aria-hidden="true"><Icon name="alert" size={14} /></span>
-                Measured from above: {formatNumber(Number(takeoff.total_area_sqft))} sq ft
-              </>
-            )}
-          </h3>
-          {action ?? (editLink && <Link to={editLink} className="small strong">Measure again</Link>)}
-        </div>
-        {marked.length > 0 && (
-          <ul className={styles.edges} aria-label="Roof edges">
-            {marked.map((e) => (
-              <li key={e} className={styles.edge} style={{ "--edge": ROOF_EDGE_COLORS[e] } as CSSProperties}>
-                <i aria-hidden="true" />
-                {EDGE_NAMES[e]} {formatNumber(edges[e])} ft
-              </li>
-            ))}
-          </ul>
-        )}
         {pitched ? (
-          <p className={styles.roofNote}>
-            {formatNumber(values.roof_sqft ?? 0)} sq ft of roof · {formatNumber(values.squares ?? 0, 1)} squares to order with {formatNumber(Number(takeoff.waste_pct))}% waste
-            {steep > 0 ? ` · ${formatNumber(steep, 1)} squares steep (${STEEP_RISE}/12 and up)` : ""}
-          </p>
+          <dl className={styles.quantities} aria-label="The measured roof">
+            <div>
+              <dt>{fromReport ? "From a report" : "Measured"}</dt>
+              <dd>{formatNumber(values.roof_squares!, 1)} squares{pitch ? (pitch === "flat" ? ", flat" : ` at ${pitch}`) : ""}</dd>
+            </div>
+            <div>
+              <dt>Roof area</dt>
+              <dd>{formatNumber(values.roof_sqft ?? 0)} sq ft</dd>
+            </div>
+            <div>
+              <dt>To order</dt>
+              <dd>{formatNumber(values.squares ?? 0, 1)} squares <span className={styles.quiet}>with {formatNumber(Number(takeoff.waste_pct))}% waste</span></dd>
+            </div>
+            {steep > 0 && (
+              <div>
+                <dt>Steep ({STEEP_RISE}/12 and up)</dt>
+                <dd>{formatNumber(steep, 1)} squares</dd>
+              </div>
+            )}
+            {marked.map((e) => (
+              <div key={e} style={{ "--edge": ROOF_EDGE_COLORS[e] } as CSSProperties}>
+                <dt><i className={styles.edge} aria-hidden="true" />{EDGE_NAMES[e]}</dt>
+                <dd>{formatNumber(edges[e])} ft</dd>
+              </div>
+            ))}
+          </dl>
         ) : (
-          <p className={styles.roofNote}>The roof has no pitch yet, so it can't be priced by the square. Set its pitch on the map (flat counts).</p>
+          <div className="callout callout-warning" role="note">
+            <Icon name="alert" size={16} />
+            <div className="grow">
+              <div>Measured from above: {formatNumber(Number(takeoff.total_area_sqft))} sq ft</div>
+              The roof has no pitch yet, so it can't be priced by the square. Set its pitch on the map (flat counts).
+            </div>
+          </div>
         )}
         {pitched && !marked.length && (
           <p className={styles.roofNote}>
@@ -84,6 +83,7 @@ export function RoofCard({ takeoff, picture, editLink, action }: { takeoff: Take
               : "No edges marked. Mark the eaves, rakes, ridges, hips and valleys on the map to price drip edge, ridge cap and flashing."}
           </p>
         )}
+        {!picture && <p className={styles.roofNote}>{fromReport ? "Entered from a report, so there's no picture of it on the map." : "No picture yet. Save the roof on the map to make the report."}</p>}
       </div>
     </div>
   );

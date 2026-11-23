@@ -7,25 +7,29 @@ import { privacyUrl } from "@crewtavo/core/privacyPolicy";
 import { slotLabel, type OpenSlot } from "@crewtavo/core/slots";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { InboxSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { EmbedDialog } from "./EmbedDialog";
+import ui from "./BookingAdmin.module.css";
+import { Select } from "@/components/ui/Select";
 
 const KIND: Record<string, string> = { request: "Request form", assessment: "Book an estimate", booking: "Book a service" };
+/** What each kind of form looks like in the list: a request, or a time on the calendar. */
+const KIND_ICON: Record<string, IconName> = { request: "requests", assessment: "calendarCheck", booking: "calendar" };
 type QType = "text" | "long_text" | "number" | "yes_no" | "choice" | "multi_choice" | "files" | "photos";
 interface Question { key: string; label: string; type: QType | "address"; required: boolean; options?: string[] }
 interface FormRow {
@@ -42,7 +46,11 @@ export function BookingAdminPage() {
   const session = useSession();
   const { company } = session;
   const queryClient = useQueryClient();
-  const [editing, setEditing] = useState<FormRow | "new" | null>(null);
+  // The form open in its dialog, kept in the address (?form=<id>, or "new"), so each row is a link and Back closes it.
+  const [params, setParams] = useSearchParams();
+  const opened = params.get("form");
+  const openForm = (id: string) => setParams((p) => { p.set("form", id); return p; });
+  const closeForm = () => setParams((p) => { p.delete("form"); return p; }, { replace: true });
   const [embedding, setEmbedding] = useState<FormRow | null>(null);
   const canEdit = hasRole(session, "admin", "office") && can(session, "settings");
   const forms = useQuery({
@@ -82,67 +90,120 @@ export function BookingAdminPage() {
     });
   };
   const link = (slug: string) => `${window.location.origin}/book/${company.slug}/${slug}`;
-  const cards = useListAnimation<HTMLDivElement>();
+  const rows = forms.data ?? [];
+  const open = opened && opened !== "new" ? rows.find((f) => f.id === opened) ?? null : null;
+  const total = rows.reduce((n, f) => n + (counts.data?.[f.id] ?? 0), 0);
+
+  /** A form's links: copy, open, or the code for a website. Grouped under Share in its More menu. */
+  const share = (f: FormRow): MenuEntry[] => [
+    { label: "Copy link", icon: "copy", kbd: "C", onSelect: () => copyText(link(f.slug), "Link copied") },
+    { label: "Open the form", icon: "external", kbd: "O", onSelect: () => window.open(link(f.slug), "_blank", "noopener,noreferrer") },
+    { label: "Put it on your website", icon: "code", kbd: "W", onSelect: () => setEmbedding(f) },
+  ];
+  const more = (f: FormRow): MenuEntry[] =>
+    canEdit
+      ? [
+          { label: "Edit form", icon: "edit", kbd: "E", onSelect: () => openForm(f.id) },
+          { label: "Share", icon: "share", items: share(f) },
+          { label: f.active ? "Turn off" : "Turn on", icon: f.active ? "pause" : "play", onSelect: () => toggle.mutate({ id: f.id, active: !f.active }) },
+          { separator: true },
+          { label: "Delete form", icon: "trash", danger: true, onSelect: () => deleteForm(f) },
+        ]
+      : share(f);
 
   return (
     <>
       <BackLink to="/settings">Settings</BackLink>
-      <PageHeader title="Online booking" actions={canEdit && <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>New form</Button>} />
+      <PageHeader
+        title="Online booking"
+        lede="Forms clients use to ask for work or book a time. Share a form's link, or put the form on your website."
+        actions={canEdit && <Button variant="primary" icon="plus" onClick={() => openForm("new")}>New form</Button>}
+      />
       {/* For the people who can add it (Settings → Company is the owners' and admins'), while there's none. */}
       {hasRole(session, "admin") && !privacyUrl(company.settings) && (
-        <p className="muted small" style={{ margin: 0 }}>
-          <Icon name="info" size={14} /> Forms that collect personal details should link your privacy policy. <Link to="/settings?tab=company">Add the link in Settings → Company</Link> and it shows under every form.
-        </p>
-      )}
-      {forms.isPending ? <Loading><div className="grid-cards">{[0, 1, 2].map((i) => <CardSkeleton key={i} lines={3} />)}</div></Loading> : forms.error ? <div className="card"><ErrorState error={forms.error} onRetry={() => forms.refetch()} /></div> : !forms.data?.length ? (
-        <div className="card"><EmptyState icon="globe" title="No booking forms yet" action={canEdit && <Button icon="plus" onClick={() => setEditing("new")}>Create a form</Button>} /></div>
-      ) : (
-        <div className="grid-cards" ref={cards}>
-          {forms.data.map((f) => (
-            <div key={f.id} className="card card-pad stack-sm" style={{ alignContent: "start" }}>
-              <div className="row">
-                <strong className="grow">{f.name}</strong>
-                <StatusPill label={f.active ? "Live" : "Off"} tone={f.active ? "good" : "muted"} />
-                {canEdit && (
-                  <Menu
-                    triggerClassName="btn btn-sm btn-ghost btn-icon"
-                    items={[
-                      { label: "Edit form", icon: "edit", onSelect: () => setEditing(f) },
-                      { label: f.active ? "Turn off" : "Turn on", icon: f.active ? "pause" : "play", onSelect: () => toggle.mutate({ id: f.id, active: !f.active }) },
-                      { separator: true },
-                      { label: "Delete form", icon: "trash", danger: true, onSelect: () => deleteForm(f) },
-                    ]}
-                  />
-                )}
-              </div>
-              <span className="muted text-sm">
-                {KIND[f.kind] ?? f.kind} · {f.questions.filter((q) => q.type !== "address").length} questions{f.service_area_zips.length ? ` · ${f.service_area_zips.length} service area${f.service_area_zips.length === 1 ? "" : "s"}` : " · any area"}
-                {f.pick_time && f.kind !== "request" ? (f.requires_approval ? " · clients ask for a time" : " · clients book a time") : ""}
-              </span>
-              <span className="small"><strong>{counts.data?.[f.id] ?? 0}</strong> <span className="muted">requests in the last 30 days</span></span>
-              <code style={{ padding: 8, background: "var(--fill)", borderRadius: "var(--radius-control)", fontSize: 12, overflowWrap: "anywhere" }}>{link(f.slug)}</code>
-              <div className="row wrap">
-                <Button size="sm" icon="copy" onClick={() => copyText(link(f.slug), "Link copied")}>Copy link</Button>
-                <a className="btn btn-sm" href={link(f.slug)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>
-                <Button size="sm" icon="code" onClick={() => setEmbedding(f)}>Embed</Button>
-              </div>
-            </div>
-          ))}
+        <div className="callout callout-info">
+          <Icon name="info" size={16} />
+          <div className="grow" style={{ fontWeight: 400 }}>
+            Forms that collect personal details should link your privacy policy. <Link to="/settings?tab=company">Add the link in Settings → Company</Link> and it shows under every form.
+          </div>
         </div>
       )}
+      {forms.isPending ? (
+        <InboxSkeleton rows={3} />
+      ) : forms.error ? (
+        <ErrorState error={forms.error} onRetry={() => forms.refetch()} />
+      ) : !rows.length ? (
+        <EmptyState icon="globe" title="No booking forms yet" action={canEdit && <Button icon="plus" onClick={() => openForm("new")}>Create a form</Button>}>
+          A form gets its own link to share, and code to put it on your website. What people send comes in under Requests.
+        </EmptyState>
+      ) : (
+        <InboxList
+          label="Booking forms"
+          className={ui.list}
+          foot={<ListFoot end={counts.data ? <><b>{total}</b> {total === 1 ? "request" : "requests"} in the last 30 days</> : undefined}>{rows.length === 1 ? "1 form" : `${rows.length} forms`}</ListFoot>}
+        >
+          <InboxGroup>
+            {rows.map((f) => {
+              const asked = f.questions.filter((q) => q.type !== "address").length;
+              const count = counts.data ? counts.data[f.id] ?? 0 : undefined;
+              return (
+                <InboxRow
+                  key={f.id}
+                  // Editing for the people who can; for the rest, the form's links and code to share.
+                  to={`?form=${f.id}`}
+                  title={f.name}
+                  avatar={<Icon name={KIND_ICON[f.kind] ?? "globe"} size={16} />}
+                  square
+                  subject={<span className={ui.link}>{link(f.slug).replace(/^https?:\/\//, "")}</span>}
+                  meta={[
+                    <StatusPill key="status" label={f.active ? "Live" : "Off"} tone={f.active ? "good" : "muted"} />,
+                    KIND[f.kind] ?? f.kind,
+                    asked === 1 ? "1 question" : `${asked} questions`,
+                    // Where it takes requests from and how times are set: a line of its own on a phone.
+                    <span key="where" className="meta-break">
+                      {f.service_area_zips.length ? `${f.service_area_zips.length} service area${f.service_area_zips.length === 1 ? "" : "s"}` : "Any area"}
+                      {f.pick_time && f.kind !== "request" && <><span className="meta-dot" aria-hidden="true"> · </span>{f.requires_approval ? "Clients ask for a time" : "Clients book a time"}</>}
+                    </span>,
+                  ]}
+                  aside={count !== undefined && <><span className="il-money">{count}</span><span className="il-sub">{count === 1 ? "request" : "requests"}<span className="hide-mobile"> · 30 days</span></span></>}
+                  actions={
+                    <>
+                      <Button size="sm" icon="copy" onClick={() => copyText(link(f.slug), "Link copied")}>Copy link</Button>
+                      <Menu label={`More actions for ${f.name}`} title={f.name} triggerClassName="btn btn-sm btn-icon" items={more(f)} />
+                    </>
+                  }
+                />
+              );
+            })}
+          </InboxGroup>
+        </InboxList>
+      )}
       {embedding && <EmbedDialog name={embedding.name} url={link(embedding.slug)} onClose={() => setEmbedding(null)} />}
-      {editing && <FormEditor form={editing === "new" ? null : editing} taken={forms.data?.map((f) => f.slug) ?? []} onClose={() => setEditing(null)} />}
+      {/* Someone who can't edit gets the form's links and code: what they came here to share. */}
+      {open && !canEdit && <EmbedDialog name={open.name} url={link(open.slug)} onClose={closeForm} />}
+      {canEdit && (opened === "new" || open) && (
+        <FormEditor
+          key={opened}
+          form={open}
+          taken={rows.map((f) => f.slug)}
+          link={open ? link(open.slug) : null}
+          onEmbed={open ? () => { closeForm(); setEmbedding(open); } : undefined}
+          onDelete={open ? () => { closeForm(); deleteForm(open); } : undefined}
+          onClose={closeForm}
+        />
+      )}
     </>
   );
 }
 
-function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: string[]; onClose: () => void }) {
+function FormEditor({ form, taken, link, onEmbed, onDelete, onClose }: { form: FormRow | null; taken: string[]; link: string | null; onEmbed?: () => void; onDelete?: () => void; onClose: () => void }) {
   const { company } = useSession();
   const queryClient = useQueryClient();
   const [name, setName] = useState(form?.name ?? "Request a quote");
   const [slug, setSlug] = useState(form?.slug ?? "");
   const [kind, setKind] = useState(form?.kind ?? "request");
   const [zips, setZips] = useState((form?.service_area_zips ?? []).join(", "));
+  const [active, setActive] = useState(form?.active ?? true);
   // Picking a time. A new form starts with it off, as every form made before it existed is.
   const [pickTime, setPickTime] = useState(form?.pick_time ?? false);
   const [minutes, setMinutes] = useState(form?.slot_minutes ?? 60);
@@ -165,6 +226,11 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
   const zipList = zips.split(/[,;\n]+/).map((z) => z.trim()).filter(Boolean);
   const badZips = zipList.filter((z) => !isPostalCode(z));
   const setQ = (i: number, patch: Partial<Question>) => setQuestions(questions.map((q, j) => (j === i ? { ...q, ...patch } : q)));
+  const move = (i: number, by: -1 | 1) => {
+    const next = [...questions];
+    [next[i], next[i + by]] = [next[i + by]!, next[i]!];
+    setQuestions(next);
+  };
 
   const save = useMutation({
     meta: { inline: true, success: form ? "Form saved" : "Form created" },
@@ -174,7 +240,7 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
       // A request form never offers times; its other booking settings are left as they were.
       const timing = books ? { pick_time: pickTime, slot_minutes: minutes, lead_time_days: lead, max_per_day: most, crew_id: crewId || null, requires_approval: needsOk } : { pick_time: false };
       const row = { ...clean, kind, questions: clean.questions as never, ...timing };
-      if (form) unwrap(await supabase().from("intake_forms").update(row).eq("id", form.id));
+      if (form) unwrap(await supabase().from("intake_forms").update({ ...row, active }).eq("id", form.id));
       else unwrap(await supabase().from("intake_forms").insert({ ...row, company_id: company.id }));
     },
     onSuccess: () => {
@@ -200,74 +266,110 @@ function FormEditor({ form, taken, onClose }: { form: FormRow | null; taken: str
         <Field label="Service area ZIP / Postal codes" optional error={badZips.length ? `Not a ZIP or postal code: ${badZips.slice(0, 3).join(", ")}` : null} hint="Separate them with commas. A code covers every one that starts with it, like M5V for M5V 2T6. Leave empty to accept any area.">
           <textarea className="textarea" style={{ minHeight: 60 }} value={zips} onChange={(e) => setZips(e.target.value)} placeholder="24151, 24065, 24184" />
         </Field>
-        {books && (
-          <div className="form-section">
-            <h3>Booking a time</h3>
-            <label className="row" style={{ gap: 12, alignItems: "flex-start" }}>
-              <input type="checkbox" className="switch" checked={pickTime} onChange={(e) => setPickTime(e.target.checked)} />
-              <span className="grow">
-                <strong style={{ display: "block" }}>Let clients pick a time</strong>
-                <span className="muted small">After the questions they choose a day and a time your schedule has open. Off, the form sends a request and you set the time.</span>
-              </span>
-            </label>
-            {pickTime && (
-              <>
-                <div className="form-grid">
-                  <Field label="Visit length" hint="How much time each booking takes on the schedule.">
-                    <Select className="select" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
-                      {(LENGTHS.some(([m]) => m === minutes) ? LENGTHS : [...LENGTHS, [minutes, `${minutes} minutes`] as [number, string]]).map(([m, l]) => <option key={m} value={m}>{l}</option>)}
-                    </Select>
-                  </Field>
-                  <Field label="Earliest booking, in days" hint="How many days ahead the first time offered is. 0 lets people book today.">
-                    <input className="input" inputMode="numeric" value={leadDays} onChange={(e) => setLeadDays(e.target.value.replace(/\D/g, "").slice(0, 2))} />
-                  </Field>
-                  <Field label="Most a day" optional hint="The most bookings this form takes for one day. Empty is no limit.">
-                    <input className="input" inputMode="numeric" value={mostADay} onChange={(e) => setMostADay(e.target.value.replace(/\D/g, "").slice(0, 2))} />
-                  </Field>
-                  <Field label="Who it books" hint={crewId ? "Times are offered when this crew is free." : "A time is offered only when nothing else on the schedule has it, so nobody is double-booked."}>
-                    <Select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
-                      <option value="">No crew: the whole schedule</option>
-                      {(crews.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </Select>
-                  </Field>
-                </div>
-                <label className="row" style={{ gap: 12, alignItems: "flex-start" }}>
-                  <input type="checkbox" className="switch" checked={needsOk} onChange={(e) => setNeedsOk(e.target.checked)} />
-                  <span className="grow">
-                    <strong style={{ display: "block" }}>Needs our OK before it's booked</strong>
-                    <span className="muted small">{needsOk ? "The time is held and shows on the request, where you book it with one press. The client is told it isn't confirmed yet." : "The visit goes straight onto the schedule, and the client is told it's booked."}</span>
-                  </span>
-                </label>
-                <NextOpenings formId={form?.id} minutes={minutes} leadDays={lead} mostADay={most} crewId={crewId || null} />
-              </>
-            )}
-          </div>
+        {form && (
+          <label className={ui.switchRow}>
+            <input type="checkbox" className="switch" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            <span className="grow">
+              <strong>Live</strong>
+              <span>{active ? "Its link and the form on your website take requests." : "Off, its link and the form on your website say it isn't available."}</span>
+            </span>
+          </label>
         )}
-        <div className="form-section">
-          <h3>Questions</h3>
-          <p className="muted small" style={{ margin: "-8px 0 0" }}>Name, email, phone and address are always asked. Files people send (plans, photos) show on the request under Plans and files.</p>
-          {questions.map((q, i) => (
-            <div key={i} className="card" style={{ padding: 12, boxShadow: "none", background: "var(--fill)", display: "grid", gap: 8 }}>
-              <div className="row">
-                <input className="input input-sm grow" value={q.label} onChange={(e) => setQ(i, { label: e.target.value })} placeholder="Question" maxLength={200} aria-label="Question" />
-                <Select className="select input-sm" style={{ width: 170 }} value={q.type} onChange={(e) => setQ(i, { type: e.target.value as QType, options: ["choice", "multi_choice"].includes(e.target.value) ? q.options ?? ["Option 1"] : undefined })} aria-label="Answer type">
-                  {QTYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </Select>
-              </div>
-              <div className="row wrap">
-                <label className="checkbox small"><input type="checkbox" checked={q.required} onChange={(e) => setQ(i, { required: e.target.checked })} />Required</label>
-                {(q.type === "choice" || q.type === "multi_choice") && <input className="input input-sm grow" value={(q.options ?? []).join(", ")} onChange={(e) => setQ(i, { options: e.target.value.split(",") })} placeholder="Options, separated by commas" aria-label="Options" />}
-                <span className="grow" />
-                <Button size="sm" variant="ghost" icon="chevronUp" aria-label="Move up" disabled={i === 0} onClick={() => { const next = [...questions]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; setQuestions(next); }} />
-                <Button size="sm" variant="ghost" icon="chevronDown" aria-label="Move down" disabled={i === questions.length - 1} onClick={() => { const next = [...questions]; [next[i + 1], next[i]] = [next[i], next[i + 1]]; setQuestions(next); }} />
-                <Button size="sm" variant="ghost" icon="trash" aria-label="Remove question" onClick={() => setQuestions(questions.filter((_, j) => j !== i))} />
-              </div>
+        {books && (
+          <Section level={3} title="Booking a time">
+            <div className={ui.stack}>
+              <label className={ui.switchRow}>
+                <input type="checkbox" className="switch" checked={pickTime} onChange={(e) => setPickTime(e.target.checked)} />
+                <span className="grow">
+                  <strong>Let clients pick a time</strong>
+                  <span>After the questions they choose a day and a time your schedule has open. Off, the form sends a request and you set the time.</span>
+                </span>
+              </label>
+              {pickTime && (
+                <>
+                  <div className={ui.grid2}>
+                    <Field label="Visit length" hint="How much time each booking takes on the schedule.">
+                      <Select className="select" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
+                        {(LENGTHS.some(([m]) => m === minutes) ? LENGTHS : [...LENGTHS, [minutes, `${minutes} minutes`] as [number, string]]).map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label="Earliest booking, in days" hint="How many days ahead the first time offered is. 0 lets people book today.">
+                      <input className="input" inputMode="numeric" value={leadDays} onChange={(e) => setLeadDays(e.target.value.replace(/\D/g, "").slice(0, 2))} />
+                    </Field>
+                    <Field label="Most a day" optional hint="The most bookings this form takes for one day. Empty is no limit.">
+                      <input className="input" inputMode="numeric" value={mostADay} onChange={(e) => setMostADay(e.target.value.replace(/\D/g, "").slice(0, 2))} />
+                    </Field>
+                    <Field label="Who it books" hint={crewId ? "Times are offered when this crew is free." : "A time is offered only when nothing else on the schedule has it, so nobody is double-booked."}>
+                      <Select className="select" value={crewId} onChange={(e) => setCrewId(e.target.value)}>
+                        <option value="">No crew: the whole schedule</option>
+                        {(crews.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                  <label className={ui.switchRow}>
+                    <input type="checkbox" className="switch" checked={needsOk} onChange={(e) => setNeedsOk(e.target.checked)} />
+                    <span className="grow">
+                      <strong>Needs our OK before it's booked</strong>
+                      <span>{needsOk ? "The time is held and shows on the request, where you book it with one press. The client is told it isn't confirmed yet." : "The visit goes straight onto the schedule, and the client is told it's booked."}</span>
+                    </span>
+                  </label>
+                  <NextOpenings formId={form?.id} minutes={minutes} leadDays={lead} mostADay={most} crewId={crewId || null} />
+                </>
+              )}
             </div>
-          ))}
-          <Button size="sm" variant="ghost" icon="plus" style={{ justifySelf: "start" }} disabled={questions.length >= 30} onClick={() => setQuestions([...questions, { key: "", label: "", type: "text", required: false }])}>Add question</Button>
-        </div>
+          </Section>
+        )}
+        <Section
+          level={3}
+          title="Questions"
+          count={questions.length}
+          action={<button type="button" disabled={questions.length >= 30} onClick={() => setQuestions([...questions, { key: "", label: "", type: "text", required: false }])}><Icon name="plus" size={14} />Add question</button>}
+        >
+          <p className={ui.note}>Name, email, phone and address are always asked. Files people send (plans, photos) show on the request under Plans and files.</p>
+          {questions.length > 0 && (
+            <ol className={ui.questions}>
+              {questions.map((q, i) => (
+                <li key={i} className={ui.question}>
+                  <span className={ui.num} aria-hidden="true">{i + 1}</span>
+                  <input className="input" value={q.label} onChange={(e) => setQ(i, { label: e.target.value })} placeholder="Question" maxLength={200} aria-label={`Question ${i + 1}`} />
+                  <Select className={`select ${ui.qType}`} value={q.type} onChange={(e) => setQ(i, { type: e.target.value as QType, options: ["choice", "multi_choice"].includes(e.target.value) ? q.options ?? ["Option 1"] : undefined })} aria-label={`Answer type for question ${i + 1}`}>
+                    {QTYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </Select>
+                  <span className={ui.qMore}>
+                    <Menu
+                      label={`More actions for question ${i + 1}`}
+                      title={q.label.trim() || `Question ${i + 1}`}
+                      triggerClassName="btn btn-icon btn-ghost"
+                      items={[
+                        { label: "Move up", icon: "chevronUp", disabled: i === 0, onSelect: () => move(i, -1) },
+                        { label: "Move down", icon: "chevronDown", disabled: i === questions.length - 1, onSelect: () => move(i, 1) },
+                        { separator: true },
+                        { label: "Remove question", icon: "trash", danger: true, onSelect: () => setQuestions(questions.filter((_, j) => j !== i)) },
+                      ]}
+                    />
+                  </span>
+                  <div className={ui.qSub}>
+                    <label className="checkbox small"><input type="checkbox" checked={q.required} onChange={(e) => setQ(i, { required: e.target.checked })} />Required</label>
+                    {(q.type === "choice" || q.type === "multi_choice") && <input className="input input-sm grow" value={(q.options ?? []).join(", ")} onChange={(e) => setQ(i, { options: e.target.value.split(",") })} placeholder="Options, separated by commas" aria-label={`Options for question ${i + 1}`} />}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Section>
+        {form && link && (
+          <Section level={3} title="Share">
+            <div className={ui.share}>
+              <code className="code-pill grow">{link}</code>
+              <Button size="sm" icon="copy" onClick={() => copyText(link, "Link copied")}>Copy link</Button>
+              <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>
+              {onEmbed && <Button size="sm" icon="code" onClick={onEmbed}>Put it on your website</Button>}
+            </div>
+          </Section>
+        )}
         <FormError error={save.error} />
         <div className="form-actions">
+          {onDelete && <Button variant="danger" icon="trash" className={`btn-ghost ${ui.delete}`} onClick={onDelete}>Delete form</Button>}
           <FormChecks />
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={save.isPending} disabled={clash || badZips.length > 0}>{form ? "Save form" : "Create form"}</Button>
@@ -295,7 +397,7 @@ function NextOpenings({ formId, minutes, leadDays, mostADay, crewId }: { formId?
     queryFn: () => api.post<{ timezone: string; timezone_label: string; window_min: number; slots: OpenSlot[] }>("/booking-forms/openings", asked),
   });
   return (
-    <div className="stack-sm" aria-live="polite">
+    <div className={ui.openings} aria-live="polite">
       <strong>The next times a client would see</strong>
       {next.isPending ? (
         <span className="muted small">Looking at your schedule…</span>
@@ -305,7 +407,7 @@ function NextOpenings({ formId, minutes, leadDays, mostADay, crewId }: { formId?
         <span className="muted small">Nothing is open in the next 60 days with these settings. Check your working days and hours in Settings → Company, and what's on the schedule.</span>
       ) : (
         <>
-          <div className="row wrap" style={{ gap: 6 }}>{next.data.slots.map((s) => <span key={s.starts_at} className="chip">{slotLabel(s, next.data.timezone, next.data.window_min)}</span>)}</div>
+          <div className={ui.chips}>{next.data.slots.map((slot) => <span key={slot.starts_at} className="chip">{slotLabel(slot, next.data.timezone, next.data.window_min)}</span>)}</div>
           <span className="muted small">In {next.data.timezone_label}, from your working hours and what's already on the schedule.</span>
         </>
       )}

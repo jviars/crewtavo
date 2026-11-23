@@ -1,17 +1,17 @@
-/* The business's own letterhead in Settings → Estimate template, and the page its lines are set on. */
+/* The business's own letterhead in Settings → Document style, and the page its lines are set on. */
 .own { display: grid; gap: 12px; }
-.empty { margin: 0; padding: 10px 12px; border-radius: var(--radius-control); background: var(--fill); font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+.empty { margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
 
 .pictures { display: grid; gap: 10px; }
 .picture { display: grid; gap: 4px; margin: 0; }
 .picture figcaption { font-size: var(--fs-12); color: var(--text-3); }
-/* Paper: white in both themes. */
-.paper { display: block; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-control); background: #fff; }
+/* Paper: white in both themes, with a hairline edge rather than a frame. */
+.paper { display: block; padding: 8px; border-radius: 6px; background: #fff; box-shadow: inset 0 0 0 1px var(--border); }
 .paper img { display: block; width: 100%; height: auto; }
 
 /* ---- The page and its two lines ---------------------------------------------------------- */
 .split { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 20px; align-items: start; }
-.page { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; touch-action: none; user-select: none; }
+.page { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius-sm); background: #fff; box-shadow: 0 0 0 1px var(--border), 0 8px 24px -12px rgba(15, 42, 53, 0.25); touch-action: none; user-select: none; }
 .page img { display: block; width: 100%; height: 100%; pointer-events: none; }
 .header, .footer, .middle { position: absolute; left: 0; right: 0; pointer-events: none; }
 .header { top: 0; box-shadow: inset 0 0 0 2px var(--green); }
@@ -37,11 +37,13 @@
 }
 .line:focus-visible > span { box-shadow: var(--ring); }
 
-.about { display: grid; gap: 10px; font-size: var(--fs-14); line-height: 1.5; color: var(--text-2); }
+.about { display: grid; gap: 12px; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
 .about p { margin: 0; }
-.sizes { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; padding: 12px 14px; border-radius: var(--radius-card); background: var(--fill); }
-.sizes dt { font-weight: 600; color: var(--ink); }
-.sizes dd { margin: 0; }
+/* The two sizes as facts on hairlines. */
+.sizes { display: grid; grid-template-columns: 72px minmax(0, 1fr); margin: 0; border-top: 1px solid var(--divider); }
+.sizes dt, .sizes dd { padding: 8px 0; border-bottom: 1px solid var(--row-divider); }
+.sizes dt { color: var(--text-3); }
+.sizes dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 
 @media (max-width: 640px) {
   .split { grid-template-columns: minmax(0, 1fr); }

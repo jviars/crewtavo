@@ -36,7 +36,7 @@ insert into public.clients (company_id, display_name) values (:'other', 'Olive E
 select set_config('request.jwt.claims', '{"sub": "c4400000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
 select public.create_company('Thistle Lawn', 'landscaping', 'America/Chicago') as co \gset
 insert into public.memberships (company_id, user_id, role) values (:'co', 'c4400000-0000-0000-0000-000000000002', 'field_crew');
-update public.companies set settings = settings || '{"quote_valid_days": 14}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"quote_valid_days": 14}' where id = :'co';
 insert into public.clients (company_id, display_name) values (:'co', 'Ada Thistlewood') returning id as ada \gset
 insert into public.properties (company_id, client_id, line1) values (:'co', :'ada', '4 Fern Ct') returning id as ada_home \gset
 insert into public.clients (company_id, display_name) values (:'co', 'Bo Thistlewood') returning id as bo \gset

@@ -7,11 +7,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
+import { cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
-import { Skeleton } from "@/components/ui/Skeleton";
-import { initials, inkOn } from "@/features/documents/words";
 import { publicFetch } from "@/lib/publicApi";
+import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, kit as k } from "./ClientKit";
+import s from "./showcase.module.css";
 
 interface ShowcaseView {
   company: { name: string; phone: string | null; website: string | null; logo: string | null; color: string | null; privacy_url?: string | null };
@@ -30,55 +31,54 @@ export function ShowcasePage() {
   useEffect(() => {
     document.title = d ? `${d.title} · ${d.company.name}` : "Showcase";
   }, [d]);
-  const brand = d?.company.color || "#3b7d23";
   const group = (role: ShowcaseView["photos"][number]["role"]) => d?.photos.filter((p) => p.role === role) ?? [];
-  const sections = d ? ([["Before", group("before")], ["After", group("after")], [group("before").length || group("after").length ? "More photos" : null, group("photo")]] as const) : [];
+  const before = group("before");
+  const after = group("after");
+  const sections = d ? ([["Before", before], ["After", after], [before.length || after.length ? "More photos" : null, group("photo")]] as const) : [];
+  const photoSection = ([label, photos]: (typeof sections)[number]) =>
+    photos.length ? (
+      <section key={label ?? "photos"} className={s.photos} aria-label={label ?? "Photos"}>
+        {label && <h2 className={k.h2}>{label}</h2>}
+        <div className={s.grid}>
+          {photos.map((p) => <img key={p.src} src={p.src} alt={label ? `${label} photo` : "Photo of the work"} loading="lazy" />)}
+        </div>
+      </section>
+    ) : null;
 
   return (
-    <div className="public-page" style={{ ["--brand" as string]: brand, ["--on-brand" as string]: inkOn(brand) }}>
-      <div className="public-wrap" style={{ maxWidth: 860 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="60%" height={26} /><Skeleton width="80%" /><Skeleton height={320} radius={8} /></div>}
+    <ClientPage color={d?.company.color}>
+      {d && <ClientHeader name={d.company.name} logo={d.company.logo} phone={d.company.phone} />}
+      <ClientBody width="wide">
+        {view.isPending && <ClientSkeleton lines={1} />}
         {view.error && (
-          <div className="card"><div className="empty-state error-state"><span className="empty-icon"><Icon name="image" size={24} /></span><h3>This showcase isn't available</h3><p>{(view.error as { status?: number }).status === 404 ? "It may have been taken down by the business." : (view.error as Error).message}</p></div></div>
+          <Broken icon="image" title="This showcase isn't available">
+            {(view.error as { status?: number }).status === 404 ? "It may have been taken down by the business." : (view.error as Error).message}
+          </Broken>
         )}
         {d && (
-          <div className="stack-lg">
-            <header className="public-brand">
-              {d.company.logo ? <img className="logo" src={d.company.logo} alt="" /> : <span className="tile" aria-hidden="true" style={{ background: "var(--brand)", color: "var(--on-brand)" }}>{initials(d.company.name)}</span>}
-              <div><strong>{d.company.name}</strong>{d.company.phone && <div className="muted text-sm"><a href={`tel:${d.company.phone}`}>{d.company.phone}</a></div>}</div>
-            </header>
-            <section className="card card-pad stack" style={{ borderTop: "4px solid var(--brand)" }}>
-              <div className="stack-sm">
-                <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "var(--tracking-display)", margin: 0 }}>{d.title}</h1>
-                {d.town && <span className="muted row" style={{ gap: 6 }}><Icon name="pin" size={14} />{d.town}</span>}
+          <>
+            <section className={cx(k.card, s.intro)} aria-labelledby="showcase-title">
+              <div className={s.introText}>
+                <h1 id="showcase-title" className={cx(k.title, k.long)}>{d.title}</h1>
+                {d.town && <span className={k.place}><Icon name="pin" size={14} />{d.town}</span>}
+                {d.description && <p className={cx(k.msg, "pre-wrap")}>{d.description}</p>}
               </div>
-              {d.description && <p className="pre-wrap" style={{ margin: 0, fontSize: 16, lineHeight: 1.55 }}>{d.description}</p>}
-              {d.book_url && (
-                <a className="btn btn-lg" href={d.book_url} style={{ justifySelf: "start", background: "var(--brand)", color: "var(--on-brand)", borderColor: "var(--brand)" }}>
-                  <Icon name="quote" size={18} />Get a quote
-                </a>
-              )}
+              {d.book_url && <a className={cx(k.cta, k.auto)} href={d.book_url}><Icon name="quote" size={18} />Get a quote</a>}
             </section>
-            {sections.map(([label, photos]) =>
-              photos.length ? (
-                <section key={label ?? "photos"} className="stack-sm" aria-label={label ?? "Photos"}>
-                  {label && <h2 className="section-title">{label}</h2>}
-                  <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))" }}>
-                    {photos.map((p) => <img key={p.src} src={p.src} alt={label ? `${label} photo` : "Photo of the work"} loading="lazy" style={{ width: "100%", borderRadius: 8, display: "block", background: "var(--fill-2)" }} />)}
-                  </div>
-                </section>
-              ) : null,
+            {/* Before and after side by side on a computer, when there are both. */}
+            {before.length > 0 && after.length > 0 ? <div className={s.pair}>{sections.slice(0, 2).map(photoSection)}</div> : sections.slice(0, 2).map(photoSection)}
+            {photoSection(sections[2]!)}
+            {/* Asked again under the photos; with none, the one in the write-up is right above. */}
+            {d.book_url && d.photos.length > 0 && (
+              <section className={cx(k.card, s.ask)} aria-label="Get a quote">
+                <p className={s.askText}>Want work like this at your place?</p>
+                <a className={cx(k.cta, k.auto)} href={d.book_url}>Get a quote</a>
+              </section>
             )}
-            {d.book_url && (
-              <div className="card card-pad row-between wrap" style={{ gap: 12 }}>
-                <strong>Want work like this at your place?</strong>
-                <a className="btn" href={d.book_url} style={{ background: "var(--brand)", color: "var(--on-brand)", borderColor: "var(--brand)" }}>Get a quote</a>
-              </div>
-            )}
-            <PrivacyFooter url={d.company.privacy_url} />
-          </div>
+            <div className={k.foot}><PrivacyFooter url={d.company.privacy_url} /></div>
+          </>
         )}
-      </div>
-    </div>
+      </ClientBody>
+    </ClientPage>
   );
 }

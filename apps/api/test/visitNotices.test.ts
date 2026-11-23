@@ -17,9 +17,9 @@ vi.mock("../src/lib/notify", async (original) => ({
 }));
 
 const notify = await import("../src/lib/notify");
-const { buildContext, executeRun, loadContext, officeVars, reminderSkip, visitNoticeSkip, visitWhen, withEvent } = await import("../src/services/automations");
+const { buildContext, executeRun, keptVars, loadContext, officeVars, reminderSkip, visitNoticeSkip, visitWhen, withEvent } = await import("../src/services/automations");
 const { adminClient } = await import("../src/lib/supabase");
-const { readClientLink } = await import("../src/lib/links");
+const { KEPT_LINK, readClientLink } = await import("../src/lib/links");
 const sendEmail = vi.mocked(notify.sendEmail);
 const sendSms = vi.mocked(notify.sendSms);
 
@@ -126,6 +126,8 @@ describe("what a rule on a visit knows", () => {
     expect(await readClientLink(env, link.split("/hub/")[1]!)).toMatchObject({ c: CO, t: "client", id: ANA_ID, own: 1 });
     const office = String((await officeVars(env, ctx, env.APP_URL!)).link);
     expect(await readClientLink(env, office.split("/hub/")[1]!)).toMatchObject({ t: "client", id: ANA_ID, via: "office" });
+    // What the team reads (the copy on the timeline, which crews who work for the client read too) has no link at all.
+    expect(keptVars(ctx).link).toBe(KEPT_LINK);
   });
 
   it("says where a moved visit was", async () => {
@@ -194,6 +196,11 @@ describe("the engine, on a visit booked, moved or cancelled", () => {
     expect(emailed()[0]!.text).toContain("12 Oak St, Radford, VA on Thursday, October 29 at 9:00 AM. Was . https://ops.example.com/hub/");
     expect(calls.filter((c) => c.path === "rpc/visit_notice_is_repeat").map((c) => c.body)).toEqual([{ p_run: 7 }]);
     expect(finished(calls)[0]).toMatchObject({ p_status: "done" });
+    // The copy on the timeline is about the visit, which crews who work for the client read: no link to the client's page in it.
+    const kept = calls.find((c) => c.method === "POST" && c.path === "messages")!.body as { related_type: string; body: string };
+    expect(kept.related_type).toBe("visit");
+    expect(kept.body).toContain(KEPT_LINK);
+    expect(kept.body).not.toContain("/hub/");
   });
 
   it("says where a moved visit was", async () => {

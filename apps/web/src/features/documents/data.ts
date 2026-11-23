@@ -13,6 +13,7 @@ import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { documentCompany, invoiceContract, isSignedQuote, liveContract, readApproval, signedContract, signedTemplate, type QuoteContract, type TemplatedQuote } from "./build";
 import type { DocumentCompany } from "./types";
+import { loadSettings } from "@/lib/companySettings";
 
 export * from "./build";
 
@@ -72,8 +73,10 @@ export function useLetterhead() {
   const { company } = useSession();
   return useQuery({
     queryKey: letterheadKey(company.id),
-    queryFn: async (): Promise<DocumentCompany> =>
-      documentCompany(unwrap(await supabase().from("companies").select("name, phone, email, website, address, settings").eq("id", company.id).single())),
+    queryFn: async (): Promise<DocumentCompany> => {
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, phone, email, website, address").eq("id", company.id).single(), loadSettings(company.id)]);
+      return documentCompany({ ...unwrap(row), settings });
+    },
     placeholderData: () => documentCompany(company),
   });
 }

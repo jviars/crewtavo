@@ -21,6 +21,7 @@ import { isStaff, toAssistantAccess, type AssistantAccess } from "@crewtavo/core
 import type { Env } from "../env";
 import { bearerToken } from "./auth";
 import { dbError } from "./http";
+import { authRoute, readUpTo } from "./signInGuard";
 import { userClient, type Db } from "./supabase";
 
 export const ASSISTANT_READ_ONLY = "This assistant can only read. To let it make changes, choose what it can change in Crewtavo, under Settings → AI assistants.";
@@ -148,7 +149,8 @@ export async function guardAssistant(env: Env, request: Request, prefix: string,
   if (!token || !client) return send(request);
   const path = new URL(request.url).pathname.slice(prefix.length);
   if (prefix === "/auth/v1") {
-    if (isRead(request.method) || OAUTH_CLIENT_PATHS.includes(path)) return send(request);
+    // Read as Auth's router reads it, as every other check on Auth's paths is (authRoute).
+    if (isRead(request.method) || OAUTH_CLIENT_PATHS.includes(authRoute(new URL(request.url), prefix))) return send(request);
     return Response.json(
       { code: 403, error_code: "assistant_not_allowed", msg: "An AI assistant can't change your sign-in. Do that in Crewtavo itself." },
       { status: 403 },
@@ -176,9 +178,12 @@ export async function guardAssistant(env: Env, request: Request, prefix: string,
  * which holds on a Supabase project without the gateway.
  */
 export async function guardConsent(env: Env, request: Request, prefix: string, send: (request: Request) => Promise<Response>): Promise<Response> {
-  const path = new URL(request.url).pathname.slice(prefix.length);
-  if (request.method !== "POST" || !/^\/oauth\/authorizations\/[^/]+\/consent$/.test(path)) return send(request);
-  const text = await request.text();
+  // The path as Auth's router reads it (authRoute), so another spelling of it is still the consent.
+  const path = authRoute(new URL(request.url), prefix);
+  if (request.method.toUpperCase() !== "POST" || !/^\/oauth\/authorizations\/[^/]+\/consent$/.test(path)) return send(request);
+  // An answer on the consent screen is a few bytes.
+  const text = await readUpTo(request, 64 * 1024);
+  if (text === null) return Response.json({ code: 413, error_code: "request_too_large", msg: "That request is too large." }, { status: 413 });
   const replay = new Request(request.url, { method: request.method, headers: request.headers, body: text });
   let action: unknown = null;
   try {

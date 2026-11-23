@@ -10,13 +10,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Field, FormError } from "@/components/ui/Field";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Face } from "@/components/ui/Avatar";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { parseZips } from "./salesAreas";
+import styles from "./settings.module.css";
 import type { Member } from "./TeamSettings";
+import { Select } from "@/components/ui/Select";
 
 const nameOf = (m: Member) => m.profile?.full_name || m.profile?.email || "Team member";
 
@@ -53,8 +56,8 @@ export function SalesAreaSettings() {
     onSettled: refresh,
   });
 
-  if (data.isPending) return <Loading label="Loading your sales areas"><CardSkeleton lines={4} /></Loading>;
-  if (data.error) return <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>;
+  if (data.isPending) return <Loading label="Loading your sales areas"><SectionSkeleton rows={4} /></Loading>;
+  if (data.error) return <ErrorState error={data.error} onRetry={() => data.refetch()} />;
 
   const { areas, team } = data.data;
   const zipsOf = (userId: string) => areas.filter((a) => a.user_id === userId && a.zip !== "").map((a) => a.zip);
@@ -66,18 +69,13 @@ export function SalesAreaSettings() {
   const ownerOf = (zip: string) => team.find((m) => m.user_id === areas.find((a) => a.zip === zip)?.user_id);
 
   return (
-    <div className="stack">
-      <p className="muted" style={{ margin: 0 }}>
-        New requests go to the salesperson who covers the property's zip code, from your forms, the phone or anywhere else, and a quote made from one goes to the same person. They get a notification. Put in whole zip codes, or the first digits for a wider area: 462 covers every zip that starts with 462, and 46201 still goes to whoever has it.
-      </p>
-      <section className="card card-pad stack" aria-labelledby="sales-areas-title">
-        <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 id="sales-areas-title" className="section-title" style={{ margin: 0 }}>Who covers where</h2>
-          <SaveStatus status={saving.status} />
-        </div>
+    <Section level={3} title="Who covers where" action={<SaveStatus status={saving.status} />}>
+      <p className="set-note">Put in whole zip codes, or the first digits for a wider area: 462 covers every zip that starts with 462, and 46201 still goes to whoever has it.</p>
+      <div className={styles.zips}>
         {people.map((m) => (
           <ZipField
             key={`${m.user_id}:${zipsOf(m.user_id).join()}`}
+            person={m}
             label={`${nameOf(m)}${m.active ? "" : " (no longer on the team)"}`}
             zips={zipsOf(m.user_id)}
             takenBy={(zip) => {
@@ -87,23 +85,23 @@ export function SalesAreaSettings() {
             onSave={(add, drop) => void saving.track(setZips.mutateAsync({ userId: m.user_id, add, drop }))}
           />
         ))}
-        <Field label="Everywhere else" hint="A request from a zip nobody covers, or with no address.">
+        <Field label="Everywhere else" hint="A request from a zip nobody covers, or with no address." className={styles.zip}>
           <Select className="select" value={elseUser} onChange={(e) => void saving.track(setElse.mutateAsync(e.target.value))}>
             <option value="">Nobody: leave it unassigned</option>
             {people.map((m) => <option key={m.user_id} value={m.user_id}>{nameOf(m)}</option>)}
           </Select>
         </Field>
-        <FormError error={setZips.error ?? setElse.error} />
-      </section>
-    </div>
+      </div>
+      <FormError error={setZips.error ?? setElse.error} />
+    </Section>
   );
 }
 
 /** One salesperson's zips, saved when they leave the box. */
-function ZipField({ label, zips, takenBy, onSave }: { label: string; zips: string[]; takenBy: (zip: string) => string | null; onSave: (add: string[], drop: string[]) => void }) {
+function ZipField({ person, label, zips, takenBy, onSave }: { person: Member; label: string; zips: string[]; takenBy: (zip: string) => string | null; onSave: (add: string[], drop: string[]) => void }) {
   const [problem, setProblem] = useState<string | null>(null);
   return (
-    <Field label={label} error={problem}>
+    <Field label={<span className={styles.zipWho}><span className="avatar" aria-hidden="true" style={{ background: person.profile?.color || "var(--avatar)" }}><Face name={nameOf(person)} photo={person.profile?.avatar_url} /></span>{label}</span>} error={problem} className={styles.zip}>
       <input
         className="input"
         defaultValue={zips.join(", ")}

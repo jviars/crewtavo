@@ -1,0 +1,261 @@
+/*
+ * Marketing's Reviews, Social, Showcases and Website tabs (App-Marketing.dc.html, Mobile-Apps.dc.html
+ * › Marketing, B-Inbox.dc.html): sections on hairlines, never boxes; forms in a quiet two-column
+ * grid with a save bar on a hairline; reviews, posts and showcases as inbox rows. Everything else is
+ * the shared kit (Section, StatStrip, InboxList, RelatedList, Toolbar). On a phone each tab is the
+ * grouped screen (.m-grouped): sections are inset cards on the grey ground.
+ */
+
+/* ---- A tab: its parts down the page with the page's gap ---- */
+.tab { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; min-width: 0; }
+
+/* ---- Words ---- */
+.note { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
+.fine { margin: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.fine a, .note a { color: var(--green); font-weight: 600; }
+.fine a:hover, .note a:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.warnLine { margin: 0; font-size: var(--fs-13); font-weight: 600; line-height: 1.45; color: var(--warning); }
+.warnLine a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.textLink { justify-self: start; font-size: var(--fs-13); font-weight: 600; color: var(--green); }
+.textLink:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
+.copy { display: grid; gap: 10px; min-width: 0; }
+.notes { display: grid; gap: 4px; }
+.notes:empty { display: none; }
+.standing { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
+.standing strong { color: var(--ink); font-weight: 600; }
+
+/* ---- Forms in a section: fields down a column, two across where they pair, a save bar on a hairline ---- */
+.form { display: grid; gap: 16px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.full { grid-column: 1 / -1; }
+.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.fill { display: flex; width: 100%; }
+.fill > button { flex: 1 1 0; min-width: 0; padding-inline: 6px; }
+.saveBar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.saveNote { font-size: var(--fs-12); color: var(--text-3); }
+/* A section's own switch, in its heading: its state in quiet words, then the switch. */
+.headSwitch { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); font-weight: 500; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.headSwitch:has(input:disabled) { cursor: not-allowed; }
+/* Switches as lines of their own, words on the left (Page-Settings.dc.html's switch line). */
+.switches { display: grid; }
+.switchLine { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); font-weight: 500; color: var(--ink); cursor: pointer; }
+.switchLine:last-child { border-bottom: 0; }
+.quote { margin: 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--divider); font-size: var(--fs-13); color: var(--text-2); }
+
+/* ---- Google's figures and stars ---- */
+.statStar { margin-right: 4px; font-size: 0.8em; color: var(--req); }
+.stars { display: inline-flex; flex: none; font-size: var(--fs-12); letter-spacing: 1px; line-height: 1; white-space: nowrap; }
+.starsOn { color: var(--req); }
+.starsOff { color: var(--fill-3); }
+:global(:root.dark) .starsOff { color: var(--text-4); }
+.noStars { font-size: var(--fs-12); color: var(--text-3); }
+.trend { display: grid; gap: 10px; min-width: 0; }
+/* The months with reviews and their average, as small figures in a row. */
+.averages { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; font-size: var(--fs-12); }
+.averages > div { display: flex; gap: 4px; }
+.averages dt { color: var(--text-3); }
+.averages dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ---- Google reviews: inbox rows with the words and the reply under the name ---- */
+.listBody { display: grid; gap: 12px; min-width: 0; }
+.syncNote { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); white-space: nowrap; }
+.syncNote:empty { display: none; }
+.reviewList { min-width: 0; }
+.review:global(.il-row) { grid-template-columns: 32px minmax(0, 1fr); }
+.review:global(.il-row):hover { background: none; }
+.review:global(.il-row)[data-highlight] { background: var(--green-tint); }
+.avatarPhoto { width: 100%; height: 100%; object-fit: cover; }
+.reviewBody { display: grid; gap: 6px; min-width: 0; }
+.reviewHead { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 24px; }
+.reviewWho { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.reviewWho strong { font-weight: 600; color: var(--ink); }
+.reviewHead :global(.il-age) { flex: none; font-size: var(--fs-12); }
+.rowMore { flex: none; width: 28px; height: 28px; margin: -4px -4px -4px 0; border-color: transparent; color: var(--text-3); }
+.rowMore:hover { background: var(--fill-2); color: var(--ink); }
+.reviewText { margin: 0; font-size: var(--fs-14); line-height: 1.55; color: var(--ink); max-width: 72ch; }
+.reviewMeta { font-size: var(--fs-12); color: var(--text-3); }
+.reviewMeta a { color: var(--text-2); font-weight: 600; }
+.reviewMeta a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+/* The reply posted: under a quiet label, set in from a hairline so it reads as the business's answer. */
+.reply { display: grid; gap: 3px; margin-top: 2px; padding: 2px 0 2px 12px; border-left: 2px solid var(--divider); max-width: 72ch; }
+.replyLabel { font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.replyText { margin: 0; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+.replyMeta { font-size: var(--fs-12); color: var(--text-3); }
+.replyMeta :global(.link-btn) { font-size: var(--fs-12); color: var(--text-2); }
+.replyMeta :global(.link-btn):hover { color: var(--ink); }
+/* Reply: a small outlined chip, never a second green button. */
+.replyButton.replyButton { justify-self: start; height: 28px; gap: 5px; margin-top: 2px; padding: 0 10px; border: 1px solid var(--divider); border-radius: 7px; background: var(--page); color: var(--ink); font-size: var(--fs-12); }
+.replyButton.replyButton:hover { border-color: var(--border); background: var(--fill-2); }
+.replyButton svg { width: 14px; height: 14px; color: var(--text-3); }
+.replyForm { display: grid; gap: 8px; margin-top: 2px; max-width: 72ch; }
+.replyBar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+/* ---- Match to a client: names that fit, as choices on hairlines ---- */
+.options { display: grid; }
+.optionsLabel { padding-bottom: 6px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 8px; border: 0; border-bottom: 1px solid var(--row-divider); border-radius: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.option:first-of-type { border-top: 1px solid var(--row-divider); }
+.option:hover { background: var(--fill); }
+.option[aria-pressed="true"] { background: var(--green-tint); }
+.option > svg { flex: none; color: var(--quiet); }
+.option[aria-pressed="true"] > svg { color: var(--green-dark); }
+.optionFace { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--fill-3); color: var(--text-2); font-size: 11px; font-weight: 700; }
+.optionText { display: grid; flex: 1; min-width: 0; }
+.optionName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-14); font-weight: 600; }
+.optionDetail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---- Showcases: a page's lede, rows that open the showcase, a taken-down one's reason ---- */
+.lede { margin: 0; max-width: 72ch; font-size: var(--fs-13); line-height: 1.5; color: var(--text-3); }
+.showcase:global(.il-row) { grid-template-columns: 32px minmax(0, 1fr) auto; }
+.metaLink { color: var(--text-2); font-weight: 600; }
+.metaLink:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+/* Why one came down by itself, in place of its description: amber words that wrap rather than cut short. */
+.downLine { font-weight: 500; color: var(--warning); }
+.showcase :global(.il-subject):has(.downLine) { white-space: normal; }
+
+/* ---- In a dialog (make a showcase, a new post): each part under a small label, photos as a grid ---- */
+.dialogPart { display: grid; gap: 10px; min-width: 0; }
+.dialogHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.dialogLabel { display: flex; align-items: baseline; gap: 8px; margin: 0; font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; color: var(--ink); }
+.dialogCount { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+.dialogHead :global(.checkbox) { font-size: var(--fs-13); }
+.linkText { font-size: var(--fs-13); overflow-wrap: anywhere; }
+.thumbCell { display: grid; gap: 4px; min-width: 0; }
+.roleSelect:global(.select) { height: 30px; min-height: 30px; padding-block: 0; font-size: var(--fs-13); }
+.thumbCheck:global(.checkbox) { font-size: var(--fs-12); color: var(--text-2); }
+.thumbNote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-12); color: var(--text-3); }
+
+.dialogFieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.dialogFieldset > legend { padding: 0 0 8px; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+/* Reviews to pick from, as rows on hairlines; the one picked tinted green (its class, never an inline border). */
+.choices { display: grid; max-height: 300px; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--row-divider); border-bottom: 1px solid var(--row-divider); }
+.choices :global(.card-row.choice-row) { gap: 10px; padding: 11px 8px; border: 0; border-bottom: 1px solid var(--row-divider); border-radius: 0; }
+.choices :global(.card-row.choice-row):last-child { border-bottom: 0; }
+.choices :global(.card-row.choice-row):hover { background: var(--fill); }
+.choices :global(.card-row.choice-row.picked) { background: var(--green-tint); }
+.choices :global(.card-row.choice-row) input[type="radio"] { flex: none; margin-top: 3px; accent-color: var(--green); }
+.choices > :is(:global(.muted), :global(.btn)) { margin: 8px; }
+.choiceHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.choiceHead strong { font-weight: 600; }
+.cardPreview { width: 220px; height: 220px; border-radius: 10px; box-shadow: 0 0 0 1px var(--divider); }
+.previewRow { display: flex; gap: 8px; overflow-x: auto; }
+.when { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.whenZone { padding-bottom: 10px; font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---- Website: the range, the figure and its chart with the totals beside it (Page-Finance.dc.html) ---- */
+.rangeRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.rangeWords { font-size: var(--fs-13); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.webHero { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 36px; align-items: start; }
+.webHeroMain { min-width: 0; }
+.webHeroMain > :global(.segmented) { margin-bottom: 12px; }
+.big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.big :global(.chip), .totalValue :global(.chip) { height: auto; padding: 0; background: none; font-size: var(--fs-14); font-weight: 600; letter-spacing: 0; }
+.prev { margin: 2px 0 0; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.webChart { margin-top: 10px; }
+.totals { display: grid; min-width: 0; }
+.total { display: grid; gap: 1px; padding: 12px 0; border-bottom: 1px solid var(--divider); }
+.total:first-child { padding-top: 0; }
+.totalLabel { font-size: var(--fs-12); color: var(--text-3); }
+.totalValue { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--fs-20); font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.totalValue :global(.chip) { font-size: var(--fs-12); }
+.totalHint { font-size: var(--fs-12); color: var(--text-3); }
+.source { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.source > i { flex: none; width: 8px; height: 8px; border-radius: var(--radius-pill); }
+.sourceText { display: grid; min-width: 0; }
+.sourceText strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.sourceText span { font-size: var(--fs-12); color: var(--text-3); }
+@media (max-width: 1100px) { .webHero { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
+
+/* ---- A client's page: their showcases on the quiet line under the name, and under the photos switch ---- */
+.flag { display: inline-flex; align-items: center; gap: 5px; font-size: inherit; color: var(--text-2); text-decoration: none; }
+.flag svg { color: var(--quiet); }
+.flag:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.switchNote { display: block; margin-top: 2px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+
+/* ---- Social posts: inbox rows with the post's picture; a draft or scheduled one opens to edit ---- */
+.post:global(.il-row) { grid-template-columns: 40px minmax(0, 1fr) auto; }
+.caption { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.postNote { margin: 4px 0 0; font-size: var(--fs-12); color: var(--text-3); }
+/* How it went on each network: a dot and words, then the link or what went wrong. */
+.results { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.results > li { display: grid; gap: 6px; min-width: 0; }
+.resultLine { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; font-size: var(--fs-12); color: var(--text-3); }
+.resultLine :global(.pill) { font-size: var(--fs-12); }
+.resultLine a { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; color: var(--text-2); }
+.resultLine a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.results :is(a, button) { position: relative; z-index: 1; }
+.resultPlace { display: inline-flex; align-items: center; gap: 1px; }
+/* The status leads the meta line only on a phone: on a desktop it's on the right, so neither it nor its dot shows here. */
+:global(.il-meta) > .metaStatus:first-child + :global(.meta-dot) { display: none; }
+.resultActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.resultActions :global(.btn) { height: 26px; padding: 0 9px; border: 1px solid var(--divider); border-radius: 6px; background: var(--page); color: var(--ink); font-size: var(--fs-12); }
+.resultActions :global(.btn):hover { border-color: var(--border); background: var(--fill-2); }
+.asideMore { width: 28px; height: 28px; margin: -2px -4px 0 0; border-color: transparent; color: var(--text-3); }
+.asideMore:hover { background: var(--fill-2); color: var(--ink); }
+.afterList { padding-top: 12px; }
+.afterList:empty { display: none; }
+.connect { justify-self: start; }
+.fieldset { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.fieldset > legend { padding: 0 0 6px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
+.fieldset :global(.checkbox) { font-size: var(--fs-13); }
+.checkNote { display: block; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+
+@media (max-width: 900px) {
+  .tab { gap: 22px; }
+  /* The figure and its chart in an inset card, the totals two across in another. */
+  .webHero { gap: 16px; }
+  .webHeroMain { padding: 14px 16px; border-radius: 14px; background: var(--m-card); }
+  .webHeroMain > :global(.segmented) { display: flex; width: 100%; background: var(--m-group); }
+  .webHeroMain > :global(.segmented) > button { flex: 1 1 0; min-width: 0; padding: 0 6px; }
+  .totals { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border-radius: 14px; background: var(--m-card); }
+  /* Hairlines only between the four, never along the card's own edges. */
+  .total { padding: 12px 16px; border-bottom: 0; }
+  .total:first-child { padding-top: 12px; }
+  .total:nth-child(2n) { box-shadow: inset 1px 0 0 var(--row-divider); }
+  .total:nth-child(n + 3) { box-shadow: inset 0 1px 0 var(--row-divider); }
+  .total:nth-child(2n):nth-child(n + 3) { box-shadow: inset 1px 1px 0 var(--row-divider); }
+  .totalLabel, .totalHint { font-size: var(--fs-13); }
+  .rangeWords { font-size: var(--fs-14); }
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .note { font-size: var(--fs-14); }
+  .warnLine { font-size: var(--fs-14); }
+  .saveBar { border-top: 0; padding-top: 0; }
+  .saveBar :global(.btn) { flex: 1 1 auto; }
+  .headSwitch { min-height: 44px; font-size: var(--fs-14); }
+  .switchLine { min-height: 48px; font-size: var(--fs-15); }
+  /* No search here: the filter button sits at the end of the chips' row rather than on a row of its own. */
+  .reviewTools :global(.list-toolbar) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .reviewTools :global(.toolbar-end) { order: 0; }
+  .reviewTools :global(.list-toolbar > .tabs) { margin-right: 0; padding-right: 0; }
+  /* Last synced waits for Sync now's sheet; how far a first sync has got still shows. */
+  .syncNote:not([data-progress]) { display: none; }
+  .review:global(.il-row) { grid-template-columns: 40px minmax(0, 1fr); }
+  .post:global(.il-row) { grid-template-columns: 44px minmax(0, 1fr) auto; }
+  .resultLine { font-size: var(--fs-13); }
+  .resultActions :global(.btn) { height: 36px; font-size: var(--fs-14); }
+  .asideMore { width: 44px; height: 44px; margin: -10px -12px 0 0; }
+  :global(.il-meta) > .metaStatus:first-child + :global(.meta-dot) { display: inline; }
+  .metaStatus:global(.mobile-only) { display: inline-flex !important; }
+  .metaStatus :global(.pill) { font-size: var(--fs-13); }
+  /* The quiet line wraps rather than cutting each part short. */
+  .post :global(.il-meta), .showcase :global(.il-meta) { flex-wrap: wrap; row-gap: 2px; }
+  .afterList { padding-top: 0; }
+  .postNote, .checkNote { font-size: var(--fs-13); }
+  .showcase:global(.il-row) { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .lede { font-size: var(--fs-14); }
+  .roleSelect:global(.select) { height: 40px; min-height: 40px; font-size: var(--fs-15); }
+  .thumbCheck:global(.checkbox), .thumbNote { font-size: var(--fs-13); }
+  .fieldset :global(.checkbox) { min-height: 36px; align-items: center; font-size: var(--fs-15); }
+  .reviewText { font-size: var(--fs-15); }
+  .reviewMeta, .replyMeta, .replyLabel { font-size: var(--fs-13); }
+  .replyText { font-size: var(--fs-14); }
+  .rowMore { width: 44px; height: 44px; margin: -12px -12px -12px 0; }
+  .replyButton.replyButton { height: 36px; font-size: var(--fs-14); }
+  /* Small things people tap (Reply, a reply's Edit and Delete, a post's links and its two answers): 44px to a finger, no bigger to the eye. */
+  .replyMeta :global(.link-btn), .resultLine a, .reviewMeta a { position: relative; }
+  .replyMeta :global(.link-btn)::after, .resultLine a::after, .reviewMeta a::after { content: ""; position: absolute; inset: -13px -6px; }
+  .replyButton.replyButton::after, .resultActions :global(.btn)::after { content: ""; position: absolute; inset: -4px 0; }
+  .option { min-height: 56px; }
+  .optionName { font-size: var(--fs-16); }
+  .optionDetail { font-size: var(--fs-13); }
+}

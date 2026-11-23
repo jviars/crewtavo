@@ -6,6 +6,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { loadSettings } from "@/lib/companySettings";
 
 type Settings = Record<string, unknown>;
 
@@ -14,8 +15,7 @@ export function useSettingsSaver() {
   return useMutation({
     meta: { inline: true },
     mutationFn: async (patch: Settings | ((current: Settings) => Settings)) => {
-      const current = unwrap(await supabase().from("companies").select("settings").eq("id", session.company.id).single());
-      const settings = (current.settings ?? {}) as Settings;
+      const settings = (await loadSettings(session.company.id)) as Settings;
       const change = typeof patch === "function" ? patch(settings) : patch;
       unwrap(await supabase().from("companies").update({ settings: { ...settings, ...change } as never }).eq("id", session.company.id));
     },

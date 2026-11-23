@@ -1,11 +1,17 @@
 /**
  * The frame around the site visit's screens on the iPad: no sidebar or top bar, just a slim header
- * (back, what this is, who's signed in), and the states the three screens share: loading, not
- * found, no access, an estimate with nothing on it yet, and one that can't be signed any more.
+ * (back, the business and what this is, the step it's at, who's signed in), and the states the three
+ * screens share: loading, not found, no access, an estimate with nothing on it yet, and one that
+ * can't be signed any more. The homeowner looks at these screens, so they wear the business's own
+ * color, as its Client Hub does (Client-Phone and Client-Desktop boards): the estimate's paper
+ * color (documentColor: the template's, else the business's brand color), as --brand.
  */
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { documentColor } from "@crewtavo/core/documents";
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
-import { Face } from "@/components/ui/Avatar";
+import { Face, initials } from "@/components/ui/Avatar";
+import { contrastRatio, inkOn } from "@/features/documents/words";
+import { logoUrl } from "@/lib/files";
 import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -23,7 +29,35 @@ export interface BackLinkProps {
   onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-export function VisitFrame({ title, subtitle, back, me = true, pageTitle, children }: {
+/** The visit's steps, as the header shows them. */
+const STEPS = ["Check it", "Sign", "Done"] as const;
+
+/** `hex` mixed toward black by `amount` (0 to 1). */
+function shade(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => Math.round(((n >> shift) & 255) * (1 - amount)).toString(16).padStart(2, "0");
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/** The light theme's grey ground (--m-group): words on it read on the white cards too. */
+const GROUND = "#f2f1ed";
+
+/**
+ * The business's color as CSS variables: the fill, the words on it, and the color for words in it on
+ * the light page: the color itself, darkened until it reads on the grey ground (4.5:1), else ink, as
+ * the Client kit does. The dark theme lightens it instead (visit.module.css).
+ */
+export function brandStyle(color: string): CSSProperties {
+  const hex = /^#[0-9a-f]{6}$/i.test(color);
+  const words = hex ? ([0, 0.15, 0.3, 0.45].map((a) => shade(color, a)).find((c) => contrastRatio(c, GROUND) >= 4.5) ?? "var(--ink)") : "var(--ink)";
+  return {
+    ["--brand" as string]: color,
+    ["--on-brand" as string]: inkOn(color),
+    ["--brand-words" as string]: words,
+  };
+}
+
+export function VisitFrame({ title, subtitle, back, me = true, pageTitle, brand, step, children }: {
   title: ReactNode;
   subtitle?: ReactNode;
   back?: BackLinkProps | null;
@@ -31,8 +65,16 @@ export function VisitFrame({ title, subtitle, back, me = true, pageTitle, childr
   me?: boolean;
   /** The browser tab's title. */
   pageTitle?: string;
+  /** The color the screen wears: the estimate's paper color. Without one, the business's brand color (else navy). */
+  brand?: string | null;
+  /** Where the visit is: checking the estimate (1), signing (2), signed (3). */
+  step?: 1 | 2 | 3;
   children: ReactNode;
 }) {
+  const { company } = useSession();
+  const color = brand ?? documentColor({ color: null }, company.settings);
+  // The way back as a round button; its words beside it unless they'd repeat the title.
+  const backWords = back && back.label !== title ? back.label : null;
   // Each screen starts at the top (the app shell does this for its own screens).
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -47,25 +89,50 @@ export function VisitFrame({ title, subtitle, back, me = true, pageTitle, childr
   }, [pageTitle]);
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={brandStyle(color)}>
       <header className={styles.header}>
         <div className={styles.side}>
           {back && (
             <Link to={back.to} className={styles.back} onClick={back.onClick} aria-label={back.label}>
-              <Icon name="chevronLeft" size={20} />
-              <span className={styles.backText} aria-hidden="true">{back.label}</span>
+              <span className={styles.backIcon}><Icon name="chevronLeft" size={20} /></span>
+              {backWords && <span className={styles.backText} aria-hidden="true">{backWords}</span>}
             </Link>
           )}
         </div>
         <div className={styles.title}>
-          <strong>{title}</strong>
-          {subtitle && <span>{subtitle}</span>}
+          <CompanyTile name={company.name} settings={company.settings} />
+          <span className={styles.titleText}>
+            <strong>{title}</strong>
+            {subtitle && <span>{subtitle}</span>}
+          </span>
         </div>
-        <div className={`${styles.side} ${styles.sideEnd}`}>{me && <Me />}</div>
+        <div className={`${styles.side} ${styles.sideEnd}`}>
+          {step && (
+            <ol className={styles.steps} aria-label={`Step ${step} of ${STEPS.length}`}>
+              {STEPS.map((label, i) => (
+                <li key={label} className={styles.stepItem} data-state={i + 1 < step ? "done" : i + 1 === step ? "on" : undefined} aria-current={i + 1 === step ? "step" : undefined}>
+                  <span className={styles.stepNumber} aria-hidden="true">{i + 1 < step ? <Icon name="check" size={13} bold /> : i + 1}</span>
+                  {label}
+                </li>
+              ))}
+            </ol>
+          )}
+          {me && <Me />}
+        </div>
       </header>
       {children}
     </div>
   );
+}
+
+/** The business's logo on white, or its initials on its color, beside the title. */
+function CompanyTile({ name, settings }: { name: string; settings: Record<string, unknown> }) {
+  const logo = logoUrl(settings);
+  const [broken, setBroken] = useState<string | null>(null);
+  if (logo && broken !== logo) {
+    return <span className={`${styles.tile} ${styles.tileLogo}`} aria-hidden="true"><img src={logo} alt="" draggable={false} onError={() => setBroken(logo)} /></span>;
+  }
+  return <span className={styles.tile} aria-hidden="true">{initials(name)}</span>;
 }
 
 /** The salesperson holding the iPad: their face and first name. */
@@ -92,7 +159,7 @@ export const whoAndWhere = (quote: Pick<EstimateQuote, "client" | "property">) =
 function Centered({ children }: { children: ReactNode }) {
   return (
     <main className={styles.centered}>
-      <div className={`card ${styles.centeredCard}`}>{children}</div>
+      <div className={styles.centeredCard}>{children}</div>
     </main>
   );
 }
@@ -115,7 +182,7 @@ export function VisitError({ error, onRetry }: { error: unknown; onRetry: () => 
       <Centered>
         <ErrorState error={error} onRetry={onRetry} />
         <div className={styles.centeredActions}>
-          <Link className={`btn ${styles.touch}`} to="/roofing">Back to Roofing</Link>
+          <Link className={`btn ${styles.touch} ${styles.ghostButton}`} to="/roofing">Back to Roofing</Link>
         </div>
       </Centered>
     </VisitFrame>
@@ -153,8 +220,8 @@ export function VisitEmpty({ quote }: { quote: Pick<EstimateQuote, "id" | "title
 export function VisitLoading({ kind }: { kind: "visit" | "sign" | "signed" }) {
   const head = (
     <span className={styles.loadingTitle}>
-      <Skeleton width={150} height={15} />
-      <Skeleton width={210} height={11} />
+      <Skeleton width={150} height={14} />
+      <Skeleton width={210} height={10} />
     </span>
   );
   return (
@@ -165,9 +232,9 @@ export function VisitLoading({ kind }: { kind: "visit" | "sign" | "signed" }) {
           <div className={styles.visit}>
             <div className={styles.panel}>
               <div className={styles.panelBody}>
-                <Skeleton height={56} radius={12} />
-                <div className={`card ${styles.estimate}`}>
-                  <Skeleton width={160} height={20} />
+                <Skeleton height={50} radius={12} />
+                <div className={styles.estimate}>
+                  <Skeleton width={160} height={18} />
                   <EstimateListSkeleton rows={7} size="large" />
                 </div>
               </div>
@@ -181,17 +248,20 @@ export function VisitLoading({ kind }: { kind: "visit" | "sign" | "signed" }) {
             <div className={styles.signPanel}>
               <div className={styles.signScroll}>
                 <Skeleton width={280} height={24} />
-                <Skeleton height={48} radius={8} />
-                <Skeleton height={170} radius={8} />
+                <Skeleton height={52} radius={12} />
+                <Skeleton height={170} radius={14} />
               </div>
             </div>
           </div>
         )}
         {kind === "signed" && (
           <div className={styles.done}>
-            <Skeleton circle width={76} height={76} />
-            <Skeleton width={320} height={30} />
-            <Skeleton width={420} height={16} />
+            <div className={styles.doneHead}>
+              <Skeleton circle width={72} height={72} />
+              <Skeleton width={300} height={28} />
+              <Skeleton width={380} height={14} />
+            </div>
+            <Skeleton height={210} radius={18} style={{ width: "100%" }} />
           </div>
         )}
       </Loading>

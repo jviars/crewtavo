@@ -15,6 +15,7 @@ export interface NavItem {
   keywords?: string; // other words people search for it by
   feature?: "team_chat" | "website" | "careers" | "drive" | "marketing" | "paving_app" | "roofing_app" | "snow_app"; // only while the business has this app on (Apps)
   foot?: boolean; // kept with Settings at the sidebar's foot, in view however long the list is
+  go?: string; // G then this key opens it from anywhere (shown in search beside it)
 }
 
 /**
@@ -24,19 +25,19 @@ export interface NavItem {
  */
 export const NAV_GROUPS: NavItem[][] = [
   [
-    { to: "/", label: msg("Home"), icon: "home", keywords: "dashboard today overview" },
-    { to: "/field", label: msg("My day"), icon: "clock", only: ["crew_lead", "field_crew", "subcontractor"], except: ["/field/paperwork", "/field/jobs"], keywords: "today my visits route" },
+    { to: "/", label: msg("Home"), icon: "home", go: "H", keywords: "dashboard today overview" },
+    { to: "/field", label: msg("My day"), icon: "clock", only: ["crew_lead", "field_crew", "subcontractor"], except: ["/field/paperwork", "/field/jobs"], go: "D", keywords: "today my visits route" },
     { to: "/field/jobs", label: msg("My jobs"), icon: "job", only: ["subcontractor"], keywords: "offers accept decline take turn down price owed paid 1099 total" },
     { to: "/field/paperwork", label: msg("My paperwork"), icon: "file", only: ["subcontractor"], keywords: "w-9 w9 insurance certificate liability workers comp upload send" },
-    { to: "/schedule", label: msg("Schedule"), icon: "calendar", keywords: "calendar visits appointments dispatch route crews tasks" },
-    { to: "/chat", label: msg("Team chat"), icon: "chat", feature: "team_chat", keywords: "chat channels messages talk team crew announcements" },
+    { to: "/schedule", label: msg("Schedule"), icon: "calendar", go: "S", keywords: "calendar visits appointments dispatch route crews tasks" },
+    { to: "/chat", label: msg("Team chat"), icon: "chat", feature: "team_chat", go: "T", keywords: "chat channels messages talk team crew announcements" },
   ],
   [
-    { to: "/clients", label: msg("Clients"), icon: "clients", keywords: "customers contacts properties addresses client hub portal" },
-    { to: "/requests", label: msg("Requests"), icon: "requests", keywords: "inquiries leads assessments website form messages contact form" },
-    { to: "/quotes", label: msg("Quotes"), icon: "quote", roles: ["admin", "office", "estimator"], also: ["/pipeline", "/measure"], keywords: "estimates proposals bids" },
-    { to: "/jobs", label: msg("Jobs"), icon: "job", keywords: "work orders projects recurring visits job costing" },
-    { to: "/invoices", label: msg("Invoices"), icon: "invoice", roles: ["admin", "office"], perm: "invoices", also: ["/payouts"], keywords: "billing bills payments batch invoicing collect payments" },
+    { to: "/clients", label: msg("Clients"), icon: "clients", go: "C", keywords: "customers contacts properties addresses client hub portal" },
+    { to: "/requests", label: msg("Requests"), icon: "requests", go: "R", keywords: "inquiries leads assessments website form messages contact form" },
+    { to: "/quotes", label: msg("Quotes"), icon: "quote", roles: ["admin", "office", "estimator"], also: ["/pipeline", "/measure"], go: "Q", keywords: "estimates proposals bids" },
+    { to: "/jobs", label: msg("Jobs"), icon: "job", go: "J", keywords: "work orders projects recurring visits job costing" },
+    { to: "/invoices", label: msg("Invoices"), icon: "invoice", roles: ["admin", "office"], perm: "invoices", also: ["/payouts"], go: "I", keywords: "billing bills payments batch invoicing collect payments" },
     { to: "/drive", label: msg("Drive"), icon: "folder", roles: ["admin", "office", "estimator"], feature: "drive", keywords: "files documents folders google drive upload pdf word docx trash" },
   ],
   [
@@ -47,14 +48,14 @@ export const NAV_GROUPS: NavItem[][] = [
   [
     { to: "/marketing", label: msg("Marketing"), icon: "marketing", roles: ["admin", "office"], perm: "marketing", feature: "marketing", keywords: "campaigns email blasts automated campaigns re-engage win back close pending quotes reviews google reviews referrals social facebook instagram posts promo promos codes coupons discounts website visits" },
     { to: "/website", label: msg("Website"), icon: "globe", roles: ["admin", "office"], perm: "marketing", feature: "website", keywords: "site web page blog posts edit content cms sveltia decap" },
-    { to: "/finance", label: msg("Finance"), icon: "finance", roles: ["admin", "office"], perm: ["reports", "invoices"], keywords: "reports revenue profit payments money collected net volume fees deposits owed goal job costing expenses" },
-    { to: "/metrics", label: msg("Metrics"), icon: "metrics", roles: ["admin", "office"], perm: "reports", keywords: "reports analytics numbers sales conversion lead sources visits hours team clients" },
+    { to: "/finance", label: msg("Finance"), icon: "finance", roles: ["admin", "office"], perm: ["reports", "invoices"], go: "F", keywords: "reports revenue profit payments money collected net volume fees deposits owed goal job costing expenses" },
+    { to: "/metrics", label: msg("Metrics"), icon: "metrics", roles: ["admin", "office"], perm: "reports", go: "M", keywords: "reports analytics numbers sales conversion lead sources visits hours team clients" },
     { to: "/timesheets", label: msg("Timesheets"), icon: "clock", keywords: "time clock hours payroll time tracking timesheet" },
     { to: "/applicants", label: msg("Applicants"), icon: "user", roles: ["admin", "office"], perm: "hiring", feature: "careers", keywords: "careers jobs hiring applications apply candidates resumes cv interviews employment" },
     { to: "/subs", label: msg("Subcontractors"), icon: "users", roles: ["admin", "office"], perm: "subs", keywords: "subs contractors 1099 w-9 w9 insurance certificates coi liability workers comp audit paperwork vendors" },
-    { to: "/equipment", label: msg("Equipment"), icon: "truck", keywords: "trucks mowers trailers tools fleet maintenance" },
-    { to: "/kb", label: msg("Knowledge base"), icon: "book", keywords: "sop procedures training how to guides" },
-    { to: "/apps", label: msg("Apps"), icon: "apps", roles: ["admin"], perm: "apps", foot: true, keywords: "integrations connect app store team chat website forms formspree contact form careers job applications hiring drive files documents google drive marketing reviews referrals campaigns google reviews google business profile facebook instagram social posts quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
+    { to: "/equipment", label: msg("Equipment"), icon: "truck", go: "E", keywords: "trucks mowers trailers tools fleet maintenance" },
+    { to: "/kb", label: msg("Knowledge base"), icon: "book", go: "K", keywords: "sop procedures training how to guides" },
+    { to: "/apps", label: msg("Apps"), icon: "apps", roles: ["admin"], perm: "apps", foot: true, go: "A", keywords: "integrations connect app store team chat website forms formspree contact form careers job applications hiring drive files documents google drive marketing reviews referrals campaigns google reviews google business profile facebook instagram social posts quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
   ],
 ];
 
@@ -88,14 +89,18 @@ export const PROFILE_ITEM: NavItem = { to: "/settings?tab=profile", label: msg("
 /** The sidebar's last link: Settings, or a sub's profile. */
 export const settingsItem = (session: { role: string }) => (session.role === "subcontractor" ? PROFILE_ITEM : SETTINGS_ITEM);
 
-/** Bottom bar on phones for the team; everything else lives under More. */
+/**
+ * The phone's bottom bar for the team: the day's four, then More for everything else (Clients is the
+ * first thing under Work there). Five tabs in all, as a phone's thumb reaches them.
+ */
 export const MOBILE_TABS: NavItem[] = [
   { to: "/", label: msg("Home"), icon: "home" },
   { to: "/field", label: msg("My day"), icon: "clock" },
   { to: "/schedule", label: msg("Schedule"), icon: "calendar" },
   { to: "/chat", label: msg("Chat"), icon: "chat", feature: "team_chat" },
-  { to: "/clients", label: msg("Clients"), icon: "clients" },
 ];
+/** In Chat's place while the business has team chat off, so the bar still has five tabs. */
+export const CHAT_OFF_TAB: NavItem = { to: "/clients", label: msg("Clients"), icon: "clients" };
 /** A sub's bottom bar: all they have, so there's no More. */
 export const SUB_TABS: NavItem[] = [
   { to: "/field", label: msg("My day"), icon: "clock", only: ["subcontractor"], except: ["/field/paperwork", "/field/jobs"] },
@@ -104,10 +109,10 @@ export const SUB_TABS: NavItem[] = [
   { to: "/settings?tab=profile", label: msg("Profile"), icon: "user", only: ["subcontractor"] },
 ];
 
-/** The phone's bottom bar for this person. */
+/** The phone's bottom bar for this person (the team's More button comes after these). */
 export function mobileTabs(session: { role: string; company?: { settings?: Record<string, unknown> | null } }): NavItem[] {
   if (session.role === "subcontractor") return SUB_TABS;
-  return MOBILE_TABS.filter((item) => !item.feature || featureOn(session.company?.settings, item.feature));
+  return MOBILE_TABS.map((item) => (!item.feature || featureOn(session.company?.settings, item.feature) ? item : CHAT_OFF_TAB));
 }
 
 /**
@@ -116,23 +121,65 @@ export function mobileTabs(session: { role: string; company?: { settings?: Recor
  */
 export const subCanOpen = (pathname: string) => /^\/field(\/paperwork|\/jobs(\/[^/]+)?|\/visits\/[^/]+)?\/?$/.test(pathname) || /^\/settings\/?$/.test(pathname);
 
-/** What people start most often: the sidebar's Create menu, the phone's More sheet and search. */
-export function createItems(session: Pick<Session, "role" | "permissions">): Array<{ to: string; label: string; newLabel: string; icon: IconName; keywords: string }> {
+/**
+ * What people start most often: the sidebar's Create menu, the phone's More sheet and search. The
+ * work's records first, in the order of the stages on Home (request, quote, job, invoice), then the
+ * tools (`tool`), which the Create menu puts below a line.
+ */
+export function createItems(session: Pick<Session, "role" | "permissions">): Array<{ to: string; label: string; newLabel: string; icon: IconName; keywords: string; key: string; tool?: boolean }> {
   if (!isStaff(session.role)) return [];
   const canSell = hasRole(session, "admin", "office", "estimator");
   // newLabel whole, not "New " + the label: Spanish says "Nuevo cliente" but "Nueva cotización".
+  // key: picks it in the Create menu, and after N from anywhere (shortcutTarget).
   return [
     ...(canSell
       ? [
-          { to: "/clients?new=1", label: msg("Client"), newLabel: t("New client"), icon: "clients" as const, keywords: "add customer lead" },
-          { to: "/requests?new=1", label: msg("Request"), newLabel: t("New request"), icon: "requests" as const, keywords: "inquiry lead" },
-          ...(can(session, "sales") ? [{ to: "/quotes?new=1", label: msg("Quote"), newLabel: t("New quote"), icon: "quote" as const, keywords: "estimate proposal" }] : []),
-          { to: "/measure", label: msg("Measurement"), newLabel: t("New measurement"), icon: "area" as const, keywords: "measure map draw area" },
+          { to: "/clients?new=1", label: msg("Client"), newLabel: t("New client"), icon: "clients" as const, keywords: "add customer lead", key: "C" },
+          { to: "/requests?new=1", label: msg("Request"), newLabel: t("New request"), icon: "requests" as const, keywords: "inquiry lead", key: "R" },
         ]
       : []),
-    ...(hasRole(session, "admin", "office") && can(session, "invoices") ? [{ to: "/invoices?new=1", label: msg("Invoice"), newLabel: t("New invoice"), icon: "invoice" as const, keywords: "bill" }] : []),
-    ...(hasRole(session, "admin", "office", "estimator", "crew_lead") && can(session, "schedule") ? [{ to: "/schedule?new=1", label: msg("Visit or task"), newLabel: t("New visit or task"), icon: "calendar" as const, keywords: "schedule appointment" }] : []),
+    // The Jobs page lets the same people start a job as a quote.
+    ...(canSell && can(session, "sales")
+      ? [
+          { to: "/quotes?new=1", label: msg("Quote"), newLabel: t("New quote"), icon: "quote" as const, keywords: "estimate proposal", key: "Q" },
+          { to: "/jobs?new=1", label: msg("Job"), newLabel: t("New job"), icon: "job" as const, keywords: "work order project", key: "J" },
+        ]
+      : []),
+    ...(hasRole(session, "admin", "office") && can(session, "invoices") ? [{ to: "/invoices?new=1", label: msg("Invoice"), newLabel: t("New invoice"), icon: "invoice" as const, keywords: "bill", key: "I" }] : []),
+    ...(canSell ? [{ to: "/measure", label: msg("Measurement"), newLabel: t("New measurement"), icon: "area" as const, keywords: "measure map draw area", key: "M", tool: true }] : []),
+    // A crew lead always schedules their own crew; "Schedule the whole team" opens the rest.
+    ...(hasRole(session, "admin", "office", "estimator", "crew_lead") && (session.role === "crew_lead" || can(session, "schedule")) ? [{ to: "/schedule?new=1", label: msg("Visit or task"), newLabel: t("New visit or task"), icon: "calendar" as const, keywords: "schedule appointment", key: "V", tool: true }] : []),
   ];
+}
+
+/**
+ * Two-key shortcuts from anywhere outside a field: G then a screen's key goes there (G S, Schedule),
+ * N then a Create item's key starts it (N R, a new request). Search shows each beside its row. Only
+ * what this person can open; null for anything else.
+ */
+export function shortcutTarget(session: Pick<Session, "role" | "permissions"> & { company?: { settings?: Record<string, unknown> | null } }, prefix: string, key: string): string | null {
+  const k = key.toUpperCase();
+  if (prefix.toLowerCase() === "g") return NAV_GROUPS.flat().find((item) => item.go === k && navVisible(session, item))?.to ?? null;
+  if (prefix.toLowerCase() === "n") return createItems(session).find((item) => item.key === k)?.to ?? null;
+  return null;
+}
+
+/** The sidebar groups this person folded, by their English names; remembered on this device. */
+const foldKey = (userId: string) => `crewtavo.nav-folded.${userId}`;
+export function foldedGroups(userId: string): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(foldKey(userId)) ?? "[]") as unknown;
+    return Array.isArray(saved) ? saved.filter((g): g is string => typeof g === "string") : [];
+  } catch {
+    return [];
+  }
+}
+export function saveFoldedGroups(userId: string, folded: string[]) {
+  try {
+    localStorage.setItem(foldKey(userId), JSON.stringify(folded));
+  } catch {
+    // Private mode: it just won't be remembered.
+  }
 }
 
 /** Whether a person sees a navigation item. */

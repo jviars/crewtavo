@@ -5,7 +5,7 @@
  * automatically (PUT /reviews/asks edits the two starter rules), referral links, and asking for
  * referrals (POST /referrals/request by hand, PUT /referrals/asks switches the starter rule).
  */
-import { addDays, ADMINS, localDate, OFFICE, SALES, type TablesInsert } from "@crewtavo/core";
+import { addDays, ADMINS, localDate, OFFICE, SALES, seesInvoices, type TablesInsert } from "@crewtavo/core";
 import {
   AUTOMATED_CAMPAIGNS,
   AUTOMATED_KEYS,
@@ -43,6 +43,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { firstName, isEmail, renderEmail } from "../lib/email";
 import { appUrl, asJson, dbError, HttpError, must, param, readJson, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
+import { noAssistants } from "../lib/noAssistants";
 import { reportError } from "../lib/monitoring";
 import { emailReady, sendEmail } from "../lib/notify";
 import { adminClient } from "../lib/supabase";
@@ -69,7 +70,7 @@ type Ctx = Parameters<typeof appUrl>[0];
 
 const requireEmail = (c: Ctx) => requireCampaignEmail(c.env, c.var.companyId);
 
-const requireMarketing = (c: Ctx) => requireCampaignsOn(c.var.db, c.var.companyId);
+const requireMarketing = (c: Ctx) => requireCampaignsOn(c.env, c.var.companyId);
 
 /**
  * Sends the signed-in person (or `to`) a test copy, with "[Test]" in the subject: no tracking, and
@@ -80,7 +81,7 @@ async function sendTest(c: Ctx, d: { to?: string; subject: string; body: string;
   const me = must(await c.var.db.from("profiles").select("email, full_name").eq("user_id", c.var.userId).maybeSingle());
   const to = d.to ?? me.email;
   if (!to || !isEmail(to)) throw new HttpError(400, "Add an email address to send the test to.");
-  const company = must(await c.var.db.from("companies").select("name, phone, email, website, address, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, website, address, settings").eq("id", c.var.companyId).maybeSingle());
   // A test of a marketing email is held to what the real one is: no postal address, no email.
   const noAddress = d.marketing ? senderAddressProblem(company) : null;
   if (noAddress) throw new HttpError(400, noAddress);
@@ -172,7 +173,7 @@ marketing.put("/campaigns/automated/:key", requireUser, requireCompany(ADMINS, "
   const { db, companyId } = c.var;
   if (body.enabled) {
     if (campaign.marketing) {
-      const company = must(await db.from("companies").select("settings").eq("id", companyId).maybeSingle());
+      const company = must(await adminClient(c.env).from("companies").select("settings").eq("id", companyId).maybeSingle());
       if (!marketingOn(company.settings as Record<string, unknown> | null)) {
         throw new HttpError(409, "Marketing is off, so automated campaigns can't be sent. An owner or admin can install it again in Apps.");
       }
@@ -344,7 +345,7 @@ marketing.put("/reviews/asks", requireUser, requireCompany(ADMINS, "marketing"),
   const rules = must(await db.from("automation_rules").select(ASK_RULE_FIELDS).eq("company_id", companyId).in("template_key", Object.values(ASK_TEMPLATE_KEYS)));
 
   // Settings first, read fresh and merged, as saveWebsite does.
-  const current = must(await db.from("companies").select("settings, timezone").eq("id", companyId).maybeSingle());
+  const current = must(await adminClient(c.env).from("companies").select("settings, timezone").eq("id", companyId).maybeSingle());
   const settings = (current.settings ?? {}) as Record<string, unknown>;
   const reviews = (settings.reviews ?? {}) as Record<string, unknown>;
   const next = { ...settings, reviews: { ...reviews, recurring_after_visits: body.recurring_after_visits, reminders: body.reminder_days.map((days) => ({ days })) } };
@@ -407,7 +408,7 @@ marketing.put("/referrals/asks", requireUser, requireCompany(ADMINS, "marketing"
   const body = await readJson(c, z.object({ enabled: z.boolean() }));
   const { db, companyId } = c.var;
   if (body.enabled) {
-    const company = must(await db.from("companies").select("settings").eq("id", companyId).maybeSingle());
+    const company = must(await adminClient(c.env).from("companies").select("settings").eq("id", companyId).maybeSingle());
     const settings = company.settings as Record<string, unknown> | null;
     if (!marketingOn(settings)) throw new HttpError(409, "Marketing is off, so referral asks can't be sent. An owner or admin can install it again in Apps.");
     if (!referralsReady(settings)) throw new HttpError(400, REFERRALS_NOT_SET_UP);
@@ -437,7 +438,8 @@ marketing.put("/referrals/asks", requireUser, requireCompany(ADMINS, "marketing"
   return c.json({ kept: isReferralRule(rule) ? [] : [{ id: rule.id, name: rule.name }], rule_id: rule.id });
 });
 
-marketing.get("/referrals/link/:id", requireUser, requireCompany(SALES), async (c) => {
+// A referral link lasts for years and opens the referral page without a sign-in: never an AI assistant's (lib/noAssistants.ts).
+marketing.get("/referrals/link/:id", requireUser, noAssistants, requireCompany(SALES), async (c) => {
   const client = must(await c.var.db.from("clients").select("id").eq("id", param(c, "id")).eq("company_id", c.var.companyId).maybeSingle(), "Client not found.");
   return c.json({ link: await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: "refer", id: client.id }) });
 });
@@ -447,15 +449,22 @@ marketing.get("/referrals/link/:id", requireUser, requireCompany(SALES), async (
  * office's copy (`via: "office"`): it works as the client's own, but can only say yes to a card
  * saved on Stripe's page through an office copy, never one brought in from Stripe or one the client
  * saved themselves, and can't add a tip to a saved card (lib/links.ts).
+ *
+ * The home shows the client's invoices, balances, payments and autopay, so the copy made for someone
+ * who doesn't see the business's money (no Invoices area) leaves them out (lib/links `nm`). Never for an
+ * AI assistant: the link works without a sign-in, as the client, after the assistant is gone
+ * (lib/noAssistants.ts).
  */
-marketing.get("/clients/:id/hub-link", requireUser, requireCompany(SALES), async (c) => {
+marketing.get("/clients/:id/hub-link", requireUser, noAssistants, requireCompany(SALES), async (c) => {
   const client = must(await c.var.db.from("clients").select("id").eq("id", param(c, "id")).eq("company_id", c.var.companyId).maybeSingle(), "Client not found.");
-  return c.json({ link: await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: "client", id: client.id, via: "office" }) });
+  // Without Invoices and payments, the copy leaves out the client's invoices and payments (lib/links `nm`).
+  const nm = seesInvoices(c.var.role, c.var.permissions) ? {} : { nm: 1 as const };
+  return c.json({ link: await clientLink(c.env, appUrl(c), { c: c.var.companyId, t: "client", id: client.id, via: "office", ...nm }) });
 });
 
 /**
  * "Reset this client's links" (the office): every quote, invoice and Client Hub link made for this
- * client before now stops opening, the office's copies on the timeline included, so a link that
+ * client before now stops opening, the copies the office handed out included, so a link that
  * was forwarded to someone else can be cut off without touching any other client's. Links made from
  * now on work as usual; unsubscribe, review and referral links are left alone. Only the server sets
  * the time (clients.links_reset_at), from the clock that stamps the links, and a note on the

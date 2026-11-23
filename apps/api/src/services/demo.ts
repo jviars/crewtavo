@@ -87,7 +87,7 @@ export async function startDemo(env: Env, trade: string, locale: "en" | "es" = "
       const marked = await admin.auth.admin.updateUserById(id, { app_metadata: { [DEMO_MARK]: { company } } });
       if (marked.error) throw new Error(`Demo account's business: ${marked.error.message}`);
     }
-    await applyPreset(db, company as string, preset);
+    await applyPreset(db, admin, company as string, preset);
     const agreed = await db.rpc("accept_terms", { p_company: company as string, p_version: TERMS_VERSION });
     if (agreed.error) throw new Error(`Demo license: ${agreed.error.message}`);
     await story.build(new DemoSeeder(db, admin, company as string, owner.id, team, DEMO_TIME_ZONE, story.taxRate));

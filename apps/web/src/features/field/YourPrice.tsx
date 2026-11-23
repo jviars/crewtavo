@@ -7,6 +7,7 @@
 import { isLivePay } from "@crewtavo/core/jobPay";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { Section } from "@/components/ui/Section";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatMoneyCents } from "@/lib/format";
@@ -34,27 +35,32 @@ export function YourPrice({ visitId }: { visitId: string }) {
   if (!p) return null;
   const lines = [...p.lines].sort((a, b) => a.sort - b.sort);
   return (
-    <section className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{t("Your price")}</strong>
-        <StatusPill label={p.status === "offered" ? t("New price") : payStatusLabel(p.status)} tone={payTone(p.status)} />
-      </div>
+    <Section title={t("Your price")} action={<StatusPill label={p.status === "offered" ? t("New price") : payStatusLabel(p.status)} tone={payTone(p.status)} />} className="your-price">
       {p.status === "offered" && (
-        <span className="small">
+        <p className="field-hint">
           {t("The office sent a new price.")} <Link to={`/field/jobs/${p.id}`}>{t("Accept or decline it in My jobs")}</Link>
-        </span>
+        </p>
       )}
-      {lines.map((l) => (
-        <div key={l.id} className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-          <span className="grow">
+      <PriceLines lines={lines} total={Number(p.total)} />
+      {p.notes && <p className="field-hint pre-wrap">{p.notes}</p>}
+    </Section>
+  );
+}
+
+/** A sub's price as lines: each line's words and how it's counted, its amount on the right, then the total. */
+export function PriceLines({ lines, total }: { lines: ReadonlyArray<{ id?: string; description: string; basis: string; unit: string | null; quantity: number; rate: number; amount: number }>; total: number }) {
+  return (
+    <ul className="price-lines">
+      {lines.map((l, i) => (
+        <li key={l.id ?? i}>
+          <span className="price-line-what">
             {l.description}
-            {l.basis !== "per_job" && <span className="muted small" style={{ display: "block" }}>{quantityWords(l.quantity, l.basis === "per_day" ? "day" : l.unit)} × {formatRate(l.rate)}</span>}
+            {l.basis !== "per_job" && <span className="price-line-how">{quantityWords(l.quantity, l.basis === "per_day" ? "day" : l.unit)} × {formatRate(l.rate)}</span>}
           </span>
           <span className="tabular">{formatMoneyCents(Number(l.amount))}</span>
-        </div>
+        </li>
       ))}
-      <div className="row-between"><strong>{t("Total")}</strong><strong className="tabular">{formatMoneyCents(Number(p.total))}</strong></div>
-      {p.notes && <p className="pre-wrap small muted" style={{ margin: 0 }}>{p.notes}</p>}
-    </section>
+      <li className="price-total"><span>{t("Total")}</span><span className="tabular">{formatMoneyCents(total)}</span></li>
+    </ul>
   );
 }

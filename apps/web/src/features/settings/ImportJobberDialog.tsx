@@ -11,9 +11,12 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine } from "@/components/ui/InboxList";
+import { RelatedRow } from "@/components/ui/Section";
 import { useSession } from "@/lib/session";
 import { cancelTask, taskFraction, useTasks } from "@/lib/tasks";
 import { FILE_LABELS, previewImport, readFile, runImport, type ChosenFile, type ImportSummary } from "./importJobber";
+import styles from "./settings.module.css";
 
 const KINDS: Array<{ kind: JobberWorkKind; label: string; one: string; path: string }> = [
   { kind: "quotes", label: "Open quotes", one: "quote", path: "/quotes/" },
@@ -75,15 +78,17 @@ export function ImportJobberDialog({ onClose }: { onClose: () => void }) {
         ) : preview.data ? (
           <>
             {preview.data.clients.length > 0 && (
-              <p className="small" style={{ margin: 0 }}>
+              <p className="set-note">
                 <strong>Clients</strong>: {count(preview.data.newClients, "new client")} first, from the clients file. Clients already here aren&apos;t added twice.
               </p>
             )}
-            {KINDS.map(({ kind, label, one }) => <PlanRow key={kind} label={label} one={one} planned={preview.data.plan[kind]} />)}
+            <ul className="rel" role="list" aria-label="What comes in">
+              {KINDS.map(({ kind, label, one }) => <PlanRow key={kind} label={label} one={one} planned={preview.data.plan[kind]} />)}
+            </ul>
             {!hasClients && KINDS.some(({ kind }) => preview.data.plan[kind].missing_clients) && (
               <div className="callout callout-warning">
-                <Icon name="info" size={20} />
-                <div className="grow small" style={{ fontWeight: 400 }}>
+                <Icon name="info" size={16} />
+                <div className="grow">
                   <div>Some clients aren&apos;t in Crewtavo yet</div>
                   {count(KINDS.reduce((n, { kind }) => n + preview.data.plan[kind].missing_clients, 0), "row")} are for clients who aren&apos;t here, so they&apos;d be skipped. Add Jobber&apos;s clients export (Clients → More actions → Export clients, as CSV) and they come in first.
                   <label className="btn btn-sm" style={{ marginTop: 8, display: "inline-flex" }}>
@@ -94,15 +99,15 @@ export function ImportJobberDialog({ onClose }: { onClose: () => void }) {
               </div>
             )}
             {preview.data.plan.jobs.ready.some((r) => r.record.needs_schedule) && (
-              <p className="muted small" style={{ margin: 0 }}>
+              <p className="set-note">
                 {count(preview.data.plan.jobs.ready.filter((r) => r.record.needs_schedule).length, "recurring job")} don&apos;t say how they repeat
                 {files.some((f) => f.kind === "visits") ? <> in a way Crewtavo can follow: they come in </> : <>. Add Jobber&apos;s visits report and their schedule is worked out from their visits; otherwise they come in </>}
                 without one, listed at the end for you to set.
               </p>
             )}
-            <div className="callout">
-              <Icon name="info" size={20} />
-              <div className="grow small" style={{ fontWeight: 400 }}>
+            <div className="callout callout-info">
+              <Icon name="info" size={16} />
+              <div className="grow">
                 <div>Nothing is sent or charged</div>
                 No emails or texts go to clients as it comes in, and no trip charge, minimum charge or late fee is added: each invoice owes what it owed in Jobber, with what was paid there as one payment. Crewtavo gives each its own number and keeps Jobber&apos;s beside it. To carry on from Jobber&apos;s numbers afterwards, set your next quote, job and invoice numbers under Settings → Company. Importing the same files again adds nothing. After that they&apos;re like the rest: an invoice that falls past due later gets your usual reminder.
               </div>
@@ -110,7 +115,7 @@ export function ImportJobberDialog({ onClose }: { onClose: () => void }) {
             {run.isPending && (
               <>
                 <div className="progress"><span style={{ width: `${Math.round((task ? (taskFraction(task) ?? 0) : 0) * 100)}%` }} /></div>
-                <p className="muted small" style={{ margin: 0 }}>It keeps going if you close this.</p>
+                <p className="set-note">It keeps going if you close this.</p>
               </>
             )}
           </>
@@ -118,15 +123,15 @@ export function ImportJobberDialog({ onClose }: { onClose: () => void }) {
           <>
             {chooser}
             {files.length > 0 && (
-              <ul className="stack-sm" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              <ul className="rel" role="list" aria-label="Files chosen">
                 {files.map((f) => (
-                  <li key={f.name + f.kind} className="row-between small">
-                    <span>
-                      <strong>{f.name}</strong>{" "}
-                      {f.kind ? <span className="muted">· {FILE_LABELS[f.kind]} · {count(Math.max(f.rows.length - 1, 0), "row")}</span> : <span className="text-danger">· Not one of Jobber&apos;s exports listed below</span>}
-                    </span>
-                    <Button size="sm" variant="ghost" onClick={() => remove(f)}>Remove</Button>
-                  </li>
+                  <RelatedRow
+                    key={f.name + f.kind}
+                    lead={<span className="rel-icon" data-tone={f.kind ? undefined : "danger"}><Icon name={f.kind ? "fileSpreadsheet" : "alert"} size={15} /></span>}
+                    title={f.name}
+                    sub={f.kind ? [FILE_LABELS[f.kind], count(Math.max(f.rows.length - 1, 0), "row")] : <span className="text-danger">Not one of Jobber&apos;s exports listed below</span>}
+                    actions={<Button size="sm" variant="ghost" onClick={() => remove(f)} aria-label={`Remove ${f.name}`}>Remove</Button>}
+                  />
                 ))}
               </ul>
             )}
@@ -136,7 +141,7 @@ export function ImportJobberDialog({ onClose }: { onClose: () => void }) {
               <li>Export the <strong>Visits</strong> report too, for the next few months: recurring jobs keep their schedule when their visits show it, and one-off jobs come with their visits still to do.</li>
               <li>Clients not in Crewtavo yet? Add Jobber&apos;s Clients export (and its Properties export) as well, and they come in first.</li>
             </ol>
-            <span className="muted small">Only what&apos;s still open comes in: quotes not yet won or lost, invoices not paid, and jobs not closed.</span>
+            <span className="set-note">Only what&apos;s still open comes in: quotes not yet won or lost, invoices not paid, and jobs not closed.</span>
           </>
         )}
         <FormError error={fileError ?? preview.error ?? run.error} />
@@ -171,19 +176,19 @@ function PlanRow({ label, one, planned }: { label: string; one: string; planned:
   const left = leftOut(planned.left_out);
   if (!planned.ready.length && !planned.already && !left && !planned.problems.length) return null;
   return (
-    <div className="stack-sm" style={{ gap: 2 }}>
-      <span><strong>{label}</strong>: {count(planned.ready.length, one)} to bring in</span>
-      <span className="muted small">
-        {[planned.already && `${count(planned.already, one)} already here`, left && `left out: ${left}`].filter(Boolean).join(" · ")}
-      </span>
-      {planned.problems.length > 0 && <Problems problems={planned.problems.map((p) => ({ number: p.number, reason: p.reason }))} one={one} />}
-    </div>
+    <li className={`rel-row ${styles.planRow}`}>
+      <div className="rel-body">
+        <span className="rel-head"><span className="rel-title">{label}</span><span className="rel-detail"> · {count(planned.ready.length, one)} to bring in</span></span>
+        <MetaLine className="rel-sub" parts={[planned.already && `${count(planned.already, one)} already here`, left && `left out: ${left}`]} />
+        {planned.problems.length > 0 && <Problems problems={planned.problems.map((p) => ({ number: p.number, reason: p.reason }))} one={one} />}
+      </div>
+    </li>
   );
 }
 
 function Problems({ problems, one }: { problems: Array<{ number: string | null; reason: string }>; one: string }) {
   return (
-    <details className="small">
+    <details className={styles.problems}>
       <summary>{count(problems.length, one)} can&apos;t come in</summary>
       <ul style={{ margin: "4px 0 0", paddingLeft: 20 }}>
         {problems.slice(0, 50).map((p, i) => <li key={i}>{p.number ? `#${p.number}: ` : ""}{p.reason}</li>)}
@@ -199,24 +204,24 @@ function Summary({ summary }: { summary: ImportSummary }) {
   return (
     <>
       <div className={summary.stopped ? "callout callout-warning" : "callout callout-good"}>
-        <Icon name={summary.stopped ? "info" : "check"} size={20} />
-        <div className="grow small" style={{ fontWeight: 400 }}>
+        <Icon name={summary.stopped ? "info" : "check"} size={16} />
+        <div className="grow">
           <div>{made.length || summary.clients ? `Brought in ${[summary.clients && count(summary.clients, "client"), ...made].filter(Boolean).join(", ")}` : "Nothing new to bring in"}</div>
           {summary.stopped ? "Stopped before the end. Import the files again to bring in the rest: nothing comes in twice." : already.length ? `Already here from before: ${already.join(", ")}.` : null}
         </div>
       </div>
       {summary.needsSchedule.length > 0 && (
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <strong>Needs a schedule</strong>
-          <span className="muted small">Recurring in Jobber, but how they repeat wasn&apos;t in the files. Open each, choose Edit details, then Recurring job, and set it.</span>
+        <div className="set-stack">
+          <strong className={styles.dialogHeading}>Needs a schedule</strong>
+          <span className="set-note">Recurring in Jobber, but how they repeat wasn&apos;t in the files. Open each, choose Edit details, then Recurring job, and set it.</span>
           <ul style={{ margin: 0, paddingLeft: 20 }}>
             {summary.needsSchedule.map((j) => <li key={j.id}><Link to={`/jobs/${j.id}`}>Job #{j.number} · {j.title}</Link> <span className="muted small">(Jobber #{j.jobber})</span></li>)}
           </ul>
         </div>
       )}
       {summary.notes.length > 0 && (
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <strong>Worth a look</strong>
+        <div className="set-stack">
+          <strong className={styles.dialogHeading}>Worth a look</strong>
           <ul style={{ margin: 0, paddingLeft: 20 }} className="small">
             {summary.notes.map((n, i) => (
               <li key={i}><Link to={`${KINDS.find((k) => k.kind === n.kind)!.path}${n.id}`}>{n.title}</Link> <span className="muted">(Jobber #{n.jobber})</span>: {n.note}</li>

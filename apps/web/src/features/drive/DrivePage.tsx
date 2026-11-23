@@ -21,11 +21,14 @@ import { featureOn } from "@/components/shell/nav";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { ContextMenu } from "@/components/ui/ContextMenu";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
+import { InboxGroup, InboxList, InboxRow, ListFoot, MetaLine, RowAge } from "@/components/ui/InboxList";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Skeleton, TableSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { InboxSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
+import { SearchField } from "@/components/ui/Toolbar";
 import { editKind, FileViewer, type ViewerFile } from "@/features/files/FileViewer";
 import { usePastedFiles } from "@/features/plans/pasteFiles";
 import { localPreview, PlanPreview, previewable, previewLink } from "@/features/plans/PlanPreview";
@@ -37,11 +40,11 @@ import {
 } from "@/features/settings/storage";
 import { api, supabase, unwrap } from "@/lib/api";
 import { errorMessage, StorageFullError } from "@/lib/errors";
-import { addressLine, timeAgo } from "@/lib/format";
+import { addressLine } from "@/lib/format";
 import { can, hasRole, isSub, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import {
-  driveView, editableInDrive, folderPath, folderTree, groupClientFiles, ICON_FOR, iconKind, placesOf, refreshFiles, savedViewerFile, seesDrive, SLOTS, fileMeta,
+  driveView, editableInDrive, folderPath, folderTree, groupByDay, groupClientFiles, ICON_FOR, iconKind, placesOf, refreshFiles, savedViewerFile, seesDrive, SLOTS, fileMeta,
   useClientProperties, useDriveClients, useDriveFolders, useDriveList, versionRefused, VIEWER_FIELDS, viewerFile, byName, type DriveFile, type DriveFolder,
   type DriveView, type FolderTree, type Target,
 } from "./data";
@@ -70,9 +73,10 @@ export function DriveTrashPage() {
   const session = useSession();
   if (isSub(session)) return <NoAccess title="Trash" />;
   const inDrive = seesDrive(session) && featureOn(session.company.settings, "drive");
+  const storage = useStorageOverview(inDrive);
   return (
     <div className={styles.page}>
-      <PageHeader title={inDrive ? "Drive" : "Trash"} documentTitle="Trash" />
+      <PageHeader title={inDrive ? "Drive" : "Trash"} documentTitle="Trash" lede={inDrive && storage.data ? <StorageLine /> : undefined} />
       {inDrive && <DriveTabs view="trash" />}
       <TrashList />
     </div>
@@ -86,48 +90,46 @@ function DriveOff() {
   return (
     <div className={styles.page}>
       <PageHeader title="Drive" />
-      <div className="card">
-        <EmptyState
-          icon="folder"
-          title="Drive is off"
-          action={
-            <>
-              {canTurnOn && <Link className="btn btn-primary" to="/apps/drive">Install Drive</Link>}
-              <Link className="btn" to="/drive/trash"><Icon name="trash" size={16} />Open the Trash</Link>
-            </>
-          }
-        >
-          {canTurnOn
-            ? "All your files in one place: folders for your company's own papers, every file on each client and job, versions, and a 30-day Trash."
-            : "Ask an owner or admin to install Drive from Apps."}
-        </EmptyState>
-      </div>
+      <EmptyState
+        icon="folder"
+        title="Drive is off"
+        action={
+          <>
+            {canTurnOn && <Link className="btn btn-primary" to="/apps/drive">Install Drive</Link>}
+            <Link className="btn" to="/drive/trash"><Icon name="trash" size={16} />Open the Trash</Link>
+          </>
+        }
+      >
+        {canTurnOn
+          ? "All your files in one place: folders for your company's own papers, every file on each client and job, versions, and a 30-day Trash."
+          : "Ask an owner or admin to install Drive from Apps."}
+      </EmptyState>
       {/* A file found with search still opens. */}
       <ViewerHost />
     </div>
   );
 }
 
-const TABS: Array<{ view: DriveView | "trash"; label: string; icon: IconName }> = [
-  { view: "company", label: "Company files", icon: "folder" },
-  { view: "clients", label: "Clients", icon: "clients" },
-  { view: "recent", label: "Recent", icon: "clock" },
-  { view: "search", label: "Search", icon: "search" },
-  { view: "trash", label: "Trash", icon: "trash" },
+const TABS: Array<{ view: DriveView | "trash"; label: string }> = [
+  { view: "company", label: "Company files" },
+  { view: "clients", label: "Clients" },
+  { view: "recent", label: "Recent" },
+  { view: "search", label: "Search" },
+  { view: "trash", label: "Trash" },
 ];
 
-function DriveTabs({ view }: { view: DriveView | "trash" }) {
-  const navigate = useNavigate();
-  const go = (to: DriveView | "trash") => navigate(to === "trash" ? "/drive/trash" : to === "company" ? "/drive" : `/drive?view=${to}`);
+/** Drive's sections as links (Page-Drive.dc.html): underlined words on a computer, chips that scroll on a phone. Search shows only while searching. */
+function DriveTabs({ view, query = "" }: { view: DriveView | "trash"; query?: string }) {
+  const href = (to: DriveView | "trash") =>
+    to === "trash" ? "/drive/trash" : to === "company" ? "/drive" : to === "search" ? `/drive?${new URLSearchParams({ view: "search", q: query })}` : `/drive?view=${to}`;
   return (
-    <div className="underline-tabs" role="tablist" aria-label="Drive">
+    <nav className={`underline-tabs ${styles.tabs}`} aria-label="Drive">
       {TABS.filter((t) => t.view !== "search" || view === "search").map((t) => (
-        <button key={t.view} type="button" role="tab" aria-selected={view === t.view} onClick={() => go(t.view)}>
-          <Icon name={t.icon} size={16} />
+        <Link key={t.view} to={href(t.view)} aria-current={view === t.view ? "page" : undefined}>
           {t.label}
-        </button>
+        </Link>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -323,6 +325,7 @@ function DriveBrowser() {
   const { open: openFileParam } = useFileParam();
   const tooLarge = useTooLarge();
   const storageFull = useStorageFull();
+  const storage = useStorageOverview();
   const googleKeys = session.config.googlePicker ?? null;
   const [sending, setSending] = useState<Sending[]>([]);
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -534,16 +537,16 @@ function DriveBrowser() {
   const fileMenu = (f: DriveFile): MenuEntry[] => {
     const onRecord = SLOTS.some((s) => f[s]);
     return [
-      { label: "Open", icon: "eye", onSelect: () => openFile(f) },
+      { label: "Open", icon: "arrowUpRight", kbd: "O", onSelect: () => openFile(f) },
       // An archived file is kept as it is (as on a job's Plans and files card): no edit, no new version.
-      { label: "Edit", icon: "pen", hidden: f.archived || !editKind(f), onSelect: () => openFile(f, true) },
-      { label: "Download", icon: "download", onSelect: () => void download(f) },
+      { label: "Edit", icon: "pen", kbd: "E", hidden: f.archived || !editKind(f), onSelect: () => openFile(f, true) },
+      { label: "Download", icon: "download", kbd: "D", onSelect: () => void download(f) },
       { separator: true },
-      { label: "Rename", icon: "edit", onSelect: () => setDialog({ kind: "rename", file: f }) },
-      { label: f.folder_id ? "Move to folder" : "Put in a folder", icon: "folderMove", hidden: !root, onSelect: () => setDialog({ kind: "move", item: { kind: "file", file: f } }) },
+      { label: "Rename", icon: "edit", kbd: "R", onSelect: () => setDialog({ kind: "rename", file: f }) },
+      { label: f.folder_id ? "Move to folder…" : "Put in a folder…", icon: "folderMove", kbd: "M", hidden: !root, onSelect: () => setDialog({ kind: "move", item: { kind: "file", file: f } }) },
       { label: "Attach to…", icon: "paperclip", onSelect: () => setDialog({ kind: "attach", file: f }) },
       { label: "Upload a new version", icon: "upload", hidden: f.archived, onSelect: () => pick(null, f) },
-      { label: "Versions", icon: "history", hidden: f.versions < 2, onSelect: () => setDialog({ kind: "versions", file: f }) },
+      { label: "Versions", icon: "history", end: String(f.versions), hidden: f.versions < 2, onSelect: () => setDialog({ kind: "versions", file: f }) },
       // Crews see files on their jobs; a file in a folder only is the office's (attaching it asks).
       { label: f.crew_visible ? "Make it office only" : "Show it to the crew", icon: f.crew_visible ? "lock" : "users", hidden: !onRecord && !f.crew_visible, onSelect: () => crew.mutate(f) },
       { separator: true },
@@ -551,9 +554,9 @@ function DriveBrowser() {
     ];
   };
   const folderMenu = (f: DriveFolder): MenuEntry[] => [
-    { label: "Open", icon: "folderOpen", onSelect: () => openFolder(f.id) },
-    { label: "Rename", icon: "edit", onSelect: () => setDialog({ kind: "folder", folder: f }) },
-    { label: "Move", icon: "folderMove", onSelect: () => setDialog({ kind: "move", item: { kind: "folder", folder: f } }) },
+    { label: "Open", icon: "folderOpen", kbd: "O", onSelect: () => openFolder(f.id) },
+    { label: "Rename", icon: "edit", kbd: "R", onSelect: () => setDialog({ kind: "folder", folder: f }) },
+    { label: "Move to folder…", icon: "folderMove", kbd: "M", onSelect: () => setDialog({ kind: "move", item: { kind: "folder", folder: f } }) },
     { separator: true },
     { label: "Move to Trash", icon: "trash", danger: true, onSelect: () => void askTrashFolder(f) },
   ];
@@ -612,7 +615,7 @@ function DriveBrowser() {
       )}
       {googleKeys && destinations.length > 1 && (
         <span onPointerEnter={preloadGoogle} onFocus={preloadGoogle}>
-          <Menu label="Import from Google Drive to which property?" triggerClassName="btn" trigger={googleLabel} items={[{ heading: "To which property?" }, ...destinations.map((d) => ({ label: d.where, icon: "pin" as const, onSelect: () => importFrom(d) }))]} />
+          <Menu label="Import from Google Drive to which property?" title="Import to which property?" triggerClassName="btn" trigger={googleLabel} items={[{ heading: "To which property?" }, ...destinations.map((d) => ({ label: d.where, icon: "pin" as const, onSelect: () => importFrom(d) }))]} />
         </span>
       )}
       {view === "company" && current && <Button icon="folderPlus" onClick={() => setDialog({ kind: "folder", parent: current })}>New folder</Button>}
@@ -620,6 +623,7 @@ function DriveBrowser() {
       {destinations.length > 1 && (
         <Menu
           label="Upload to which property?"
+          title="Upload to which property?"
           triggerClassName="btn btn-primary"
           trigger={<><Icon name="upload" size={16} />Upload</>}
           items={[{ heading: "To which property?" }, ...destinations.map((d) => ({ label: d.where, icon: "pin" as const, onSelect: () => pick(d) }))]}
@@ -627,26 +631,28 @@ function DriveBrowser() {
       )}
     </>
   );
+  // Clients with files, found by name (Clients).
+  const [findClient, setFindClient] = useState("");
+  // The search over every file, on the right of the row under the sections (on a phone, over them).
+  const searchBox = <SearchField value={search} onChange={setSearch} placeholder="Search every file" label="Search every file" />;
 
   return (
     <Actions.Provider value={actions}>
       <div ref={pageRef} className={styles.page} {...(view === "company" || view === "recent" || view === "search" ? dropProps("page", single) : {})}>
-        <PageHeader title="Drive" actions={headerActions} />
-        <StorageLine />
-        <DriveTabs view={view} />
-        <div className="toolbar">
-          <div className="input-group">
-            <span className="addon"><Icon name="search" size={16} /></span>
-            <input className="input" type="search" placeholder="Search every file" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search every file" />
-          </div>
-        </div>
-        {sending.length > 0 && <Uploads sending={sending} />}
+        <PageHeader title="Drive" actions={headerActions} lede={storage.data ? <StorageLine /> : undefined} />
+        <DriveTabs view={view} query={q} />
+        {/* One row for every view, so the search keeps its place (and its focus) as typing moves to the results. */}
+        <Bar search={searchBox}>
+          {view === "company" && current && <FolderCrumbs current={current} />}
+          {view === "clients" && (clientParam ? <ClientCrumb clientId={clientParam} /> : <SearchField value={findClient} onChange={setFindClient} placeholder="Find a client" label="Find a client" shortcut={false} />)}
+        </Bar>
+        <Uploads sending={sending} />
         {folders.error && !folders.data ? (
-          <div className="card"><ErrorState error={folders.error} onRetry={() => folders.refetch()} /></div>
+          <ErrorState error={folders.error} onRetry={() => folders.refetch()} />
         ) : view === "company" ? (
           <CompanyFiles key={folderParam ?? "root"} folderId={folderParam} loading={folders.isPending} dropping={dropOn === "page"} />
         ) : view === "clients" ? (
-          clientParam ? <ClientFiles key={clientParam} clientId={clientParam} /> : <ClientList />
+          clientParam ? <ClientFiles key={clientParam} clientId={clientParam} /> : <ClientList find={findClient} onClear={() => setFindClient("")} />
         ) : view === "recent" ? (
           <FileList scope="recent" dropping={dropOn === "page"} />
         ) : (
@@ -718,7 +724,7 @@ function StorageLine() {
   const level = fullness(share);
   const mine = personalLine(o.me);
   return (
-    <div className={styles.storage}>
+    <span className={styles.storage}>
       {share !== null && (
         <span className={styles.storageBar} data-level={level} role="img" aria-label={`${Math.floor(share * 100)}% of the storage limit used`}>
           <span style={{ width: `${Math.min(100, share * 100)}%` }} />
@@ -727,36 +733,96 @@ function StorageLine() {
       <span data-level={level}>{level === "full" ? `Storage is full: ${companyLine(o)}` : companyLine(o)}</span>
       {mine && <span data-level={fullness(shareOf(o.me.used_bytes, o.me.limit_bytes))}>{mine}</span>}
       {managesStorage(session) && <Link to={STORAGE_SETTINGS}>Storage settings</Link>}
+    </span>
+  );
+}
+
+/**
+ * The row under the sections: where you are on the left (a folder's path, a client), the search over
+ * every file on the right. On a phone its two halves take their own places: the search over the
+ * sections, where you are under them.
+ */
+function Bar({ children, search }: { children?: ReactNode; search: ReactNode }) {
+  return (
+    <div className={styles.bar}>
+      <div className={styles.barStart}>{children}</div>
+      {search}
     </div>
+  );
+}
+
+/** A client's name, as Drive's Clients view reads it (shared by its crumb and its list). */
+function useDriveClient(clientId: string) {
+  const session = useSession();
+  return useQuery({
+    queryKey: ["drive", session.company.id, "client", clientId],
+    queryFn: async () => unwrap(await supabase().from("clients").select("id, display_name").eq("id", clientId).maybeSingle()),
+  });
+}
+
+/** Where a folder is in Company files: each folder above it a link back up. At the top, just "Company files" (not on a phone, where the chip says it). */
+function FolderCrumbs({ current }: { current: DriveFolder }) {
+  const a = useActions();
+  const path = folderPath(a.tree, current.id);
+  return (
+    <nav aria-label="Folder" className={current.parent_id ? undefined : styles.atRoot}>
+      <ol className={styles.crumbs}>
+        {path.map((f, i) => (
+          <li key={f.id}>
+            {i > 0 && <Icon name="chevronRight" size={13} />}
+            {i === path.length - 1 ? <span aria-current="page">{folderLabel(f)}</span> : <Link to={f.parent_id ? `/drive?folder=${f.id}` : "/drive"}>{folderLabel(f)}</Link>}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/** Clients › a client's name, and the way to their page. */
+function ClientCrumb({ clientId }: { clientId: string }) {
+  const client = useDriveClient(clientId);
+  return (
+    <>
+      <nav aria-label="Client">
+        <ol className={styles.crumbs}>
+          <li><Link to="/drive?view=clients">Clients</Link></li>
+          <li><Icon name="chevronRight" size={13} /><span aria-current="page">{client.isPending ? <Skeleton width={120} /> : (client.data?.display_name ?? "Client")}</span></li>
+        </ol>
+      </nav>
+      <Link className={styles.openClient} to={`/clients/${clientId}`}>Open client<Icon name="arrowRight" size={13} /></Link>
+    </>
   );
 }
 
 /** Files on their way up, or being copied from Google Drive, each with a way to stop it. */
 function Uploads({ sending }: { sending: Sending[] }) {
+  if (!sending.length) return null;
   return (
-    <div className={`card card-pad ${styles.uploads}`}>
+    <ul className={styles.uploads} aria-label="Adding files">
       {sending.map((u) => {
         const copying = u.progress === null;
         const status = copying ? (u.stopping ? "Stopping after this one…" : "Copying from Google Drive…") : u.progress! >= 1 ? "Saving…" : `${Math.round(u.progress! * 100)}% of ${fileSize(u.size)}`;
         return (
-          <div key={u.key} className={styles.upload} role="status">
+          <li key={u.key} className={styles.upload} role="status">
             <FileIcon file={{ content_type: u.type, file_name: u.name }} preview={u.preview ?? undefined} />
             <div className={styles.uploadBody}>
               <div className={styles.uploadHead}>
                 <span title={u.name}>{u.name}</span>
-                <span className="muted small tabular">{status}</span>
-                {(copying ? !u.stopping : u.progress! < 1) && (
-                  <Button size="sm" variant="ghost" icon="x" aria-label={copying ? `Stop copying after ${u.name}` : `Stop uploading ${u.name}`} title="Stop" onClick={u.abort} />
-                )}
+                <span className={styles.uploadStatus}>{status}</span>
               </div>
               <div className={`progress${copying ? ` ${styles.indeterminate}` : ""}`} aria-hidden="true">
                 <span style={copying ? undefined : { width: `${Math.round(u.progress! * 100)}%` }} />
               </div>
             </div>
-          </div>
+            {(copying ? !u.stopping : u.progress! < 1) ? (
+              <Button size="sm" variant="ghost" icon="x" aria-label={copying ? `Stop copying after ${u.name}` : `Stop uploading ${u.name}`} title="Stop" onClick={u.abort} />
+            ) : (
+              <span />
+            )}
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 
@@ -764,45 +830,48 @@ function Uploads({ sending }: { sending: Sending[] }) {
 // Rows
 // ---------------------------------------------------------------------------------------------
 
-/** A file's kind as an icon, or a picture's preview (`preview`, a link to it) once it has loaded. */
+/** A file's kind as an icon on a small tile, or a picture's preview (`preview`, a link to it) once it has loaded. */
 function FileIcon({ file, preview }: { file: Pick<DriveFile, "content_type" | "file_name">; preview?: string }) {
   const kind = iconKind(file);
   return (
     <span className={styles.icon} data-kind={kind} aria-hidden="true">
-      <Icon name={ICON_FOR[kind]} size={18} />
+      <Icon name={ICON_FOR[kind]} size={17} />
       {preview && <PlanPreview src={preview} />}
     </span>
   );
 }
 
-/** Folders, then files: each opens with a tap, and has its menu at the end. `where` adds the column saying where each file is. */
-function FileTable({ folders = [], files, where, caption }: { folders?: DriveFolder[]; files: DriveFile[]; where: "records" | "all" | null; caption: string }) {
+/** Opened with the keyboard or a plain click: the viewer, here. With a modifier key, the browser's own way (a new tab). */
+const plainClick = (e: MouseEvent) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+
+/**
+ * Folders, then files, as rows (Page-Drive.dc.html): each opens with a tap or Enter, and has its menu
+ * at the end. `where` adds the column saying where each file is. `heads` puts "Folders" and "Files"
+ * over them, as a folder's own list does.
+ */
+function FileRows({ folders = [], files, where, label, heads = false }: { folders?: DriveFolder[]; files: DriveFile[]; where: "records" | "all" | null; label: string; heads?: boolean }) {
   // Links for the pictures' previews (the rest make theirs when they're opened or downloaded).
   const links = usePlanLinks(previewable(files));
-  const a = useActions();
-  // A right-click, or a held finger, on a row: the same as its ⋯ menu.
-  const rowMenu = (target: Element) => {
-    const id = target.closest<HTMLElement>("tr[data-row]")?.dataset.row;
-    const file = files.find((f) => f.id === id);
-    const folder = folders.find((f) => f.id === id);
-    return file ? a.fileMenu(file) : folder ? a.folderMenu(folder) : null;
-  };
+  const folderRows = folders.map((f) => <FolderRow key={f.id} folder={f} where={Boolean(where)} />);
+  const fileRows = files.map((f) => <FileRow key={f.id} file={f} where={where} preview={previewLink(f, links.data?.open)} />);
+  if (!heads) return <InboxGroup>{folderRows}{fileRows}</InboxGroup>;
   return (
-    <table className={`table table-stack ${styles.files}`}>
-      <caption className="sr-only">{caption}</caption>
-      <thead>
-        <tr>
-          <th>Name</th>
-          {where && <th className={styles.whereCol}>Where</th>}
-          <th className={styles.actionsCol}><span className="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <ContextMenu render={<tbody />} items={rowMenu}>
-        {folders.map((f) => <FolderRow key={f.id} folder={f} where={Boolean(where)} />)}
-        {files.map((f) => <FileRow key={f.id} file={f} where={where} preview={previewLink(f, links.data?.open)} />)}
-      </ContextMenu>
-    </table>
+    <>
+      {folders.length > 0 && <InboxGroup label="Folders" count={folders.length}>{folderRows}</InboxGroup>}
+      {files.length > 0 && <InboxGroup label={label} count={files.length}>{fileRows}</InboxGroup>}
+    </>
   );
+}
+
+/** The address that opens a file in the viewer, from where the list is. */
+function useFileHref() {
+  const location = useLocation();
+  return (id: string) => {
+    const next = new URLSearchParams(location.search);
+    next.set("file", id);
+    next.delete("edit");
+    return `${location.pathname}?${next}`;
+  };
 }
 
 function FolderRow({ folder, where }: { folder: DriveFolder; where: boolean }) {
@@ -810,94 +879,85 @@ function FolderRow({ folder, where }: { folder: DriveFolder; where: boolean }) {
   const inside = a.tree.children.get(folder.id)?.length ?? 0;
   const zone = `folder:${folder.id}`;
   return (
-    <tr className="row-link" data-row={folder.id} data-drop={a.dropOn === zone || undefined} onClick={() => a.openFolder(folder.id)} {...a.dropProps(zone, { key: folder.id, target: { folder_id: folder.id }, where: folder.name })}>
-      <td className={styles.nameCell}>
-        <div className={styles.name}>
-          <span className={styles.icon} data-kind="folder" aria-hidden="true"><Icon name="folder" size={18} /></span>
-          <div className={styles.body}>
-            <button type="button" className={styles.title} onClick={(e) => { e.stopPropagation(); a.openFolder(folder.id); }}>{folder.name}</button>
-            <span className={styles.meta}>Folder{inside ? ` · ${inside} ${inside === 1 ? "folder" : "folders"} inside` : ""}</span>
-          </div>
-        </div>
-      </td>
-      {where && <td className={styles.whereCell} />}
-      <td className={styles.actionsCell} onClick={(e) => e.stopPropagation()}>
-        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${folder.name}`} items={a.folderMenu(folder)} />
-      </td>
-    </tr>
+    <ContextMenu render={<li />} items={a.folderMenu(folder)} className={`${styles.row}${where ? "" : ` ${styles.rowNoWhere}`}`} data-drop={a.dropOn === zone || undefined} {...a.dropProps(zone, { key: folder.id, target: { folder_id: folder.id }, where: folder.name })}>
+      <span className={styles.icon} data-kind="folder" aria-hidden="true"><Icon name="folder" size={17} /></span>
+      <div className={styles.rowBody}>
+        <Link className="il-link" to={folder.parent_id ? `/drive?folder=${folder.id}` : "/drive"}>
+          <span className="il-l1"><span className="il-title">{folder.name}</span></span>
+        </Link>
+        <MetaLine className="il-meta" parts={["Folder", inside ? `${inside} ${inside === 1 ? "folder" : "folders"} inside` : null]} />
+      </div>
+      {where && <span className={styles.where} />}
+      <span className={styles.more}>
+        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${folder.name}`} title={folder.name} align="end" items={a.folderMenu(folder)} />
+      </span>
+    </ContextMenu>
   );
 }
 
 function FileRow({ file: f, where, preview }: { file: DriveFile; where: "records" | "all" | null; preview?: string }) {
   const a = useActions();
+  const href = useFileHref();
   const onRecord = SLOTS.some((s) => f[s]);
   const places = placesOf(f);
   const folder = f.folder_id ? a.tree.byId.get(f.folder_id) : undefined;
-  const stop = (e: MouseEvent) => e.stopPropagation();
+  const showFolder = where === "all" && Boolean(f.folder_id);
+  // Who sees it, and whether it's kept as it was: by the name on a computer, on the quiet line on a phone (Mobile-Business.dc.html), first so a long line cuts the date instead.
+  const tags = [onRecord && !f.crew_visible && "Office only", !onRecord && f.crew_visible && "Crew leads see it", f.archived && "Archived"].filter((x): x is string => Boolean(x));
   return (
-    <tr className="row-link" data-row={f.id} onClick={() => a.openFile(f)}>
-      <td className={styles.nameCell}>
-        <div className={styles.name}>
-          <FileIcon file={f} preview={preview} />
-          <div className={styles.body}>
-            <button type="button" className={styles.title} onClick={(e) => { stop(e); a.openFile(f); }}>{f.title}</button>
-            <span className={styles.meta}>{fileMeta(f)}</span>
-            {(f.archived || (onRecord && !f.crew_visible) || (!onRecord && f.crew_visible)) && (
-              <div className={styles.flags}>
-                {onRecord && !f.crew_visible && <span className="chip chip-amber"><Icon name="lock" size={11} />Office only</span>}
-                {!onRecord && f.crew_visible && <span className="chip chip-blue"><Icon name="users" size={11} />Crew leads see it</span>}
-                {f.archived && <span className="chip">Archived</span>}
-              </div>
-            )}
-          </div>
-        </div>
-      </td>
+    <ContextMenu render={<li />} items={a.fileMenu(f)} className={`${styles.row}${where ? "" : ` ${styles.rowNoWhere}`}`}>
+      <FileIcon file={f} preview={preview} />
+      <div className={styles.rowBody}>
+        <Link
+          className="il-link"
+          to={href(f.id)}
+          state={{ driveViewer: true }}
+          onClick={(e) => {
+            if (!plainClick(e)) return;
+            e.preventDefault();
+            a.openFile(f);
+          }}
+        >
+          <span className="il-l1">
+            <span className="il-title">{f.title}</span>
+            {tags.map((tag) => <span key={tag} className="tag">{tag}</span>)}
+          </span>
+        </Link>
+        <MetaLine className="il-meta" parts={[...tags.map((tag) => <span key={tag} className={styles.metaTag}>{tag}</span>), fileMeta(f)]} />
+      </div>
       {where && (
-        <td className={styles.whereCell}>
-          {(places.length > 0 || (where === "all" && f.folder_id)) && (
-            <div className={styles.where}>
-              {where === "all" && f.folder_id && (
-                <Link className={styles.place} data-slot="folder" to={folder?.parent_id ? `/drive?folder=${f.folder_id}` : "/drive"} onClick={stop} title={folder ? folderPath(a.tree, folder.id).map(folderLabel).join(" › ") : undefined}>
-                  {folder ? folderLabel(folder) : (f.folder_name ?? "Company files")}
-                </Link>
-              )}
-              {places.map((p) =>
-                p.path ? (
-                  <Link key={p.slot} className={styles.place} data-slot={p.slot} to={p.path} onClick={stop} title={p.label}>{p.label}</Link>
-                ) : (
-                  <span key={p.slot} className={styles.place} data-slot={p.slot} title={p.label}>{p.label}</span>
-                ),
-              )}
-            </div>
+        <span className={styles.where}>
+          {showFolder && (
+            <Link to={folder?.parent_id ? `/drive?folder=${f.folder_id}` : "/drive"} title={folder ? folderPath(a.tree, folder.id).map(folderLabel).join(" › ") : undefined}>
+              {folder ? folderLabel(folder) : (f.folder_name ?? "Company files")}
+            </Link>
           )}
-        </td>
+          {places.map((p) => (p.path ? <Link key={p.slot} to={p.path} title={p.label}>{p.label}</Link> : <span key={p.slot} title={p.label}>{p.label}</span>))}
+        </span>
       )}
-      <td className={styles.actionsCell} onClick={stop}>
-        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} items={a.fileMenu(f)} />
-      </td>
-    </tr>
+      <span className={styles.more}>
+        <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label={`Actions for ${f.title}`} title={f.title} align="end" items={a.fileMenu(f)} />
+      </span>
+    </ContextMenu>
   );
 }
 
 /**
- * "Show more" under a list that came back full. At the most the database sends, it says so instead,
+ * Under a list that came back full: "Load more". At the most the database sends, it says so instead,
  * so a long list never looks complete when it isn't.
  */
-function More({ shown, limit, onMore, beyond = "Search to find others." }: { shown: number; limit: number; onMore: () => void; beyond?: string }) {
-  if (shown < Math.min(limit, LIST_MAX)) return null;
-  if (shown >= LIST_MAX) {
-    return (
-      <div className="list-foot">
-        <span>Showing the first {LIST_MAX}. {beyond}</span>
-      </div>
-    );
-  }
-  return (
-    <div className="list-foot">
-      <span>Showing the first {shown}.</span>
-      <Button size="sm" onClick={onMore}>Show more</Button>
-    </div>
-  );
+function more({ shown, limit, onMore, beyond = "Search to find others." }: { shown: number; limit: number; onMore: () => void; beyond?: string }) {
+  if (shown < Math.min(limit, LIST_MAX)) return undefined;
+  if (shown >= LIST_MAX) return <ListFoot>Showing the first {LIST_MAX}. {beyond}</ListFoot>;
+  return <ListFoot more={{ onClick: onMore, label: "Show more" }}>Showing the first {shown}.</ListFoot>;
+}
+
+/** A list's place while it loads. */
+const ListSkeleton = () => <InboxSkeleton rows={5} />;
+
+/** What the page says when a list is empty or failed: straight on the page, and where files can be dropped, outlined while they're over it. */
+function DropArea({ dropping, children }: { dropping: boolean; children: ReactNode }) {
+  return <div className={`${styles.dropArea}${dropping ? ` ${styles.dropping}` : ""}`}>{children}</div>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -914,64 +974,44 @@ function CompanyFiles({ folderId, loading, dropping }: { folderId: string | null
   if (loading) return <ListSkeleton />;
   if (!current) {
     return (
-      <div className="card">
-        <EmptyState icon="folder" title="That folder isn't here" action={<Button onClick={() => a.openFolder(null)}>Go to Company files</Button>}>
-          It may have been moved to the Trash.
-        </EmptyState>
-      </div>
+      <EmptyState icon="folder" title="That folder isn't here" action={<Button onClick={() => a.openFolder(null)}>Go to Company files</Button>}>
+        It may have been moved to the Trash.
+      </EmptyState>
     );
   }
-  const path = folderPath(a.tree, current.id);
   const subfolders = a.tree.children.get(current.id) ?? [];
   const rows = files.data ?? [];
   const isRoot = !current.parent_id;
   const to = { key: current.id, target: { folder_id: current.id }, where: folderLabel(current) };
 
   return (
-    <section className="stack" aria-label={folderLabel(current)}>
-      {path.length > 1 && (
-        <nav aria-label="Folder">
-          <ol className={styles.crumbs}>
-            {path.map((f, i) => (
-              <li key={f.id}>
-                {i > 0 && <Icon name="chevronRight" size={14} />}
-                {i === path.length - 1 ? <span aria-current="page">{folderLabel(f)}</span> : <button type="button" onClick={() => a.openFolder(f.id)}>{folderLabel(f)}</button>}
-              </li>
-            ))}
-          </ol>
-        </nav>
-      )}
+    <>
       {files.isPending ? (
         <ListSkeleton />
       ) : files.error && !files.data ? (
-        <div className="card"><ErrorState error={files.error} onRetry={() => files.refetch()} /></div>
+        <ErrorState error={files.error} onRetry={() => files.refetch()} />
       ) : !subfolders.length && !rows.length ? (
-        <div className={`card${dropping ? ` ${styles.dropping}` : ""}`}>
+        <DropArea dropping={dropping}>
           <EmptyState
             icon={isRoot ? "folder" : "folderOpen"}
             title={isRoot ? "No company files yet" : `Nothing in ${current.name} yet`}
             action={
               <>
                 <Button icon="folderPlus" onClick={() => a.newFolder(current)}>New folder</Button>
-                <Button variant="primary" icon="upload" onClick={() => a.upload(to)}>Upload</Button>
+                <Button icon="upload" onClick={() => a.upload(to)}>Upload</Button>
               </>
             }
           >
             Make folders for your forms, price sheets and insurance papers, or drop or paste files here.
           </EmptyState>
-        </div>
+        </DropArea>
       ) : (
-        <div className={`card${files.isPlaceholderData ? " is-stale" : ""}${dropping ? ` ${styles.dropping}` : ""}`}>
-          <FileTable folders={subfolders} files={rows} where="records" caption={`In ${folderLabel(current)}`} />
-          <More shown={rows.length} limit={limit} onMore={() => setLimit(longer(PAGE))} />
-        </div>
+        <InboxList label={`In ${folderLabel(current)}`} stale={files.isPlaceholderData} className={dropping ? styles.dropping : undefined} foot={more({ shown: rows.length, limit, onMore: () => setLimit(longer(PAGE)) })}>
+          <FileRows folders={subfolders} files={rows} where="records" label="Files" heads />
+        </InboxList>
       )}
-    </section>
+    </>
   );
-}
-
-function ListSkeleton() {
-  return <div className="card"><TableSkeleton rows={5} columns={2} header={false} /></div>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -983,21 +1023,29 @@ function FileList({ scope, dropping }: { scope: "recent"; dropping: boolean }) {
   const [limit, setLimit] = useState(100);
   const files = useDriveList(session.company.id, scope, null, null, limit);
   const rows = files.data ?? [];
-  if (files.isPending) return <ListSkeleton />;
-  if (files.error && !files.data) return <div className="card"><ErrorState error={files.error} onRetry={() => files.refetch()} /></div>;
-  if (!rows.length) {
-    return (
-      <div className={`card${dropping ? ` ${styles.dropping}` : ""}`}>
+  const groups = useMemo(() => groupByDay(rows, session.company.timezone), [rows, session.company.timezone]);
+  const links = usePlanLinks(previewable(rows));
+  let body: ReactNode;
+  if (files.isPending) body = <ListSkeleton />;
+  else if (files.error && !files.data) body = <ErrorState error={files.error} onRetry={() => files.refetch()} />;
+  else if (!rows.length) {
+    body = (
+      <DropArea dropping={dropping}>
         <EmptyState icon="clock" title="No files yet">Files added anywhere in Crewtavo, on a job, a quote or in your company folders, show up here newest first.</EmptyState>
-      </div>
+      </DropArea>
+    );
+  } else {
+    body = (
+      <InboxList label="Recent files" stale={files.isPlaceholderData} className={dropping ? styles.dropping : undefined} foot={more({ shown: rows.length, limit, onMore: () => setLimit(longer(100)) })}>
+        {groups.map((g) => (
+          <InboxGroup key={g.key} label={g.label} count={g.files.length}>
+            {g.files.map((f) => <FileRow key={f.id} file={f} where="all" preview={previewLink(f, links.data?.open)} />)}
+          </InboxGroup>
+        ))}
+      </InboxList>
     );
   }
-  return (
-    <div className={`card${files.isPlaceholderData ? " is-stale" : ""}${dropping ? ` ${styles.dropping}` : ""}`}>
-      <FileTable files={rows} where="all" caption="Recent files" />
-      <More shown={rows.length} limit={limit} onMore={() => setLimit(longer(100))} />
-    </div>
-  );
+  return body;
 }
 
 function SearchResults({ query, dropping }: { query: string; dropping: boolean }) {
@@ -1015,92 +1063,78 @@ function SearchResults({ query, dropping }: { query: string; dropping: boolean }
   const folders = needle ? [...a.tree.byId.values()].filter((f) => f.parent_id && f.name.toLowerCase().includes(needle)).sort((x, y) => starts(x) - starts(y) || byName(x, y)).slice(0, 20) : [];
   const rows = searching ? (files.data ?? []) : [];
 
-  if (!query) {
-    return (
-      <div className="card">
-        <EmptyState icon="search" title="Search every file">By name, revision, notes, client or job number.</EmptyState>
-      </div>
-    );
-  }
-  if (searching && files.isPending && !folders.length) return <ListSkeleton />;
-  if (files.error && !files.data) return <div className="card"><ErrorState error={files.error} onRetry={() => files.refetch()} /></div>;
-  if (!folders.length && !rows.length && (!searching || !files.isFetching)) {
-    return (
-      <div className={`card${dropping ? ` ${styles.dropping}` : ""}`}>
+  let body: ReactNode;
+  if (!query) body = <EmptyState icon="search" title="Search every file">By name, revision, notes, client or job number.</EmptyState>;
+  else if (searching && files.isPending && !folders.length) body = <ListSkeleton />;
+  else if (files.error && !files.data) body = <ErrorState error={files.error} onRetry={() => files.refetch()} />;
+  else if (!folders.length && !rows.length && (!searching || !files.isFetching)) {
+    body = (
+      <DropArea dropping={dropping}>
         <EmptyState icon="search" title="No files match" action={<Button onClick={() => navigate("/drive")}>Clear search</Button>}>
           {searching ? "Try part of the name, a revision, a client's name or a job number." : "Type another letter or two."}
         </EmptyState>
-      </div>
+      </DropArea>
+    );
+  } else {
+    body = (
+      <InboxList
+        label={`Files matching ${query}`}
+        stale={files.isPlaceholderData || (searching && files.isFetching)}
+        className={dropping ? styles.dropping : undefined}
+        foot={more({ shown: rows.length, limit, onMore: () => setLimit(longer(100)), beyond: "Add to the search to find others." })}
+      >
+        <FileRows folders={folders} files={rows} where="all" label="Files" heads />
+      </InboxList>
     );
   }
-  return (
-    <div className={`card${files.isPlaceholderData || (searching && files.isFetching) ? " is-stale" : ""}${dropping ? ` ${styles.dropping}` : ""}`}>
-      <FileTable folders={folders} files={rows} where="all" caption={`Files matching ${query}`} />
-      <More shown={rows.length} limit={limit} onMore={() => setLimit(longer(100))} beyond="Add to the search to find others." />
-    </div>
-  );
+  return body;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Clients
 // ---------------------------------------------------------------------------------------------
 
-function ClientList() {
+function ClientList({ find, onClear }: { find: string; onClear: () => void }) {
   const session = useSession();
-  const navigate = useNavigate();
-  const [find, setFind] = useState("");
   const term = useDeferredValue(find.trim());
   const [limit, setLimit] = useState(100);
   const clients = useDriveClients(session.company.id, term, limit);
   const rows = clients.data ?? [];
-  const open = (id: string) => navigate(`/drive?view=clients&client=${id}`);
 
-  if (clients.isPending) return <ListSkeleton />;
-  return (
-    <div className={`card${clients.isPlaceholderData ? " is-stale" : ""}`}>
-      <div className={styles.clientFind}>
-        <div className="input-group">
-          <span className="addon"><Icon name="search" size={16} /></span>
-          <input className="input" type="search" placeholder="Find a client" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find a client" />
-        </div>
-      </div>
-      {clients.error && !clients.data ? (
-        <ErrorState error={clients.error} onRetry={() => clients.refetch()} />
-      ) : rows.length === 0 ? (
-        term ? (
-          <EmptyState icon="search" title="No clients match" action={<Button onClick={() => setFind("")}>Clear</Button>}>Only clients with files show here.</EmptyState>
-        ) : (
-          <EmptyState icon="clients" title="No client files yet">Files on your clients' properties, requests, quotes and jobs show up here, by client.</EmptyState>
-        )
-      ) : (
-        <>
-          <div>
-            {rows.map((c) => (
-              <button key={c.client_id} type="button" className={`card-row ${styles.clientRow}`} onClick={() => open(c.client_id)}>
-                <span className={styles.icon} aria-hidden="true"><Icon name="clients" size={18} /></span>
-                <span className="grow">
-                  <strong className="ellipsis">{c.client_name}</strong>
-                  <span className="muted small">{c.files === 1 ? "1 file" : `${c.files} files`} · updated {timeAgo(c.updated_at)}</span>
-                </span>
-                <Icon name="chevronRight" size={16} />
-              </button>
-            ))}
-          </div>
-          <More shown={rows.length} limit={limit} onMore={() => setLimit(longer(100))} beyond="Find a client above to see others." />
-        </>
-      )}
-    </div>
-  );
+  let body: ReactNode;
+  if (clients.isPending) body = <ListSkeleton />;
+  else if (clients.error && !clients.data) body = <ErrorState error={clients.error} onRetry={() => clients.refetch()} />;
+  else if (!rows.length) {
+    body = term ? (
+      <EmptyState icon="search" title="No clients match" action={<Button onClick={onClear}>Clear</Button>}>Only clients with files show here.</EmptyState>
+    ) : (
+      <EmptyState icon="clients" title="No client files yet">Files on your clients' properties, requests, quotes and jobs show up here, by client.</EmptyState>
+    );
+  } else {
+    body = (
+      <InboxList label="Clients with files" stale={clients.isPlaceholderData} foot={more({ shown: rows.length, limit, onMore: () => setLimit(longer(100)), beyond: "Find a client above to see others." })}>
+        <InboxGroup>
+          {rows.map((c) => (
+            <InboxRow
+              key={c.client_id}
+              to={`/drive?view=clients&client=${c.client_id}`}
+              title={c.client_name}
+              meta={c.files === 1 ? "1 file" : `${c.files} files`}
+              aside={<RowAge at={c.updated_at} />}
+            />
+          ))}
+        </InboxGroup>
+      </InboxList>
+    );
+  }
+  return body;
 }
 
 function ClientFiles({ clientId }: { clientId: string }) {
   const session = useSession();
   const navigate = useNavigate();
   const [limit, setLimit] = useState(PAGE * 2);
-  const client = useQuery({
-    queryKey: ["drive", session.company.id, "client", clientId],
-    queryFn: async () => unwrap(await supabase().from("clients").select("id, display_name").eq("id", clientId).maybeSingle()),
-  });
+  const client = useDriveClient(clientId);
   const properties = useClientProperties(clientId);
   const files = useDriveList(session.company.id, "client", clientId, null, limit);
   const groups = useMemo(() => groupClientFiles(files.data ?? []), [files.data]);
@@ -1114,74 +1148,68 @@ function ClientFiles({ clientId }: { clientId: string }) {
     return p ? propertyLabel(p) : fallback;
   };
 
-  const head = (
-    <div className={styles.crumbBar}>
-      <nav aria-label="Client">
-        <ol className={styles.crumbs}>
-          <li><button type="button" onClick={() => navigate("/drive?view=clients")}>Clients</button></li>
-          <li><Icon name="chevronRight" size={14} /><span aria-current="page">{client.isPending ? <Skeleton width={120} /> : name}</span></li>
-        </ol>
-      </nav>
-      <Link className="btn btn-sm" to={`/clients/${clientId}`}>Open client<Icon name="arrowRight" size={14} /></Link>
-    </div>
-  );
 
-  if (files.isPending) return <section className="stack">{head}<ListSkeleton /></section>;
+  if (files.isPending) return <ListSkeleton />;
   if (client.data === null) {
-    return (
-      <div className="card">
-        <EmptyState icon="clients" title="That client isn't here" action={<Button onClick={() => navigate("/drive?view=clients")}>See clients</Button>}>They may have been deleted.</EmptyState>
-      </div>
-    );
+    return <EmptyState icon="clients" title="That client isn't here" action={<Button onClick={() => navigate("/drive?view=clients")}>See clients</Button>}>They may have been deleted.</EmptyState>;
   }
   return (
-    <section className="stack" aria-label={`${name}'s files`}>
-      {head}
-      {files.error && !files.data && <div className="card"><ErrorState error={files.error} onRetry={() => files.refetch()} /></div>}
+    <>
+      {files.error && !files.data && <ErrorState error={files.error} onRetry={() => files.refetch()} />}
       {files.data && !groups.length && !empty.length && (
-        <div className="card">
-          <EmptyState icon="file" title={`No files for ${name} yet`}>
-            {properties.data && !properties.data.length ? "Add a property to this client first. A client's files are kept with a property." : "Files on their properties, requests, quotes and jobs show up here."}
-          </EmptyState>
-        </div>
+        <EmptyState icon="file" title={`No files for ${name} yet`}>
+          {properties.data && !properties.data.length ? "Add a property to this client first. A client's files are kept with a property." : "Files on their properties, requests, quotes and jobs show up here."}
+        </EmptyState>
       )}
       {groups.map((g) => (
-        <PropertyCard key={g.key} propertyId={g.propertyId} label={g.propertyId ? label(g.propertyId, g.label) : g.label}>
+        <PropertySection key={g.key} propertyId={g.propertyId} label={g.propertyId ? label(g.propertyId, g.label) : g.label} count={g.places.reduce((n, p) => n + p.files.length, 0)}>
           {g.places.map((p) => (
-            <div key={p.key}>
+            <div key={p.key} className={styles.place}>
               <h3 className={styles.placeHead}>{p.path ? <Link to={p.path}>{p.label}</Link> : p.label}</h3>
-              <FileTable files={p.files} where={null} caption={`${p.label}, ${g.label}`} />
+              <InboxList label={`${p.label}, ${g.label}`}>
+                <FileRows files={p.files} where={null} label="Files" />
+              </InboxList>
             </div>
           ))}
-        </PropertyCard>
+        </PropertySection>
       ))}
       {empty.map((p) => (
-        <PropertyCard key={p.id} propertyId={p.id} label={propertyLabel(p)}>
-          <div className={styles.groupEmpty}>No files here yet. Drop files on this card, or use Upload.</div>
-        </PropertyCard>
+        <PropertySection key={p.id} propertyId={p.id} label={propertyLabel(p)}>
+          <EmptyState inline title="No files here yet">Drop files here, or use Upload.</EmptyState>
+        </PropertySection>
       ))}
-      {files.data && <More shown={files.data.length} limit={limit} onMore={() => setLimit(longer(PAGE))} />}
-    </section>
+      {files.data && more({ shown: files.data.length, limit, onMore: () => setLimit(longer(PAGE)) })}
+    </>
   );
 }
 
 /** One of a client's properties, with its files: drop files on it, or use its own Upload. */
-function PropertyCard({ propertyId, label, children }: { propertyId: string | null; label: string; children: ReactNode }) {
+function PropertySection({ propertyId, label, count, children }: { propertyId: string | null; label: string; count?: number; children: ReactNode }) {
   const a = useActions();
   const to = propertyId ? { key: propertyId, target: { property_id: propertyId }, where: label } : null;
   const zone = `property:${propertyId ?? "none"}`;
   return (
-    <section className={`card ${styles.group}${a.dropOn === zone ? ` ${styles.dropping}` : ""}`} aria-label={label} {...a.dropProps(zone, to)}>
-      <div className={styles.groupHead}>
-        <h2><Icon name="pin" size={16} /><span title={label}>{label}</span></h2>
-        {to && a.importFrom && (
-          <Button size="sm" onPointerEnter={a.preloadGoogle} onFocus={a.preloadGoogle} onClick={() => a.importFrom!(to)} aria-label={`Import from Google Drive to ${label}`} title="Import from Google Drive">
-            <img src={googleLogo} alt="" width={14} height={14} />Import
-          </Button>
-        )}
-        {to && <Button size="sm" icon="upload" onClick={() => a.upload(to)} aria-label={`Upload to ${label}`}>Upload</Button>}
-      </div>
-      {children}
-    </section>
+    <div className={styles.dropZone} {...a.dropProps(zone, to)}>
+      <Section
+        title={<span title={label}>{label}</span>}
+        count={count}
+        flush
+        className={a.dropOn === zone ? styles.dropping : undefined}
+        action={
+          to && (
+            <>
+              {a.importFrom && (
+                <button type="button" onPointerEnter={a.preloadGoogle} onFocus={a.preloadGoogle} onClick={() => a.importFrom!(to)} aria-label={`Import from Google Drive to ${label}`} title="Import from Google Drive">
+                  <img src={googleLogo} alt="" width={14} height={14} />Import
+                </button>
+              )}
+              <button type="button" onClick={() => a.upload(to)} aria-label={`Upload to ${label}`}><Icon name="upload" size={14} />Upload</button>
+            </>
+          )
+        }
+      >
+        {children}
+      </Section>
+    </div>
   );
 }

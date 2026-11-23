@@ -12,6 +12,7 @@ import { adminClient, type Db } from "../lib/supabase";
 import { geocodeAddress } from "./external";
 import { addressOf, saveLocation } from "./properties";
 import type { Scope } from "./schedule";
+import { settingsAs } from "../lib/companySettings";
 
 /** Ordering takes about a quarter second at 100 stops and grows fast (2.6 s at 200), blocking the server. */
 export const MAX_ROUTE_STOPS = 100;
@@ -312,8 +313,8 @@ export async function autoRoutes(env: Env, now = new Date()) {
 // ---- Organize route, for the schedule and AI assistants -----------------------------------------
 
 async function companyClock(s: Scope): Promise<CompanyClock> {
-  const company = must(await s.db.from("companies").select("timezone, settings").eq("id", s.companyId).maybeSingle());
-  return { tz: company.timezone, settings: (company.settings ?? {}) as Record<string, any> };
+  const [company, settings] = await Promise.all([s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle(), settingsAs(s.db, s.companyId)]);
+  return { tz: must(company).timezone, settings };
 }
 
 /** With automatic routes on, anytime visits added to an organized day go into its route. Never fails the visit. */
@@ -435,9 +436,9 @@ const placeOf = (p: Place): LatLng | null => (p?.lat != null && p.lng != null ? 
  * Null when neither is known, and the text leaves it out.
  */
 export async function arrivalTime(db: Db, companyId: string, visitId: string, from: LatLng | null, userId?: string, now = Date.now()): Promise<string | null> {
-  const [{ data: visit }, { data: company }] = await Promise.all([
+  const [{ data: visit }, settings] = await Promise.all([
     db.from("visits").select("scheduled_on, crew_id, property:properties(lat, lng)").eq("id", visitId).eq("company_id", companyId).maybeSingle(),
-    db.from("companies").select("settings").eq("id", companyId).maybeSingle(),
+    settingsAs(db, companyId).catch(() => null),
   ]);
   const to = placeOf(visit?.property ?? null);
   if (!visit || !to) return null;
@@ -448,6 +449,6 @@ export async function arrivalTime(db: Db, companyId: string, visitId: string, fr
     start = placeOf(data?.property ?? null);
   }
   if (!start) return null;
-  const { minutes } = driveBetween(start, to, scheduleSettings(company?.settings).speedMph);
+  const { minutes } = driveBetween(start, to, scheduleSettings(settings).speedMph);
   return new Date(now + minutes * 60_000).toISOString();
 }

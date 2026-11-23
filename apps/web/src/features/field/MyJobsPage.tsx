@@ -6,7 +6,7 @@
  * they see only its town, its days, the work and their own price (public.my_sub_offers()); once they
  * have, it's on My day with the address. An answer needs signal: it never waits on the phone.
  */
-import type { SubOffer, SubOfferLine } from "@crewtavo/core/subOffers";
+import type { SubOffer } from "@crewtavo/core/subOffers";
 import { moneyShort, offerDate, offerDays, offerOutcomeLabel } from "@crewtavo/core/subOffers";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -16,17 +16,20 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { useDocumentTitle } from "@/components/ui/PageHeader";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { ApiError } from "@/lib/errors";
 import { dateIn, formatDate, formatDateTime, formatMoneyCents, formatTime } from "@/lib/format";
 import { isSub, useSession, type SubLogin } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { formatRate, quantityWords } from "../subs/pay";
+import { quantityWords } from "../subs/pay";
 import { answeredToast, answerState, missingOfferNote, myJobSections, offerCardLine, paidTotalNote, totalsWords } from "./myJobs";
 import { answerOffer, useMyJobs, useMyPayTotals, useOfferCompany } from "./myJobsData";
 import { useSignal } from "./OfflineNote";
+import { FieldHeader } from "./fieldUi";
+import { PriceLines } from "./YourPrice";
 import { translateError } from "@crewtavo/core/i18n/patterns";
 import { getLocale, t } from "@/lib/i18n";
 
@@ -67,135 +70,112 @@ function MyJobs({ sub }: { sub: SubLogin }) {
   }, [payId, Boolean(linked)]);
 
   return (
-    <div className="field-app">
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-2)" }}>{sub.name}</div>
-        <h1 className="page-title" style={{ marginTop: 4 }}>{t("My jobs")}</h1>
-      </div>
+    <div className="field-app m-grouped field-narrow">
+      <FieldHeader kicker={sub.name} title={t("My jobs")} />
       {!online && (
         <div className="callout callout-info" role="status">
-          <Icon name="wifiOff" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="wifiOff" size={16} />
+          <div className="grow">
             <div>{t("No signal")}</div>
             {t("This is what you had when you last had signal. Accepting or declining a job needs signal, so it reaches the office right away.")}
           </div>
         </div>
       )}
 
-      {jobs.isPending && <Loading label={t("Loading your jobs")}><div className="stack">{[0, 1].map((i) => <CardSkeleton key={i} lines={3} />)}</div></Loading>}
-      {jobs.error && !jobs.data && <div className="card"><ErrorState error={jobs.error} onRetry={() => jobs.refetch()} /></div>}
+      {jobs.isPending && <Loading label={t("Loading your jobs")}><SectionSkeleton rows={3} /></Loading>}
+      {jobs.error && !jobs.data && <ErrorState error={jobs.error} onRetry={() => jobs.refetch()} />}
       {missing && (
         <div className="callout callout-info" role="status">
-          <Icon name="info" size={20} />
-          <div className="grow" style={{ fontWeight: 400 }}>{missing.text}</div>
+          <Icon name="info" size={16} />
+          <div className="grow">{missing.text}</div>
           {missing.switchTo && <Button onClick={() => session.switchCompany(missing.switchTo!)}>{t("Switch to it")}</Button>}
         </div>
       )}
 
       {jobs.data && !anything && (
-        <div className="card">
-          <EmptyState icon="job" title={t("No jobs yet")}>{t("When {company} offers you a job, it shows here, and you'll get a notification. Accept or decline it in one tap.", { company: company.name })}</EmptyState>
-        </div>
+        <EmptyState icon="job" title={t("No jobs yet")}>{t("When {company} offers you a job, it shows here, and you'll get a notification. Accept or decline it in one tap.", { company: company.name })}</EmptyState>
       )}
 
       {sections.waiting.length > 0 && (
-        <section className="stack-sm">
-          <h2 className="section-title">{t("Waiting for your answer")}</h2>
-          <div className="stack">
+        <Section title={t("Waiting for your answer")} count={sections.waiting.length} flush>
+          <div className="offer-list">
             {sections.waiting.map((o) => <OfferCard key={o.id} offer={o} focused={o.id === payId} />)}
           </div>
-        </section>
+        </Section>
       )}
 
       {sections.upcoming.length > 0 && (
-        <section className="stack-sm">
-          <h2 className="section-title">{t("Coming up")}</h2>
-          <div className="card">
+        <Section title={t("Coming up")} count={sections.upcoming.length}>
+          <RelatedList>
             {sections.upcoming.map((o) => {
               const next = o.visits.find((v) => v.status !== "completed") ?? o.visits[0];
-              const row = (
-                <>
-                  <span className="grow" style={{ minWidth: 0 }}>
-                    <strong>{o.job_title}</strong>
-                    <span className="muted small" style={{ display: "block" }}>{[visitDays(o), o.city].filter(Boolean).join(" · ")}</span>
-                    {o.notes && <span className="small pre-wrap" style={{ display: "block", marginTop: 2 }}>{o.notes}</span>}
-                  </span>
-                  <span className="tabular strong">{formatMoneyCents(Number(o.is_change ? o.agreed_total : o.total))}</span>
-                  {next && <Icon name="chevronRight" size={16} />}
-                </>
-              );
-              return next ? (
-                <Link key={o.id} id={`job-${o.id}`} to={`/field/visits/${next.id}`} className="card-row" style={focusStyle(o.id === payId)}>{row}</Link>
-              ) : (
-                <div key={o.id} id={`job-${o.id}`} className="card-row" style={focusStyle(o.id === payId)}>{row}</div>
+              return (
+                <RelatedRow
+                  key={o.id}
+                  to={next ? `/field/visits/${next.id}` : undefined}
+                  current={o.id === payId}
+                  title={<span id={`job-${o.id}`} className="job-anchor">{o.job_title}</span>}
+                  sub={[visitDays(o), o.city, o.notes && <span key="notes" className="meta-break pre-wrap">{o.notes}</span>]}
+                  end={<b>{formatMoneyCents(Number(o.is_change ? o.agreed_total : o.total))}</b>}
+                />
               );
             })}
-          </div>
-        </section>
+          </RelatedList>
+        </Section>
       )}
 
       {sections.done.length > 0 && (
-        <section className="stack-sm">
-          <div className="section-head">
-            <h2 className="section-title">{t("Done, waiting to be paid")}</h2>
-            {words.owed && <span className="muted small tabular">{words.owed}</span>}
-          </div>
-          <div className="card">
+        <Section title={t("Done, waiting to be paid")} count={words.owed ?? sections.done.length}>
+          <RelatedList>
             {sections.done.map((o) => (
-              <div key={o.id} id={`job-${o.id}`} className="card-row" style={focusStyle(o.id === payId)}>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{o.job_title}</strong>
-                  <span className="muted small" style={{ display: "block" }}>{o.earned_on ? t("Done {date}", { date: formatDate(o.earned_on) }) : t("Done")}</span>
-                </span>
-                <span className="tabular strong">{formatMoneyCents(Number(o.total))}</span>
-              </div>
+              <RelatedRow
+                key={o.id}
+                current={o.id === payId}
+                title={<span id={`job-${o.id}`} className="job-anchor">{o.job_title}</span>}
+                sub={o.earned_on ? t("Done {date}", { date: formatDate(o.earned_on) }) : t("Done")}
+                end={<b>{formatMoneyCents(Number(o.total))}</b>}
+              />
             ))}
-          </div>
-        </section>
+          </RelatedList>
+        </Section>
       )}
 
       {(sections.paid.length > 0 || (totals.data?.payments ?? 0) > 0) && (
-        <section className="stack-sm">
-          <div className="section-head">
-            <h2 className="section-title">{t("Paid")}</h2>
-            {words.paid && <span className="muted small tabular">{words.paid}</span>}
-          </div>
-          <div className="card">
-            {sections.paid.map((o) => (
-              <div key={o.id} id={`job-${o.id}`} className="card-row" style={focusStyle(o.id === payId)}>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{o.job_title}</strong>
-                  <span className="muted small" style={{ display: "block" }}>{o.paid_at ? t("Paid {date}", { date: formatDate(dateIn(o.paid_at, tz)) }) : t("Paid")}</span>
-                </span>
-                <span className="tabular strong">{formatMoneyCents(Number(o.paid_amount ?? o.total))}</span>
-              </div>
-            ))}
-          </div>
-          <span className="muted small">{paidTotalNote(totals.data, company.name)}</span>
-        </section>
+        <Section title={t("Paid")} count={words.paid ?? (sections.paid.length || undefined)}>
+          {sections.paid.length > 0 && (
+            <RelatedList>
+              {sections.paid.map((o) => (
+                <RelatedRow
+                  key={o.id}
+                  current={o.id === payId}
+                  title={<span id={`job-${o.id}`} className="job-anchor">{o.job_title}</span>}
+                  sub={o.paid_at ? t("Paid {date}", { date: formatDate(dateIn(o.paid_at, tz)) }) : t("Paid")}
+                  end={<b>{formatMoneyCents(Number(o.paid_amount ?? o.total))}</b>}
+                />
+              ))}
+            </RelatedList>
+          )}
+          <p className="field-hint">{paidTotalNote(totals.data, company.name)}</p>
+        </Section>
       )}
 
       {sections.over.length > 0 && (
-        <section className="stack-sm">
-          <h2 className="section-title">{t("Offers that are over")}</h2>
-          <div className="card">
+        <Section title={t("Offers that are over")} count={sections.over.length}>
+          <RelatedList>
             {sections.over.map((o) => (
-              <div key={o.id} id={`job-${o.id}`} className="card-row" style={focusStyle(o.id === payId)}>
-                <span className="grow" style={{ minWidth: 0 }}>
-                  <strong>{o.job_title}</strong>
-                  <span className="muted small" style={{ display: "block" }}>{[visitDays(o), o.city, moneyShort(o.total)].filter(Boolean).join(" · ")}</span>
-                </span>
-                <StatusPill label={o.status === "offered" ? t(offerOutcomeLabel("expired", "sub")) : t(offerOutcomeLabel(o.outcome ?? o.status, "sub")) || t("Over")} tone="muted" />
-              </div>
+              <RelatedRow
+                key={o.id}
+                current={o.id === payId}
+                title={<span id={`job-${o.id}`} className="job-anchor">{o.job_title}</span>}
+                sub={[<StatusPill key="status" label={o.status === "offered" ? t(offerOutcomeLabel("expired", "sub")) : t(offerOutcomeLabel(o.outcome ?? o.status, "sub")) || t("Over")} tone="muted" />, visitDays(o), o.city, moneyShort(o.total)]}
+              />
             ))}
-          </div>
-        </section>
+          </RelatedList>
+        </Section>
       )}
     </div>
   );
 }
-
-const focusStyle = (focused: boolean) => (focused ? { boxShadow: "var(--ring)", scrollMarginTop: 80 } : { scrollMarginTop: 80 });
 
 const visitDays = (o: Pick<SubOffer, "visits">) => offerDays(o.visits.map((v) => v.scheduled_on));
 
@@ -223,73 +203,70 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
       queryClient.invalidateQueries({ queryKey: ["field-visit"] });
     },
   });
+  const place = [o.city, o.region].filter(Boolean).join(", ");
 
   return (
     // Named by its job, so its Accept and Decline are told apart from another offer's.
-    <article id={`job-${o.id}`} className="field-card" style={focusStyle(focused)} aria-labelledby={`job-${o.id}-title`}>
-      <div className="row wrap" style={{ gap: 6 }}>
+    <article id={`job-${o.id}`} className="offer-card" data-focused={focused || undefined} aria-labelledby={`job-${o.id}-title`}>
+      <div className="offer-top">
         <StatusPill label={o.is_change ? t("New price") : t("New job offer")} tone="info" />
-        <span className="chip">{o.respond_by ? t("Answer by {when}", { when: formatDateTime(o.respond_by, tz) }) : t("No deadline")}</span>
+        <span className="offer-by">{o.respond_by ? t("Answer by {when}", { when: formatDateTime(o.respond_by, tz) }) : t("No deadline")}</span>
       </div>
-      <strong id={`job-${o.id}-title`} style={{ fontSize: 16 }}>{offerCardLine(o)}</strong>
+      {/* The job, then the glance: its days, the town, how much and the price (the same line without its title). */}
+      <div className="offer-head">
+        <h3 id={`job-${o.id}-title`} className="offer-title">{o.job_title}</h3>
+        <p className="offer-sum">{offerCardLine({ ...o, job_title: "" })}</p>
+      </div>
       {o.is_change && o.agreed_total != null && (
-        <span className="small">{t("The office changed the price: {price}, was {was}. If you decline it, you keep the job at {was}.", { price: moneyShort(o.total), was: moneyShort(o.agreed_total) })}</span>
+        <p className="offer-note">{t("The office changed the price: {price}, was {was}. If you decline it, you keep the job at {was}.", { price: moneyShort(o.total), was: moneyShort(o.agreed_total) })}</p>
       )}
 
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <strong className="small">{t("When")}</strong>
-        {o.visits.length === 0 ? (
-          <span className="muted small">{t("The office will set the days.")}</span>
-        ) : (
-          o.visits.map((v) => (
-            <span key={v.id} className="small">
-              {v.scheduled_on ? offerDate(v.scheduled_on) : t("Not scheduled yet")}
-              {v.starts_at && <>, {v.ends_at ? t("{start} to {end}", { start: formatTime(v.starts_at, tz), end: formatTime(v.ends_at, tz) }) : formatTime(v.starts_at, tz)}</>}
-            </span>
-          ))
+      <Facts>
+        <Fact label={t("When")} wide>
+          {o.visits.length === 0 ? (
+            <span className="offer-quiet">{t("The office will set the days.")}</span>
+          ) : (
+            o.visits.map((v) => (
+              <span key={v.id} className="offer-day">
+                {v.scheduled_on ? offerDate(v.scheduled_on) : t("Not scheduled yet")}
+                {v.starts_at && <>, {v.ends_at ? t("{start} to {end}", { start: formatTime(v.starts_at, tz), end: formatTime(v.ends_at, tz) }) : formatTime(v.starts_at, tz)}</>}
+              </span>
+            ))
+          )}
+          {place ? <span className="offer-quiet">{t("In {place}. You'll see the address once you take it.", { place })}</span> : null}
+        </Fact>
+        {o.scope.length > 0 && (
+          <Fact label={t("The work")} wide>
+            {o.scope.map((s, i) => (
+              <span key={i} className="offer-day">
+                {s.name}
+                {Number(s.quantity) > 0 && <span className="offer-quiet"> · {quantityWords(s.quantity, s.unit)}</span>}
+              </span>
+            ))}
+          </Fact>
         )}
-        {o.city || o.region ? <span className="muted small">{t("In {place}. You'll see the address once you take it.", { place: [o.city, o.region].filter(Boolean).join(", ") })}</span> : null}
-      </div>
+        <Fact label={t("Notes from the office")} wide>{o.notes && <span className="pre-wrap">{o.notes}</span>}</Fact>
+      </Facts>
 
-      {o.scope.length > 0 && (
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <strong className="small">{t("The work")}</strong>
-          {o.scope.map((s, i) => (
-            <span key={i} className="small">
-              {s.name}
-              {Number(s.quantity) > 0 && <span className="muted"> · {quantityWords(s.quantity, s.unit)}</span>}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {o.notes && (
-        <div className="stack-sm" style={{ gap: 4 }}>
-          <strong className="small">{t("Notes from the office")}</strong>
-          <span className="small pre-wrap">{o.notes}</span>
-        </div>
-      )}
-
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <strong className="small">{t("Your price")}</strong>
-        {o.lines.map((l, i) => <PriceLine key={l.id ?? i} line={l} />)}
-        <div className="row-between"><strong>{t("Total")}</strong><strong className="tabular">{formatMoneyCents(Number(o.total))}</strong></div>
+      <div className="offer-price">
+        <h4 className="offer-price-title">{t("Your price")}</h4>
+        <PriceLines lines={o.lines} total={Number(o.total)} />
       </div>
 
       {o.insurance_warning.length > 0 && (
         <div className="callout callout-warning">
-          <Icon name="alert" size={20} />
-          <div className="grow small" style={{ fontWeight: 400 }}>
+          <Icon name="alert" size={16} />
+          <div className="grow">
             {o.insurance_warning.map((w) => translateError(getLocale(), w)).join(" ")} <Link to="/field/paperwork">{t("My paperwork")}</Link>
           </div>
         </div>
       )}
 
-      {state.note && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}><Icon name={online ? "clock" : "wifiOff"} size={14} /> {state.note}</span>}
+      {state.note && <p className="offer-wait"><Icon name={online ? "clock" : "wifiOff"} size={14} /> {state.note}</p>}
       {!declining && <FormError error={send.error} />}
-      <div className="field-card-more">
-        <Button className="big-action" icon="x" aria-label={t("Decline {job}", { job: o.job_title })} disabled={state.disabled || send.isPending} onClick={() => { send.reset(); setDeclining(true); }}>{t("Decline")}</Button>
-        <Button className="big-action" variant="primary" icon="check" aria-label={t("Accept {job}", { job: o.job_title })} disabled={state.disabled} loading={send.isPending && send.variables?.accept === true} onClick={() => send.mutate({ accept: true })}>
+      <div className="offer-acts">
+        <Button aria-label={t("Decline {job}", { job: o.job_title })} disabled={state.disabled || send.isPending} onClick={() => { send.reset(); setDeclining(true); }}>{t("Decline")}</Button>
+        <Button variant="primary" icon="check" aria-label={t("Accept {job}", { job: o.job_title })} disabled={state.disabled} loading={send.isPending && send.variables?.accept === true} onClick={() => send.mutate({ accept: true })}>
           {t("Accept")}
         </Button>
       </div>
@@ -306,18 +283,6 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
         />
       )}
     </article>
-  );
-}
-
-function PriceLine({ line: l }: { line: SubOfferLine }) {
-  return (
-    <div className="row-between" style={{ alignItems: "flex-start", gap: 12 }}>
-      <span className="grow small">
-        {l.description}
-        {l.basis !== "per_job" && <span className="muted" style={{ display: "block" }}>{quantityWords(l.quantity, l.basis === "per_day" ? "day" : l.unit)} × {formatRate(l.rate)}</span>}
-      </span>
-      <span className="tabular small">{formatMoneyCents(Number(l.amount))}</span>
-    </div>
   );
 }
 

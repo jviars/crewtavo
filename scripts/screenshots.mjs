@@ -50,9 +50,16 @@ async function signedIn(email, options, colorScheme = "light") {
 
 /** Waits for data and charts to settle: no requests in flight and no loading placeholders. */
 async function settle(page) {
-  await page.waitForLoadState("networkidle");
+  // The app checks in now and then (counts, a new build), so the network may never go quiet for long.
+  await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
   await page.waitForFunction(() => !document.querySelector(".skeleton, [aria-busy='true']"), null, { timeout: 15_000 }).catch(() => {});
   await page.waitForTimeout(600);
+  // The first time someone's clock shows (My day, Timesheets), a notice asks once about their location: they say OK.
+  const understood = page.getByRole("button", { name: "OK, I understand" });
+  if (await understood.isVisible()) {
+    await understood.click();
+    await page.waitForTimeout(600);
+  }
 }
 
 async function shot(page, name, path) {
@@ -102,15 +109,15 @@ const noPicture = await office.getByText(/No picture saved yet/).isVisible();
 await office.evaluate(() => localStorage.setItem("crewtavo.measureHelpSeen", "1"));
 await office.getByRole("link", { name: "Edit the takeoff" }).click();
 await office.waitForURL(/\/measure\?/);
-await office.getByRole("button", { name: "Saved" }).waitFor();
+await office.getByRole("status").filter({ hasText: "Saved" }).first().waitFor();
 await office.locator(".measure-tool", { hasText: "Edit" }).click(); // so no drawing hint covers the map
 await office.waitForTimeout(3000); // aerial tiles
 await shot(office, "measure");
 if (noPicture) {
   // The seed can't draw the map picture the project shows, so save the takeoff once to make it.
-  await office.getByLabel("Name this measurement").fill("Clubhouse lot "); // a change; the server trims it
+  await office.getByLabel("Name", { exact: true }).fill("Clubhouse lot "); // a change; the server trims it
   await office.getByRole("button", { name: "Save changes" }).click();
-  await office.getByRole("button", { name: "Saved" }).waitFor({ timeout: 30_000 });
+  await office.getByRole("status").filter({ hasText: "Saved" }).first().waitFor({ timeout: 30_000 });
 }
 await shot(office, "paving", project);
 

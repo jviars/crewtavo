@@ -1,6 +1,5 @@
 Logos for the apps Crewtavo connects to, shown on the Apps page to identify each integration. They
-are trademarks of their owners. crewtavo.svg is Crewtavo's own mark (public/crewtavo-mark.svg, in its
-light-background colors), for the apps built into Crewtavo, such as Team Chat - Crewtavo. Stripe, Google Calendar, Twilio, Claude and ChatGPT (OpenAI) come
+are trademarks of their owners. Built-in apps show their menu icon on a green tile (AppIcon.tsx OWN_ICONS); crewtavo.svg is no longer used there. Stripe, Google Calendar, Twilio, Claude and ChatGPT (OpenAI) come
 from svgl.app; QuickBooks and Zoho are Simple Icons (CC0) in each brand's color. sveltia.svg is
 Sveltia CMS's logo from sveltiacms.app (images/logo/sveltia-logo.svg); it's already a rounded app
 icon, so AppIcon.tsx shows it edge to edge. outlook.svg is a

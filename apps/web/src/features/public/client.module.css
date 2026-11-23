@@ -1,0 +1,259 @@
+/*
+ * The client kit (Client-Phone.dc.html, Client-Desktop.dc.html): the pages a business's clients, and
+ * its subs, open from a link. The booking form, a referral, a showcase, the unsubscribe page and a
+ * sub's paperwork wear the business's color (--brand, from brandStyle in ClientKit.tsx: its brand
+ * color, else the navy its paper prints in) and its logo, never Crewtavo's green, on the phone kit's
+ * grey ground with white rounded cards. Booking, referral, showcase and unsubscribe always draw light
+ * (lib/theme.ts); a sub's paperwork follows the device, so everything here is drawn from the theme's
+ * tokens, and words in the color are lightened in dark.
+ */
+
+.page {
+  /* brandStyle sets these on the page; the navy here is only its fallback's twin. */
+  --brand: #1f4e79;
+  --brand-hover: #1b4569;
+  --on-brand: #fff;
+  --brand-tint: color-mix(in srgb, var(--brand) 11%, var(--m-card));
+  --brand-text: var(--brand-words, var(--brand));
+  /* Focus in the business's color, as words in it read: on white at 4.5:1 or better. */
+  --focus-ring: var(--brand-text);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--brand) 24%, transparent);
+  display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh;
+  background: var(--m-group); color: var(--ink); font-size: var(--fs-15); line-height: 1.5;
+}
+/* A sub's paperwork in the dark theme: words in the color, lightened until they read on the dark cards. */
+:global(.dark) .page { --brand-text: color-mix(in srgb, var(--brand) 45%, #fff); }
+/* In a frame on the business's own website (?embed=1): its page shows around the card. */
+.embedded { min-height: 0; background: transparent; }
+
+/* ---- The business at the top: its logo or initials, its name, and a way to call ---- */
+.head { display: flex; align-items: center; gap: 12px; min-height: 68px; padding: 10px 32px; box-sizing: border-box; border-bottom: 1px solid var(--divider); background: var(--m-card); }
+.mark { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--brand); color: var(--on-brand); font-size: var(--fs-14); font-weight: 800; letter-spacing: 0.02em; }
+.markImg { flex: none; width: auto; height: 40px; max-width: 160px; object-fit: contain; }
+.biz { flex: 1; min-width: 0; font-size: var(--fs-16); font-weight: 700; line-height: 1.25; }
+.biz > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.biz > .bizSub { font-size: var(--fs-12); font-weight: 500; color: var(--text-3); }
+.headBtn { display: inline-flex; flex: none; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--m-card); color: var(--ink); font-size: var(--fs-14); font-weight: 600; text-decoration: none; white-space: nowrap; transition: background-color var(--dur-fast); }
+.headBtn:hover { background: var(--fill-2); color: var(--ink); text-decoration: none; }
+.headBtn svg { flex: none; }
+
+/* ---- The page's column ---- */
+.body { box-sizing: border-box; display: grid; flex: 1; gap: 16px; align-content: start; width: 100%; max-width: 680px; margin: 0 auto; padding: 32px 32px 40px; animation: rise var(--dur-slow) var(--ease-out); }
+.body.wide { max-width: 1000px; }
+.body.narrow { max-width: 560px; }
+.embedded .body { max-width: none; padding: 1px 1px 4px; animation: none; }
+
+.card { padding: 28px; border-radius: 20px; background: var(--m-card); }
+/* The business's own frame draws the edge: inside it the card keeps a hairline, its page may be white. */
+.embedded .card { box-shadow: inset 0 0 0 1px var(--border); }
+
+.kick { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--brand-text); }
+.kick svg { flex: none; }
+.title { margin: 6px 0 4px; font-size: var(--fs-32); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; overflow-wrap: anywhere; text-wrap: balance; }
+.kick + .title { margin-top: 8px; }
+.title:first-child { margin-top: 0; }
+.titleMd { margin: 0; font-size: var(--fs-24); font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
+.text { margin: 0; color: var(--text-2); }
+.msg { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--divider); color: var(--text-2); }
+.offer { margin: 12px 0 0; font-weight: 600; color: var(--brand-text); }
+.h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; }
+.place { display: inline-flex; align-items: center; gap: 6px; height: 30px; margin-top: 10px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--fill-2); font-size: var(--fs-13); font-weight: 500; color: var(--text-2); }
+.place svg { flex: none; color: var(--quiet); }
+
+/* ---- A form: its parts one under the other, a hairline between ---- */
+.form { display: grid; gap: 24px; }
+.part { display: grid; gap: 14px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.part + .part, .form > .bar { padding-top: 24px; border-top: 1px solid var(--divider); }
+.page legend { padding: 0; }
+/* Where the business's bot check would go: no gap while there's none. */
+.check:empty { display: none; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+.full { grid-column: 1 / -1; }
+
+/* The app's fields, a size up for a client's thumb and eye: 48px, a soft edge, 16px words. */
+.page :global(.field) { gap: 6px; font-size: var(--fs-14); }
+.page :global(.field-label) { font-size: var(--fs-14); font-weight: 600; }
+.page :global(.field) > :global(.hint), .page :global(.field) > :global(.field-error) { font-size: var(--fs-13); }
+.page :global(:is(.input, .select, .textarea)) { height: 48px; padding: 0 14px; border: 0; border-radius: 12px; background-color: var(--m-card); box-shadow: inset 0 0 0 1.5px var(--border); font-size: var(--fs-16); }
+.page :global(.select) { padding-right: 34px; background-position: right 14px center; }
+.page :global(.textarea) { height: auto; min-height: 104px; padding: 12px 14px; }
+.page :global(:is(.input, .select, .textarea):hover) { box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.page :global(:is(.input, .select, .textarea):focus) { box-shadow: inset 0 0 0 2px var(--brand), var(--ring); }
+.page :global(:is(.input, .select, .textarea):is([aria-invalid="true"], :user-invalid)) { box-shadow: inset 0 0 0 1.5px var(--danger); }
+.page :global(:is(.input, .select, .textarea):is([aria-invalid="true"], :user-invalid):focus) { box-shadow: inset 0 0 0 2px var(--danger), var(--ring-danger); }
+.page :global(:is(.input, .select, .textarea):disabled) { background-color: var(--fill); }
+.page :global(.form-error) { border-radius: 12px; }
+.page :global(.progress) > span { background: var(--brand); }
+/* Check boxes and radios in the business's color, not Crewtavo's green. */
+.page :global(input[type="checkbox"]:not(.switch, [role="switch"]):is(:checked, :indeterminate)) { border-color: var(--brand); background-color: var(--brand); }
+.page :global(:is(input[type="checkbox"], input[type="radio"])) { accent-color: var(--brand); }
+
+/* A part's heading, and the quiet line under it. */
+.legend { margin: 0; font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+.note { margin: 0; font-size: var(--fs-14); font-weight: 400; color: var(--text-3); }
+
+/* ---- Choices: one or several of a few answers ---- */
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--m-card); box-shadow: inset 0 0 0 1.5px var(--border); color: var(--ink); font: inherit; font-size: var(--fs-15); font-weight: 600; cursor: pointer; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+.choice:hover { box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.choice[aria-pressed="true"] { background: var(--brand-tint); box-shadow: inset 0 0 0 2px var(--brand); color: var(--brand-text); }
+.choice svg { flex: none; }
+
+/* ---- Picking a time: a week, its days, then the times on the day ---- */
+.week { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-15); font-weight: 600; font-variant-numeric: tabular-nums; }
+.round { display: grid; place-items: center; flex: none; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); cursor: pointer; transition: background-color var(--dur-fast); }
+.round:hover:not(:disabled) { background: var(--fill-3); }
+.round:disabled { opacity: 0.4; cursor: not-allowed; }
+/* A week's days in one row: as many columns as days open (--cols, 5 to 7), so a short week keeps its chips' size. */
+.days { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)); gap: 6px; }
+.day { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 64px; padding: 0; border: 0; border-radius: 14px; background: var(--m-card); box-shadow: inset 0 0 0 1.5px var(--border); color: var(--text-3); font: inherit; font-size: var(--fs-12); font-weight: 600; line-height: 1.2; cursor: pointer; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+.day b { font-size: var(--fs-20); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.day:hover { box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.day[aria-pressed="true"] { background: var(--brand); box-shadow: none; color: color-mix(in srgb, var(--on-brand) 85%, transparent); }
+.day[aria-pressed="true"] b { color: var(--on-brand); }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; }
+.slot { box-sizing: border-box; height: 54px; padding: 0 12px; border: 0; border-radius: 14px; background: var(--m-card); box-shadow: inset 0 0 0 1.5px var(--border); color: var(--ink); font: inherit; font-size: var(--fs-16); font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; transition: box-shadow var(--dur-fast), background-color var(--dur-fast); }
+.slot:hover { box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+.slot[aria-pressed="true"] { background: var(--brand); box-shadow: none; color: var(--on-brand); }
+.picked { margin: 0; font-size: var(--fs-14); color: var(--text-2); }
+.picked b { font-weight: 600; color: var(--ink); }
+
+/* ---- Files sent with a request or a sub's paperwork ---- */
+.files { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.files li { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-14); }
+.files li > svg { flex: none; color: var(--text-3); }
+.fileName { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fileName small { margin-left: 6px; font-size: var(--fs-13); color: var(--text-3); white-space: nowrap; }
+.drop { outline: 2px dashed var(--brand); outline-offset: 6px; border-radius: 12px; }
+
+/* ---- Buttons and links in the business's color ---- */
+.cta { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 50px; padding: 0 20px; border: 0; border-radius: 14px; background: var(--brand); color: var(--on-brand); font: inherit; font-size: var(--fs-16); font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color var(--dur-fast); }
+.cta:hover { background: var(--brand-hover); color: var(--on-brand); text-decoration: none; }
+/* The same look on the app's Button (it keeps its spinner and disabled state). */
+.page .cta:global(.btn) { height: 50px; border: 0; border-radius: 14px; background: var(--brand); color: var(--on-brand); font-size: var(--fs-16); box-shadow: none; }
+.page .cta:global(.btn):hover { background: var(--brand-hover); color: var(--on-brand); }
+/* Not ready to press yet (the bot check isn't done): the app's quiet disabled look, not the color. */
+.page .cta:global(.btn):disabled:not(:global(.is-loading)) { background: var(--fill-2); color: var(--text-4); cursor: not-allowed; }
+.cta.auto { width: auto; justify-self: start; }
+.soft { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--fill-2); color: var(--ink); font: inherit; font-size: var(--fs-15); font-weight: 600; text-decoration: none; cursor: pointer; transition: background-color var(--dur-fast); }
+.page .soft:global(.btn) { height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--fill-2); color: var(--ink); font-size: var(--fs-15); box-shadow: none; }
+.page .soft:global(.btn):hover, .soft:hover { background: var(--fill-3); color: var(--ink); text-decoration: none; }
+.page .soft:global(.btn[aria-disabled="true"]) { opacity: 0.5; background: var(--fill-2); }
+/* Also on a signed-in sub's paperwork dialog (ItemCard), outside the kit's page: Crewtavo's green there. */
+.link { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: var(--brand-text, var(--green-dark)); font: inherit; font-size: var(--fs-15); font-weight: 600; text-decoration: none; cursor: pointer; }
+.link:hover { color: var(--brand-text, var(--green-dark)); text-decoration: underline; text-underline-offset: 3px; }
+.link:disabled { opacity: 0.5; cursor: not-allowed; text-decoration: none; }
+.link svg { flex: none; }
+.iconBtn { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: var(--radius-pill); background: none; color: var(--text-3); cursor: pointer; }
+.iconBtn:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.iconBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* A promo code that's on: a quiet strip in the business's tint. */
+.promo { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--brand-tint); font-size: var(--fs-14); color: var(--ink); }
+.promo > svg { flex: none; color: var(--brand-text); }
+.promo code { font-family: var(--font-mono, ui-monospace, monospace); font-weight: 700; }
+.promoEntry { display: flex; gap: 8px; align-items: center; }
+.promoEntry :global(.input) { text-transform: uppercase; }
+
+/* ---- The send button and what's said beside it ---- */
+.bar { display: grid; gap: 10px; }
+.bar :global(.form-checks) { justify-self: center; }
+.sending { display: grid; gap: 6px; font-size: var(--fs-14); }
+.sendingHead { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+.sendingHead span:last-child { color: var(--text-3); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* ---- Something finished (booked, sent, unsubscribed), or a link that doesn't work ---- */
+.done { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.doneMark { display: grid; place-items: center; width: 72px; height: 72px; margin-bottom: 8px; border-radius: var(--radius-pill); background: var(--brand-tint); color: var(--brand-text); }
+.doneMark[data-tone="quiet"] { background: var(--fill-2); color: var(--text-3); }
+.doneMark[data-tone="draw"] svg { clip-path: inset(0 100% 0 0); animation: draw 0.5s 0.15s var(--ease-out) forwards; }
+.doneTitle { margin: 0; font-size: var(--fs-24); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; text-wrap: balance; }
+.doneText { margin: 0; max-width: 440px; color: var(--text-2); text-wrap: pretty; }
+.done > .cta, .done > .soft, .done > :global(.btn) { margin-top: 8px; }
+/* A card with nothing around it (a link that doesn't work, a test link): smaller, a little way down the page. */
+.alone { justify-self: center; width: 100%; max-width: 520px; box-sizing: border-box; margin-top: min(8vh, 64px); padding-block: 36px; }
+.done > .cta { max-width: 360px; }
+.done > :global(.callout) { width: 100%; text-align: left; }
+
+/* What was booked, as label and value on hairlines. */
+.facts { width: 100%; margin: 12px 0 0; text-align: left; }
+.facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--row-divider); font-size: var(--fs-15); }
+.facts dt { flex: none; color: var(--text-3); }
+.facts dd { min-width: 0; margin: 0; font-weight: 500; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.facts dd small { display: block; font-size: var(--fs-13); font-weight: 400; color: var(--text-3); }
+
+/* ---- The foot: the business's privacy policy ---- */
+.foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; font-size: var(--fs-12); color: var(--text-3); }
+.foot :global(footer) { margin: 0 !important; font-size: var(--fs-12); }
+.foot a { color: var(--text-3); }
+.foot a:hover { color: var(--ink); }
+
+/* ---- Loading: the header and a card's shape ---- */
+.skeleton { display: grid; gap: 14px; }
+.skeletonHead { display: flex; align-items: center; gap: 12px; }
+
+/* A form whose parts are cards of their own: the send button follows them, no hairline above it. */
+.form.loose { gap: 14px; }
+@media (min-width: 901px) {
+  .form.loose > .bar { padding-top: 10px; border-top: 0; }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* The check wipes in from the left, as if drawn (Phosphor's icons are filled shapes, not strokes). */
+@keyframes draw { to { clip-path: inset(0); } }
+
+@media (max-width: 900px) {
+  /* The phone kit: the business on the grey ground, round buttons, the main action in thumb reach. */
+  .head { gap: 10px; min-height: 0; padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); border-bottom: 0; background: transparent; }
+  .mark { width: 36px; height: 36px; font-size: var(--fs-13); }
+  .markImg { height: 36px; }
+  .biz { font-size: var(--fs-15); line-height: 1.2; }
+  .headBtn { justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--m-card); }
+  .headText { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .body { gap: 14px; padding: 14px max(16px, env(safe-area-inset-right)) 28px max(16px, env(safe-area-inset-left)); }
+  .card { padding: 18px 16px; border-radius: 18px; }
+  .title { font-size: var(--fs-30); }
+  /* A sentence of a title (a referral, a showcase) in a card: a size down, so it isn't the whole screen. */
+  .card > .title.long { font-size: var(--fs-24); }
+  /* A form sits on the ground, its fields white; the send button stays in reach at the bottom. */
+  .formCard { padding: 4px 0 0; border-radius: 0; background: transparent; }
+  .embedded .formCard { padding: 18px 16px; border-radius: 18px; background: var(--m-card); }
+  .round { width: 44px; height: 44px; background: var(--m-card); }
+  /* A thumb's reach for the small controls: removing a file, and the text buttons (Have a promo code?, Change). */
+  .iconBtn { width: 44px; height: 44px; margin: -4px -6px -4px 0; }
+  button.link { min-height: 44px; }
+  .embedded .round { background: var(--fill-2); }
+  .bar {
+    position: sticky; bottom: 0; z-index: 3;
+    margin: 0 calc(-1 * max(16px, env(safe-area-inset-right))) 0 calc(-1 * max(16px, env(safe-area-inset-left)));
+    padding: 12px max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    border-top: 1px solid var(--divider);
+    background: color-mix(in srgb, var(--m-group) 94%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .form > .bar { padding-top: 12px; }
+  .embedded .bar { position: static; margin: 0; padding: 24px 0 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  /* What was booked: the phone kit's inset card. */
+  .doneCard { padding: 24px 0 0; background: transparent; }
+  .doneCard .facts { padding: 0 16px; border-radius: 14px; background: var(--m-card); }
+  .doneCard .facts > div:first-child { border-top: 0; }
+  /* In a frame on the business's website, its page is behind: the card stays a card. */
+  .embedded .doneCard { padding: 24px 16px; background: var(--m-card); }
+  .embedded .doneCard .facts { padding: 0; border-radius: 0; background: none; }
+  .embedded .doneCard .facts > div:first-child { border-top: 1px solid var(--row-divider); }
+}
+@media (max-width: 560px) {
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .grid2.pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .body { animation: none; }
+  .doneMark[data-tone="draw"] svg { animation: none; clip-path: none; }
+}
+@media print {
+  .page { min-height: 0; background: #fff; }
+  .head { border: 0; background: none; }
+  .body { animation: none; }
+  .card { padding: 0; }
+  .bar { position: static; }
+}

@@ -2,9 +2,9 @@
 import { textDisclosure } from "@crewtavo/core/marketing";
 import { slotLabel, slotTime, type OpenSlot } from "@crewtavo/core/slots";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
+import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "../public/ClientKit";
 import { postToHost } from "./embed";
 
 /** The most files a request can bring (the API's limit too). */
@@ -36,6 +37,10 @@ interface Booking { timezone: string; timezone_label: string; minutes: number; w
 interface Week { from: string; to: string; first: string; last: string; slots: OpenSlot[] }
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const visitLength = (minutes: number) => (minutes < 60 ? `${minutes} minutes` : minutes % 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : minutes === 60 ? "an hour" : `${minutes / 60} hours`);
+/** A calendar date ("2026-11-27") in words, the same wherever the reader is. */
+const dateWords = (date: string, options: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { ...options, timeZone: "UTC" });
+/** A week's dates as the picker heads them: "Nov 24 – 30", or "Nov 28 – Dec 4" across a month's end. */
+export const weekWords = (from: string, to: string) => `${dateWords(from, { month: "short", day: "numeric" })} – ${from.slice(0, 7) === to.slice(0, 7) ? Number(to.slice(8)) : dateWords(to, { month: "short", day: "numeric" })}`;
 
 interface Question {
   key: string;
@@ -46,7 +51,7 @@ interface Question {
 }
 interface FormView {
   /** `texts`: the business can text, so the phone box says what giving a number agrees to. */
-  company: { name: string; phone: string | null; texts?: boolean; privacy_url?: string | null };
+  company: { name: string; phone: string | null; texts?: boolean; privacy_url?: string | null; logo?: string | null; color?: string | null };
   form: { name: string; kind: string; questions: Question[] };
   booking?: Booking;
 }
@@ -148,41 +153,53 @@ export function BookingFormPage() {
   });
   const set = (key: keyof typeof contact) => (e: { target: { value: string } }) => setContact({ ...contact, [key]: e.target.value });
 
+  const business = view.data?.company;
+  const first = contact.name.trim().split(" ")[0];
   return (
-    // Embedded, just enough room around the card for its shadow; index.html clears the page's own background.
-    <div ref={page} className="public-page" style={embedded ? { padding: "1px 1px 4px", background: "transparent", minHeight: 0 } : undefined}>
-      <div className="public-wrap" style={{ maxWidth: 640 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="40%" height={12} /><Skeleton width="65%" height={26} /><Skeleton height={300} radius={8} /></div>}
-        {view.error && (
-          <div className="card"><div className="empty-state error-state"><span className="empty-icon"><Icon name="search" size={24} /></span><h3>This form isn't available</h3><p>{(view.error as Error).message}</p></div></div>
-        )}
+    // Embedded, the business's own page shows around the card: index.html clears the page's background.
+    <ClientPage pageRef={page} embedded={embedded} color={business?.color}>
+      {/* On its own the business heads the page; in a frame on its website the site does. */}
+      {business && !embedded && <ClientHeader name={business.name} logo={business.logo} phone={business.phone} />}
+      <ClientBody>
+        {view.isPending && <ClientSkeleton header={!embedded} lines={4} />}
+        {view.error && <Broken icon="search" title="This form isn't available">{(view.error as Error).message}</Broken>}
         {view.data && submit.data && (
-          <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 32 }}>
-            <span className="success-mark"><Icon name="check" size={30} bold /></span>
-            <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{submit.data.booking?.status === "booked" ? `You're booked, ${contact.name.trim().split(" ")[0]}` : `Thanks, ${contact.name.trim().split(" ")[0]}`}</h1>
+          <Done className={k.doneCard} title={submit.data.booking?.status === "booked" ? `You're booked, ${first}` : `Thanks, ${first}`}>
             {submit.data.booking && booking ? (
-              <BookedNote sent={submit.data.booking} booking={booking} company={view.data.company.name} reference={submit.data.reference} />
+              <BookedNote sent={submit.data.booking} company={view.data.company.name} />
             ) : (
-              <p style={{ margin: 0 }}>{view.data.company.name} got your request (reference #{submit.data.reference}) and will be in touch soon.</p>
+              <p className={k.doneText}>{view.data.company.name} got your request and will be in touch soon.</p>
             )}
-            {submit.data.sentFiles > 0 && <p className="muted" style={{ margin: 0 }}>{submit.data.sentFiles === 1 ? "Your file came with it." : `Your ${submit.data.sentFiles} files came with it.`}</p>}
+            <dl className={k.facts}>
+              {submit.data.booking && booking && (
+                <div>
+                  <dt>{submit.data.booking.status === "booked" ? "When" : "Asked for"}</dt>
+                  <dd>{bookedWhen(submit.data.booking, booking)}<small>{booking.timezone_label}</small></dd>
+                </div>
+              )}
+              <div><dt>Where</dt><dd>{[contact.line1.trim(), contact.city.trim()].filter(Boolean).join(", ")}</dd></div>
+              {submit.data.sentFiles > 0 && <div><dt>Files</dt><dd>{submit.data.sentFiles === 1 ? "Your file came with it" : `Your ${submit.data.sentFiles} files came with it`}</dd></div>}
+              <div><dt>Reference</dt><dd>#{submit.data.reference}</dd></div>
+            </dl>
             {submit.data.failed.length > 0 && (
-              <div className="callout callout-warning" style={{ textAlign: "left", width: "100%" }}>
-                <Icon name="alert" size={20} />
+              <div className="callout callout-warning">
+                <Icon name="alert" size={16} />
                 <div className="grow">
                   <div>{submit.data.failed.length === 1 ? "One file didn't come through:" : `${submit.data.failed.length} files didn't come through:`} {submit.data.failed.join(", ")}</div>
-                  <div className="small" style={{ fontWeight: 400 }}>Your request is in. Email {submit.data.failed.length === 1 ? "it" : "them"} to {view.data.company.name}{view.data.company.phone ? `, or call ${view.data.company.phone}` : ""}.</div>
+                  Your request is in. Email {submit.data.failed.length === 1 ? "it" : "them"} to {view.data.company.name}{view.data.company.phone ? `, or call ${view.data.company.phone}` : ""}.
                 </div>
               </div>
             )}
-            {view.data.company.phone && <p className="muted" style={{ margin: 0 }}>Questions? Call <a href={`tel:${view.data.company.phone}`}>{view.data.company.phone}</a>.</p>}
-          </div>
+            {submit.data.booking?.calendar && <CalendarLink text={submit.data.booking.calendar} />}
+            {view.data.company.phone && <p className={k.doneText}>Questions? Call <a className={k.link} href={`tel:${view.data.company.phone}`}>{view.data.company.phone}</a></p>}
+          </Done>
         )}
         {view.data && !submit.data && (
           <form
             ref={formRef}
-            className="card card-pad stack"
+            className={cx(k.card, k.formCard, k.form)}
             noValidate
+            aria-labelledby="booking-form-title"
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               setTouched(true);
@@ -195,84 +212,107 @@ export function BookingFormPage() {
               submit.mutate();
             }}
           >
-            <div>
-              {!embedded && <div className="muted strong">{view.data.company.name}</div>}
-              <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{view.data.form.name}</h1>
-            </div>
-            <div className="form-grid">
-              <Field label="Your name" requiredMessage={NAME_NEEDED} error={touched && contact.name.trim().length < 2 ? NAME_NEEDED : null}><input className="input" value={contact.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
-              <Field label="Email" error={touched && noContact ? "Add an email or a phone number, so we can reach you." : null}><input className="input" type="email" value={contact.email} onChange={set("email")} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
-              <Field label="Phone" hint={view.data.company.texts ? textDisclosure(view.data.company.name) : undefined}><input className="input" type="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="tel" aria-invalid={touched && noContact} /></Field>
-            </div>
-            <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
-            <div className="form-grid">
-              <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-              <Field label="ZIP / Postal code"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
-            </div>
-            {questions.map((q) => (
-              isFileQuestion(q) ? (
-                <FileQuestion key={q.key} q={q} files={files[q.key] ?? []} room={MAX_FILES - fileCount} invalid={touched && unanswered.includes(q)} disabled={submit.isPending} onChange={(list) => setFiles((all) => ({ ...all, [q.key]: list }))} />
-              ) : (
-                <QuestionField key={q.key} q={q} value={answers[q.key]} invalid={touched && unanswered.includes(q)} onChange={(v) => setAnswers({ ...answers, [q.key]: v })} />
-              )
-            ))}
+            <h1 id="booking-form-title" className={k.title}>{view.data.form.name}</h1>
+            <Part title="How to reach you">
+              <div className={k.grid2}>
+                <Field className={k.full} label="Your name" requiredMessage={NAME_NEEDED} error={touched && contact.name.trim().length < 2 ? NAME_NEEDED : null}><input className="input" value={contact.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
+                <Field label="Email" error={touched && noContact ? "Add an email or a phone number, so we can reach you." : null}><input className="input" type="email" value={contact.email} onChange={set("email")} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
+                <Field label="Phone" hint={view.data.company.texts ? textDisclosure(view.data.company.name) : undefined}><input className="input" type="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="tel" aria-invalid={touched && noContact} /></Field>
+              </div>
+            </Part>
+            <Part title="Where the work is">
+              <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
+              <div className={cx(k.grid2, k.pair)}>
+                <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
+                <Field label="ZIP / Postal code"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
+              </div>
+            </Part>
+            {questions.length > 0 && (
+              <Part title="About the job">
+                {questions.map((q) => (
+                  isFileQuestion(q) ? (
+                    <FileQuestion key={q.key} q={q} files={files[q.key] ?? []} room={MAX_FILES - fileCount} invalid={touched && unanswered.includes(q)} disabled={submit.isPending} onChange={(list) => setFiles((all) => ({ ...all, [q.key]: list }))} />
+                  ) : (
+                    <QuestionField key={q.key} q={q} value={answers[q.key]} invalid={touched && unanswered.includes(q)} onChange={(v) => setAnswers({ ...answers, [q.key]: v })} />
+                  )
+                ))}
+              </Part>
+            )}
             {booking && (
-              <TimePicker path={path} booking={booking} postalCode={contact.postal_code} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
+              <div className={k.part}>
+                <TimePicker path={path} booking={booking} postalCode={contact.postal_code} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
+              </div>
             )}
             {promo.offer ? (
-              <div className="callout callout-good">
-                <Icon name="tag" size={20} />
-                <div className="grow"><strong className="mono">{promo.code}</strong>: {promo.offer}. It'll be applied to your quote.</div>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={() => { setPromo({ code: "", offer: "", open: false }); checkPromo.reset(); }}>Remove</button>
+              <div className={k.promo}>
+                <Icon name="tag" size={18} />
+                <span className="grow"><code>{promo.code}</code>: {promo.offer}. It'll be applied to your quote.</span>
+                <button type="button" className={k.link} onClick={() => { setPromo({ code: "", offer: "", open: false }); checkPromo.reset(); }}>Remove</button>
               </div>
             ) : promo.open ? (
               <Field label="Promo code" optional error={checkPromo.error ? (checkPromo.error as Error).message : null}>
-                <div className="promo-entry">
+                <div className={k.promoEntry}>
                   <input className="input mono grow" value={promo.code} onChange={(e) => { setPromo({ ...promo, code: e.target.value.toUpperCase() }); checkPromo.reset(); }} maxLength={24} autoCapitalize="characters" />
-                  <Button loading={checkPromo.isPending} disabled={!promo.code.trim()} onClick={() => checkPromo.mutate(promo.code.trim())}>Apply</Button>
+                  <Button className={k.soft} loading={checkPromo.isPending} disabled={!promo.code.trim()} onClick={() => checkPromo.mutate(promo.code.trim())}>Apply</Button>
                 </div>
               </Field>
             ) : (
-              <button type="button" className="btn btn-sm btn-ghost" style={{ justifySelf: "start" }} onClick={() => setPromo({ ...promo, open: true })}><Icon name="tag" size={14} />Have a promo code?</button>
+              <button type="button" className={k.link} style={{ justifySelf: "start" }} onClick={() => setPromo({ ...promo, open: true })}><Icon name="tag" size={16} />Have a promo code?</button>
             )}
-            <div ref={turnstile.ref} />
-            <FormError error={submit.error} />
-            {sending && (
-              <div className="stack-sm" role="status" aria-live="polite">
-                <div className="row-between small"><span className="strong">Sending your files: {sending.done + 1} of {sending.total}</span><span className="muted tabular">{Math.round(sending.progress * 100)}%</span></div>
-                <div className="progress"><span style={{ width: `${Math.round(((sending.done + sending.progress) / sending.total) * 100)}%` }} /></div>
-                <span className="muted small">Keep this page open until they're done.</span>
-              </div>
-            )}
-            <FormChecks />
-            <Button type="submit" variant="primary" size="lg" icon={booking && time ? "calendar" : "send"} loading={submit.isPending} disabled={turnstile.required && !turnstile.token}>
-              {booking && time ? (booking.needs_ok ? "Request this time" : "Book this time") : "Send request"}
-            </Button>
+            <div ref={turnstile.ref} className={k.check} />
+            <div className={k.bar}>
+              <FormError error={submit.error} />
+              {sending && (
+                <div className={k.sending} role="status" aria-live="polite">
+                  <div className={k.sendingHead}><span>Sending your files: {sending.done + 1} of {sending.total}</span><span>{Math.round(sending.progress * 100)}%</span></div>
+                  <div className="progress"><span style={{ width: `${Math.round(((sending.done + sending.progress) / sending.total) * 100)}%` }} /></div>
+                  <span className={k.note}>Keep this page open until they're done.</span>
+                </div>
+              )}
+              <FormChecks />
+              <Button type="submit" variant="primary" size="lg" className={k.cta} icon={booking && time ? "calendar" : "send"} loading={submit.isPending} disabled={turnstile.required && !turnstile.token}>
+                {booking && time ? (booking.needs_ok ? "Request this time" : "Book this time") : "Send request"}
+              </Button>
+            </div>
           </form>
         )}
-        <PrivacyFooter url={view.data?.company.privacy_url} />
-      </div>
-    </div>
+        <div className={k.foot}><PrivacyFooter url={view.data?.company.privacy_url} /></div>
+      </ClientBody>
+    </ClientPage>
   );
 }
 
-/** After a time was picked: when, in whose time zone, how they'll hear, and a file for their calendar. */
-function BookedNote({ sent, booking, company, reference }: { sent: Booked; booking: Booking; company: string; reference: number }) {
-  const when = slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min);
-  const told = sent.emailed && sent.texted ? "We've emailed and texted you the details." : sent.emailed ? "We've emailed you the details." : sent.texted ? "We've texted you the details." : null;
-  const calendar = useMemo(() => (sent.calendar ? URL.createObjectURL(new Blob([sent.calendar], { type: "text/calendar" })) : null), [sent.calendar]);
-  useEffect(() => () => { if (calendar) URL.revokeObjectURL(calendar); }, [calendar]);
+/** One part of the form under its heading: who's asking, where, the questions. */
+function Part({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId();
   return (
-    <>
-      {sent.status === "booked" ? (
-        <p style={{ margin: 0 }}>{company} will see you <strong>{when}</strong> (reference #{reference}).</p>
-      ) : (
-        <p style={{ margin: 0 }}>You asked for <strong>{when}</strong> (reference #{reference}). This time isn't confirmed yet: {company} will confirm it, or get in touch to find another.</p>
-      )}
-      <p className="muted" style={{ margin: 0 }}>Times are in {booking.timezone_label}.{told ? ` ${told}` : ""}</p>
-      {calendar && <a className="btn" href={calendar} download="visit.ics"><Icon name="calendar" size={16} />Add to calendar</a>}
-    </>
+    <section className={k.part} aria-labelledby={id}>
+      <h2 id={id} className={k.legend}>{title}</h2>
+      {children}
+    </section>
   );
+}
+
+/** When a booked visit is, as the form offered it, in the business's time zone. */
+function bookedWhen(sent: Booked, booking: Booking) {
+  return slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min);
+}
+
+/** After a time was picked: whether it's booked or waiting on the business, and how they'll hear. */
+function BookedNote({ sent, company }: { sent: Booked; company: string }) {
+  const told = sent.emailed && sent.texted ? "We've emailed and texted you the details." : sent.emailed ? "We've emailed you the details." : sent.texted ? "We've texted you the details." : null;
+  return sent.status === "booked" ? (
+    <p className={k.doneText}>{told ?? `${company} will see you then.`}</p>
+  ) : (
+    <p className={k.doneText}>This time isn't confirmed yet: {company} will confirm it, or get in touch to find another.{told ? ` ${told}` : ""}</p>
+  );
+}
+
+/** A file for their calendar, made from the booking's own (an object URL, let go when the page is). */
+function CalendarLink({ text }: { text: string }) {
+  const calendar = useMemo(() => URL.createObjectURL(new Blob([text], { type: "text/calendar" })), [text]);
+  useEffect(() => () => URL.revokeObjectURL(calendar), [calendar]);
+  return <a className={k.cta} href={calendar} download="visit.ics"><Icon name="calendar" size={18} />Add to calendar</a>;
 }
 
 /**
@@ -316,41 +356,48 @@ function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, inv
     if (picked && week.isSuccess && !week.isPlaceholderData && week.data.from <= picked.date && picked.date <= week.data.to && !slots.some((s) => s.starts_at === picked.starts_at)) onPick(null);
   }, [week.data]);
   const dayName = (date: string) => slotLabel({ date, starts_at: null }, booking.timezone);
-  const choice = (key: string, on: boolean, label: string, pick: () => void) => (
-    <button key={key} type="button" className="tab" aria-pressed={on} style={{ height: "var(--control)", padding: "0 14px" }} onClick={pick}>{on && <Icon name="check" size={14} bold />}{label}</button>
-  );
   return (
     <fieldset className="field" data-invalid={invalid || undefined} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 10 }}>
-      <legend style={{ marginBottom: 6 }}>{booking.needs_ok ? "Pick a time you'd like" : "Pick a time"}</legend>
-      <span className="muted small">Times are in {booking.timezone_label}. {booking.window_min ? "We arrive within the window you pick." : `Set aside about ${visitLength(booking.minutes)}.`}</span>
+      <legend className={k.legend}>{booking.needs_ok ? "Pick a time you'd like" : "Pick a time"}</legend>
+      <p className={k.note}>{booking.window_min ? "We arrive within the window you pick." : `Set aside about ${visitLength(booking.minutes)}.`} Times are in {booking.timezone_label}.</p>
       {waiting ? (
-        <span className="muted">Enter your ZIP / postal code above to see the times we have open.</span>
+        <p className={k.note}>Enter your ZIP / postal code above to see the times we have open.</p>
       ) : week.isPending ? (
-        <Skeleton height={96} radius={8} />
+        <Skeleton height={140} radius={14} />
       ) : outside ? (
         <span className="field-error">{(week.error as Error).message}</span>
       ) : unread ? (
-        <span className="muted">We couldn't show our open times just now. Send your request and we'll be in touch to set one.</span>
+        <p className={k.note}>We couldn't show our open times just now. Send your request and we'll be in touch to set one.</p>
       ) : none || !w ? (
-        <span className="muted">We don't have a time open online right now. Send your request and we'll be in touch to set one.</span>
+        <p className={k.note}>We don't have a time open online right now. Send your request and we'll be in touch to set one.</p>
       ) : (
         <>
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Button size="sm" icon="chevronLeft" disabled={w.from <= w.first || week.isFetching} onClick={() => { setDay(null); setFrom(addDays(w.from, -7) <= w.first ? w.first : addDays(w.from, -7)); }}>Earlier</Button>
-            <strong className="grow" style={{ textAlign: "center" }}>{dayName(w.from)} to {dayName(w.to)}</strong>
-            <Button size="sm" disabled={w.to >= w.last || week.isFetching} onClick={() => { setDay(null); setFrom(addDays(w.to, 1)); }}>Later<Icon name="chevronRight" size={14} /></Button>
+          <div className={k.week}>
+            <button type="button" className={k.round} aria-label="Earlier" disabled={w.from <= w.first || week.isFetching} onClick={() => { setDay(null); setFrom(addDays(w.from, -7) <= w.first ? w.first : addDays(w.from, -7)); }}><Icon name="chevronLeft" size={20} /></button>
+            <span aria-live="polite"><span className="sr-only">{dayName(w.from)} to {dayName(w.to)}</span><span aria-hidden="true">{weekWords(w.from, w.to)}</span></span>
+            <button type="button" className={k.round} aria-label="Later" disabled={w.to >= w.last || week.isFetching} onClick={() => { setDay(null); setFrom(addDays(w.to, 1)); }}><Icon name="chevronRight" size={20} /></button>
           </div>
           {days.length === 0 ? (
-            <span className="muted">Nothing open these days. Try {w.to >= w.last ? "earlier" : "later"}.</span>
+            <p className={k.note}>Nothing open these days. Try {w.to >= w.last ? "earlier" : "later"}.</p>
           ) : (
             <>
-              <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay, dayName(d), () => setDay(d)))}</div>
-              <div className="row wrap" style={{ gap: 6 }} role="group" aria-label={booking.window_min ? "Arrival window" : "Time"}>
-                {slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, booking.timezone, booking.window_min), () => onPick(picked?.starts_at === s.starts_at ? null : s)))}
+              <div className={k.days} role="group" aria-label="Day" style={{ ["--cols" as string]: Math.min(Math.max(days.length, 5), 7) }}>
+                {days.map((d) => (
+                  <button key={d} type="button" className={k.day} aria-pressed={d === shownDay} onClick={() => setDay(d)}>
+                    {dateWords(d, { weekday: "short" })} <b>{Number(d.slice(8))}</b><span className="sr-only">, {dateWords(d, { month: "long" })}</span>
+                  </button>
+                ))}
+              </div>
+              <div className={k.slots} role="group" aria-label={booking.window_min ? "Arrival window" : "Time"}>
+                {slots.filter((s) => s.date === shownDay).map((s) => (
+                  <button key={s.starts_at!} type="button" className={k.slot} aria-pressed={picked?.starts_at === s.starts_at} onClick={() => onPick(picked?.starts_at === s.starts_at ? null : s)}>
+                    {slotTime(s.starts_at!, booking.timezone, booking.window_min)}
+                  </button>
+                ))}
               </div>
             </>
           )}
-          {picked && <span className="strong" role="status">{booking.needs_ok ? "You're asking for" : "You picked"} {slotLabel(picked, booking.timezone, booking.window_min)}.</span>}
+          {picked && <p className={k.picked} role="status">{booking.needs_ok ? "You're asking for" : "You picked"} <b>{slotLabel(picked, booking.timezone, booking.window_min)}</b>.</p>}
         </>
       )}
       {invalid && !waiting && !week.isError && <span className="field-error" role="alert">Pick a time for your visit.</span>}
@@ -397,27 +444,26 @@ export function FileQuestion({ q, files, room, invalid, disabled, onChange }: { 
   const error = problem ?? (invalid ? "Add a file to send with your request." : null);
   return (
     <div
-      className="field"
+      className={cx("field", over && k.drop)}
       data-invalid={invalid || undefined}
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setOver(true); } }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled) add([...e.dataTransfer.files]); }}
-      style={over ? { outline: "2px dashed var(--green)", outlineOffset: 4, borderRadius: "var(--radius-control)" } : undefined}
     >
-      <span>{label}</span>
+      <span className="field-label">{label}</span>
       {files.length > 0 && (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 6 }}>
+        <ul className={k.files}>
           {files.map((f, i) => (
-            <li key={`${f.name}-${i}`} className="row" style={{ gap: 8 }}>
-              <Icon name={f.type.startsWith("image/") ? "image" : "file"} size={16} />
-              <span className="grow" style={{ overflowWrap: "anywhere" }}>{f.name} <span className="muted small">{fileSize(f.size)}</span></span>
-              <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={`Remove ${f.name}`} disabled={disabled} onClick={() => onChange(files.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
+            <li key={`${f.name}-${i}`}>
+              <Icon name={f.type.startsWith("image/") ? "image" : "file"} size={18} />
+              <span className={k.fileName}>{f.name}<small>{fileSize(f.size)}</small></span>
+              <button type="button" className={k.iconBtn} aria-label={`Remove ${f.name}`} disabled={disabled} onClick={() => onChange(files.filter((_, j) => j !== i))}><Icon name="x" size={16} /></button>
             </li>
           ))}
         </ul>
       )}
-      <label className="btn" style={{ justifySelf: "start" }} aria-disabled={disabled || room <= 0}>
-        <Icon name={photos ? "camera" : "upload"} size={16} />{photos ? "Add photos" : "Add files"}
+      <label className={cx("btn", k.soft)} style={{ justifySelf: "start" }} aria-disabled={disabled || room <= 0}>
+        <Icon name={photos ? "camera" : "upload"} size={18} />{photos ? "Add photos" : "Add files"}
         <input
           type="file"
           multiple
@@ -432,7 +478,7 @@ export function FileQuestion({ q, files, room, invalid, disabled, onChange }: { 
           onChange={(e) => { const picked = [...(e.target.files ?? [])]; e.target.value = ""; add(picked); }}
         />
       </label>
-      <span className="muted small">{photos ? "Pictures" : "Plans, PDFs or pictures"}, up to {fileSize(PLAN_MAX_BYTES)} each. You can also drop them here.</span>
+      <span className="hint">{photos ? "Pictures" : "Plans, PDFs or pictures"}, up to {fileSize(PLAN_MAX_BYTES)} each. You can also drop them here.</span>
       {error && <span id={errorId} className="field-error" role="alert">{error}</span>}
     </div>
   );
@@ -453,13 +499,13 @@ export function QuestionField({ q, value, invalid, onChange }: { q: Question; va
       const list = Array.isArray(value) ? (value as string[]) : [];
       return (
         <fieldset className="field" data-invalid={invalid || undefined} style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend style={{ marginBottom: 6 }}>{label}</legend>
-          <div className="row wrap" style={{ gap: 6 }}>
+          <legend className="field-label" style={{ marginBottom: 8 }}>{label}</legend>
+          <div className={k.choices}>
             {options.map((o) => {
               const on = q.type === "multi_choice" ? list.includes(o) : value === o;
               return (
-                <button key={o} type="button" className="tab" aria-pressed={on} style={{ height: "var(--control)", padding: "0 14px" }} onClick={() => onChange(q.type === "multi_choice" ? (on ? list.filter((x) => x !== o) : [...list, o]) : o)}>
-                  {on && <Icon name="check" size={14} bold />}{o}
+                <button key={o} type="button" className={k.choice} aria-pressed={on} onClick={() => onChange(q.type === "multi_choice" ? (on ? list.filter((x) => x !== o) : [...list, o]) : o)}>
+                  {on && <Icon name="check" size={16} bold />}{o}
                 </button>
               );
             })}

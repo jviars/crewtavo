@@ -265,16 +265,16 @@ function emailFrom(env: Env, company: Company, to: string, subject: string, text
   );
 }
 
-/** Which of a pair of links (clientLinks): the client's own, for what goes out, or the office's copy, for the timeline. */
-type Who = "own" | "office";
+/** Which of a pair of links (clientLinks): the client's own, for what goes out, or what stands for it on the timeline (lib/links KEPT_LINK). */
+type Who = "own" | "kept";
 
 /**
  * A fresh link to the client's autopay page (120 days, as client links last), as a pair
- * (clientLinks): their own for the email or text, the office's copy for what's kept on the timeline.
+ * (clientLinks): their own for the email or text, and no link in what's kept on the timeline.
  */
 async function autopayLinks(env: Env, base: string, companyId: string, clientId: string): Promise<Record<Who, string>> {
   const links = await clientLinks(env, base, { c: companyId, t: "client", id: clientId }, 120);
-  return { own: `${links.own}?view=autopay`, office: `${links.office}?view=autopay` };
+  return { own: `${links.own}?view=autopay`, kept: links.kept };
 }
 
 /**
@@ -542,11 +542,11 @@ export async function sendAutopayReceipt(env: Env, admin: Db, chargeId: string):
     : `${charged} for ${what}. Thank you.`;
   const tip = base && tipOffered ? await clientLinks(env, base, { c: company.id, t: "invoice", id: invoice.id }) : null;
   const home = base ? await autopayLinks(env, base, company.id, client.id) : null;
-  // The same words with either set of links: the client's own to send, the office's to keep. A
-  // contact's copy says what was charged and no more: the tip and the card are the client's.
+  // The same words with the client's own links to send, and none in what's kept. A contact's copy
+  // says what was charged and no more: the tip and the card are the client's.
   const write = (who: Who | "contact") => {
     const parts = [`Hi ${firstName(client.display_name)},`, paid];
-    if (tip && who !== "contact") parts.push("Add a tip for the crew?", `${tip[who]}?tip=1`);
+    if (tip && who !== "contact") parts.push("Add a tip for the crew?", who === "own" ? `${tip.own}?tip=1` : tip.kept);
     if (home && who !== "contact") parts.push("Change your card or turn off autopay any time:", home[who]);
     parts.push(`Thanks,\n${company.name}`);
     return parts.join("\n\n");
@@ -556,7 +556,7 @@ export async function sendAutopayReceipt(env: Env, admin: Db, chargeId: string):
   const delivery = await sendToEach(people, (person) => emailFrom(env, company, person.to, subject, write(person.contact_id ? "contact" : "own")), "The receipt wasn't sent.");
   // Sent to nobody: tried again. Once it reached someone it's logged, so it isn't sent twice.
   if (!delivery.went.length) throw new Error(delivery.failed[0]!.reason);
-  await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "email", subject, body: write("office"), related_type: "invoice", related_id: invoice.id, external_id: key, recipients: recipientsColumn(delivery) });
+  await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "email", subject, body: write("kept"), related_type: "invoice", related_id: invoice.id, external_id: key, recipients: recipientsColumn(delivery) });
   return "sent";
 }
 
@@ -567,7 +567,7 @@ const CONFIRM_CODES = ["authentication_required", "invoice_payment_intent_requir
  * A charge that didn't go through, told to the client: by email, else a text when there's a number
  * and texting is set up, else nobody (the office was told anyway). The invoice is owed as usual, so
  * it carries the Pay link and a way to update the card: the client's own links in what goes out,
- * the office's copies in what's kept on the timeline.
+ * and none in what's kept on the timeline (lib/links KEPT_LINK).
  */
 export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, status: "failed" | "needs_client", failures: number): Promise<string> {
   const facts = await chargeFacts(admin, chargeId);
@@ -628,7 +628,7 @@ export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, s
 
   if (reachable(client.email) && (await emailReady(env, company.id))) {
     const home = base && !confirm ? await autopayLinks(env, base, company.id, client.id) : null;
-    // The same words with either set of links: the client's own to send, the office's to keep.
+    // The same words with the client's own links to send, and none in what's kept.
     const write = (who: Who) => {
       const parts = [`Hi ${firstName(client.display_name)},`, message];
       if (invoiceLink) parts.push(invoiceLink[who]);
@@ -638,7 +638,7 @@ export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, s
     };
     const result = await emailFrom(env, company, client.email.trim(), subject, write("own"));
     if (!result.sent) throw new Error(result.reason ?? "The notice wasn't sent.");
-    await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "email", subject, body: write("office"), related_type: "invoice", related_id: invoice.id, external_id: key });
+    await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "email", subject, body: write("kept"), related_type: "invoice", related_id: invoice.id, external_id: key });
     return "sent";
   }
   // Never to a client whose texts are off, or a number that's stopped (and Twilio saying so is kept).
@@ -648,7 +648,7 @@ export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, s
     const result = await textWithStopLine(admin, company.id, to, body("own"), (text) => sendSms(env, { to, body: text, company: company.id }));
     await noteRefusedText(admin, client, client.phone, result, company.id);
     if (!result.sent) throw new Error(result.reason ?? "The notice wasn't sent.");
-    await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "sms", subject: null, body: body("office"), related_type: "invoice", related_id: invoice.id, external_id: key });
+    await logMessage(admin, { company_id: company.id, client_id: client.id, channel: "sms", subject: null, body: body("kept"), related_type: "invoice", related_id: invoice.id, external_id: key });
     return "sent";
   }
   return "skipped: no way to reach them";
@@ -658,7 +658,7 @@ export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, s
  * The client's copy of what they agreed to, right after they agreed (from their page, or by
  * confirming a card brought in from Stripe): the card, when it's charged, the words in full, and a
  * link to turn it off. A link the office copied can agree for them (to a card saved through it), so
- * this is how they'd find out. The copy on the timeline has the office's copy of the link.
+ * this is how they'd find out. The copy on the timeline has no link (lib/links KEPT_LINK).
  */
 export async function sendAutopayAgreed(env: Env, admin: Db, authorizationId: string): Promise<string> {
   const { data: agreement, error } = await admin
@@ -688,7 +688,7 @@ export async function sendAutopayAgreed(env: Env, admin: Db, authorizationId: st
   const subject = `Autopay is set up with ${company.name}`;
 
   if (reachable(who.email) && (await emailReady(env, company.id))) {
-    // The same words with either link: the client's own to send, the office's to keep.
+    // The same words with the client's own link to send, and none in what's kept.
     const write = (link: Who) => {
       const parts = [`Hi ${firstName(who.display_name)},`, intro, "What you agreed to:", agreement.terms];
       parts.push(links ? "Not you, or changed your mind? Turn it off here:" : "Not you, or changed your mind? Contact us to turn it off.");
@@ -698,7 +698,7 @@ export async function sendAutopayAgreed(env: Env, admin: Db, authorizationId: st
     };
     const result = await emailFrom(env, company, who.email.trim(), subject, write("own"));
     if (!result.sent) throw new Error(result.reason ?? "The copy of the agreement wasn't sent.");
-    await logMessage(admin, { company_id: company.id, client_id: who.id, channel: "email", subject, body: write("office"), related_type: "autopay", related_id: who.id, external_id: key });
+    await logMessage(admin, { company_id: company.id, client_id: who.id, channel: "email", subject, body: write("kept"), related_type: "autopay", related_id: who.id, external_id: key });
     return "sent";
   }
   if (who.phone && (await smsReady(env, company.id)) && !textsOff(who) && !(await numberStopped(admin, company.id, who.phone))) {
@@ -707,7 +707,7 @@ export async function sendAutopayAgreed(env: Env, admin: Db, authorizationId: st
     const result = await textWithStopLine(admin, company.id, to, body("own"), (text) => sendSms(env, { to, body: text, company: company.id }));
     await noteRefusedText(admin, who, who.phone, result, company.id);
     if (!result.sent) throw new Error(result.reason ?? "The copy of the agreement wasn't sent.");
-    await logMessage(admin, { company_id: company.id, client_id: who.id, channel: "sms", subject: null, body: body("office"), related_type: "autopay", related_id: who.id, external_id: key });
+    await logMessage(admin, { company_id: company.id, client_id: who.id, channel: "sms", subject: null, body: body("kept"), related_type: "autopay", related_id: who.id, external_id: key });
     return "sent";
   }
   return "skipped: no way to reach them";
@@ -767,9 +767,8 @@ export const INVITE_LIMIT_DETAIL = "Skipped: too many invites this hour";
 /**
  * Send one client the link to set up (or confirm) autopay. A client with a card brought in from
  * Stripe and no agreement is asked to confirm that card; anyone else to set it up. What's kept on
- * their timeline has the office's copy of the link (clientLinks), which opens their page but can't
- * confirm that card for them. `allowSend` (the bulk invite's hourly limit) is asked only once a
- * message is about to go.
+ * their timeline has no link (lib/links KEPT_LINK). `allowSend` (the bulk invite's hourly limit) is
+ * asked only once a message is about to go.
  */
 export async function sendAutopayInvite(
   env: Env,
@@ -850,8 +849,8 @@ export async function sendAutopayInvite(
     client_id: client.id,
     channel: input.channel,
     subject: input.channel === "email" ? subject : null,
-    // Whoever reads the timeline can open their page from it, but not as the client.
-    body: input.channel === "email" ? text(links.office) : sms(links.office),
+    // No working link: whoever reads the timeline would hold one to the client's page (lib/links KEPT_LINK).
+    body: input.channel === "email" ? text(links.kept) : sms(links.kept),
     related_type: "autopay",
     related_id: client.id,
     external_id: result.id ?? null,

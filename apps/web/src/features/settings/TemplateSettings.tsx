@@ -26,10 +26,9 @@ import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
-import { Icon, type IconName } from "@/components/ui/Icon";
+import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
+import { Loading, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
@@ -39,7 +38,9 @@ import { documentCompany, letterheadKey, sampleDocument, templatesKey, useLetter
 import { CompanyLogo } from "./CompanyLogo";
 import { contractPreview, contractSummary, inLibraryOrder, pickSection, placeLabel, useContractSections } from "./ContractSettings";
 import { OwnLetterhead } from "./OwnLetterhead";
+import { SettingsActions, SwitchRow, usePhoneLayout } from "./SettingsKit";
 import styles from "./TemplateSettings.module.css";
+import { Select } from "@/components/ui/Select";
 
 type SectionId = "letterhead" | "details" | "contract" | "signatures" | "footer";
 
@@ -68,17 +69,17 @@ export function TemplateSettings() {
   if (templates.isPending) {
     return (
       <Loading label="Loading your document style">
-        <div className="stack">
-          <CardSkeleton lines={2} />
-          <div className="two-col">
-            <div className="narrow stack-sm"><CardSkeleton lines={3} /><CardSkeleton lines={2} /><CardSkeleton lines={1} /></div>
-            <div className="wide card card-pad"><Skeleton height={520} radius={4} /></div>
+        <div className={styles.wrap}>
+          <Skeleton width="55%" height={12} />
+          <div className={styles.layout}>
+            <div className={styles.controls}><SectionSkeleton rows={3} /><SectionSkeleton rows={2} /></div>
+            <div className={styles.preview}><Skeleton height={520} radius={4} /></div>
           </div>
         </div>
       </Loading>
     );
   }
-  if (templates.error) return <div className="card"><ErrorState error={templates.error} onRetry={() => templates.refetch()} /></div>;
+  if (templates.error) return <ErrorState error={templates.error} onRetry={() => templates.refetch()} />;
   const rows = templates.data;
   const current = rows.find((t) => t.id === selected) ?? rows.find((t) => t.is_default) ?? rows[0] ?? null;
   return <TemplateEditor key={current?.id ?? "built-in"} row={current} rows={rows} onSelect={setSelected} />;
@@ -188,6 +189,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
       commit: () => remove.mutateAsync(doomed.id),
     });
   const justSaved = useJustDone(save);
+  const phone = usePhoneLayout();
 
   /** Leaving a template with changes that aren't saved asks first. */
   const leave = async () => !dirty || confirm({ title: "Discard your changes?", body: "The changes you made to this style aren't saved.", confirmLabel: "Discard changes", danger: true });
@@ -224,19 +226,36 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
 
   return (
     <div className={styles.wrap}>
-      <div className={`card card-pad ${styles.bar}`}>
-        <div className={styles.intro}>
-          <h2>Document style</h2>
-          <p>How your estimates, proposals and invoices look. Change anything below and the page follows.</p>
-        </div>
+      <SettingsActions>
+        <Menu
+          label="More for this style"
+          title={name}
+          triggerClassName="btn btn-icon"
+          items={[
+            { label: "Print a sample", icon: "printer", kbd: "P", onSelect: () => void printDocument() },
+            { separator: true },
+            { label: "New style", icon: "plus", kbd: "N", onSelect: async () => { if (await leave()) setNaming("new"); } },
+            { label: "Rename", icon: "edit", hidden: !row, onSelect: () => setNaming("rename") },
+            { label: "Make it the default", icon: "check", hidden: !row || isDefault, onSelect: () => makeDefault.mutate() },
+            { separator: true, hidden: !row || isDefault },
+            { label: "Delete style", icon: "trash", danger: true, hidden: !row || isDefault, onSelect: () => row && deleteTemplate(row) },
+          ]}
+        />
+        {/* A phone floats it over the page, so it shows there only once there's something to save. */}
+        {(!phone || dirty || justSaved || save.isPending) && (
+          <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved} onClick={() => save.mutate()}>Save style</Button>
+        )}
+      </SettingsActions>
+
+      <div className={styles.bar}>
         <div className={styles.tools}>
           <label className={styles.picker}>
-            Style
+            <span>Style</span>
             <Select
               className="select"
+              value={row?.id ?? ""}
               // The size .picker select gives the native one, for the list's button too.
               style={{ width: "auto", minWidth: 200, maxWidth: "100%" }}
-              value={row?.id ?? ""}
               onChange={async (e) => {
                 const next = e.target.value;
                 if (await leave()) onSelect(next || null);
@@ -245,38 +264,20 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
               {rows.length ? rows.map((r) => <option key={r.id} value={r.id}>{r.name}{r.is_default ? " (default)" : ""}</option>) : <option value="">Standard (default)</option>}
             </Select>
           </label>
-          <Button icon="plus" onClick={async () => (await leave()) && setNaming("new")}>New style</Button>
-          <Menu
-            label="More for this style"
-            items={[
-              { label: "Rename", icon: "edit", hidden: !row, onSelect: () => setNaming("rename") },
-              { label: "Make it the default", icon: "check", hidden: !row || isDefault, onSelect: () => makeDefault.mutate() },
-              { separator: true, hidden: !row || isDefault },
-              {
-                label: "Delete style",
-                icon: "trash",
-                danger: true,
-                hidden: !row || isDefault,
-                onSelect: () => row && deleteTemplate(row),
-              },
-            ]}
-          />
-          <span className={styles.spacer} />
-          {dirty && <span className={styles.dirty}>Not saved yet</span>}
-          <Button icon="printer" onClick={() => void printDocument()}>Print a sample</Button>
-          <Button variant="primary" icon="check" loading={save.isPending} done={justSaved} disabled={!dirty && !justSaved} onClick={() => save.mutate()}>Save style</Button>
+          <span className={styles.which}>
+            {isDefault ? "Used for every estimate and invoice, unless a quote picks another." : "Used on the quotes that pick it. Pick it on a quote, beside its totals."}
+          </span>
+          {dirty && <span className={styles.dirty} aria-live="polite">Not saved yet</span>}
         </div>
-        <span className={styles.which}>
-          {isDefault ? "Used for every estimate and invoice, unless a quote picks another." : "Used on the quotes that pick it. Pick it on a quote, beside its totals."}
-        </span>
         <FormError error={save.error} />
       </div>
 
       <div className={styles.layout}>
         <div className={styles.controls}>
-          <Section id="letterhead" icon="palette" title="Letterhead" summary={summary.letterhead} open={open.letterhead} onToggle={toggle}>
+          <Fold id="letterhead" title="Letterhead" summary={summary.letterhead} open={open.letterhead} onToggle={toggle}>
             <div className={styles.group}>
-              <span className={styles.label} id="letterhead-kind">Letterhead</span>
+              {/* The fold's own heading says it: the name is for the switch. */}
+              <span className="sr-only" id="letterhead-kind">Letterhead</span>
               <div className="segmented" role="group" aria-labelledby="letterhead-kind" style={{ justifySelf: "start" }}>
                 <button type="button" aria-pressed={t.letterhead === "built_in"} onClick={() => set("letterhead", "built_in")}>Crewtavo's</button>
                 <button type="button" aria-pressed={t.letterhead === "custom"} onClick={() => set("letterhead", "custom")}>Your own</button>
@@ -313,17 +314,17 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                   ) : doc.logo ? (
                     <div className="row wrap" style={{ gap: 12 }}>
                       <span className={styles.logoTile}><img src={doc.logo} alt="Your logo" /></span>
-                      <span className="muted small">From Settings → Company. An admin can change it there.</span>
+                      <span className="set-note">From Settings → Company. An admin can change it there.</span>
                     </div>
                   ) : (
-                    <span className="muted small">No logo yet, so your initials go at the top. An admin can add a logo in Settings → Company.</span>
+                    <span className="set-note">No logo yet, so your initials go at the top. An admin can add a logo in Settings → Company.</span>
                   )}
                 </div>
               </>
             )}
 
             <div className={styles.group}>
-              <span className={styles.label} id="doc-color">Color <span className="muted" style={{ fontWeight: 400 }}>· {colorName}</span></span>
+              <span className={styles.label} id="doc-color">Color <span className={styles.labelNote}>{colorName}</span></span>
               <div className={styles.swatches} role="group" aria-labelledby="doc-color">
                 <button type="button" className={styles.brandSwatch} style={{ "--swatch": brand } as CSSProperties} aria-pressed={t.color === null} onClick={() => set("color", null)}>
                   Brand color
@@ -333,7 +334,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 ))}
                 {custom && <button type="button" className={styles.swatch} title="Custom" aria-label="Custom color" aria-pressed style={{ background: custom, "--swatch": custom } as CSSProperties} />}
               </div>
-              <span className="muted small">Brand color is the one in Settings → Company, also on your Client Hub.</span>
+              <span className="set-note">Brand color is the one in Settings → Company, also on your Client Hub.</span>
             </div>
 
             <div className={styles.group}>
@@ -343,9 +344,9 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 <button type="button" aria-pressed={t.font === "classic"} onClick={() => set("font", "classic")} style={{ fontFamily: CLASSIC_FONT, fontSize: 14 }}>Classic</button>
               </div>
             </div>
-          </Section>
+          </Fold>
 
-          <Section id="details" icon="home" title="Business details" summary={summary.details} open={open.details} onToggle={toggle}>
+          <Fold id="details" title="Business details" summary={summary.details} open={open.details} onToggle={toggle}>
             {own.header && <p className={styles.note}>Your own letterhead prints at the top in place of these.</p>}
             <div className={styles.readonly}>
               <strong>{doc.name}</strong>
@@ -357,7 +358,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
             <Field label="Under the name" optional hint="A few words on what you do.">
               <input className="input" value={t.tagline} maxLength={TEMPLATE_LIMITS.tagline} placeholder={(company.trade_preset && TAGLINES[company.trade_preset]) || "What you do, in a few words"} onChange={(e) => set("tagline", e.target.value)} />
             </Field>
-            <div className={styles.pair}>
+            <div className="set-grid">
               <Field label="License number" optional>
                 <input className="input" value={t.license} maxLength={TEMPLATE_LIMITS.license} placeholder="#RC-104882" onChange={(e) => set("license", e.target.value)} />
               </Field>
@@ -365,17 +366,13 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 <input className="input" value={t.insurer} maxLength={TEMPLATE_LIMITS.insurer} placeholder="Your insurance company" onChange={(e) => set("insurer", e.target.value)} />
               </Field>
             </div>
-            <label className="switch-row">
-              <input type="checkbox" className="switch" checked={t.show_license} onChange={(e) => set("show_license", e.target.checked)} />
-              Show the license number
-            </label>
-            <label className="switch-row">
-              <input type="checkbox" className="switch" checked={t.show_insurer} onChange={(e) => set("show_insurer", e.target.checked)} />
-              Show who insures you
-            </label>
-          </Section>
+            <div className="set-rows">
+              <SwitchRow label="Show the license number" checked={t.show_license} onChange={(on) => set("show_license", on)} />
+              <SwitchRow label="Show who insures you" checked={t.show_insurer} onChange={(on) => set("show_insurer", on)} />
+            </div>
+          </Fold>
 
-          <Section id="contract" icon="file" title="Contract" summary={summary.contract} open={open.contract} onToggle={toggle}>
+          <Fold id="contract" title="Contract" summary={summary.contract} open={open.contract} onToggle={toggle}>
             <Field label="Printed above the signatures" hint="Payment, changes and your warranty, in plain words. Each line prints on its own line.">
               <textarea className="textarea" rows={7} value={t.terms} maxLength={TEMPLATE_LIMITS.terms} onChange={(e) => set("terms", e.target.value)} />
             </Field>
@@ -406,33 +403,24 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 Add sections like payment, your warranty and the right to cancel in <Link to="/settings?tab=contracts">Settings → Contract terms</Link>, then pick the ones every estimate and invoice prints here.
               </p>
             )}
-          </Section>
+          </Fold>
 
-          <Section id="signatures" icon="signature" title="Signatures" summary={summary.signatures} open={open.signatures} onToggle={toggle}>
-            <div className={styles.group}>
-              <label className="switch-row">
-                <input type="checkbox" className="switch" checked={t.customer_signs} onChange={(e) => set("customer_signs", e.target.checked)} />
-                The customer signs
-              </label>
-              <input className="input" aria-label="Words under the customer's line" value={t.customer_label} maxLength={TEMPLATE_LIMITS.label} placeholder="Customer" disabled={!t.customer_signs} onChange={(e) => set("customer_label", e.target.value)} />
+          <Fold id="signatures" title="Signatures" summary={summary.signatures} open={open.signatures} onToggle={toggle}>
+            <div className="set-rows">
+              <SwitchRow label="The customer signs" checked={t.customer_signs} onChange={(on) => set("customer_signs", on)}>
+                <input className={`input ${styles.rowInput}`} aria-label="Words under the customer's line" value={t.customer_label} maxLength={TEMPLATE_LIMITS.label} placeholder="Customer" disabled={!t.customer_signs} onChange={(e) => set("customer_label", e.target.value)} />
+              </SwitchRow>
+              <SwitchRow label="Your company signs too" checked={t.company_signs} onChange={(on) => set("company_signs", on)}>
+                <input className={`input ${styles.rowInput}`} aria-label="Words under your company's line" value={t.company_label} maxLength={TEMPLATE_LIMITS.label} placeholder={`${doc.name} representative`} disabled={!t.company_signs} onChange={(e) => set("company_label", e.target.value)} />
+              </SwitchRow>
+              <SwitchRow label="A date beside each signature" checked={t.sign_dates} onChange={(on) => set("sign_dates", on)} />
             </div>
-            <div className={styles.group}>
-              <label className="switch-row">
-                <input type="checkbox" className="switch" checked={t.company_signs} onChange={(e) => set("company_signs", e.target.checked)} />
-                Your company signs too
-              </label>
-              <input className="input" aria-label="Words under your company's line" value={t.company_label} maxLength={TEMPLATE_LIMITS.label} placeholder={`${doc.name} representative`} disabled={!t.company_signs} onChange={(e) => set("company_label", e.target.value)} />
-            </div>
-            <label className="switch-row">
-              <input type="checkbox" className="switch" checked={t.sign_dates} onChange={(e) => set("sign_dates", e.target.checked)} />
-              A date beside each signature
-            </label>
             <p className={styles.note}>
               Each salesperson's signature is saved the first time they sign, so on site it's one tap. <Link to="/settings?tab=profile">Add yours in Profile</Link>.
             </p>
-          </Section>
+          </Fold>
 
-          <Section id="footer" icon="list" title="Footer" summary={summary.footer} open={open.footer} onToggle={toggle}>
+          <Fold id="footer" title="Footer" summary={summary.footer} open={open.footer} onToggle={toggle}>
             {own.footer ? (
               <p className={styles.note}>The bottom of your own letterhead prints along the bottom of the page. To print words here instead, upload your letterhead again and leave its bottom out.</p>
             ) : (
@@ -440,21 +428,19 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
                 <input className="input" value={t.footer} maxLength={TEMPLATE_LIMITS.footer} placeholder="Licensed and insured · Family owned since 1998" onChange={(e) => set("footer", e.target.value)} />
               </Field>
             )}
-            <label className="switch-row">
-              <input type="checkbox" className="switch" checked={t.page_numbers} onChange={(e) => set("page_numbers", e.target.checked)} />
-              Page numbers
-            </label>
-          </Section>
+            <div className="set-rows">
+              <SwitchRow label="Page numbers" checked={t.page_numbers} onChange={(on) => set("page_numbers", on)} />
+            </div>
+          </Fold>
         </div>
 
         <section className={styles.preview} aria-label="Live preview">
           <div className={styles.previewHead}>
-            <span><Icon name="eye" size={16} />Live preview, with a sample {previewing === "invoice" ? "invoice" : company.trade_preset === "roofing_exteriors" ? "roof estimate" : "estimate"}</span>
             <div className="segmented" role="group" aria-label="Sample to show">
               <button type="button" aria-pressed={previewing === "estimate"} onClick={() => setPreviewing("estimate")}>Estimate</button>
               <button type="button" aria-pressed={previewing === "invoice"} onClick={() => setPreviewing("invoice")}>Invoice</button>
             </div>
-            <span>Letter size · prints and saves as a PDF</span>
+            <span className={styles.previewNote}>Live preview, with a sample {previewing === "invoice" ? "invoice" : company.trade_preset === "roofing_exteriors" ? "roof estimate" : "estimate"}. Letter size, prints and saves as a PDF.</span>
           </div>
           <DocumentSheet template={preview.template} company={doc} data={preview.data} />
         </section>
@@ -503,21 +489,22 @@ export function letterheadSummary(t: Pick<Template, "letterhead" | "letterhead_h
   return "Your own letterhead, not uploaded yet";
 }
 
-/** One fold of the template's settings: a header that says what's chosen, and the choices. */
-function Section({ id, icon, title, summary, open, onToggle, children }: { id: SectionId; icon: IconName; title: string; summary: string; open: boolean; onToggle: (id: SectionId) => void; children: ReactNode }) {
+/** One fold of the template's settings, on a hairline: a heading that says what's chosen, and the choices. */
+function Fold({ id, title, summary, open, onToggle, children }: { id: SectionId; title: string; summary: string; open: boolean; onToggle: (id: SectionId) => void; children: ReactNode }) {
   const bodyId = useId();
   return (
-    <div className={styles.section}>
-      <button type="button" className={styles.sectionHead} aria-expanded={open} aria-controls={bodyId} onClick={() => onToggle(id)}>
-        <span className={styles.sectionIcon} aria-hidden="true"><Icon name={icon} /></span>
-        <span className={styles.sectionTitle}>
-          <strong>{title}</strong>
-          <span>{summary}</span>
-        </span>
-        <span className={styles.chevron} aria-hidden="true"><Icon name="chevronDown" /></span>
-      </button>
+    <section className={styles.section} aria-label={title}>
+      <h3 className={styles.sectionHeading}>
+        <button type="button" className={styles.sectionHead} aria-expanded={open} aria-controls={bodyId} onClick={() => onToggle(id)}>
+          <span className={styles.sectionTitle}>
+            <strong>{title}</strong>
+            <span>{summary}</span>
+          </span>
+          <span className={styles.chevron} aria-hidden="true"><Icon name="chevronDown" size={16} /></span>
+        </button>
+      </h3>
       <div id={bodyId} className={styles.sectionBody} hidden={!open}>{children}</div>
-    </div>
+    </section>
   );
 }
 
@@ -545,7 +532,7 @@ function SectionPicks({ label, hint, library, ids, showPlace = false, onChange }
           </label>
         ))}
       </div>
-      <span className="muted small" id={hintId}>{hint}</span>
+      <span className="set-note" id={hintId}>{hint}</span>
     </div>
   );
 }

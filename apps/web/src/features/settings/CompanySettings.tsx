@@ -14,9 +14,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
-import { NumberInput } from "@/components/ui/NumberInput";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { CURRENCIES, timeZoneChoices } from "@/lib/format";
@@ -26,13 +25,20 @@ import { CompanyLogo } from "./CompanyLogo";
 import { JobCostSettings } from "./JobCostSettings";
 import { NextNumbers } from "./NextNumberSettings";
 import { QuoteSettings } from "./QuoteSettings";
+import { SaveBar, Suffix, SwitchRow, unsavedCount } from "./SettingsKit";
+import { loadSettings } from "@/lib/companySettings";
+import { Select } from "@/components/ui/Select";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 // The clock at the property's choices of how close counts as there, in meters, said in feet too.
 const RADII = [100, 150, 200, 300, 400, 500];
 const radiusLabel = (m: number) => `${m} m (${(Math.round((m * FT_PER_M) / 10) * 10).toLocaleString("en-US")} ft)`;
 // Monday first, as the week reads; settings.working_hours.days keeps them as 0 (Sunday) to 6.
 const WEEK = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [0, "Sun"]] as const;
-const BRAND_COLORS = ["#0f2a35", "#3b7d23", "#1d4ed8", "#b45309", "#be123c", "#6d28d9", "#0f766e", "#1f2937"];
+const BRAND_COLORS = [
+  { value: "#0f2a35", name: "Ink" }, { value: "#3b7d23", name: "Green" }, { value: "#1d4ed8", name: "Blue" }, { value: "#b45309", name: "Rust" },
+  { value: "#be123c", name: "Red" }, { value: "#6d28d9", name: "Purple" }, { value: "#0f766e", name: "Teal" }, { value: "#1f2937", name: "Charcoal" },
+];
 
 export function CompanySettings() {
   const session = useSession();
@@ -40,16 +46,21 @@ export function CompanySettings() {
   const queryClient = useQueryClient();
   const details = useQuery({
     queryKey: ["company", company.id],
-    queryFn: async () => unwrap(await supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, settings, trade_preset").eq("id", company.id).single()),
+    queryFn: async () => {
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
+      return { ...unwrap(row), settings };
+    },
   });
   const [f, setF] = useState<Record<string, string> | null>(null);
+  // What was loaded (or last saved), to say how many changes are waiting.
+  const [loaded, setLoaded] = useState<Record<string, string> | null>(null);
   useEffect(() => {
     if (!details.data || f) return;
     const d = details.data;
     const a = (d.address ?? {}) as Record<string, string>;
     const s = (d.settings ?? {}) as Record<string, any>;
     const fee = lateFeeSettings(s);
-    setF({
+    const start: Record<string, string> = {
       name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "", trade: d.trade_preset,
       privacy_url: typeof s.privacy_url === "string" ? s.privacy_url : "",
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
@@ -67,7 +78,9 @@ export function CompanySettings() {
       complete_jobs: completesWhenVisitsDone(s) ? "1" : "",
       minimum_charge: String(minimumCharge(s) ?? ""),
       late_fee: fee?.type ?? "off", late_fee_amount: fee ? String(fee.amount) : "", late_fee_days: String(fee?.grace_days ?? 7),
-    });
+    };
+    setF(start);
+    setLoaded(start);
   }, [details.data, f]);
 
   const save = useMutation({
@@ -137,59 +150,65 @@ export function CompanySettings() {
       return { located };
     },
     onSuccess: () => {
+      // What's on screen is what's saved now.
+      setLoaded(f);
       queryClient.invalidateQueries({ queryKey: ["company", company.id] });
       session.refresh();
     },
   });
 
   const saved = useJustDone(save);
-  if (details.isPending || !f) return details.error ? <div className="card"><ErrorState error={details.error} onRetry={() => details.refetch()} /></div> : <CardSkeleton lines={8} />;
+  if (details.isPending || !f) return details.error ? <ErrorState error={details.error} onRetry={() => details.refetch()} /> : <SectionSkeleton rows={8} />;
   const set = (key: string) => (e: { target: { value: string } }) => setF({ ...f, [key]: e.target.value });
+  const unsaved = unsavedCount(f, loaded);
+  const logo = ((details.data?.settings ?? {}) as Record<string, any>).branding?.logo ?? null;
+  const days = f.workdays ? f.workdays.split(",").map(Number) : [];
+  const ownColor = !BRAND_COLORS.some((c) => c.value === f.color);
 
   return (
-    <div className="stack" style={{ maxWidth: 860 }}>
-    <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-      <div className="card card-pad stack">
-        <strong>Business</strong>
-        <div className="form-grid">
+    <>
+    <form className="settings-body" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+      <Section level={3} title="Business">
+        <div className="set-grid">
           <Field label="Business name"><input className="input" value={f.name} onChange={set("name")} required maxLength={200} /></Field>
+          <Field label="Trade" hint="Picks your starter prices and terms. Paving and Roofing are apps: turn on either or both in Apps.">
+            <Select className="select" value={f.trade} onChange={set("trade")}>
+              {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Phone"><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={40} /></Field>
           <Field label="Email"><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={200} /></Field>
           <Field label="Website" optional><input className="input" value={f.website} onChange={set("website")} maxLength={200} placeholder="https://" /></Field>
           <Field label="Privacy policy link" optional hint="Shown at the bottom of your booking forms, Client Hub, referral, showcase and unsubscribe pages. Pages that collect personal details should link one.">
             <input className="input" value={f.privacy_url} onChange={set("privacy_url")} maxLength={PRIVACY_URL_MAX} placeholder="https://" />
           </Field>
-          <Field label="Trade" hint="Picks your starter prices and terms. Paving and Roofing are apps: turn on either or both in Apps.">
-            <Select className="select" value={f.trade} onChange={set("trade")}>
-              {Object.values(PRESETS).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <div className="field">
-          <span>Logo <span className="optional">(quotes, invoices, Client Hub and emails)</span></span>
-          <CompanyLogo path={((details.data?.settings ?? {}) as Record<string, any>).branding?.logo ?? null} />
-        </div>
-        <div className="field">
-          <span>Brand color <span className="optional">(Client Hub and emails)</span></span>
-          <div className="row wrap" style={{ gap: 8 }}>
-            {BRAND_COLORS.map((c) => <button key={c} type="button" aria-label={`Brand color ${c}`} aria-pressed={f.color === c} onClick={() => setF({ ...f, color: c })} style={{ width: 32, height: 32, borderRadius: "var(--radius-control)", background: c, border: 0, boxShadow: f.color === c ? `0 0 0 2px #fff, 0 0 0 4px ${c}` : "none", cursor: "pointer" }} />)}
-            <input type="color" value={f.color} onChange={set("color")} aria-label="Custom brand color" style={{ width: 38, height: 32, padding: 0, border: 0, background: "none" }} />
+          <div className="field set-full">
+            <span>Logo <span className="optional">(quotes, invoices, Client Hub and emails)</span></span>
+            <CompanyLogo path={logo} />
+          </div>
+          <div className="field set-full">
+            <span id="brand-color-label">Brand color <span className="optional">(Client Hub and emails)</span></span>
+            <div className="set-swatches" role="group" aria-labelledby="brand-color-label">
+              {BRAND_COLORS.map((c) => <button key={c.value} type="button" className="set-swatch" aria-label={`Brand color: ${c.name}`} aria-pressed={f.color === c.value} title={c.name} onClick={() => setF({ ...f, color: c.value })} style={{ background: c.value }} />)}
+              {/* A color box can't be pressed (aria-pressed): its ring is data-on, and its name says it's the one in use. */}
+              <input type="color" className="set-swatch" value={f.color} onChange={set("color")} aria-label={ownColor ? "Custom brand color, in use" : "Custom brand color"} title="Your own color" data-on={ownColor || undefined} />
+            </div>
           </div>
         </div>
-      </div>
-      <div className="card card-pad stack">
-        <strong>Shop address</strong>
-        <span className="muted small">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, state and ZIP.</span>
-        <Field label="Street"><input className="input" value={f.line1} onChange={set("line1")} maxLength={200} /></Field>
-        <div className="form-grid-3">
-          <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
-          <Field label="State / Province"><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
-          <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+      </Section>
+      <Section level={3} title="Shop address">
+        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, state and ZIP.</p>
+        <div className="set-grid">
+          <Field label="Street" className="set-full"><input className="input" value={f.line1} onChange={set("line1")} maxLength={200} /></Field>
+          <div className="set-grid set-grid-3 set-full">
+            <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
+            <Field label="State / Province"><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
+            <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+          </div>
         </div>
-      </div>
-      <div className="card card-pad stack">
-        <strong>Defaults</strong>
-        <div className="form-grid">
+      </Section>
+      <Section level={3} title="Defaults">
+        <div className="set-grid">
           <Field label="Time zone">
             <Select className="select" value={f.timezone} onChange={set("timezone")}>
               {timeZoneChoices(f.timezone).map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
@@ -201,13 +220,20 @@ export function CompanySettings() {
               {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
             </Select>
           </Field>
-          <Field label="Sales tax (%)"><input className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Field>
-          <Field label="Invoice due after (days)" hint="0 means due on receipt. A client can have their own, on their page."><NumberInput className="input" min={0} max={365} value={f.payment_terms_days} onChange={set("payment_terms_days")} /></Field>
+          <Field label={<>Sales tax<span className="sr-only"> (%)</span></>}>
+            <Suffix unit="%"><input className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+          </Field>
+          <Field label={<>Invoice due after<span className="sr-only"> (days)</span></>} hint="0 means due on receipt. A client can have their own, on their page.">
+            <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.payment_terms_days} onChange={set("payment_terms_days")} /></Suffix>
+          </Field>
+          <Field label={<>Quotes valid for<span className="sr-only"> (days)</span></>}>
+            <Suffix unit="days"><NumberInput className="input" min={1} max={365} value={f.quote_valid_days} onChange={set("quote_valid_days")} /></Suffix>
+          </Field>
           <Field label="Minimum charge" optional hint="An invoice under it gets a Minimum charge line that makes up the difference.">
             <input className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
           </Field>
-          <Field label="Late fee" hint={f.late_fee === "off" ? "Added once to an invoice still unpaid after its due date." : `Added once, if it's still unpaid that many days after it's due. Late fees aren't taxed. You can take one off an invoice, or turn them off for it, on the invoice. ${LATE_FEE_LAW_NOTE}`}>
-            <Select className="select" value={f.late_fee} onChange={set("late_fee")}>
+          <Field label="Late fee" className="set-full" hint={f.late_fee === "off" ? "Added once to an invoice still unpaid after its due date." : `Added once, if it's still unpaid that many days after it's due. Late fees aren't taxed. You can take one off an invoice, or turn them off for it, on the invoice. ${LATE_FEE_LAW_NOTE}`}>
+            <Select className="select set-narrow" value={f.late_fee} onChange={set("late_fee")}>
               <option value="off">Off</option>
               <option value="flat">A flat amount</option>
               <option value="percent">A percent of what's owed</option>
@@ -218,57 +244,68 @@ export function CompanySettings() {
               <Field label={f.late_fee === "percent" ? "Late fee (%)" : "Late fee amount"}>
                 <input className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
               </Field>
-              <Field label="Days after the due date"><NumberInput className="input" min={0} max={365} value={f.late_fee_days} onChange={set("late_fee_days")} /></Field>
+              <Field label={<>Days after the due date<span className="sr-only"> (days)</span></>}>
+                <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.late_fee_days} onChange={set("late_fee_days")} /></Suffix>
+              </Field>
             </>
           )}
-          <Field label="Quotes valid for (days)"><NumberInput className="input" min={1} max={365} value={f.quote_valid_days} onChange={set("quote_valid_days")} /></Field>
+        </div>
+        <div className="set-rows">
+          {/* The one switch for tips (settings.hub_tips): the Client Hub, the receipt and the server all follow it. */}
+          <SwitchRow
+            label="Let clients add a tip when they pay online"
+            hint={<>Also offered on the receipt after an automatic charge. Off: no tip choice anywhere, and no tip is charged. {TIPS_LAW_NOTE}</>}
+            checked={f.hub_tips === "1"}
+            onChange={(on) => setF({ ...f, hub_tips: on ? "1" : "" })}
+          />
+        </div>
+      </Section>
+      <Section level={3} title="Workday">
+        <div className="set-grid">
           <Field label="Workday starts"><input className="input" type="time" value={f.hours_start} onChange={set("hours_start")} /></Field>
           <Field label="Workday ends"><input className="input" type="time" value={f.hours_end} onChange={set("hours_end")} /></Field>
-          <div className="field">
-            <span>Workdays</span>
-            <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Workdays">
+          <div className="field set-full">
+            <span id="workdays-label">Workdays</span>
+            <div className="segmented set-days" role="group" aria-labelledby="workdays-label">
               {WEEK.map(([d, label]) => {
-                const days = f.workdays ? f.workdays.split(",").map(Number) : [];
                 const on = days.includes(d);
                 return (
-                  <button key={d} type="button" className="tab" aria-pressed={on} onClick={() => setF({ ...f, workdays: (on ? days.filter((x) => x !== d) : [...days, d]).sort().join(",") })}>
+                  <button key={d} type="button" aria-pressed={on} onClick={() => setF({ ...f, workdays: (on ? days.filter((x) => x !== d) : [...days, d]).sort().join(",") })}>
                     {label}
                   </button>
                 );
               })}
             </div>
-            <span className="muted small">Find a time and clients moving a visit online only get these days.</span>
+            <span className="hint">Find a time and clients moving a visit online only get these days.</span>
           </div>
-          <Field label="Arrival window" hint="What clients are told in their portal and reminders, like “between 9:00 AM and 11:00 AM”.">
-            <Select className="select" value={f.arrival_window_min} onChange={set("arrival_window_min")}>
+          <Field label="Arrival window" className="set-full" hint="What clients are told in their portal and reminders, like “between 9:00 AM and 11:00 AM”.">
+            <Select className="select set-narrow" value={f.arrival_window_min} onChange={set("arrival_window_min")}>
               <option value="0">None: the start time</option>
               {[30, 60, 120, 180, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`}</option>)}
             </Select>
           </Field>
         </div>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" checked={f.hub_tips === "1"} onChange={(e) => setF({ ...f, hub_tips: e.target.checked ? "1" : "" })} />
-          Let clients add a tip when they pay online
-        </label>
-        {/* The one switch for tips (settings.hub_tips): the Client Hub, the receipt and the server all follow it. */}
-        <span className="muted small">Also offered on the receipt after an automatic charge. Off: no tip choice anywhere, and no tip is charged. {TIPS_LAW_NOTE}</span>
-      </div>
-      <div className="card card-pad stack">
-        <strong>Jobs</strong>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" checked={f.complete_jobs === "1"} onChange={(e) => setF({ ...f, complete_jobs: e.target.checked ? "1" : "" })} />
-          When the last visit of a one-off job is finished, mark the work complete
-        </label>
-        <span className="muted small">
-          The job moves to Requires invoicing and the people who handle invoices are told. A job on autopay isn't marked, since that charges the card: they're told to mark it themselves. Off: jobs wait for Mark work complete, and they're still told.
-        </span>
-      </div>
-      <div className="card card-pad stack">
-        <strong>Time clock</strong>
-        <div className="form-grid">
+      </Section>
+      <Section level={3} title="Jobs">
+        <div className="set-rows">
+          <SwitchRow
+            label="When the last visit of a one-off job is finished, mark the work complete"
+            hint="The job moves to Requires invoicing and the people who handle invoices are told. A job on autopay isn't marked, since that charges the card: they're told to mark it themselves. Off: jobs wait for Mark work complete, and they're still told."
+            checked={f.complete_jobs === "1"}
+            onChange={(on) => setF({ ...f, complete_jobs: on ? "1" : "" })}
+          />
+        </div>
+      </Section>
+      <Section level={3} title="Time clock">
+        <div className="set-grid">
           <Field label="How the clock works" hint={CLOCK_MODE_HINTS[f.clock_mode as ClockMode]}>
             <Select className="select" value={f.clock_mode} onChange={set("clock_mode")}>
               {(Object.keys(CLOCK_MODE_LABELS) as ClockMode[]).map((m) => <option key={m} value={m}>{CLOCK_MODE_LABELS[m]}</option>)}
+            </Select>
+          </Field>
+          <Field label="Breaks" hint={BREAK_PAY_HINTS[f.breaks as BreakPay]}>
+            <Select className="select" value={f.breaks} onChange={set("breaks")}>
+              {(Object.keys(BREAK_PAY_LABELS) as BreakPay[]).map((b) => <option key={b} value={b}>{BREAK_PAY_LABELS[b]}</option>)}
             </Select>
           </Field>
           <Field label="At the property" hint={f.geofence_mode === "off" ? GEOFENCE_MODE_HINTS.off : `${GEOFENCE_MODE_HINTS[f.geofence_mode as GeofenceMode]} ${GEOFENCE_NOTE}`}>
@@ -284,25 +321,27 @@ export function CompanySettings() {
               </Select>
             </Field>
           )}
-          <Field label="Breaks" hint={BREAK_PAY_HINTS[f.breaks as BreakPay]}>
-            <Select className="select" value={f.breaks} onChange={set("breaks")}>
-              {(Object.keys(BREAK_PAY_LABELS) as BreakPay[]).map((b) => <option key={b} value={b}>{BREAK_PAY_LABELS[b]}</option>)}
-            </Select>
-          </Field>
         </div>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
-          <input type="checkbox" className="switch" checked={f.record_location === "1"} onChange={(e) => setF({ ...f, record_location: e.target.checked ? "1" : "" })} />
-          Save where people are when they clock in and out (the office and crew leads see it on Timesheets)
-        </label>
-      </div>
+        <div className="set-rows">
+          <SwitchRow
+            label="Save where people are when they clock in and out"
+            hint="The office and crew leads see it on Timesheets."
+            checked={f.record_location === "1"}
+            onChange={(on) => setF({ ...f, record_location: on ? "1" : "" })}
+          />
+        </div>
+      </Section>
       <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start" }}><FormChecks /><Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save company settings</Button></div>
+      <SaveBar note={unsaved ? (unsaved === 1 ? "1 unsaved change" : `${unsaved} unsaved changes`) : null}>
+        <Button type="submit" variant="primary" loading={save.isPending} done={saved}>Save company settings</Button>
+        <FormChecks />
+      </SaveBar>
     </form>
     {/* Saved by itself: the hourly profit check goes by when its line changes. */}
     <JobCostSettings settings={(details.data?.settings ?? {}) as Record<string, unknown>} />
     {/* Saved by itself, through the database's own function: not one of the settings above. */}
     <NextNumbers />
     <QuoteSettings />
-    </div>
+    </>
   );
 }

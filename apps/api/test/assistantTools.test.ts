@@ -6,7 +6,7 @@
  * that offer options read and approved for the option the client chose, keeping the contract they
  * were sent.
  */
-import { assistantRefusal } from "@crewtavo/core";
+import { assistantRefusal, MONEY_REFUSAL } from "@crewtavo/core";
 import { templateSettings } from "@crewtavo/core/documents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
@@ -21,6 +21,7 @@ vi.mock("../src/services/team", async (original) => ({
 }));
 const { app } = await import("../src/app");
 const { ADMIN_FROM_TEAM_PAGE } = await import("../src/services/team");
+const { OFFICE_FROM_TEAM_PAGE } = await import("../src/assistant-tools/team");
 
 const env: Env = { SUPABASE_URL: "http://127.0.0.1:8080", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", SUPABASE_SECRET_KEY: "sb_secret_test", APP_URL: "https://ops.example.com" };
 const part = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -51,7 +52,14 @@ function supabase(role = "owner", answers: Record<string, unknown> = {}) {
       return Response.json(CONNECTIONS[client] ? [CONNECTIONS[client]] : []);
     }
     if (table === "memberships") memberships.push(url);
+    // Someone else on the team, when a test says who (answers.member): read without the company, as the team tools read them.
+    if (table === "memberships" && "member" in answers && !url.searchParams.get("select")?.includes("company")) {
+      if (method === "PATCH") sent.push({ method, table, body, query: url.searchParams });
+      return Response.json(answers.member);
+    }
     if (table === "memberships") return Response.json([{ company_id: "company-1", role, role_id: null, company: { timezone: "America/New_York", settings: {} } }]);
+    // The company's settings as the person reads them (lib/companySettings.ts settingsAs): all of them, for an owner.
+    if (table === "rpc/company_settings") return Response.json(db.companies?.[0]?.settings ?? {});
     if (!url.pathname.startsWith("/rest/v1/")) return Response.json([]);
     sent.push({ method, table, body, query: url.searchParams });
     const rows = (db[table] ??= []);
@@ -166,9 +174,62 @@ describe("money", () => {
       ["mark_paid", { from: "2026-10-12", to: "2026-10-18", method: "check" }],
       ["save_promo_code", { code: "SPRING10", kind: "percent", value: 10 }],
     ] as const) {
-      expect((await call("nomoney", name, args)).error, name).toMatch(/^This assistant can't change money: quotes, invoices, payments, pay or promo codes\./);
+      expect((await call("nomoney", name, args)).error, name).toMatch(/^This assistant can't change money: prices, quotes, invoices, payments, pay or promo codes\./);
     }
     expect(sent.filter((s) => ["payments", "quotes", "pay_periods", "promo_codes"].includes(s.table))).toEqual([]);
+  });
+
+  it("includes what clients pay: the price list, a job's lines and billing, extra work and price changes", async () => {
+    const { db, sent } = supabase();
+    const JOB = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a95";
+    const ID = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a87";
+    db.jobs = [{ id: JOB, company_id: "company-1", kind: "recurring", starts_on: "2026-06-01", recurrence_rule: "FREQ=WEEKLY;BYDAY=MO" }];
+    const change = { kind: "percent", value: 5 };
+    for (const [name, args] of [
+      ["add_services", { items: [{ name: "Trip charge", unit_price: 500, add_to_every_job: true }] }],
+      ["update_service", { service_id: ID, unit_price: 999 }],
+      ["add_extra_work", { visit_id: ID, name: "Storm cleanup", unit_price: 850 }],
+      ["delete_extra_work", { extra_id: ID }],
+      ["change_prices", { ...change, expect: { jobs: 1, lines: 1, new_price: 47 } }],
+      ["undo_price_change", { price_change_id: ID }],
+      ["update_job", { job_id: JOB, lines: [{ name: "Mowing", unit_price: 4500 }] }],
+      ["update_job", { job_id: JOB, pricing: "fixed", invoice_schedule: "monthly" }],
+      ["create_job", { client_id: ID, title: "Mowing", lines: [{ name: "Mowing", unit_price: 45 }] }],
+    ] as const) {
+      expect((await call("nomoney", name, args)).error, `${name} ${JSON.stringify(args)}`).toBe(MONEY_REFUSAL);
+    }
+    expect(sent.filter((s) => s.method !== "GET" && s.table !== "assistant_calls")).toEqual([]);
+    // Jobs without their prices are still jobs.
+    expect(await call("nomoney", "update_job", { job_id: JOB, title: "Weekly mowing" })).toMatchObject({ saved: true });
+  });
+
+  it("needs the Prices area as well as Jobs for a job's lines", async () => {
+    const { db, sent } = supabase();
+    const JOB = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a94";
+    db.jobs = [{ id: JOB, company_id: "company-1", kind: "one_off", starts_on: null, recurrence_rule: null }];
+    expect((await call("jobsonly", "update_job", { job_id: JOB, lines: [{ name: "Cleanup", unit_price: 300 }] })).error).toBe(assistantRefusal("prices"));
+    expect((await call("jobsonly", "update_job", { job_id: JOB, lines: [] })).error).toBe(assistantRefusal("prices"));
+    expect((await call("jobsonly", "add_extra_work", { visit_id: JOB, name: "Mulch", unit_price: 60 })).error).toBe(assistantRefusal("prices"));
+    expect(sent.filter((s) => s.table === "job_line_items" || s.table === "visit_extras")).toEqual([]);
+    expect(await call("jobsonly", "update_job", { job_id: JOB, instructions: "Gate on the left" })).toMatchObject({ saved: true });
+  });
+
+  it("keeps a client's tax exemption and payment terms, and the company's money settings, with invoices", async () => {
+    const { db, sent } = supabase();
+    const CLIENT = "6f4cc1b2-7e43-4c1d-9a8e-3c2f1d0b9a93";
+    db.clients.push({ id: CLIENT, display_name: "Pat Lee" });
+    for (const [name, args] of [
+      ["update_client", { client_id: CLIENT, tax_exempt: true }],
+      ["update_client", { client_id: CLIENT, payment_terms_days: 90 }],
+      ["create_client", { name: "Pat Lee", tax_exempt: true, tax_exempt_note: "Cert 12" }],
+    ] as const) {
+      for (const client of ["nomoney", "jobsonly"]) {
+        expect((await call(client, name, args)).error, `${client} ${name}`).toMatch(/A client's tax exemption and payment terms go with invoices\.$/);
+      }
+    }
+    expect((await call("nomoney", "update_company_settings", { sales_tax_percent: 0 })).error).toBe(`${MONEY_REFUSAL} Payment terms, sales tax, the minimum charge, late fees and tips go with invoices.`);
+    expect(sent.filter((s) => s.method !== "GET" && s.table !== "assistant_calls")).toEqual([]);
+    expect(await call("jobsonly", "update_client", { client_id: CLIENT, phone: "540-555-0101" })).toEqual({ saved: true });
   });
 
   it("job profit counts sub and crew pay as labor, once", async () => {
@@ -275,10 +336,46 @@ describe("tools", () => {
 
   it("invite people without handing the assistant their link", async () => {
     supabase();
-    const result = await call("full", "invite_person", { email: "new@example.com", role: "office" });
+    const result = await call("full", "invite_person", { email: "new@example.com", role: "field_crew" });
     expect(result).toEqual({ user_id: "user-9", invited: true, emailed: true, reason: null });
     expect(JSON.stringify(result)).not.toContain("SECRET");
-    expect(invites.calls).toEqual([{ email: "new@example.com", full_name: undefined, role: "office", role_id: undefined }]);
+    expect(invites.calls).toEqual([{ email: "new@example.com", full_name: undefined, role: "field_crew", role_id: undefined }]);
+    expect(await call("full", "invite_person", { email: "lead@example.com", role: "crew_lead" })).toMatchObject({ invited: true });
+  });
+
+  it("give no one office or estimator access: they see every client and the money", async () => {
+    const office = { company_roles: [{ base_role: "office", permissions: ["sales"] }] };
+    const { sent } = supabase("owner", office);
+    const person = "00000000-0000-4000-8000-000000000009";
+    const officeRole = "00000000-0000-4000-8000-0000000000bb";
+    for (const args of [{ email: "new@example.com", role: "office" }, { email: "new@example.com", role: "estimator" }, { email: "new@example.com", role: "field_crew", role_id: officeRole }]) {
+      expect((await call("full", "invite_person", args)).error, JSON.stringify(args)).toBe(OFFICE_FROM_TEAM_PAGE);
+    }
+    expect(invites.calls).toEqual([]);
+    for (const args of [{ user_id: person, role: "office" }, { user_id: person, role: "estimator" }, { user_id: person, role_id: officeRole }]) {
+      expect((await call("full", "change_role", args)).error, JSON.stringify(args)).toBe(OFFICE_FROM_TEAM_PAGE);
+    }
+    expect(sent.filter((r) => r.method !== "GET" && r.table !== "assistant_calls")).toEqual([]);
+  });
+
+  it("take someone off a custom role (role_id null), at the crew level they have", async () => {
+    const person = "00000000-0000-4000-8000-000000000009";
+    const { sent } = supabase("owner", { member: [{ user_id: person, role: "field_crew", role_id: null }] });
+    expect(await call("full", "change_role", { user_id: person, role_id: null })).toEqual({ saved: true, level: "field_crew" });
+    expect(sent.filter((r) => r.method === "PATCH" && r.table === "memberships").map((r) => r.body)).toEqual([{ role_id: null }]);
+    // Not someone whose level is more than crew lead: that's done on Settings → People.
+    supabase("owner", { member: [{ user_id: person, role: "office", role_id: null }] });
+    expect((await call("full", "change_role", { user_id: person, role_id: null })).error).toBe(OFFICE_FROM_TEAM_PAGE);
+    // And still one or the other.
+    supabase("owner");
+    expect((await call("full", "change_role", { user_id: person })).error).toBe("Give a role or a role_id.");
+  });
+
+  it("give access back only to crew", async () => {
+    // The person on the team, read back as an office member.
+    const { sent } = supabase("office");
+    expect((await call("full", "restore_person", { user_id: "00000000-0000-4000-8000-000000000009" })).error).toBe(OFFICE_FROM_TEAM_PAGE);
+    expect(sent.filter((r) => r.method !== "GET" && r.table !== "assistant_calls")).toEqual([]);
   });
 
   it("never give admin access: that asks for the person's password, in Crewtavo", async () => {
@@ -289,6 +386,8 @@ describe("tools", () => {
       expect((await call("full", "change_role", args)).error, JSON.stringify(args)).toBe(ADMIN_FROM_TEAM_PAGE);
     }
     expect((await call("full", "save_role", { name: "Everything", base_role: "admin", permissions: ["team"] })).error).toBe(ADMIN_FROM_TEAM_PAGE);
+    // Nor given back: turning a removed admin's access back on is giving it.
+    expect((await call("full", "restore_person", { user_id: person })).error).toBe(ADMIN_FROM_TEAM_PAGE);
     expect(sent.filter((r) => r.method !== "GET" && r.table !== "assistant_calls")).toEqual([]);
     // A role that's admin-level already can still be renamed.
     expect(await call("full", "save_role", { role_id: "00000000-0000-4000-8000-0000000000aa", name: "Manager", base_role: "admin", permissions: ["team"] })).toEqual({ role_id: "00000000-0000-4000-8000-0000000000aa", saved: true });

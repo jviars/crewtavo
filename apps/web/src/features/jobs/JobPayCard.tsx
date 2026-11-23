@@ -18,13 +18,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
-import { Button } from "@/components/ui/Button";
+import { Button, cx, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine, RowPerson } from "@/components/ui/InboxList";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { SaveStatus, useSaveStatus } from "@/components/ui/SaveStatus";
-import { Select } from "@/components/ui/Select";
+import { RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
@@ -95,7 +97,10 @@ import {
   type PayeeRef,
 } from "../subs/payData";
 import { loadSubs, useSubPaperwork } from "../subs/subsData";
+import { RowsSkeleton } from "./JobMaterials";
+import styles from "./jobMoney.module.css";
 import { ChangePriceDialog, SendOfferDialog } from "./OfferDialogs";
+import { Select } from "@/components/ui/Select";
 
 /** A visit as the job page has it. */
 export interface JobVisit { id: string; title: string; status: string; scheduled_on: string | null; completed_at: string | null; assignees: Array<{ user_id: string }> }
@@ -141,7 +146,7 @@ export function JobPayCard({ job, visits, lines = [], startAdding = false, onAdd
   // for the visits that offer covered).
   const [adding, setAdding] = useState<null | "any" | { elsewhere: readonly string[] }>(startAdding ? "any" : null);
   const [showOver, setShowOver] = useState(false);
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
   if (!subsArea && !teamArea) return null;
 
   const list = [...(pays.data ?? [])].sort(byPayOrder);
@@ -153,56 +158,59 @@ export function JobPayCard({ job, visits, lines = [], startAdding = false, onAdd
   const twice = overCounted(list, lines);
 
   return (
-    <section className="stack">
-      <div className="section-head">
-        <h2 className="section-title">Sub and crew pay</h2>
-        {agreed.length > 0 && <span className="muted small"><AnimatedNumber value={total} format={MONEY_CENTS} /> agreed</span>}
-        {!job.archived && <Button size="sm" icon="plus" onClick={() => setAdding("any")}>Add pay</Button>}
-      </div>
-      {twice.map((w) => (
-        <div key={w} className="callout callout-warning"><Icon name="alert" size={20} /><div className="grow small" style={{ fontWeight: 400 }}>{w}</div></div>
-      ))}
-      <div className="card" ref={listRef}>
+    <Section className="rel-figures" title="Sub and crew pay" count={list.length || undefined} action={!job.archived && <Button size="sm" icon="plus" onClick={() => setAdding("any")}>Add pay</Button>}>
+      <div className={styles.parts}>
+        {twice.map((w) => (
+          <div key={w} className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{w}</div></div>
+        ))}
         {pays.isPending ? (
-          <div className="card-row"><Skeleton width="50%" /></div>
+          <RowsSkeleton rows={2} lead />
         ) : pays.error ? (
-          <div className="card-row"><ErrorState compact error={pays.error} onRetry={() => pays.refetch()} /></div>
+          <ErrorState compact error={pays.error} onRetry={() => pays.refetch()} />
         ) : list.length === 0 ? (
           <EmptyState inline title="No sub or crew pay yet" />
         ) : (
-          <>
-            {shown.length === 0 && <div className="card-row"><span className="muted small">Nothing in play: it was all cancelled or turned down.</span></div>}
-            {shown.map((p) => {
-              const chip = offerChip(p, payeeOf(p));
-              const warning = p.subcontractor_id && warnsPaperwork(p.status, payees.subActive(p.subcontractor_id)) && payees.paperwork.data
-                ? payPaperworkWarning(payees.statusesOf(p.subcontractor_id), lastWorkDay(visits, p.visits.map((v) => v.visit_id)), todayIn(session.company.timezone))
-                : null;
-              return (
-                <button key={p.id} type="button" className="card-row" style={{ width: "100%", textAlign: "left", background: "none", border: 0, cursor: "pointer", flexWrap: "wrap" }} onClick={() => setOpen(p.id)}>
-                  <span className="grow" style={{ minWidth: 180 }}>
-                    <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                      <strong>{payees.nameOf(p)}</strong>
-                      <span className="chip">{p.subcontractor_id ? "Sub" : "Team"}</span>
-                      {warning && <span className="chip chip-amber"><Icon name="alert" size={12} />Paperwork</span>}
-                    </span>
-                    <span className="muted small" style={{ display: "block" }}>
-                      {(p.subcontractor_id && offerLine(p, session.company.timezone)) || payStatusLine(p, session.company.timezone, finishedOn(visits, p.visits.map((v) => v.visit_id), session.company.timezone))}
-                    </span>
-                  </span>
-                  <span className="tabular strong">{formatMoneyCents(p.status === "paid" ? p.paid_amount : p.total)}</span>
-                  <StatusPill label={chip.label} tone={chip.tone} />
-                </button>
-              );
-            })}
-            {over.length > 0 && (
-              <div className="list-foot">
-                <span />
-                <Button size="sm" variant="ghost" onClick={() => setShowOver(!showOver)}>
-                  {showOver ? "Hide what's over" : over.every((p) => p.status === "cancelled") ? `Show ${over.length} cancelled` : `Show ${over.length} more`}
-                </Button>
+          <div>
+            {shown.length === 0 ? (
+              <p className={styles.empty}>Nothing in play: it was all cancelled or turned down.</p>
+            ) : (
+              <ul className="rel" role="list" aria-label="Sub and crew pay" ref={listRef}>
+                {shown.map((p) => {
+                  const chip = offerChip(p, payeeOf(p));
+                  const name = payees.nameOf(p);
+                  const line = (p.subcontractor_id && offerLine(p, session.company.timezone)) || payStatusLine(p, session.company.timezone, finishedOn(visits, p.visits.map((v) => v.visit_id), session.company.timezone));
+                  const warning = p.subcontractor_id && warnsPaperwork(p.status, payees.subActive(p.subcontractor_id)) && payees.paperwork.data
+                    ? payPaperworkWarning(payees.statusesOf(p.subcontractor_id), lastWorkDay(visits, p.visits.map((v) => v.visit_id)), todayIn(session.company.timezone))
+                    : null;
+                  return (
+                    <RelatedRow
+                      key={p.id}
+                      onClick={() => setOpen(p.id)}
+                      lead={<RowPerson name={name} />}
+                      title={name}
+                      detail={p.subcontractor_id ? "Sub" : "Team"}
+                      sub={[
+                        <StatusPill key="s" label={chip.label} tone={chip.tone} />,
+                        warning && <span key="w" className={styles.warn} title={warning}><Icon name="alert" size={12} /> Paperwork</span>,
+                        line,
+                      ]}
+                      end={<b>{formatMoneyCents(p.status === "paid" ? p.paid_amount : p.total)}</b>}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+            {(agreed.length > 0 || over.length > 0) && (
+              <div className={styles.total}>
+                {over.length > 0 ? (
+                  <button type="button" className="link-btn" onClick={() => setShowOver(!showOver)}>
+                    {showOver ? "Hide what's over" : over.every((p) => p.status === "cancelled") ? `Show ${over.length} cancelled` : `Show ${over.length} more`}
+                  </button>
+                ) : <span />}
+                {agreed.length > 0 && <span>Agreed <b><AnimatedNumber value={total} format={MONEY_CENTS} /></b></span>}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
       {adding && (
@@ -237,7 +245,7 @@ export function JobPayCard({ job, visits, lines = [], startAdding = false, onAdd
           }}
         />
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -307,7 +315,7 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
           error={tried && !payeeId ? (kind === "sub" ? "Choose the sub it's for." : "Choose who it's for.") : null}
           hint={kind === "sub" && elsewhere ? "Subs with their paperwork in order come first. It covers the same visits as the offer that ended." : undefined}
         >
-          {loadingChoices ? <Skeleton height={38} /> : (
+          {loadingChoices ? <Skeleton height="var(--control)" radius={8} /> : (
             <Select className="select" value={payeeId} onChange={(e) => { setPayeeId(e.target.value); setCovered(startCovered); }}>
               <option value="">{kind === "sub" ? "Choose a sub" : "Choose someone"}</option>
               {choices.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -315,20 +323,20 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
           )}
         </Field>
         {kind === "sub" && !loadingChoices && choices.length === 0 && (
-          <p className="muted small" style={{ margin: 0 }}>No subs yet. <Link to="/subs?new=1">Add one under Subcontractors</Link>.</p>
+          <p className={styles.hint}>No subs yet. <Link to="/subs?new=1">Add one under Subcontractors</Link>.</p>
         )}
         {existing ? (
           <div className="callout callout-info">
-            <Icon name="info" size={20} />
-            <div className="grow" style={{ fontWeight: 400 }}>They already have pay on this job ({payStatusLabel(existing.status).toLowerCase()}, {formatMoneyCents(existing.total)}).</div>
+            <Icon name="info" size={16} />
+            <div className="grow">They already have pay on this job ({payStatusLabel(existing.status).toLowerCase()}, {formatMoneyCents(existing.total)}).</div>
             <Button size="sm" onClick={() => onOpen(existing.id)}>Open it</Button>
           </div>
         ) : payeeId ? (
           <>
             {warning && (
               <div className="callout callout-warning">
-                <Icon name="alert" size={20} />
-                <div className="grow small" style={{ fontWeight: 400 }}>{warning} <Link to={`/subs/${payeeId}`}>Their paperwork</Link></div>
+                <Icon name="alert" size={16} />
+                <div className="grow">{warning} <Link to={`/subs/${payeeId}`}>Their paperwork</Link></div>
               </div>
             )}
             <VisitPicker
@@ -338,37 +346,35 @@ function AddPayDialog({ job, visits, pays, payees, areas, elsewhere, onClose, on
               onToggle={(id, on) => setCovered(on ? [...chosen, id] : chosen.filter((x) => x !== id))}
               hint={visitsHint(kind, signIns)}
             />
-            <div className="stack-sm">
-              <div className="row-between">
-                <strong>What their rates come to</strong>
-                {kind === "sub" ? <Link className="small" to={`/subs/${payeeId}`}>Their rates</Link> : <Button size="sm" variant="ghost" onClick={() => setRates(true)}>Their rates</Button>}
+            <div className={styles.group}>
+              <div className={styles.label}>
+                <span>What their rates come to</span>
+                {kind === "sub" ? <Link to={`/subs/${payeeId}`}>Their rates</Link> : <button type="button" className="link-btn" onClick={() => setRates(true)}>Their rates</button>}
               </div>
-              <div className="card">
+              <div className={styles.lines}>
                 {suggestion.isPending ? (
-                  <div className="card-row"><Skeleton width="60%" /></div>
+                  <div className={styles.lineRead} aria-hidden="true"><Skeleton width="55%" /><Skeleton width={90} height={10} /><Skeleton width={70} /></div>
                 ) : suggestion.error ? (
-                  <div className="card-row"><ErrorState compact error={suggestion.error} onRetry={() => suggestion.refetch()} /></div>
+                  <ErrorState compact error={suggestion.error} onRetry={() => suggestion.refetch()} />
                 ) : !suggestion.data?.lines.length ? (
-                  <div className="card-row">
-                    <span className="muted small">
-                      No rates for them yet, so it starts with no lines: add them on the next step.{" "}
-                      {kind === "sub" ? <Link to={`/subs/${payeeId}`}>Set their rates</Link> : <button type="button" className="link-btn small" onClick={() => setRates(true)}>Set their rates</button>}
-                      {kind === "team" && peopleSettings && <> (they're also under <Link to="/settings?tab=team">Settings → People</Link>)</>}
-                    </span>
-                  </div>
+                  <p className={styles.empty}>
+                    No rates for them yet, so it starts with no lines: add them on the next step.{" "}
+                    {kind === "sub" ? <Link to={`/subs/${payeeId}`}>Set their rates</Link> : <button type="button" className="link-btn" onClick={() => setRates(true)}>Set their rates</button>}
+                    {kind === "team" && peopleSettings && <> (they're also under <Link to="/settings?tab=team">Settings → People</Link>)</>}
+                  </p>
                 ) : (
                   <>
                     {suggestion.data.lines.map((l) => (
-                      <div key={l.pay_rate_id ?? l.sort} className="card-row" style={{ alignItems: "flex-start" }}>
-                        <span className="grow" style={{ minWidth: 0 }}>
-                          <strong>{l.description}</strong>
-                          {l.note && <span className={`small ${l.check_it ? "" : "muted"}`} style={{ display: "block", color: l.check_it ? "var(--warning)" : undefined }}>{l.check_it && <Icon name="alert" size={12} />} {l.note}</span>}
+                      <div key={l.pay_rate_id ?? l.sort} className={styles.lineRead}>
+                        <span className={styles.desc}>
+                          <span>{l.description}</span>
+                          {l.note && <span className={styles.note} data-check={l.check_it || undefined}>{l.check_it && <Icon name="alert" size={12} />}{l.note}</span>}
                         </span>
-                        <span className="muted small tabular nowrap">{quantityWords(l.quantity, l.unit)} × {formatRate(l.rate)}</span>
-                        <span className="tabular strong" style={{ minWidth: 90, textAlign: "right" }}>{formatMoneyCents(l.amount)}</span>
+                        <span className={styles.how}>{quantityWords(l.quantity, l.unit)} × {formatRate(l.rate)}</span>
+                        <span className={styles.amount}>{formatMoneyCents(l.amount)}</span>
                       </div>
                     ))}
-                    <div className="card-row"><strong className="grow">Total</strong><strong className="tabular">{formatMoneyCents(suggestion.data.total)}</strong></div>
+                    <div className={styles.total}><span>Total</span><b className={styles.grand}>{formatMoneyCents(suggestion.data.total)}</b></div>
                   </>
                 )}
               </div>
@@ -403,25 +409,26 @@ function TeamRatesDialog({ userId, name, onClose }: { userId: string; name: stri
 }
 
 function VisitPicker({ visits, covered, onToggle, disabled, hint }: { visits: readonly JobVisit[]; covered: readonly string[]; onToggle: (id: string, on: boolean) => void; disabled?: boolean; hint?: string }) {
+  const count = visits.filter((v) => covered.includes(v.id)).length;
   return (
-    <div className="stack-sm">
-      <strong>Visits it covers</strong>
+    <div className={styles.group} role="group" aria-label="Visits it covers">
+      <div className={styles.label}><span>Visits it covers</span>{visits.length > 0 && <span className={styles.count}>{count} of {visits.length}</span>}</div>
       {visits.length === 0 ? (
-        <span className="muted small">This job has no visits yet. Mark the work done yourself when it's finished.</span>
+        <p className={styles.empty}>This job has no visits yet. Mark the work done yourself when it's finished.</p>
       ) : (
-        <div className="card">
+        <div className={styles.rows}>
           {visits.map((v) => (
-            <label key={v.id} className="card-row checkbox" style={{ cursor: disabled ? "default" : "pointer" }}>
+            <label key={v.id} className={styles.check} aria-disabled={disabled || undefined}>
               <input type="checkbox" checked={covered.includes(v.id)} disabled={disabled} onChange={(e) => onToggle(v.id, e.target.checked)} />
-              <span className="grow">
-                {v.title}
-                <span className="muted small" style={{ display: "block" }}>{v.scheduled_on ? formatDate(v.scheduled_on) : "Not scheduled"} · {statusText("visit", v.status)}</span>
+              <span className={styles.what}>
+                <b>{v.title}</b>
+                <small>{v.scheduled_on ? formatDate(v.scheduled_on) : "Not scheduled"} · {statusText("visit", v.status)}</small>
               </span>
             </label>
           ))}
         </div>
       )}
-      {hint && visits.length > 0 && <span className="muted small">{hint}</span>}
+      {hint && visits.length > 0 && <p className={styles.hint} style={{ marginTop: 4 }}>{hint}</p>}
     </div>
   );
 }
@@ -549,39 +556,48 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
   const shownVisits = visits.filter((v) => v.status !== "cancelled" || covered.includes(v.id));
   const lastDone = visits.filter((v) => covered.includes(v.id) && v.completed_at).map((v) => dateIn(v.completed_at!, tz)).sort().at(-1) ?? null;
 
+  // Taking back, withdrawing, cancelling and deleting are in the foot's More menu, the dangerous ones last.
+  const more: MenuEntry[] = [
+    ...actions.filter((a) => a === "unpaid").map((a): MenuEntry => ({ label: label(a), icon: "undo", onSelect: () => void run(a) })),
+    { separator: true },
+    ...actions.filter((a) => a === "withdraw" || a === "cancel" || a === "delete").map((a): MenuEntry => ({ label: label(a), icon: a === "delete" ? "trash" : "x", danger: true, onSelect: () => void run(a) })),
+  ];
+  const hasMore = actions.some((a) => a === "cancel" || a === "delete" || a === "unpaid" || a === "withdraw");
+
   return (
     <Dialog open onClose={onClose} title={name} size="lg" description={`Job #${job.number} · ${job.title}`}>
       <div className="dialog-body">
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <StatusPill label={chip.label} tone={chip.tone} />
-          <span className="chip">{who === "sub" ? "Sub" : "Team"}</span>
-          <span className="muted small grow">{offerNote ?? payStatusLine(pay, tz, finishedOn(visits, covered, tz))}</span>
+        <div className={styles.top}>
+          <MetaLine parts={[<StatusPill key="s" label={chip.label} tone={chip.tone} />, who === "sub" ? "Sub" : "Team", offerNote ?? payStatusLine(pay, tz, finishedOn(visits, covered, tz))]} />
           <SaveStatus status={save.status} />
-          {who === "sub" && pay.subcontractor_id && <Link className="small" to={`/subs/${pay.subcontractor_id}`}>Their page</Link>}
+          {who === "sub" && pay.subcontractor_id && <Link to={`/subs/${pay.subcontractor_id}`}>Their page</Link>}
         </div>
         {warning && (
           <div className="callout callout-warning">
-            <Icon name="alert" size={20} />
-            <div className="grow small" style={{ fontWeight: 400 }}>{warning}</div>
+            <Icon name="alert" size={16} />
+            <div className="grow">{warning}</div>
           </div>
         )}
         {cutShortNote(pay, visits) && (
           <div className="callout callout-info">
-            <Icon name="info" size={20} />
-            <div className="grow small" style={{ fontWeight: 400 }}>{cutShortNote(pay, visits)}</div>
+            <Icon name="info" size={16} />
+            <div className="grow">{cutShortNote(pay, visits)}</div>
           </div>
         )}
         {pay.status === "offered" && recorded.length > 0 && (
-          <span className="muted small">Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office")).join(" ")}</span>
+          <p className={styles.hint}>Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office")).join(" ")}</p>
         )}
 
-        <div className="stack-sm">
-          <div className="row-between">
-            <strong>Lines</strong>
-            {who === "team" && editable && pay.user_id && <Button size="sm" variant="ghost" onClick={() => setDialog("rates")}>Their rates</Button>}
+        <div className={styles.group} role="group" aria-label="Lines">
+          <div className={styles.label}>
+            <span>Lines</span>
+            {who === "team" && editable && pay.user_id && <button type="button" className="link-btn" onClick={() => setDialog("rates")}>Their rates</button>}
           </div>
-          <div className="card">
-            {pay.lines.length === 0 && <div className="card-row"><span className="muted small">No lines yet.{editable ? " Add what they're paid for." : ""}</span></div>}
+          <div className={styles.lines}>
+            {editable && pay.lines.length > 0 && (
+              <div className={styles.lineHead} aria-hidden="true"><span>Description</span><span className={styles.num}>Quantity</span><span className={styles.num}>Rate</span><span className={styles.num}>Amount</span><span /></div>
+            )}
+            {pay.lines.length === 0 && <p className={styles.empty}>No lines yet.{editable ? " Add what they're paid for." : ""}</p>}
             {pay.lines.map((l) => (
               <LineRow
                 key={l.id}
@@ -599,14 +615,13 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
                 onRemove={() => removeLine.mutate(l.id)}
               />
             ))}
-            <div className="card-row">
+            <div className={styles.linesFoot}>
               {editable && <Button size="sm" variant="ghost" icon="plus" loading={addLine.isPending} onClick={() => addLine.mutate()}>Add a line</Button>}
-              <strong className="grow" style={{ textAlign: "right" }}>Total</strong>
-              <strong className="tabular" style={{ minWidth: 90, textAlign: "right" }}>{formatMoneyCents(total)}</strong>
+              <div className={styles.total}><span>Total</span><b className={styles.grand}>{formatMoneyCents(total)}</b></div>
             </div>
           </div>
           {who === "sub" && pay.status === "accepted" && (signIns ?? 0) > 0 && pay.lines.length > 0 && (
-            <span className="muted small">Changing these lines here counts as agreed with them, say on the phone. To ask them first, use Change price.</span>
+            <p className={styles.hint}>Changing these lines here counts as agreed with them, say on the phone. To ask them first, use Change price.</p>
           )}
           <FormError error={updateLine.error ?? addLine.error ?? removeLine.error} />
         </div>
@@ -639,13 +654,20 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
         </Field>
 
         {who === "sub" && pay.status === "draft" && signIns === 0 && (
-          <span className="muted small">They don't sign in, so there's no offer to send them. Agree it with them on the phone and press Agree, or give them a sign-in on <Link to={`/subs/${pay.subcontractor_id}`}>their page</Link>.</span>
+          <p className={styles.hint}>They don't sign in, so there's no offer to send them. Agree it with them on the phone and press Agree, or give them a sign-in on <Link to={`/subs/${pay.subcontractor_id}`}>their page</Link>.</p>
         )}
         <FormError error={act.error ?? saveNotes.error} />
-        <div className="form-actions" style={{ flexWrap: "wrap" }}>
-          {actions.filter((a) => a === "cancel" || a === "delete" || a === "unpaid" || a === "withdraw").map((a) => (
-            <Button key={a} variant={a === "unpaid" ? "secondary" : "danger"} loading={act.isPending && act.variables === a} onClick={() => run(a)}>{label(a)}</Button>
-          ))}
+        <div className="form-actions">
+          {hasMore && (
+            <Menu
+              label="More for this pay"
+              title={name}
+              align="start"
+              triggerClassName={cx("btn btn-icon", styles.footMore)}
+              items={more}
+            />
+          )}
+          {act.isPending && ["cancel", "delete", "unpaid", "withdraw"].includes(act.variables ?? "") && <Spinner size={16} label="Working…" />}
           <span className="grow" />
           <Button onClick={onClose}>Close</Button>
           {secondary.map((a) => (
@@ -697,37 +719,35 @@ function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onUncha
   };
   const amount = draft ? draftAmount(draft) : Number(line.amount);
   const unit = line.basis === "per_unit" ? line.unit : line.basis === "per_day" ? "day" : "job";
-  const noteLine = note && <span className="small" style={{ display: "block", color: note.check ? "var(--warning)" : "var(--text-3)" }}>{note.check && <Icon name="alert" size={12} />} {note.text}</span>;
+  const noteLine = note && <span className={styles.note} data-check={note.check || undefined}>{note.check && <Icon name="alert" size={12} />}{note.text}</span>;
   if (!editable) {
     return (
-      <div className="card-row" style={{ alignItems: "flex-start" }}>
-        <span className="grow" style={{ minWidth: 0 }}><strong>{line.description}</strong>{noteLine}</span>
-        <span className="muted small tabular nowrap">{quantityWords(line.quantity, unit)} × {formatRate(line.rate)}</span>
-        <span className="tabular strong" style={{ minWidth: 90, textAlign: "right" }}>{formatMoneyCents(Number(line.amount))}</span>
+      <div className={styles.lineRead}>
+        <span className={styles.desc}><span>{line.description}</span>{noteLine}</span>
+        <span className={styles.how}>{quantityWords(line.quantity, unit)} × {formatRate(line.rate)}</span>
+        <span className={styles.amount}>{formatMoneyCents(Number(line.amount))}</span>
       </div>
     );
   }
   const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && e.currentTarget.blur();
   return (
-    <div className="card-row" style={{ flexWrap: "wrap", alignItems: "flex-start" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && commit()}>
-      <span className="grow stack-sm" style={{ minWidth: 200, gap: 4 }}>
+    // On a phone the description has the line to itself, and the quantity, rate and amount share the next.
+    <div className={styles.line} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && commit()}>
+      <span className={styles.desc}>
         <input className="input input-sm" value={d.description} maxLength={200} aria-label="Description" onChange={(e) => onDraft({ ...d, description: e.target.value })} onKeyDown={onKey} />
         {noteLine}
         {problem && <span className="field-error" role="alert">{problem}</span>}
       </span>
-      {/* On a phone the quantity and rate share a line, and the amount and Remove go on the next. */}
-      <span className="row" style={{ gap: 6, flexWrap: "wrap", flex: "1 1 260px", justifyContent: "flex-end", minWidth: 0 }}>
-        <input className="input input-sm tabular" style={{ flex: "1 1 64px", maxWidth: 96, minWidth: 0, textAlign: "right" }} inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${line.description}`} aria-invalid={problem?.includes("quantity") || undefined} onChange={(e) => onDraft({ ...d, quantity: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
-        <span className="muted small">{quantityWords(Number(d.quantity) || 0, unit).replace(/^[\d.,]+ /, "")} ×</span>
-        <span className="input-group" style={{ flex: "1 1 88px", maxWidth: 120, minWidth: 0 }}>
-          <span className="addon">$</span>
-          <input className="input input-sm tabular" style={{ textAlign: "right", paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${line.description}`} aria-invalid={problem?.includes("rate") || undefined} onChange={(e) => onDraft({ ...d, rate: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
-        </span>
-        <span className="row" style={{ gap: 6, marginLeft: "auto" }}>
-          <span className="tabular strong" style={{ minWidth: 80, textAlign: "right" }}>{saving ? <Skeleton width={60} /> : amount === null ? "—" : formatMoneyCents(amount)}</span>
-          <Button size="sm" variant="ghost" icon="trash" aria-label={`Remove ${line.description}`} onClick={onRemove} />
-        </span>
+      <span className={styles.qty}>
+        <input className="input input-sm tabular" inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${line.description}`} aria-invalid={problem?.includes("quantity") || undefined} onChange={(e) => onDraft({ ...d, quantity: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
+        <span>{quantityWords(Number(d.quantity) || 0, unit).replace(/^[\d.,]+ /, "")}</span>
       </span>
+      <span className={cx("input-group", styles.rate)}>
+        <span className="addon">$</span>
+        <input className="input input-sm tabular" style={{ paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${line.description}`} aria-invalid={problem?.includes("rate") || undefined} onChange={(e) => onDraft({ ...d, rate: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
+      </span>
+      <span className={styles.amount}>{saving ? <Skeleton width={60} style={{ marginLeft: "auto" }} /> : amount === null ? null : formatMoneyCents(amount)}</span>
+      <Button className={styles.remove} size="sm" variant="ghost" icon="trash" aria-label={`Remove ${line.description}`} onClick={onRemove} />
     </div>
   );
 }

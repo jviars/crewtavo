@@ -16,7 +16,7 @@ import type { Env } from "../env";
 import { HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
 import { timeRates } from "./payRates";
-import { companyZone } from "./schedule";
+import { companyTimeZone, companyZone } from "./schedule";
 
 export interface PayScope {
   db: Db;
@@ -33,6 +33,19 @@ function mayPay(s: PayScope) {
   if (!(OFFICE as readonly string[]).includes(s.role) || !s.permissions.includes("job_costs")) {
     throw new HttpError(403, "Pay is for the office, with Job costs and profit. Ask an owner or admin.");
   }
+}
+
+export const OWN_PAY = "Ask an owner to mark your own pay paid, or take the mark back.";
+
+/**
+ * Someone's own pay in a period is an owner's to mark paid or take back, as their pay rate is (the
+ * database holds pay_period_lines to it): anyone else who handles pay leaves their own line alone.
+ * Named on purpose, it's refused; with nobody named, they're left out.
+ */
+function ownPayOut(s: PayScope, named: readonly string[] | undefined): boolean {
+  if (s.role === "owner") return false;
+  if (named?.includes(s.userId)) throw new HttpError(403, OWN_PAY);
+  return true;
 }
 
 async function names(s: PayScope) {
@@ -174,8 +187,9 @@ export async function markPaid(s: PayScope, body: { from: string; to: string; us
     const subs = await subSignIns(s);
     if (body.user_ids.some((id) => subs.has(id))) throw new HttpError(400, SUBS_NOT_PAYROLL);
   }
+  const notMine = ownPayOut(s, body.user_ids);
   const owed = (p: { hours: number; piece_amount: number }) => p.hours > 0 || p.piece_amount > 0;
-  const named = summary.people.filter((p) => (body.user_ids ? body.user_ids.includes(p.user_id) : owed(p)));
+  const named = summary.people.filter((p) => (body.user_ids ? body.user_ids.includes(p.user_id) : owed(p) && !(notMine && p.user_id === s.userId)));
   // A paid line is the record of a payment: marking again never writes over it.
   const people = named.filter((p) => !p.paid);
   if (!people.length) {
@@ -185,7 +199,7 @@ export async function markPaid(s: PayScope, body: { from: string; to: string; us
   if (waiting.length) {
     throw new HttpError(400, `Approve everyone's time first: ${waiting.map((p) => `${p.name} (${p.running ? "a clock is still running" : `${p.unapproved_hours} h not approved`})`).join(", ")}.`);
   }
-  const { tz } = await companyZone(s);
+  const tz = await companyTimeZone(s);
   const paidAt = zonedTimeToUtc(body.paid_on ?? localDate(new Date(), tz), "12:00", tz).toISOString();
   const period = must(
     await s.db
@@ -225,9 +239,11 @@ export async function markPaid(s: PayScope, body: { from: string; to: string; us
 /** Take back a paid mark (for the period, or some people), so their time can be changed again (and their piece pay is done again, owed). */
 export async function unmarkPaid(s: PayScope, body: { from: string; to: string; user_ids?: readonly string[] }) {
   mayPay(s);
+  const notMine = ownPayOut(s, body.user_ids);
   const period = must(await s.db.from("pay_periods").select("id").eq("company_id", s.companyId).eq("starts_on", body.from).eq("ends_on", body.to).maybeSingle(), "No pay period with those dates has been marked paid.");
   let query = s.db.from("pay_period_lines").update({ paid_at: null, paid_by: null, paid_amount: null, method: null, reference: null }).eq("period_id", period.id);
   if (body.user_ids) query = query.in("user_id", [...body.user_ids]);
+  else if (notMine) query = query.neq("user_id", s.userId);
   const changed = must(await query.select("user_id"));
   must(await s.db.from("pay_periods").update({ status: "open", paid_at: null, paid_by: null }).eq("id", period.id).select("id"));
   return { period_id: period.id, unmarked: changed.length };

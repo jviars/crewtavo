@@ -1,0 +1,143 @@
+/*
+ * The Snow page's own (SnowPage.tsx, App-Snow.dc.html, Mobile-Apps.dc.html): its tabs, which are
+ * underline tabs on a desktop and a segmented control on a phone; the rows' right edge and the
+ * parts a phone says differently; the Season tab; the popups' pick lists and price rows; and the
+ * crew's "Can you go out?" card. The rows, sections and strips are the house's own
+ * (components.css); these only add what Snow says that they don't.
+ */
+.body { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+
+/* A count after a tab's words, quiet. */
+.tabs :global(.badge) { color: var(--quiet); font-weight: 500; }
+
+/* ---------- A list's own head: Today, Tomorrow, with the search on the right ---------- */
+.listHead { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; margin-bottom: -10px; }
+.listTitle { display: grid; gap: 1px; min-width: 0; }
+.listTitle h2 { margin: 0; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; line-height: 1.3; color: var(--ink); }
+.listTitle span { font-size: var(--fs-12); color: var(--quiet); }
+
+
+/* ---------- Season ---------- */
+/* What fell, typed into the row: a small field in its quiet line. */
+:global(.il-meta) > .fell { flex: none; gap: 6px; overflow: visible; }
+.fell :global(.input-group) { width: 84px; }
+.fell :global(.input) { height: 26px; padding-left: 8px; font-size: var(--fs-12); }
+.fell :global(.input-group) > :global(.input):has(+ :global(.addon-unit)) { padding-right: 26px; }
+.fell :global(.addon-unit) { right: 8px; z-index: 2; font-size: var(--fs-12); }
+.fellError { color: var(--danger); font-weight: 600; }
+.reportLink { margin-left: 8px; }
+.reportLink a { font-weight: 600; }
+.byCustomer :global(.num) { text-align: right; }
+
+/* A row's right edge: how soon it's cleared, then who works it (and what the subs asked said: green once all can go). */
+.clear { font-size: var(--fs-12); font-weight: 600; color: var(--ink); }
+.crew { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.crew[data-tone="good"] { color: var(--green-dark); }
+.crew[data-tone="warning"] { font-weight: 500; }
+
+/* Said on a desktop only, or on a phone only: in a row's quiet line the dot before it goes with it. */
+@media not all and (max-width: 900px) {
+  :global(.il) .phoneOnly, :global(.il-meta) > :global(.meta-dot):has(+ .phoneOnly), :global(.il-meta) > .phoneOnly:first-child + :global(.meta-dot) { display: none; }
+}
+
+/* ---------- Pick lists in the popups: a job to make a snow customer, the people on it ---------- */
+/* A list on hairlines that scrolls between its top and bottom lines, not a box. */
+.pick { max-height: 220px; overflow-y: auto; border-block: 1px solid var(--divider); overscroll-behavior: contain; }
+.pickRow { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 4px; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); font-weight: 400; color: var(--ink); cursor: pointer; transition: background var(--dur-fast); }
+.pickRow:last-child { border-bottom: 0; }
+.pickRow:hover { background: var(--fill); }
+.pickRow:has(input:checked) { background: var(--green-tint); }
+.pickRow:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: -2px; border-radius: 8px; }
+.pickRow input { flex: none; margin: 0; }
+.pickText { display: grid; min-width: 0; }
+.pickText b { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pickText span { overflow: hidden; font-size: var(--fs-12); color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.pickEmpty { padding: 12px 4px; font-size: var(--fs-13); color: var(--text-3); }
+.pickSearch { margin-bottom: 8px; }
+
+/* Three short fields alike, a third each (the house's form-grid-3 gives the first one half the row). */
+@media (min-width: 561px) { :global(.form-grid).three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* A form's parts under small headings, on hairlines. */
+.part { display: grid; gap: 14px; min-width: 0; }
+.part + .part { margin-top: 8px; }
+.partHead { display: flex; align-items: center; gap: 8px; min-height: 32px; margin: 0; border-bottom: 1px solid var(--divider); font-size: var(--fs-13); font-weight: 650; color: var(--ink); }
+.partHead span { font-weight: 400; color: var(--quiet); }
+
+/* The client hears it: a switch with its words beside it. */
+.toggle { display: flex; align-items: flex-start; gap: 12px; font-size: var(--fs-13); cursor: pointer; }
+.toggle > :global(.switch) { margin-top: 1px; }
+.toggle b { display: block; font-weight: 600; color: var(--ink); }
+.toggle span span { display: block; margin-top: 2px; font-size: var(--fs-12); color: var(--text-3); }
+
+/* ---------- Storm prices by depth ---------- */
+.depthList { display: grid; justify-items: start; gap: 6px; }
+.depths { justify-self: stretch; border-top: 1px solid var(--row-divider); }
+.depth { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px; padding: 6px 0; border-bottom: 1px solid var(--row-divider); }
+.depthLabel { min-width: 44px; font-size: var(--fs-13); font-weight: 400; color: var(--text-3); }
+.depth :global(.input-group) { width: 120px; }
+.depthRemove { margin-left: auto; color: var(--text-3); }
+.depthAdd { margin-left: -10px; color: var(--green); }
+.depthAdd:hover { color: var(--green-dark); }
+.fill { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.fill :global(.btn) { margin-left: -10px; }
+.partHint { margin: -6px 0 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.remove { margin-right: auto; color: var(--danger); }
+.remove:hover { color: var(--danger); }
+
+/* ---------- A sub's My day: "Snow is coming. Can you go out?" (SnowAvailabilityCard.tsx) ---------- */
+.ask { flex-wrap: wrap; align-items: flex-start; }
+.askHint { margin-top: 2px; color: var(--text-2); }
+/* The answers under the question, where they read in a narrow column too. */
+.askAnswers { display: flex; flex: 0 0 100%; gap: 8px; padding-left: 26px; }
+.askAnswers :global(.btn) { min-width: 64px; }
+.askChange { flex: none; }
+
+@media (max-width: 900px) {
+  .body { gap: 20px; }
+  /* The tabs as the phone's segmented control (Mobile-Apps.dc.html, Snow): one track, the chosen one raised. */
+  .tabs { gap: 2px; padding: 3px; border: 0; border-radius: 11px; background: var(--fill-2); overflow: visible; }
+  .tabs > button { flex: 1 1 0; justify-content: center; min-width: 0; height: 38px; border-radius: 8px; font-size: var(--fs-14); }
+  .tabs > button[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: var(--seg-shadow); }
+  .tabs > button[aria-selected="true"]::after { content: none; }
+  /* The tabs not chosen reach over the track's edge for a 44px target, as the shared segmented control's do. */
+  .tabs > button:not([aria-selected="true"])::after { content: ""; position: absolute; inset: -3px 0; }
+  .tabs[data-indicator]::before { top: 0; bottom: auto; height: var(--ind-h); transform: translate(var(--ind-x), var(--ind-y)); border-radius: 8px; background: var(--raised); box-shadow: var(--seg-shadow); }
+  .tabs[data-indicator] > button[aria-selected="true"] { background: transparent; box-shadow: none; }
+  .listHead { display: grid; justify-content: stretch; margin-bottom: -14px; }
+  .listTitle { padding: 0 4px; }
+  .listTitle h2 { font-size: var(--fs-16); }
+  .listTitle span { font-size: var(--fs-13); }
+  .listHead :global(.search-field) { width: 100%; height: 44px; background: var(--m-card); }
+  /* A visit's report, 44px tall to a thumb. */
+  :global(.il-meta) > :global(.meta-break) > .reportLink { overflow: visible; }
+  .reportLink a::after { content: ""; position: absolute; inset: -14px -4px; }
+  .fell :global(.input) { height: 32px; font-size: var(--fs-14); }
+  .fell :global(.input-group) { width: 92px; }
+  /* The phone kit's rows (Mobile-Apps.dc.html, Snow): no avatar, so the name has the room. */
+  .rows :global(.il-row) { grid-template-columns: minmax(0, 1fr) auto; }
+  .rows :global(.il-avatar) { display: none; }
+  .rows:global(.il-inset) :global(.il-row)::before { left: 16px; }
+  :global(.il) .wideOnly, :global(.il-meta) > :global(.meta-dot):has(+ .wideOnly) { display: none; }
+  /* Who works it in two lines at most, and a tap on it opens the row like the rest: a phone shows no tooltip. */
+  :global(.il-aside) > .crew { position: static; display: -webkit-box; max-width: 136px; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  /* This season by customer: an inset card, each customer's figures on one line under its name. */
+  /* Named with the grouped page and the card, to outrank the house's flat table card. */
+  :global(.m-grouped) :global(.card).byCustomer { padding: 0 16px; border-radius: 14px; background: var(--m-card); }
+  :global(.m-grouped) :global(.card).byCustomer :global(.table-stack) tr { grid-template-columns: repeat(4, auto); justify-content: start; gap: 4px 16px; padding-left: 0; padding-right: 0; }
+  :global(.m-grouped) :global(.card).byCustomer :global(.table-stack) td { padding: 0; text-align: left; }
+  :global(.m-grouped) :global(.card).byCustomer :global(.table-stack) td:first-child { grid-column: 1 / -1; margin-bottom: 2px; }
+  :global(.m-grouped) :global(.card).byCustomer :global(.table-stack) tbody tr:last-child { border-bottom: 0; }
+  .pick { max-height: 260px; }
+  .pickRow { min-height: 52px; font-size: var(--fs-15); }
+  .pickText span { font-size: var(--fs-13); }
+  .partHead { min-height: 36px; font-size: var(--fs-14); }
+  .depth :global(.input-group) { width: 108px; }
+  /* The small buttons by the prices, 44px to a thumb. */
+  .depth > :global(.btn).depthRemove, .depthList > :global(.btn).depthAdd, .fill > :global(.btn) { height: 44px; }
+  .depth > :global(.btn).depthRemove { width: 44px; margin-right: -8px; }
+  .toggle { font-size: var(--fs-15); }
+  /* The answers under the question, each half the width: 44px, for a gloved thumb. */
+  .askAnswers :global(.btn) { flex: 1 1 0; height: 44px; }
+  .toggle span span { font-size: var(--fs-13); }
+}

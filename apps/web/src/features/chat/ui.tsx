@@ -44,6 +44,18 @@ export function dayLabel(iso: string, now = new Date()): string {
 }
 
 export const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString(browserOrSpanish(), { hour: "numeric", minute: "2-digit" });
+
+/** When a channel last spoke, as a phone's list says it: "1:52 PM" today, "Yesterday", "Mon" this week, then "Nov 3". */
+export function listTime(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  if (sameDay(d, now)) return timeLabel(iso);
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, yesterday)) return t("Yesterday");
+  const days = (now.getTime() - d.getTime()) / 86_400_000;
+  if (days < 6) return d.toLocaleDateString(browserOrSpanish(), { weekday: "short" });
+  return d.toLocaleDateString(browserOrSpanish(), { month: "short", day: "numeric", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
+}
 export const shortTime = (iso: string) => timeLabel(iso).replace(/\s?([AP]M|[ap]\.\s?m\.)$/i, "");
 
 /** When a message shows its sender again: a new person, a new day, or five minutes later. */

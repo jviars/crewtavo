@@ -7,6 +7,7 @@
  * contract as they signed it (with their initials), kept with the signature.
  */
 import { shownCustomFields } from "@crewtavo/core/customFields";
+import { documentColor } from "@crewtavo/core/documents";
 import { useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Spinner } from "@/components/ui/Button";
@@ -126,10 +127,10 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
   const textProblem = textCopy.error ? errorMessage(textCopy.error) : textCopy.data && !textCopy.data.sent ? (textCopy.data.reason ?? "It didn't go out. Try again.") : null;
 
   return (
-    <VisitFrame title={quote.title} subtitle={whoAndWhere(quote)} pageTitle={`Signed · ${quote.title}`}>
+    <VisitFrame title={quote.title} subtitle={whoAndWhere(quote)} pageTitle={`Signed · ${quote.title}`} brand={documentColor(template, session.company.settings)} step={3}>
       <main className={styles.done}>
         <div className={styles.doneHead}>
-          <span className={styles.bigCheck} aria-hidden="true"><Icon name="check" size={38} bold /></span>
+          <span className={styles.bigCheck} aria-hidden="true"><Icon name="check" size={34} bold /></span>
           <h1>{heading}</h1>
           <p>
             {sentence.lead} <strong>{sentence.amount}</strong>
@@ -183,8 +184,8 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
         </div>
 
         <div className={styles.doneButtons}>
-          <Link className={`btn ${styles.doneButton}`} to={`/roofing/${quote.id}`}>Open the project</Link>
-          <Link className={`btn btn-dark ${styles.doneButton}`} to="/roofing">
+          <Link className={`btn ${styles.doneButton} ${styles.ghostButton}`} to={`/roofing/${quote.id}`}>Open the project</Link>
+          <Link className={`btn btn-primary ${styles.doneButton}`} to="/roofing">
             Back to Roofing
             <Icon name="arrowRight" size={20} bold />
           </Link>
@@ -199,9 +200,12 @@ function ActionCard({ icon, title, text, problem, busy, disabled, onClick }: { i
   return (
     <div className={styles.actCell}>
       <button type="button" className={styles.act} disabled={disabled || busy} aria-busy={busy || undefined} onClick={onClick}>
-        <span className={styles.actIcon}>{busy ? <Spinner size={24} /> : <Icon name={icon} size={24} />}</span>
-        <strong className={styles.actTitle}>{title}</strong>
-        <span className={styles.actText}>{text}</span>
+        <span className={styles.actIcon}>{busy ? <Spinner size={20} /> : <Icon name={icon} size={20} />}</span>
+        <span className={styles.actBody}>
+          <strong className={styles.actTitle}>{title}</strong>
+          <span className={styles.actText}>{text}</span>
+        </span>
+        <span className={styles.actEnd} aria-hidden="true"><Icon name="chevronRight" size={18} /></span>
       </button>
       {problem && <p className={styles.actProblem} role="alert">{problem}</p>}
     </div>
@@ -212,12 +216,12 @@ function DoneCard({ icon, title, text }: { icon: IconName; title: string; text: 
   return (
     <div className={styles.actCell}>
       <div className={styles.act} data-done="" role="status">
-        <span className={styles.actIcon}><Icon name={icon} size={24} /></span>
-        <strong className={styles.actTitle}>
-          <Icon name="check" size={16} bold />
-          {title}
-        </strong>
-        <span className={styles.actText}>{text}</span>
+        <span className={styles.actIcon}><Icon name={icon} size={20} /></span>
+        <span className={styles.actBody}>
+          <strong className={styles.actTitle}>{title}</strong>
+          <span className={styles.actText}>{text}</span>
+        </span>
+        <span className={styles.actEnd} aria-hidden="true"><Icon name="check" size={20} bold /></span>
       </div>
     </div>
   );

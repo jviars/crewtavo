@@ -2,6 +2,7 @@
 /**
  * Builds the single-process server used by the Dockerfile (Railway, Docker, any Node host):
  *   dist/server/server.mjs              web app + API + scheduler (apps/api/src/server.ts)
+ *   dist/server/pdf-worker.mjs          the thread an estimate's or invoice's PDF is made on (apps/api/src/pdf/worker.ts)
  *   dist/server/public/                 the built web app
  *   dist/server/scripts/migrate.mjs     applies database migrations (node scripts/migrate.mjs)
  *   dist/server/scripts/restore.mjs     puts a database backup into an instance (node scripts/restore.mjs)
@@ -37,7 +38,7 @@ cpSync(join(root, "apps/api/assets/fonts"), join(out, "assets/fonts"), { recursi
 cpSync(join(root, "apps/api/assets/licenses"), join(out, "assets/licenses"), { recursive: true });
 const resvgWasm = createRequire(join(root, "apps/api/package.json")).resolve("@resvg/resvg-wasm/index_bg.wasm");
 cpSync(resvgWasm, join(out, "assets/resvg.wasm"));
-// The PDF's maker (pdfkit, under react-pdf: services/documentPdf.ts) loads its built-in fonts at run
+// The PDF's maker (pdfkit, under react-pdf: apps/api/src/pdf/render.ts) loads its built-in fonts at run
 // time, as "#standard-fonts/Helvetica" from its own package: here they're in assets, and the
 // package.json next to the bundle says so.
 const standardFonts = join(dirname(createRequire(join(root, "apps/api/package.json")).resolve("pdfkit")), "standard-fonts");
@@ -66,6 +67,8 @@ const bundle = async (entry, outfile) => {
   for (const output of Object.values(metafile.outputs)) for (const [file, { bytesInOutput }] of Object.entries(output.inputs)) if (bytesInOutput) shipped.push(resolve(file));
 };
 await bundle(join(root, "apps/api/src/server.ts"), join(out, "server.mjs"));
+// The server starts it next to itself (services/documentPdf.ts), so a PDF never holds up its own thread.
+await bundle(join(root, "apps/api/src/pdf/worker.ts"), join(out, "pdf-worker.mjs"));
 await bundle(join(root, "scripts/migrate.mjs"), join(out, "scripts/migrate.mjs"));
 await bundle(join(root, "apps/api/src/scripts/renderCard.ts"), join(out, "scripts/render-card.mjs"));
 const intro = `Open-source software in Crewtavo's server

@@ -9,13 +9,16 @@ import { contractValues, type LibrarySection } from "@crewtavo/core/contracts";
 import { DEFAULT_TEMPLATE, type TemplateSettings } from "@crewtavo/core/documents";
 import { DEFAULT_RANGE, optionsRange, priceRange } from "@crewtavo/core/estimates";
 import { optionBaseTotal, optionTotals, quoteTotals } from "@crewtavo/core/money";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { approvalSignatures, quoteContract, readApproval, signedContract, signedTemplate } from "../src/features/documents/data";
 import { moveRefusal } from "../src/features/pipeline/PipelinePage";
-import { listPrice, shownWords, sortOptions, withOptionLines, type QuoteOptionRow } from "../src/features/quotes/options";
+import { hasOptionArt, listPrice, shownWords, sortOptions, withOptionLines, type QuoteOptionRow } from "../src/features/quotes/options";
 import {
   approvalOption,
   approveSteps,
+  historyIcon,
   contractFor,
   depositCap,
   firstChoice,
@@ -30,7 +33,7 @@ import {
   totalsCaption,
   type PaperQuote,
 } from "../src/features/quotes/QuotePage";
-import { optionsNote } from "../src/features/quotes/QuotesPage";
+import { groupQuotes, isExpired, optionsNote, shortDate } from "../src/features/quotes/QuotesPage";
 import { lowestOption, optionPrices, rangeNow } from "../src/features/roofing/flow/model";
 
 // The quotes withOptionLines reads again for their lines, as the database has them.
@@ -465,5 +468,90 @@ describe("the options bar", () => {
   it("marks the option they chose once it's signed, wherever it's shown", () => {
     expect(shownWords("visit", true)).toEqual({ chip: "Chosen", note: "Signed estimates keep their option." });
     expect(shownWords("office", true).chip).toBe("Chosen");
+  });
+
+  it("shows an option's picture, or a roof style's drawing, but not the plain pattern of an option with neither", () => {
+    expect(hasOptionArt({ picture: "acme/packages/a.jpg", style: "other" })).toBe(true);
+    expect(hasOptionArt({ picture: null, style: "shingle" })).toBe(true);
+    expect(hasOptionArt({ picture: null, style: "other" })).toBe(false);
+  });
+});
+
+describe("the quote list as an inbox", () => {
+  const row = (id: string, status: string) => ({ id, status });
+
+  it("puts what needs doing first: changes asked for, then quotes ready to become jobs, then the rest", () => {
+    const groups = groupQuotes([row("a", "draft"), row("b", "sent"), row("c", "approved"), row("d", "changes_requested"), row("e", "sent")]);
+    expect(groups.map((g) => g.key)).toEqual(["changes_requested", "approved", "sent", "draft"]);
+    expect(groups.map((g) => g.tone)).toEqual(["warning", "good", undefined, undefined]);
+    expect(groups[0]!.label).toBe("Changes requested");
+    expect(groups[1]!.label).toBe("Approved: ready to become jobs");
+    // The list's own order stays within a group.
+    expect(groups[2]!.rows.map((r) => r.id)).toEqual(["b", "e"]);
+  });
+
+  it("groups closed quotes by how they ended, and leaves out empty groups", () => {
+    expect(groupQuotes([row("a", "lost"), row("b", "converted"), row("c", "archived")]).map((g) => g.key)).toEqual(["converted", "lost", "archived"]);
+    expect(groupQuotes([])).toEqual([]);
+  });
+
+  it("says a quote out or still a draft has expired once its day has gone by, not before", () => {
+    expect(isExpired({ status: "sent", valid_until: "2026-11-20" }, "2026-11-21")).toBe(true);
+    expect(isExpired({ status: "draft", valid_until: "2026-11-20" }, "2026-11-21")).toBe(true);
+    expect(isExpired({ status: "sent", valid_until: "2026-11-21" }, "2026-11-21")).toBe(false);
+    expect(isExpired({ status: "approved", valid_until: "2026-11-01" }, "2026-11-21")).toBe(false);
+    expect(isExpired({ status: "sent", valid_until: null }, "2026-11-21")).toBe(false);
+  });
+
+  it("gives a day without its year in the year it is, and a plain date as that day anywhere", () => {
+    const now = new Date("2026-11-21T15:00:00Z");
+    expect(shortDate("2026-11-19T03:00:00Z", "America/New_York", now)).toBe("Nov 18");
+    expect(shortDate("2026-11-19", "Pacific/Honolulu", now)).toBe("Nov 19");
+    expect(shortDate("2025-12-02", "America/New_York", now)).toBe("Dec 2, 2025");
+  });
+});
+
+describe("a quote's history", () => {
+  it("has an icon for what happened", () => {
+    expect(historyIcon("quote.sent")).toBe("send");
+    expect(historyIcon("quote.approved")).toBe("check");
+    expect(historyIcon("quote.range_accepted")).toBe("check");
+    expect(historyIcon("quote.changes_requested")).toBe("messages");
+    expect(historyIcon("quote.converted")).toBe("job");
+    expect(historyIcon("quote.lost")).toBe("x");
+    expect(historyIcon("quote.something_new")).toBe("history");
+  });
+});
+
+describe("the line items on a touch screen", () => {
+  const css = readFileSync(join(__dirname, "../src/styles/features.css"), "utf8");
+  const block = css.slice(css.indexOf("/* ---------- Line item editor"), css.indexOf("/* ---------- Schedule"));
+
+  it("gives each line's menu a 44px target, its column as wide so the rows keep to the heads", () => {
+    const touch = block.slice(block.indexOf("@media (max-width: 900px)"));
+    expect(touch).toMatch(/\.btn\.line-more \{ width: 44px; height: 44px; \}/);
+    expect(touch).toMatch(/\.lines-head, \.line-edit \{ grid-template-columns: minmax\(0, 1fr\) 72px 72px 96px 104px 44px; \}/);
+    expect(touch).toMatch(/\.line-view \{ grid-template-columns: minmax\(0, 1fr\) 44px; \}/);
+    expect(block).not.toMatch(/line-more \{ width: 40px/);
+  });
+});
+
+describe("the quotes list and the contract section, as the boards draw them", () => {
+  const src = (path: string) => readFileSync(join(__dirname, "../src/features", path), "utf8");
+
+  it("ends a row's menu with archiving in red after a separator, the Menus board's row menu", () => {
+    const list = src("quotes/QuotesPage.tsx");
+    const items = list.slice(list.indexOf('{ label: "Open quote"'), list.indexOf("]}", list.indexOf('{ label: "Open quote"')));
+    expect(items.indexOf('"Open quote"')).toBeLessThan(items.indexOf('"Copy link"'));
+    expect(items).toMatch(/\{ separator: true \},\s*\{ label: "Archive", icon: "archive", kbd: "E", danger: true,/);
+    expect(items.match(/danger: true/g)).toHaveLength(1);
+  });
+
+  it("lets the Contract heading be an h3 inside a roofing step, and an h2 on the quote page", () => {
+    const sections = src("quotes/QuoteSections.tsx");
+    expect(sections).toContain("level = 2 }: QuoteSectionsProps");
+    expect(sections.match(/<Section title="Contract" level=\{level\}/g)).toHaveLength(3);
+    expect(src("roofing/flow/EstimateStep.tsx")).toMatch(/<QuoteSections [^>]*level=\{3\} \/>/);
+    expect(src("quotes/QuotePage.tsx")).toMatch(/<QuoteSections quote=\{q\}(?![^>]*level=)[^>]*\/>/);
   });
 });

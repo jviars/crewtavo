@@ -28,6 +28,7 @@ import { uploadFile } from "@/lib/files";
 import { formatDate, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { refreshEquipment, seesEquipmentCosts, type DueRow, type Equipment, type PaperRow } from "./equipmentData";
+import styles from "./Equipment.module.css";
 import { msg, t } from "@/lib/i18n";
 
 /** Digits and at most one decimal point. */
@@ -197,7 +198,7 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
 
         {suggestions.length > 0 && (
           <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend className="strong small" style={{ marginBottom: 6 }}>Maintenance to track</legend>
+            <legend className={styles.legend}>Maintenance to track</legend>
             {suggestions.map((p) => (
               <label key={p.name} className="checkbox">
                 <input type="checkbox" checked={presets.includes(p.name)} onChange={(e) => setPresets(e.target.checked ? [...presets, p.name] : presets.filter((x) => x !== p.name))} />
@@ -210,7 +211,7 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
 
         {!equipment && vehicle && (
           <fieldset className="stack-sm" style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend className="strong small" style={{ marginBottom: 6 }}>Tags and inspection</legend>
+            <legend className={styles.legend}>Tags and inspection</legend>
             <div className="form-grid">
               <Field label="Tags good through" optional hint="The month on the decal runs through its last day.">
                 <input className="input" type="date" value={f.registration_on} onChange={set("registration_on")} />

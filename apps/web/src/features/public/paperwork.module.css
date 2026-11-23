@@ -1,0 +1,24 @@
+/*
+ * A sub's paperwork (PaperworkPage.tsx): what's needed, each document a card of its own on the
+ * link's page (client kit), and the same ItemCard flat inside a signed-in sub's dialog (field).
+ */
+/* The greeting on the grey ground, like the Client Hub's "Hi Priya"; the documents are the cards. */
+.intro { display: grid; gap: 12px; padding: 4px 4px 6px; }
+.items { display: grid; gap: 12px; }
+
+.item { display: grid; gap: 12px; min-width: 0; }
+.items > .item[data-problem] { box-shadow: inset 0 0 0 1.5px var(--danger); }
+.itemHead { display: flex; align-items: flex-start; gap: 8px; }
+.itemName { display: block; font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; }
+.itemWhy { display: block; margin-top: 2px; font-size: var(--fs-14); color: var(--text-3); }
+.kinds { justify-self: start; }
+.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.pick:global(.btn) { height: 48px; gap: 8px; border: 0; border-radius: 12px; background: var(--fill-2); color: var(--ink); font-size: var(--fs-15); font-weight: 600; box-shadow: none; }
+.pick:global(.btn):hover { background: var(--fill-3); color: var(--ink); }
+.file { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border-radius: 12px; background: var(--fill-2); font-size: var(--fs-14); }
+.file > svg { flex: none; color: var(--text-3); }
+.hint { margin-top: -4px; font-size: var(--fs-13); color: var(--text-3); }
+
+/* Something else to send: a quiet fold under the cards, its choices the kit's chips. */
+.extras { padding: 4px 4px 0; border-top: 0; }
+.extraList { display: flex; flex-wrap: wrap; gap: 8px; }

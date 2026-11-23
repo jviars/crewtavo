@@ -1,13 +1,32 @@
-.page { max-width: 760px; }
-.title { font-size: var(--fs-16); font-weight: 700; letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
-.address { justify-self: start; font-size: var(--fs-16); font-weight: 700; overflow-wrap: anywhere; }
-.steps, .list { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--fs-14); line-height: 1.5; overflow-wrap: anywhere; }
+/*
+ * Settings → Web address (and the setup step that shows the same screen): where Crewtavo's address
+ * stands and the way to the business's own, as flat groups on hairlines. Steps on a thin line, DNS
+ * records as facts with copy buttons, nothing boxed but the small sketch of Railway's screen.
+ */
+.body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.formHead { display: grid; gap: 4px; }
+.title { margin: 0; font-size: var(--fs-15); font-weight: 650; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+.lead { font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
+.minor { font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.muted { color: var(--text-3); }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.address { justify-self: start; max-width: 100%; text-decoration: none; }
+.address:hover { text-decoration: none; }
+.steps, .list { margin: 0; padding-left: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere; }
 .list { gap: 6px; }
-.inline { font-size: var(--fs-13); padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill); overflow-wrap: anywhere; }
+.inline { font-size: var(--fs-12); padding: 1px 5px; border-radius: var(--radius-sm); background: var(--fill-2); overflow-wrap: anywhere; }
 .copy { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.code { margin: 0; padding: 12px 14px; border-radius: var(--radius-control); background: var(--fill); border: 1px solid var(--border); font-size: var(--fs-13); line-height: 1.5; overflow-x: auto; }
-.panel { padding: 14px; border-radius: var(--radius-card); background: var(--fill); }
-.divided { padding-top: 16px; border-top: 1px solid var(--divider); }
+.copy :global(.code-pill) { min-height: var(--control-sm); padding: 5px 10px; border: 0; background: var(--fill-2); font-size: var(--fs-12); }
+.code { margin: 0; padding: 12px 14px; border-radius: var(--radius-control); background: var(--fill-2); font-size: var(--fs-12); line-height: 1.5; overflow-x: auto; }
+/* One last step, under a hairline: what to set by hand. */
+.panel { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--divider); }
+.divided { padding-top: 14px; border-top: 1px solid var(--divider); }
+.okLine { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-2); }
+.okLine > svg { flex: none; color: var(--green); }
+.lockNote { display: inline-flex; align-items: flex-start; gap: 6px; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.lockNote > svg { flex: none; margin-top: 2px; color: var(--quiet); }
+.lockNote :global(.link-btn) { font-size: var(--fs-12); }
 
 /* The address box: crm. stays in front and they type their domain after it. */
 .prefixed { display: flex; align-items: center; cursor: text; }
@@ -19,86 +38,113 @@
 .prefixed > input:focus { box-shadow: none; }
 
 /* Where it stands: a ring per step, filled once it's done. */
-.progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.progress li { display: flex; align-items: center; gap: 10px; font-size: var(--fs-14); font-weight: 600; color: var(--text-3); }
+.progress { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.progress li { display: flex; align-items: center; gap: 10px; font-size: var(--fs-13); font-weight: 500; color: var(--text-3); }
 .progress li[data-state="done"], .progress li[data-state="current"], .progress li[data-state="failed"] { color: var(--ink); }
-.mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border-strong); color: var(--on-solid); }
+.mark { display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); color: #fff; }
 [data-state="done"] > .mark { background: var(--green-solid); border-color: var(--green-solid); }
 [data-state="current"] > .mark { border-color: var(--green); border-style: dashed; }
 [data-state="failed"] > .mark { background: var(--danger); border-color: var(--danger); }
 
 /* DNS records: what to type, with copy buttons, and whether it's in place yet. */
-.records { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-.record { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); }
-.record[data-status="ok"] { background: var(--fill); }
-.fields { margin: 0; display: grid; gap: 8px; }
-.fields > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; align-items: center; }
-.fields dt { font-size: var(--fs-13); font-weight: 600; color: var(--text-3); }
-.fields dd { margin: 0; min-width: 0; }
-@media (max-width: 520px) { .fields > div { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.records { min-width: 0; }
+.record { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--row-divider); list-style: none; }
+.record:first-child { padding-top: 4px; }
+.recordHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: var(--fs-13); }
+.recordHead strong { font-weight: 600; }
+ol.records, .records > ol { margin: 0; padding: 0; list-style: none; display: grid; }
+.fields { margin: 0; display: grid; border-top: 1px solid var(--row-divider); }
+.fields > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 40px; padding: 4px 0; border-bottom: 1px solid var(--row-divider); }
+.fields dt { font-size: var(--fs-12); color: var(--text-3); }
+.fields dd { margin: 0; min-width: 0; font-size: var(--fs-13); }
+@media (max-width: 520px) { .fields > div { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 8px 0; } }
 
-.details > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-weight: 600; color: var(--text-2); }
+/* Domains already on Railway: a row each, with Use this domain. */
+.domains { margin: 0; padding: 0; list-style: none; display: grid; border-top: 1px solid var(--divider); }
+.domain { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.domainText { display: grid; gap: 1px; min-width: 0; }
+.domainText strong { font-size: var(--fs-13); font-weight: 600; overflow-wrap: anywhere; }
+.domainText span { font-size: var(--fs-12); color: var(--text-3); }
+
+.details > summary { display: inline-flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font-size: var(--fs-13); font-weight: 600; color: var(--text-2); }
+.details > summary:hover { color: var(--ink); }
 .details > summary::-webkit-details-marker { display: none; }
-.details > summary::before { content: ""; width: 7px; height: 7px; margin-right: 4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-fast); }
+.details > summary::before { content: ""; width: 6px; height: 6px; margin-right: 2px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform var(--dur-fast); }
 .details[open] > summary { margin-bottom: 12px; }
 .details[open] > summary::before { transform: rotate(45deg); }
 
-/* The steps to your own address: a ring per step on a line, the current one opened up. */
-.timeline { list-style: none; margin: 0; padding: 0; display: grid; }
-.timeline > li { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); column-gap: 14px; padding-bottom: 20px; }
+/* The steps to your own address: a ring per step on a thin line, the current one opened up. */
+.timeline { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
+.timeline > li { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 14px; padding-bottom: 22px; }
 .timeline > li:last-child { padding-bottom: 0; }
-.timeline > li:not(:last-child)::before { content: ""; position: absolute; left: 13px; top: 32px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--divider); }
+.timeline > li:not(:last-child)::before { content: ""; position: absolute; left: 11.5px; top: 30px; bottom: 6px; width: 1px; background: var(--divider); }
 .timeline > li[data-state="done"]::before { background: var(--green-solid); }
-.dot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border-strong); background: var(--surface); font-size: var(--fs-13); font-weight: 700; color: var(--text-3); }
-[data-state="done"] > .dot { background: var(--green-solid); border-color: var(--green-solid); color: var(--on-solid); }
-[data-state="current"] > .dot { border-color: var(--green); color: var(--green); box-shadow: 0 0 0 4px var(--green-tint); }
-.stepTitle { font-size: var(--fs-16); line-height: 28px; }
-[data-state="todo"] .stepTitle { color: var(--text-2); }
-.stepNow { position: relative; margin-top: 6px; padding: 16px; border-radius: var(--radius-card); background: var(--fill); min-width: 0; }
-@media (max-width: 520px) { .stepNow { margin-left: -42px; padding: 14px; } }
+.dot { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--border-strong); background: var(--page); font-size: var(--fs-12); font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; }
+[data-state="done"] > .dot { background: var(--green-solid); border-color: var(--green-solid); color: #fff; }
+[data-state="current"] > .dot { border-color: var(--green); color: var(--green-dark); }
+.stepTitle { font-size: var(--fs-14); font-weight: 600; line-height: 24px; }
+[data-state="todo"] .stepTitle { color: var(--text-3); font-weight: 500; }
+.stepAhead { font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); overflow-wrap: anywhere; }
+.stepNow { position: relative; margin-top: 8px; min-width: 0; }
 
 /* Now → your own: two address bars. */
 .move { display: flex; align-items: flex-end; gap: 10px; }
 .moveSide { display: grid; gap: 4px; flex: 1 1 0; min-width: 0; }
-.moveLabel { font-size: var(--fs-11); font-weight: 600; letter-spacing: var(--tracking-caps); text-transform: uppercase; color: var(--text-3); }
-.moveArrow { flex: none; padding-bottom: 9px; color: var(--text-3); }
+.moveLabel { font-size: var(--fs-11); font-weight: 600; color: var(--quiet); }
+.moveArrow { flex: none; padding-bottom: 8px; color: var(--quiet); }
 @media (max-width: 520px) {
   .move { flex-direction: column; align-items: stretch; gap: 6px; }
   .moveSide { flex: none; }
   .moveArrow { align-self: center; padding: 0; transform: rotate(90deg); }
 }
-.bar { display: flex; align-items: center; gap: 7px; min-width: 0; height: 36px; padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--fill); font-size: var(--fs-13); font-weight: 600; }
-.bar > svg { flex: none; color: var(--text-3); }
+.bar { display: flex; align-items: center; gap: 7px; min-width: 0; height: 34px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--seg-track); color: var(--text-2); font-size: var(--fs-13); font-weight: 500; }
+.bar > svg { flex: none; color: var(--quiet); }
 .barText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bar[data-tone="old"] { color: var(--text-2); font-weight: 600; }
-.bar[data-tone="new"] { border-color: transparent; background: var(--green-tint); color: var(--green-dark); }
+.bar[data-tone="new"] { background: var(--green-tint); color: var(--green-dark); font-weight: 600; }
 .bar[data-tone="new"] > svg { color: var(--green); }
-.bar[data-tone="example"] { border-style: dashed; background: none; color: var(--text-3); }
+.bar[data-tone="example"] { background: none; box-shadow: inset 0 0 0 1px var(--border); color: var(--quiet); }
 .preview { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .preview > .bar { flex: 0 1 auto; }
 
 /* Step 1: the sign-in, with a small sketch of Railway's screen beside it. */
-.split { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 16px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; align-items: start; }
 @media (max-width: 640px) { .split { grid-template-columns: minmax(0, 1fr); } }
-.sketch { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-xs); font-size: var(--fs-12); }
+.sketch { overflow: hidden; border-radius: 10px; background: var(--page); box-shadow: 0 0 0 1px var(--border), 0 8px 20px -14px rgba(15, 42, 53, 0.3); font-size: var(--fs-12); }
 .sketchTop { display: flex; align-items: center; gap: 5px; padding: 7px 10px; border-bottom: 1px solid var(--divider); color: var(--text-3); font-weight: 600; }
-.sketchTop i { width: 7px; height: 7px; border-radius: 50%; background: var(--fill-2); }
+.sketchTop i { width: 7px; height: 7px; border-radius: 50%; background: var(--fill-3); }
 .sketchTop span { margin-left: 6px; }
 .sketchBody { display: grid; gap: 10px; padding: 12px; }
 .sketchRow { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-2); font-weight: 600; }
-.sketchRow b { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--green-solid); color: var(--on-solid); font-size: var(--fs-11); }
-.sketchSelect { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--ink); }
-.sketchAllow { display: inline-grid; place-items: center; height: 28px; padding: 0 16px; border-radius: var(--radius-sm); background: var(--ink); color: var(--surface); font-weight: 600; }
+.sketchRow b { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: var(--fill-2); color: var(--text-2); font-size: var(--fs-11); }
+.sketchSelect { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--ink); }
+.sketchAllow { display: inline-grid; place-items: center; height: 28px; padding: 0 14px; border-radius: 6px; background: var(--solid); color: var(--on-solid); font-weight: 600; }
 
-/* Step 2: the domain they have, or a new one. */
-.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
-.choice { display: grid; align-content: start; justify-items: start; gap: 6px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-xs); text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color var(--dur-fast), transform var(--dur-fast); }
-.choice:hover { border-color: var(--green); transform: translateY(-1px); }
-@media (prefers-reduced-motion: reduce) { .choice:hover { transform: none; } }
-.choice:focus-visible { outline: none; box-shadow: var(--ring); }
-.choice strong { font-size: var(--fs-16); }
-.choiceIcon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-control); background: var(--green-tint); color: var(--green); }
+/* Step 2: the domain they have, or a new one: two tiles a person picks. */
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; }
+.choice { display: grid; align-content: start; justify-items: start; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast); }
+.choice:hover { border-color: var(--border-strong); background: var(--fill); }
+.choice:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.choice strong { margin-top: 6px; font-size: var(--fs-14); font-weight: 600; }
+.choiceText { font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.choiceIcon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-2); }
 
 /* Step 3: send the records to whoever looks after the domain. */
-.send { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); }
+.send { display: grid; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--divider); }
+.sendHead { display: flex; align-items: flex-start; gap: 10px; }
+.sendText { display: grid; gap: 2px; min-width: 0; font-size: var(--fs-12); line-height: 1.5; color: var(--text-3); }
+.sendText strong { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.send > .actions { padding-left: 42px; }
 
+/* Switching, or switched: a quiet round icon beside what's happening. */
+.state { display: flex; align-items: flex-start; gap: 12px; padding-top: 4px; }
+.stateIcon { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--green); }
+.stateIcon[data-tone="good"] { background: var(--green-tint); color: var(--green-dark); }
+
+@media (max-width: 900px) {
+  .lead, .steps, .list, .okLine, .progress li, .recordHead, .fields dd { font-size: var(--fs-15); }
+  .stepAhead, .lockNote, .choiceText, .sendText, .domainText span, .fields dt { font-size: var(--fs-13); }
+  .stepTitle { font-size: var(--fs-16); }
+  /* The tiles sit in the section's card, so they keep their edge to read as two choices. */
+  .choice { min-height: 44px; }
+  .send > .actions { padding-left: 0; }
+}

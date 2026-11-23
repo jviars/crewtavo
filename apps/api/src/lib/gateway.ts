@@ -10,8 +10,10 @@ import { STORAGE_PAUSED, storageWritesPaused } from "../services/storageBucket";
 import { guardAssistant, guardConsent } from "./assistants";
 import { EMAILED_SIGN_INS, signedInWithin } from "./auth";
 import { authMetadata, signsIdTokens, withoutOpenId } from "./authMetadata";
+import { allow } from "./limit";
 import { authRoute, guardLink, guardSignIn, isGuessable, NO_AUTH_MAIL, readUpTo, sendsAuthMail } from "./signInGuard";
 import type { Stack } from "./stack";
+import { publicUploadsFrom, type PublicUploads } from "./publicUploads";
 import { guardStorage, routedPath, snapshotsFrom, verifiedClaims, type SnapshotSource } from "./storageLimits";
 import { adminClient } from "./supabase";
 import { connectionOf, visitorIp } from "./visitor";
@@ -22,12 +24,18 @@ type Gateway = { Bindings: HttpBindings };
 /**
  * `storage`: where the storage limits' numbers come from (the database, unless a test says
  * otherwise). `jwtSecret`: what the instance's services sign tokens with (JWT_SECRET, which stack
- * mode always has), so the limits know who's really uploading.
+ * mode always has), so the limits know who's really uploading. `uploads`: the records and daily
+ * counts that hold uploads through the links the server makes for people without an account
+ * (lib/publicUploads.ts).
  */
 export function gateway(
   env: Env,
   stack: Stack,
-  { storage = snapshotsFrom(() => adminClient(env)), jwtSecret = (env as Env & { JWT_SECRET?: string }).JWT_SECRET }: { storage?: SnapshotSource; jwtSecret?: string } = {},
+  {
+    storage = snapshotsFrom(() => adminClient(env)),
+    jwtSecret = (env as Env & { JWT_SECRET?: string }).JWT_SECRET,
+    uploads = publicUploadsFrom(env),
+  }: { storage?: SnapshotSource; jwtSecret?: string; uploads?: PublicUploads } = {},
 ) {
   const routes = new Hono<Gateway>();
   const visitor = (c: Context<Gateway>) => visitorIp(env, c.req.raw.headers, connectionOf(c.env));
@@ -57,27 +65,31 @@ export function gateway(
     // A connector's sign-in asking for an ID token Auth can't sign goes ahead without one.
     const plain = c.req.method === "GET" && c.req.path === "/auth/v1/oauth/authorize" ? withoutOpenId(new URL(incoming.url)) : null;
     if (plain && !(await signsIdTokens(`${stack.auth.replace(/\/$/, "")}/.well-known/jwks.json`))) incoming = new Request(plain, incoming);
-    // ...and only someone on a team connects one (a sub's sign-in can't).
-    return guardConsent(env, incoming, "/auth/v1", (consented) =>
-      guardAssistant(env, consented, "/auth/v1", async (request) => {
-        const url = new URL(request.url);
-        const route = authRoute(url, "/auth/v1");
-        // An emailed link is redeemed only with this server's signature on its token, and Auth's
-        // own emails (which would make tokens without one, or replace a link someone is waiting
-        // on) are only ever asked for by this server (lib/signInGuard.ts).
-        if (route === "/verify") return guardLink(env, request, send);
-        // The public demo connects no AI assistants, so nobody registers one there (lib/demoMode.ts).
-        if (isDemo(env) && route.startsWith("/oauth")) return Response.json({ code: 403, error_code: "demo", msg: DEMO_OFF }, { status: 403 });
-        if (sendsAuthMail(route) && !asServer(request, jwtSecret)) return Response.json({ code: 403, error_code: "validation_failed", msg: NO_AUTH_MAIL }, { status: 403 });
-        return isGuessable(request.method, url, "/auth/v1") ? guardSignIn(env, request, send) : guardPasswordChange(request, jwtSecret, send);
-      }),
+    // Signing an app up with Auth's OAuth server needs no sign-in: a few an hour from each visitor.
+    if (registersApp(incoming) && !asServer(incoming, jwtSecret) && !(await allow(env, `oauth-register:ip:${address}`, APP_SIGN_UPS, 3600))) {
+      return c.json({ code: 429, error_code: "over_request_rate_limit", msg: "Too many apps signed up from here. Try again in an hour." }, 429, { "Retry-After": "3600" });
+    }
+    return withinSize(incoming, MAX_AUTH_BODY, jwtSecret, "/auth/v1", (sized) =>
+      // ...and only someone on a team connects one (a sub's sign-in can't).
+      guardConsent(env, sized, "/auth/v1", (consented) =>
+        guardAssistant(env, consented, "/auth/v1", async (request) => {
+          const url = new URL(request.url);
+          const route = authRoute(url, "/auth/v1");
+          // An emailed link is redeemed only with this server's signature on its token, and Auth's
+          // own emails (which would make tokens without one, or replace a link someone is waiting
+          // on) are only ever asked for by this server (lib/signInGuard.ts).
+          if (route === "/verify") return guardLink(env, request, send);
+          // The public demo connects no AI assistants, so nobody registers one there (lib/demoMode.ts).
+          if (isDemo(env) && route.startsWith("/oauth")) return Response.json({ code: 403, error_code: "demo", msg: DEMO_OFF }, { status: 403 });
+          if (sendsAuthMail(route) && !asServer(request, jwtSecret)) return Response.json({ code: 403, error_code: "validation_failed", msg: NO_AUTH_MAIL }, { status: 403 });
+          return isGuessable(request.method, url, "/auth/v1") ? guardSignIn(env, request, send) : guardPasswordChange(request, jwtSecret, send);
+        }),
+      ),
     );
   });
-  routes.all("/rest/v1/*", async (c) => {
-    const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who, connectionOf(c.env));
-    if (refused) return refused;
-    return guardAssistant(env, c.req.raw, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c)));
-  });
+  routes.all("/rest/v1/*", (c) =>
+    withinSize(c.req.raw, MAX_REST_BODY, jwtSecret, "/rest/v1", (sized) => guardAssistant(env, sized, "/rest/v1", (request) => forward(request, stack.rest, "/rest/v1", visitor(c)))),
+  );
   routes.all("/storage/v1/*", async (c) => {
     const refused = await gatewayRefusal(env, c.req.raw, visitor(c), who, connectionOf(c.env));
     if (refused) return refused;
@@ -101,12 +113,60 @@ export function gateway(
     const request = c.req.raw;
     const send = (r: Request) => forward(r, stack.storage, "/storage/v1", visitor(c), { "x-forwarded-prefix": "/storage/v1" }, true);
     // A signed-in person's upload over the company's storage limit, or their own, is refused before
-    // anything is stored (lib/storageLimits.ts).
-    const res = await guardAssistant(env, request, "/storage/v1", (r) => (storesFile(r) ? guardStorage(storage, jwtSecret, r, send) : send(r)));
+    // anything is stored (lib/storageLimits.ts); so is one through a link the server made for
+    // someone without an account that's bigger than it was made for, or past the day's worth.
+    const links = { uploads, visitor: visitor(c) };
+    const res = await guardAssistant(env, request, "/storage/v1", (r) => (storesFile(r) ? guardStorage(storage, jwtSecret, r, send, links) : send(r)));
     return safeFile(request, res);
   });
   return routes;
 }
+
+/**
+ * The most a request to the Data API or to Auth may send, from anyone but this server itself (which
+ * reaches the services through this gateway in an instance). Far past the biggest the app sends (a
+ * batch of an import, a drawing, a contract), and far short of what would tie the services up.
+ * Storage has its own limits (lib/storageLimits.ts).
+ */
+export const MAX_REST_BODY = 20 * 1024 * 1024;
+export const MAX_AUTH_BODY = 1024 * 1024;
+
+/**
+ * A request whose body is bigger than `max` is turned away before the service reads it: by its
+ * Content-Length when it says one, or as it arrives when it doesn't.
+ */
+async function withinSize(request: Request, max: number, secret: string | undefined, prefix: string, next: (request: Request) => Promise<Response>): Promise<Response> {
+  if (!request.body || asServer(request, secret)) return next(request);
+  const tooLarge = () =>
+    prefix === "/auth/v1"
+      ? Response.json({ code: 413, error_code: "request_too_large", msg: "That request is too large." }, { status: 413 })
+      : Response.json({ code: "PGRST413", message: "That's too much to send at once. Send it in smaller parts.", details: null, hint: null }, { status: 413 });
+  const length = request.headers.get("content-length");
+  if (length !== null) return Number(length) > max ? tooLarge() : next(request);
+  let size = 0;
+  let over = false;
+  const counted = request.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        size += chunk.byteLength;
+        if (size <= max) return controller.enqueue(chunk);
+        over = true;
+        controller.error(new Error("The request is too large."));
+      },
+    }),
+  );
+  const res = await next(new Request(request.url, { method: request.method, headers: request.headers, body: counted, duplex: "half" } as RequestInit)).catch((error: unknown) => {
+    if (over) return null;
+    throw error;
+  });
+  return over || !res ? tooLarge() : res;
+}
+
+/** Sign-ups of AI assistants' apps with Auth's OAuth server (which needs no sign-in) from one visitor, an hour. */
+export const APP_SIGN_UPS = 30;
+
+/** An app signing itself up with Auth's OAuth server (dynamic client registration), by any spelling of its path. */
+const registersApp = (request: Request) => request.method.toUpperCase() === "POST" && authRoute(new URL(request.url), "/auth/v1") === "/oauth/clients/register";
 
 /** What a change to the signed-in person's account may carry (Auth's PUT /user). */
 const USER_FIELDS = ["email", "password", "nonce", "data", "phone", "channel", "code_challenge", "code_challenge_method"];

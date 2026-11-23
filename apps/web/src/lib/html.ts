@@ -102,10 +102,40 @@ const CONTRACT_ATTR = ["colspan", "rowspan"];
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
-/** HTML as plain text without a browser: tags dropped, block ends as line breaks, entities read. */
+/** Elements whose insides are never words on the page, and each one's end tag. */
+const HIDDEN = ["script", "style", "template", "iframe"];
+const HIDDEN_END = new Map(HIDDEN.map((name) => [name, new RegExp(`</${name}[\\s/>]`, "gi")]));
+
+/**
+ * `html` without script, style, template and iframe elements, in one pass: each is searched for its
+ * end tag once, from where it opens, and one never closed runs to the end, as a browser reads it. (A
+ * lazy match to the end tag would search again from every unclosed one, so a section of many would
+ * take a very long time.)
+ */
+function withoutHidden(html: string): string {
+  const open = new RegExp(`<(${HIDDEN.join("|")})\\b`, "gi");
+  let out = "";
+  let at = 0;
+  for (let found = open.exec(html); found; found = open.exec(html)) {
+    const close = HIDDEN_END.get(found[1]!.toLowerCase());
+    if (!close) continue;
+    out += html.slice(at, found.index);
+    close.lastIndex = open.lastIndex;
+    const end = close.exec(html);
+    const after = end ? html.indexOf(">", end.index) : -1;
+    if (after < 0) return out;
+    at = open.lastIndex = after + 1;
+  }
+  return out + html.slice(at);
+}
+
+/**
+ * HTML as plain text without a browser: tags dropped, block ends as line breaks, entities read.
+ * Every step takes time in step with the HTML's length, whatever it holds (it runs on the server,
+ * on what a page sends to print).
+ */
 function plainText(html: string): string {
-  return html
-    .replace(/<(script|style|template|iframe)\b[\s\S]*?<\/\1\s*>/gi, "")
+  return withoutHidden(html)
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|h[1-6]|li|blockquote|tr|div|section|article|address|pre|header|footer|main|aside|figure|figcaption|center|dt|dd)\s*>/gi, "\n")
     .replace(/<\/?[a-z!?][^>]*>?/gi, "")

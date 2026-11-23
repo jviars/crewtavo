@@ -2,15 +2,16 @@
  * Share a guide with people outside the team, by link (apps/api/src/routes/guideShares.ts): only
  * the people added here by email address, who each prove the address with a code sent to it, or
  * anyone who has the link. For owners and admins who edit guides. Changes save as they're made.
+ * KB-Extras, Share with a link: add people, who has access (hairline rows), general access and the
+ * link to copy, Get a new link and Done at the foot.
  */
 import { ACCESS_LABELS, GUIDE_SHARE_ACCESS, MAX_SHARE_ADD, MAX_SHARE_PEOPLE, readAddresses, type GuideShareAccess } from "@crewtavo/core/guideShares";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button, useJustDone } from "@/components/ui/Button";
+import { Button, cx, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
-import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -21,6 +22,7 @@ import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import s from "./kbWrite.module.css";
 import { addedNote } from "./shareWords";
 
 export interface SharedPerson { id: string; email: string; created_at: string; last_opened_at: string | null }
@@ -39,6 +41,11 @@ interface Added extends GuideShare { added: string[]; emailed: string[]; not_ema
 const WHO: Record<GuideShareAccess, string> = {
   restricted: "Only people with access can open the link. Someone you add types their email address and gets a code there.",
   anyone: "Anyone who has the link can read this guide, with no code or sign-in. Keep prices and anything private out of it.",
+};
+/** Each choice in the General access menu, in a line. */
+const CHOICE: Record<GuideShareAccess, string> = {
+  restricted: "Only people you add. They get a code by email.",
+  anyone: "No code or sign-in needed.",
 };
 
 export function ShareGuideDialog({ pageId, title, onClose }: { pageId: string; title: string; onClose: () => void }) {
@@ -101,117 +108,122 @@ export function ShareGuideDialog({ pageId, title, onClose }: { pageId: string; t
     if (typed.trim()) add.mutate(typed);
   };
   const full = (d?.people.length ?? 0) >= MAX_SHARE_PEOPLE;
+  const addError = add.error instanceof Error ? add.error.message : null;
 
   return (
-    <Dialog open onClose={onClose} title={`Share “${title}”`} description="A link lets people outside your team read this guide: a new hire, a subcontractor, a client." size="md">
-      {share.error ? <ErrorState compact error={share.error} onRetry={() => share.refetch()} /> : !d ? (
-        <div className="stack" aria-busy="true" aria-label="Loading"><Skeleton height={34} width={280} /><Skeleton height={38} /><Skeleton height={38} /></div>
+    <Dialog open onClose={onClose} title={`Share “${title}”`} description="A link lets people outside your team read this guide: a new hire, a subcontractor, a client.">
+      {share.error ? (
+        <div className="dialog-body"><ErrorState compact error={share.error} onRetry={() => share.refetch()} /></div>
+      ) : !d ? (
+        <div className="dialog-body" aria-busy="true" aria-label="Loading"><Skeleton height={36} radius={8} /><Skeleton height={50} radius={8} /><Skeleton height={50} radius={8} /></div>
       ) : (
-        <div className="stack" style={{ gap: 18 }}>
+        <div className={cx("dialog-body", s.shareBody)}>
           {!d.published && (
             <div className="callout callout-warning" role="status">
-              <Icon name="alert" size={18} />
+              <Icon name="alert" size={16} />
               <div className="grow">This guide is a draft, so its link says it isn't available. It works once the guide is published.</div>
             </div>
           )}
 
-          <div className="stack-sm">
-            <form className="row" style={{ gap: 8 }} onSubmit={submit}>
-              <input
-                className="input input-lg grow" style={{ minWidth: 0 }} type="text" inputMode="email" autoComplete="off" spellCheck={false}
-                placeholder="Add people by email address" aria-label="Email addresses to add" disabled={full}
-                value={typed} onChange={(e) => { setTyped(e.target.value); add.reset(); }}
-              />
-              {(typed.trim() || add.isPending || added) && <Button type="submit" size="lg" loading={add.isPending} done={added} doneLabel="Added">Add</Button>}
-            </form>
-            <FormError error={add.error} />
-            <span className="muted small">
-              {full
-                ? `A guide is shared with up to ${MAX_SHARE_PEOPLE} people. To reach more, let anyone with the link open it.`
-                : "Several at once with commas between them. Each gets an email with the link."}
-            </span>
-            {!d.email_ready && (
-              <div className="callout callout-warning" role="status">
-                <Icon name="mail" size={18} />
-                <div className="grow">
-                  Email isn't set up in Crewtavo yet, so nobody can be sent the link or a code. <Link to="/settings?tab=email" className="strong">Connect your email</Link>{d.access === "anyone" ? " to email it from here." : ", or let anyone with the link open it."}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <section className="stack-sm" aria-labelledby="share-people">
-            <strong id="share-people">People with access</strong>
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 2 }} aria-labelledby="share-people">
-              <li className="row" style={{ gap: 12, padding: "6px 0" }}>
-                <span className="avatar" aria-hidden="true" style={{ width: 34, height: 34 }}><Icon name="users" size={16} /></span>
-                <span className="grow stack-sm" style={{ gap: 0, minWidth: 0 }}>
-                  <strong className="small">Your team</strong>
-                  <span className="muted small">Reads it in Crewtavo, signed in</span>
-                </span>
-              </li>
-              {d.people.map((p) => (
-                <li key={p.id} className="row" style={{ gap: 12, padding: "6px 0" }}>
-                  <span className="avatar" aria-hidden="true" style={{ width: 34, height: 34, fontSize: 14 }}>{p.email[0]!.toUpperCase()}</span>
-                  <span className="grow stack-sm" style={{ gap: 0, minWidth: 0 }}>
-                    <strong className="ellipsis small">{p.email}</strong>
-                    <span className="muted small">{p.last_opened_at ? `Opened it ${timeAgo(p.last_opened_at)}` : d.access === "anyone" ? `Added ${timeAgo(p.created_at)}` : "Hasn't opened it yet"}</span>
-                  </span>
-                  <button type="button" className="icon-btn" title="Email them the link again" aria-label={`Email the link to ${p.email} again`} disabled={!d.email_ready || !d.published || (emailAgain.isPending && emailAgain.variables?.id === p.id)} onClick={() => emailAgain.mutate(p)}>
-                    <Icon name="mail" size={16} />
-                  </button>
-                  <button type="button" className="icon-btn" title="Take them off" aria-label={`Take ${p.email} off`} disabled={remove.isPending && remove.variables?.id === p.id} onClick={() => remove.mutate(p)}>
-                    <Icon name="x" size={16} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="stack-sm" aria-labelledby="share-who">
-            <strong id="share-who">General access</strong>
-            <div className="row" style={{ gap: 12, alignItems: "flex-start" }}>
-              <span className="avatar" aria-hidden="true" style={{ width: 34, height: 34, background: "var(--fill-2)", color: "var(--text-2)" }}><Icon name={d.access === "anyone" ? "globe" : "lock"} size={16} /></span>
-              <div className="grow stack-sm" style={{ gap: 2, minWidth: 0 }}>
-                <span>
-                  <Menu
-                    label={`General access: ${ACCESS_LABELS[d.access]}`}
-                    align="start"
-                    triggerClassName="btn btn-ghost btn-sm"
-                    trigger={<><strong>{ACCESS_LABELS[d.access]}</strong><Icon name="chevronDown" size={14} /></>}
-                    items={GUIDE_SHARE_ACCESS.map((access) => ({
-                      label: ACCESS_LABELS[access],
-                      icon: d.access === access ? "check" as const : access === "anyone" ? "globe" as const : "lock" as const,
-                      disabled: setAccess.isPending,
-                      onSelect: () => { if (d.access !== access) setAccess.mutate(access); },
-                    }))}
-                  />
-                </span>
-                <span className="muted small" role="status" style={{ paddingLeft: 10 }}>{WHO[d.access]}</span>
+          <form className={s.addrow} onSubmit={submit}>
+            <input
+              className="input" type="text" inputMode="email" autoComplete="off" spellCheck={false}
+              placeholder="Add people by email address" aria-label="Email addresses to add" disabled={full}
+              aria-invalid={addError ? true : undefined} aria-describedby="share-add-note"
+              value={typed} onChange={(e) => { setTyped(e.target.value); add.reset(); }}
+            />
+            <Button type="submit" loading={add.isPending} done={added} doneLabel="Added" disabled={full || (!typed.trim() && !added)}>Add</Button>
+          </form>
+          <p className={s.hintP} id="share-add-note" role={addError ? "alert" : undefined} data-tone={addError ? "danger" : undefined}>
+            {addError ?? (full
+              ? `A guide is shared with up to ${MAX_SHARE_PEOPLE} people. To reach more, let anyone with the link open it.`
+              : "Several at once with commas between them. Each gets an email with the link.")}
+          </p>
+          {!d.email_ready && (
+            <div className="callout callout-warning" role="status" style={{ marginTop: 12 }}>
+              <Icon name="mail" size={16} />
+              <div className="grow">
+                Email isn't set up in Crewtavo yet, so nobody can be sent the link or a code. <Link to="/settings?tab=email" className="strong">Connect your email</Link>{d.access === "anyone" ? " to email it from here." : ", or let anyone with the link open it."}
               </div>
             </div>
-          </section>
+          )}
 
-          <div className="form-actions">
-            <Button icon="link" onClick={() => copyText(d.url, "Link copied")}>Copy link</Button>
-            <Button
-              variant="ghost" loading={newLink.isPending}
-              onClick={async () => {
-                const ok = await confirm({
-                  title: "Get a new link for this guide?",
-                  body: d.people.length
-                    ? "The link people have now stops working right away. The people you've added stay on the list: email them the new link from here."
-                    : "The link you've given out stops working right away. Use this when it's gone somewhere it shouldn't.",
-                  confirmLabel: "Get a new link",
-                });
-                if (ok) newLink.mutate();
-              }}
-            >
-              Get a new link
-            </Button>
-            <span className="spacer" />
-            <Button variant="primary" onClick={onClose}>Done</Button>
+          <h3 className={s.fl} id="share-people">People with access</h3>
+          <ul className={s.plist} aria-labelledby="share-people">
+            <li className={s.person}>
+              <span className={cx(s.ava, s.avaSq)} aria-hidden="true"><Icon name="users" size={15} /></span>
+              <span style={{ minWidth: 0 }}>
+                <span className={s.who}>Your team</span>
+                <span className={s.ps}>Reads it in Crewtavo, signed in</span>
+              </span>
+              <span />
+            </li>
+            {d.people.map((p) => (
+              <li key={p.id} className={s.person}>
+                <span className={s.ava} aria-hidden="true">{p.email[0]!.toUpperCase()}</span>
+                <span style={{ minWidth: 0 }}>
+                  <span className={s.who}>{p.email}</span>
+                  <span className={s.ps}>{p.last_opened_at ? `Opened it ${timeAgo(p.last_opened_at)}` : d.access === "anyone" ? `Added ${timeAgo(p.created_at)}` : "Hasn't opened it yet"}</span>
+                </span>
+                <span className={s.acts}>
+                  <button type="button" className={s.iconBtn} title="Email them the link again" aria-label={`Email the link to ${p.email} again`} disabled={!d.email_ready || !d.published || (emailAgain.isPending && emailAgain.variables?.id === p.id)} onClick={() => emailAgain.mutate(p)}>
+                    <Icon name="mail" size={15} />
+                  </button>
+                  <button type="button" className={s.iconBtn} title="Take them off" aria-label={`Take ${p.email} off`} disabled={remove.isPending && remove.variables?.id === p.id} onClick={() => remove.mutate(p)}>
+                    <Icon name="x" size={15} />
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <h3 className={s.fl} id="share-who">General access</h3>
+          <div className={s.gax}>
+            <span className={cx(s.ava, s.avaSq)} aria-hidden="true"><Icon name={d.access === "anyone" ? "globe" : "lock"} size={15} /></span>
+            <div style={{ minWidth: 0 }}>
+              <Menu
+                label={`General access: ${ACCESS_LABELS[d.access]}`}
+                title="General access"
+                align="start"
+                triggerClassName={s.selbtn}
+                trigger={<>{ACCESS_LABELS[d.access]}<Icon name="chevronDown" size={14} /></>}
+                items={GUIDE_SHARE_ACCESS.map((access) => ({
+                  label: ACCESS_LABELS[access],
+                  description: CHOICE[access],
+                  icon: access === "anyone" ? "globe" as const : "lock" as const,
+                  checked: d.access === access,
+                  disabled: setAccess.isPending,
+                  onSelect: () => { if (d.access !== access) setAccess.mutate(access); },
+                }))}
+              />
+              <div className={s.ps} role="status">{WHO[d.access]}</div>
+              <div className={s.urlf}>
+                <input type="text" readOnly value={d.url.replace(/^https?:\/\//, "")} aria-label="Link to this guide" onFocus={(e) => e.currentTarget.select()} />
+                <Button size="sm" icon="copy" onClick={() => copyText(d.url, "Link copied")}>Copy link</Button>
+              </div>
+            </div>
           </div>
+        </div>
+      )}
+      {d && (
+        <div className="form-actions">
+          <Button
+            variant="ghost" icon="refresh" loading={newLink.isPending}
+            onClick={async () => {
+              const ok = await confirm({
+                title: "Get a new link for this guide?",
+                body: d.people.length
+                  ? "The link people have now stops working right away. The people you've added stay on the list: email them the new link from here."
+                  : "The link you've given out stops working right away. Use this when it's gone somewhere it shouldn't.",
+                confirmLabel: "Get a new link",
+              });
+              if (ok) newLink.mutate();
+            }}
+          >
+            Get a new link
+          </Button>
+          <span className="spacer" />
+          <Button variant="primary" onClick={onClose}>Done</Button>
         </div>
       )}
     </Dialog>

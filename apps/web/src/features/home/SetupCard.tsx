@@ -3,12 +3,16 @@
  * than inside the quotes and invoices being worked on: in any trade, prices, payments, logo, email and
  * texting (so the first quote can go out), team and a first client, then options on a quote, and
  * measuring for work priced by area or length. Each step ticks itself off once it's been done
- * (one small read finds out), the card goes when every step is done, and anyone can hide it for good.
+ * (one small read finds out), the checklist goes when every step is done, and anyone can hide it for good.
+ *
+ * Setup-Flow.dc.html: done steps first and quiet, then the step that's up next with what it's for and
+ * a button, then the rest with how long each takes. On a business's first visit it is Home (full);
+ * once there's work it sits at the top of Home's side column (rail).
  */
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
@@ -103,48 +107,78 @@ export function useSetupSteps(enabled: boolean) {
   });
 }
 
+/** One step: where it's done, about how long it takes, and the words on its button while it's up next. */
+export interface SetupStep {
+  key: string;
+  show: boolean;
+  done: boolean;
+  title: string;
+  detail: string;
+  to: string;
+  minutes: number;
+  action: string;
+}
+
 /**
  * Email and texting, before the first quote goes out: connecting the business's own mailbox
  * (Settings → Email) and its own Twilio account (Apps → Twilio). Each is done once this business
  * can send that way, its own or the server's. For the people who can connect them.
  */
-export function sendingSteps(session: Pick<Session, "role" | "permissions" | "config">) {
+export function sendingSteps(session: Pick<Session, "role" | "permissions" | "config">): SetupStep[] {
   const admin = hasRole(session, "admin");
   return [
     {
       key: "email", show: admin && (can(session, "apps") || can(session, "settings")), done: session.config.features.email,
-      title: "Connect your email", detail: "Quotes, invoices and reminders go out from your own address.", to: "/settings?tab=email",
+      title: "Connect your email", detail: "Quotes, invoices and reminders go out from your own address.", to: "/settings?tab=email", minutes: 2, action: "Connect email",
     },
     {
       key: "texting", show: admin && can(session, "apps"), done: session.config.features.sms,
-      title: "Turn on texting", detail: "Reminders and on-my-way texts from your own number, with your Twilio account.", to: "/apps/twilio",
+      title: "Turn on texting", detail: "Reminders and on-my-way texts from your own number, with your Twilio account.", to: "/apps/twilio", minutes: 5, action: "Connect Twilio",
     },
   ];
 }
 
-export function SetupCard() {
+/** Done steps first (they keep their order), then the rest in the order they're best done in. */
+export function orderSteps<T extends { done: boolean }>(steps: T[]): { done: T[]; next: T | null; rest: T[] } {
+  const done = steps.filter((s) => s.done);
+  const [next = null, ...rest] = steps.filter((s) => !s.done);
+  return { done, next, rest };
+}
+
+export type Setup =
+  | { state: "off" }
+  | { state: "loading" }
+  | { state: "ready"; steps: SetupStep[]; done: number; hide: () => void };
+
+/**
+ * The checklist for this person: off when it isn't theirs, when it's hidden or when every step is
+ * done; loading while its one read is under way.
+ */
+export function useSetup(): Setup {
   const session = useSession();
   const key = hiddenKey(session.company.id, session.userId);
   const [hidden, setHidden] = useState(() => readHidden(key));
-  const steps = useSetupSteps(seesSetup(session) && !hidden);
+  const mine = seesSetup(session) && !hidden;
+  const steps = useSetupSteps(mine);
   // Online payments are for the people who look after money (Settings → Payments shows them the same).
   const takesMoney = hasRole(session, "admin") && can(session, "invoices");
-  const payments = useAutopayStatus(seesSetup(session) && !hidden && takesMoney);
-  if (hidden || !steps.data || (takesMoney && payments.isPending)) return null;
+  const payments = useAutopayStatus(mine && takesMoney);
+  if (!mine || steps.isError) return { state: "off" };
+  if (!steps.data || (takesMoney && payments.isPending)) return { state: "loading" };
   const logo = Boolean((session.company.settings.branding as { logo?: string } | undefined)?.logo);
-  const list = [
-    { key: "prices", show: true, done: steps.data.prices, title: "Set your prices", detail: "Your services and what you charge, so quotes and invoices fill themselves in.", to: "/settings?tab=prices" },
-    { key: "payments", show: takesMoney, done: Boolean(payments.data?.connected), title: "Take payments online", detail: "Clients pay their invoices by card or bank from the link you send.", to: "/settings?tab=payments" },
-    { key: "logo", show: hasRole(session, "admin"), done: logo, title: "Add your logo", detail: "On your quotes, invoices and the client's portal.", to: "/settings?tab=company" },
+  const list: SetupStep[] = [
+    { key: "prices", show: true, done: steps.data.prices, title: "Set your prices", detail: "Your services and what you charge, so quotes and invoices fill themselves in.", to: "/settings?tab=prices", minutes: 5, action: "Set prices" },
+    { key: "payments", show: takesMoney, done: Boolean(payments.data?.connected), title: "Take payments online", detail: "Clients pay their invoices by card or bank from the link you send.", to: "/settings?tab=payments", minutes: 3, action: "Connect Stripe" },
+    { key: "logo", show: hasRole(session, "admin"), done: logo, title: "Add your logo", detail: "On your quotes, invoices and the client's portal.", to: "/settings?tab=company", minutes: 1, action: "Add logo" },
     ...sendingSteps(session),
-    { key: "team", show: hasRole(session, "admin") && can(session, "team"), done: steps.data.team, title: "Invite your team", detail: "The office and your crews, each seeing what their role allows.", to: "/settings?tab=team" },
-    { key: "client", show: true, done: steps.data.client, title: "Add your first client", detail: "Or bring your clients over from Jobber or a spreadsheet.", to: "/clients" },
-    { key: "options", show: true, done: steps.data.options, title: "Offer options on a quote", detail: "Good, Better and Best side by side, and the client picks one.", to: "/quotes" },
+    { key: "team", show: hasRole(session, "admin") && can(session, "team"), done: steps.data.team, title: "Invite your team", detail: "The office and your crews, each seeing what their role allows.", to: "/settings?tab=team", minutes: 3, action: "Invite people" },
+    { key: "client", show: true, done: steps.data.client, title: "Add your first client", detail: "Or bring your clients over from Jobber or a spreadsheet.", to: "/clients", minutes: 1, action: "Add a client" },
+    { key: "options", show: true, done: steps.data.options, title: "Offer options on a quote", detail: "Good, Better and Best side by side, and the client picks one.", to: "/quotes", minutes: 3, action: "Open quotes" },
     // Only for work priced by area or length: a plumber's price list has nothing to measure.
-    { key: "measure", show: steps.data.measures, done: steps.data.measured, title: "Measure a property from the map", detail: "Areas, lengths and roofs drawn over the satellite view.", to: "/measure" },
+    { key: "measure", show: steps.data.measures, done: steps.data.measured, title: "Measure a property from the map", detail: "Areas, lengths and roofs drawn over the satellite view.", to: "/measure", minutes: 2, action: "Open the map" },
   ].filter((s) => s.show);
   const done = list.filter((s) => s.done).length;
-  if (done === list.length) return null;
+  if (done === list.length) return { state: "off" };
   const hide = () =>
     undoable({
       title: "Setup checklist hidden",
@@ -152,29 +186,72 @@ export function SetupCard() {
       restore: () => setHidden(false),
       commit: () => storeHidden(key),
     });
+  return { state: "ready", steps: list, done, hide };
+}
+
+/**
+ * The checklist itself. `full` is the first visit's (Setup-Flow.dc.html, Home, first visit): a
+ * progress bar, what each step is for, and the step up next as the screen's one green button. In the
+ * side column it's shorter: titles and minutes, the step up next with an outlined button.
+ */
+export function SetupChecklist({ steps, done, full }: { steps: SetupStep[]; done: number; full?: boolean }) {
+  const order = orderSteps(steps);
   return (
-    // Its check usually lands after the rest of Home, so it fades in rather than popping in.
-    <section className="stack" aria-labelledby="setup-title" style={{ animation: "fade-in var(--dur-enter) var(--ease-enter)" }}>
-      <div className="section-head">
-        <h2 id="setup-title" className="section-title">Set up Crewtavo</h2>
-        <span className="muted small">{done} of {list.length} done</span>
-        <Button size="sm" variant="ghost" onClick={hide}>Hide</Button>
-      </div>
-      <div className="card">
-        {list.map((s) => (
-          <Link key={s.key} to={s.to} className={`card-row ${styles.step}`} data-done={s.done || undefined}>
-            <span className={styles.mark} aria-hidden="true">{s.done && <Icon name="check" size={12} bold />}</span>
-            <span className="grow" style={{ minWidth: 0 }}>
-              <span className={styles.stepTitle}>
-                {s.title}
-                {s.done && <span className="sr-only"> (done)</span>}
-              </span>
-              <span className="muted small" style={{ display: "block" }}>{s.detail}</span>
+    <div className={styles.setup} data-full={full || undefined}>
+      {full && (
+        <div className={styles.progress}>
+          <span className={styles.meter} aria-hidden="true"><span style={{ width: `${(done / steps.length) * 100}%` }} /></span>
+          {done} of {steps.length} done
+        </div>
+      )}
+      {order.done.length > 0 && (
+        <ul className={styles.steps} role="list" aria-label="Done">
+          {order.done.map((s) => (
+            <li key={s.key}>
+              <Link to={s.to} className={styles.step} data-done>
+                <span className={styles.ring} aria-hidden="true"><Icon name="check" size={12} bold /></span>
+                <span className={styles.stepText}>
+                  <span className={styles.stepTitle}>{s.title}<span className="sr-only"> (done)</span></span>
+                </span>
+                {/* The side column's done steps are the check and the struck title alone (Page-Home.dc.html). */}
+                {full && <span className={styles.stepEnd} aria-hidden="true">Done</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      {order.next && (
+        <Link to={order.next.to} className={styles.next}>
+          <span className={styles.ring} aria-hidden="true" />
+          <span className={styles.stepText}>
+            <span className={styles.stepTitle}>
+              {order.next.title}
+              <span className={styles.upNext}>Up next</span>
             </span>
-            <Icon name="chevronRight" size={16} />
-          </Link>
-        ))}
-      </div>
-    </section>
+            <span className={styles.stepDetail}>{order.next.detail}</span>
+          </span>
+          <span className={cx("btn btn-sm", full && "btn-primary", styles.nextButton)} aria-hidden="true">{order.next.action}</span>
+        </Link>
+      )}
+      {order.rest.length > 0 && (
+        <ul className={styles.steps} role="list" aria-label="Still to do">
+          {order.rest.map((s) => (
+            <li key={s.key}>
+              <Link to={s.to} className={styles.step}>
+                <span className={styles.ring} aria-hidden="true" />
+                <span className={styles.stepText}>
+                  <span className={styles.stepTitle}>{s.title}</span>
+                  {full && <span className={styles.stepDetail}>{s.detail}</span>}
+                </span>
+                <span className={styles.stepEnd}>{minutes(s.minutes)}</span>
+                <span className={styles.stepChevron} aria-hidden="true"><Icon name="chevronRight" size={16} /></span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
+
+const minutes = (n: number) => `${n} min`;

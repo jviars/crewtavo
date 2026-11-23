@@ -11,7 +11,7 @@ import { HttpError, must } from "../lib/http";
 import { clientLink, linkLifetimeDays } from "../lib/links";
 import { reportError } from "../lib/monitoring";
 import { sendEmail, sendSms, smsReady } from "../lib/notify";
-import type { Db } from "../lib/supabase";
+import { adminClient, type Db } from "../lib/supabase";
 import { logoImage } from "./logo";
 
 export interface SubPaperwork {
@@ -92,7 +92,8 @@ export async function sendPaperworkLink(
 ) {
   const sub = must(await s.db.from("subcontractors").select(`${SUB_FIELDS}, active`).eq("company_id", s.companyId).eq("id", subId).maybeSingle(), "Subcontractor not found.");
   if (!sub.active) throw new HttpError(400, "This sub is turned off. Turn them back on to send them a link.");
-  const company = must(await s.db.from("companies").select("id, name, email, settings").eq("id", s.companyId).maybeSingle());
+  // With the server's key: the browser's role doesn't read the settings (lib/companySettings.ts).
+  const company = must(await adminClient(s.env).from("companies").select("id, name, email, settings").eq("id", s.companyId).maybeSingle());
   const { link, expires_at } = await paperworkLink(s.env, s.baseUrl, s.companyId, subId);
   const { needed } = await subPaperwork(s.db, s.companyId, subId);
   const intro = body.message?.trim() || paperworkLinkIntro(needed);

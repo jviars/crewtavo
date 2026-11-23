@@ -1,15 +1,19 @@
 import { autopaySettings } from "@crewtavo/core/autopay";
 import { shownCustomFields } from "@crewtavo/core/customFields";
-import { askChannels, askRefusal, creditMoney, marketingOn, notAsked, reachOf, referralAskRefusal, referralsReady, RESUBSCRIBE_HINT, textConsentLine, textsOff, type AskChannel } from "@crewtavo/core/marketing";
+import { creditMoney, marketingOn, reachOf, referralsReady, RESUBSCRIBE_HINT, textConsentLine, textsOff, type AskChannel } from "@crewtavo/core/marketing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { initials } from "@/components/ui/Avatar";
+import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
+import { MetaLine } from "@/components/ui/InboxList";
 import { MapsLink } from "@/components/ui/MapsLink";
-import { Menu } from "@/components/ui/Menu";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, PageError } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
@@ -27,19 +31,22 @@ import { listPrice, withOptionLines } from "../quotes/options";
 import { NewRequestDialog } from "../requests/NewRequestDialog";
 import { AutopayCard, useAutopayInvite } from "./AutopayCard";
 import { EditClientDialog } from "./ClientForm";
+import styles from "./clients.module.css";
 import { AddContact, ContactsCard, useClientContacts } from "./ContactsCard";
 import { PropertyDialog, type AccessRow, type PropertyRow } from "./PropertyDialog";
 import { PropertyEquipment } from "./PropertyEquipment";
-import { RESET_LINKS_BODY, RESET_LINKS_LABEL, resetLinksPath } from "./resetLinks";
+import { RESET_LINKS_BODY, RESET_LINKS_LABEL, RESET_LINKS_NOTE, resetLinksPath } from "./resetLinks";
+import { askedNot, sendWay } from "./sendWays";
 import { MergeClientsDialog } from "./MergeClientsDialog";
 import { TextsSwitch, useTextStops } from "./TextsSwitch";
 import { Timeline } from "./Timeline";
 import { PhotosCard } from "../files/PhotosCard";
 import { socialKey } from "../marketing/socialData";
 import { askToastKind, type AskResult } from "../marketing/askForm";
-import { CustomFieldList, useCustomFields } from "../customFields/CustomFields";
+import { CustomFieldFacts, useCustomFields } from "../customFields/CustomFields";
 
 type WorkTab = "requests" | "quotes" | "jobs" | "invoices";
+const WORK_LABELS: Record<WorkTab, string> = { requests: "Requests", quotes: "Quotes", jobs: "Jobs", invoices: "Invoices" };
 type ClientPatch = { status?: "lead" | "active" | "archived"; marketing_opt_out?: boolean; review_opt_out?: boolean; social_photos_opt_out?: boolean };
 /** The client's switches, which move the moment they're flipped. */
 const SWITCHES = ["marketing_opt_out", "review_opt_out", "social_photos_opt_out"] as const;
@@ -51,9 +58,11 @@ export function ClientPage() {
   const queryClient = useQueryClient();
   // Null until someone picks a tab: until then it opens on the first kind of work the client has.
   const [picked, setPicked] = useState<WorkTab | null>(null);
-  const workRef = useRef<HTMLElement>(null);
+  const workRef = useRef<HTMLDivElement>(null);
   const [dialog, setDialog] = useState<null | "edit" | "request" | "quote" | "merge">(null);
   const [property, setProperty] = useState<{ row?: PropertyRow; access?: AccessRow | null } | null>(null);
+  // The property whose Add equipment was picked from its menu.
+  const [equipmentFor, setEquipmentFor] = useState<string | null>(null);
   const isOffice = hasRole(session, "admin", "office");
   const canSell = hasRole(session, "admin", "office", "estimator") && can(session, "sales");
   // Autopay is for the people who look after money, and only once the company has it on.
@@ -190,6 +199,19 @@ export function ClientPage() {
   });
   // Review asks and referrals are Marketing's: while it's uninstalled they aren't offered here.
   const marketing = marketingOn(session.company.settings);
+  // Where asking them stands, for the menu's Ask for a review and Referrals: when they were last asked, and how many friends they've referred.
+  const lastAsk = useQuery({
+    queryKey: ["review-ask", id, "last"],
+    enabled: marketing && canSell,
+    meta: { silent: true },
+    queryFn: async () => unwrap(await supabase().rpc("last_review_ask", { p_company: session.company.id, p_client: id })) ?? null,
+  });
+  const referred = useQuery({
+    queryKey: ["referrals", session.company.id, "from", id],
+    enabled: marketing && canSell,
+    meta: { silent: true },
+    queryFn: async () => (await supabase().from("referrals").select("id", { count: "exact", head: true }).eq("company_id", session.company.id).eq("referrer_client_id", id)).count ?? 0,
+  });
 
   if (client.isPending) return <DetailSkeleton />;
   if (client.error || !c) return <PageError error={client.error} onRetry={() => client.refetch()} back={<BackLink to="/clients">Clients</BackLink>} />;
@@ -199,8 +221,9 @@ export function ClientPage() {
   // The review asks offered are the ones that can go: not to a client who opted out or is archived,
   // nor by a way this Crewtavo can't send or the client can't get.
   const ready = { email: session.config.features.email, sms: session.config.features.sms };
-  const cannotAsk = (channel: AskChannel) => Boolean(askRefusal(c, channel, ready));
-  const bothWays = !notAsked(c) && askChannels("both", reachOf(c, ready), false).send.length === 2;
+  // Texts are off when they asked, and when their number texted STOP.
+  const reach = { ...reachOf(c, ready), textsOff: stopped };
+  const reviewWay = (way: AskChannel) => sendWay(c, reach, way, askedNot(c));
   const owed = unpaid.reduce((sum, i) => sum + Number(i.balance_due), 0);
   const pastDue = unpaid.reduce((sum, i) => sum + (i.status === "overdue" ? Number(i.balance_due) : 0), 0);
   // Never paid, and taken as a loss: worth knowing before taking on more work for them.
@@ -213,6 +236,7 @@ export function ClientPage() {
   const noWork = Boolean(work.data) && tabs.every((t) => counts[t] === 0);
   const accessFor = (pid: string) => access.data?.find((a) => a.property_id === pid) ?? null;
   const billing = c.billing_address as { line1?: string; city?: string; region?: string; postal_code?: string } | null;
+  const firstPlace = c.properties.find((p) => p.line1.trim());
 
   const deleteClient = async () => {
     if (hasWork) {
@@ -261,271 +285,310 @@ export function ClientPage() {
     document.getElementById("work-tab-invoices")?.focus({ preventScroll: true });
   };
 
+  // Everything else they can do, grouped (ClientMenu.dc.html): the record, then asking them for things, then
+  // the ones that can't be taken back lightly (archiving, merging, resetting their links, deleting). Each way
+  // to send says where it goes, or why it can't, and the sub menus say where asking stands.
+  const more: MenuEntry[] = [
+    { label: "Edit client", icon: "edit", kbd: "E", onSelect: () => setDialog("edit") },
+    { label: "Copy Client Hub link", icon: "link", onSelect: () => hubLink.mutate() },
+    { separator: true },
+    // A client who already left a Google review isn't asked again: the one line says so.
+    { label: "Already left a Google review", icon: "star", onSelect: () => undefined, disabled: true, hidden: !marketing || !c.reviewed_at },
+    {
+      label: "Ask for a review", icon: "star", hidden: !marketing || Boolean(c.reviewed_at),
+      end: lastAsk.data === undefined ? undefined : lastAsk.data ? `Asked ${formatDate(lastAsk.data)}` : "Not asked yet",
+      items: [
+        { label: "By email", icon: "mail", onSelect: () => review.mutate("email"), ...reviewWay("email") },
+        { label: "By text", icon: "messages", onSelect: () => review.mutate("sms"), ...reviewWay("sms") },
+        { label: "By text and email", icon: "send", onSelect: () => review.mutate("both"), ...reviewWay("both") },
+      ],
+    },
+    {
+      label: "Referrals", icon: "gift", hidden: !marketing,
+      end: referred.data ? `${referred.data} referred` : undefined,
+      items: [
+        {
+          label: "Ask for referrals by email", icon: "mail", onSelect: () => referralAsk.mutate(),
+          ...sendWay(c, reach, "email", referralsReady(session.company.settings) ? askedNot({ marketing_opt_out: c.marketing_opt_out, status: c.status }) : "Add a credit or an offer first"),
+        },
+        { label: "Copy referral link", icon: "link", onSelect: () => referralLink.mutate() },
+      ],
+    },
+    {
+      label: "Send autopay invite", icon: "card", hidden: !seesMoney || !autopayOn,
+      items: [
+        { label: "By email", icon: "mail", onSelect: () => autopayInvite.mutate("email"), ...sendWay(c, reach, "email"), hidden: !session.config.features.email },
+        { label: "By text", icon: "messages", onSelect: () => autopayInvite.mutate("sms"), ...sendWay(c, reach, "sms"), hidden: !session.config.features.sms },
+      ],
+    },
+    { separator: true, hidden: !isOffice },
+    { label: c.status === "archived" ? "Restore client" : "Archive client", icon: c.status === "archived" ? "undo" : "archive", onSelect: () => update.mutate({ status: c.status === "archived" ? "active" : "archived" }), hidden: !isOffice },
+    { label: "Merge into another client", icon: "users", onSelect: () => setDialog("merge"), hidden: !seesMoney },
+    { label: RESET_LINKS_LABEL, description: RESET_LINKS_NOTE, icon: "refresh", onSelect: resetClientLinks, hidden: !isOffice },
+    { label: "Delete client", icon: "trash", danger: true, onSelect: deleteClient, hidden: !isOffice },
+  ];
+
+  // Quick ways to reach them on a phone, under the title (Mobile-Work.dc.html).
+  const quick = [
+    c.phone && <a key="call" href={`tel:${c.phone}`}><Icon name="phone" size={21} />Call</a>,
+    c.phone && !stopped && <a key="text" href={`sms:${c.phone}`}><Icon name="messages" size={21} />Text</a>,
+    c.email && <a key="email" href={`mailto:${c.email}`}><Icon name="mail" size={21} />Email</a>,
+    firstPlace && <MapsLink key="map" className="" place={firstPlace}><Icon name="navigation" size={21} />Directions</MapsLink>,
+  ].filter(Boolean);
+
+  const details = (
+    <Section title="Details" action={canSell && <button type="button" onClick={() => setDialog("edit")}>Edit</button>}>
+      <Facts className={styles.details}>
+        <Fact label="Email">{c.email && <a href={`mailto:${c.email}`}>{c.email}</a>}</Fact>
+        <Fact label="Phone">{c.phone && <a href={`tel:${c.phone}`}>{c.phone}</a>}</Fact>
+        {isOffice && c.phone ? (
+          <Fact label="Texts">
+            <TextsSwitch clientId={c.id} name={c.display_name} phone={c.phone} stop={stopFor(c.phone)} since={c.sms_opt_out_at} />
+            {/* Where their number came from: the record of their say-so to be texted. */}
+            {!stopped && <span className={styles.hint}>{textConsentLine(c.sms_consent_source, c.sms_consent_at ? formatDate(c.sms_consent_at) : null)}</span>}
+          </Fact>
+        ) : c.sms_opt_out_at ? (
+          <Fact label="Texts">Off since {formatDate(c.sms_opt_out_at)}. They asked not to be texted.</Fact>
+        ) : null}
+        <Fact label="Balance">
+          {owed > 0 && (
+            <>
+              <button type="button" className={`link-btn ${styles.balance} ${styles.tap}`} onClick={showInvoices}>{formatMoney(owed)}</button>
+              {pastDue > 0 && <span className={styles.pastDue}>{pastDue < owed ? ` · ${formatMoney(pastDue)} ${statusText("invoice", "overdue").toLowerCase()}` : ` · ${statusText("invoice", "overdue")}`}</span>}
+            </>
+          )}
+        </Fact>
+        <Fact label="Written off">{writtenOff > 0 && <span className="tabular">{formatMoney(writtenOff)}</span>}</Fact>
+        <Fact label="Lead source">{c.lead_source}</Fact>
+        <CustomFieldFacts fields={clientFields} values={c.custom_fields} />
+        <Fact label="Referred by">{referrer && <Link to={`/clients/${referrer.id}`}>{referrer.display_name}</Link>}</Fact>
+        <Fact label="Referral credit">
+          {credits.data?.some((r) => Number(r.credit_left) > 0) && credits.data.filter((r) => Number(r.credit_left) > 0).map((r) => (
+            <span key={r.referral_id} className={styles.line}>
+              {creditMoney(Number(r.credit_left), session.company.currency)} for referring {r.friend_name}. {r.auto_apply ? "Goes on their next invoice." : "Kept off invoices."}
+            </span>
+          ))}
+        </Fact>
+        <Fact label="Client since">{formatDate(c.created_at)}</Fact>
+        <Fact label="Billing">{billing?.line1 && addressLine(billing)}</Fact>
+        <Fact label="Payment terms">{c.payment_terms_days != null && (c.payment_terms_days === 0 ? "Due on receipt" : `Due in ${c.payment_terms_days} days`)}</Fact>
+        <Fact label="Tax">{c.tax_exempt && `Tax exempt${c.tax_exempt_note ? ` · ${c.tax_exempt_note}` : ""}`}</Fact>
+        {isOffice && (
+          <>
+            <Fact label="Marketing">
+              <label className={`switch-row ${styles.switchRow}`}>
+                <input type="checkbox" className="switch" checked={!c.marketing_opt_out} onChange={(e) => update.mutate({ marketing_opt_out: !e.target.checked })} />
+                Gets campaigns, review and referral asks
+              </label>
+              {c.marketing_opt_out && <span className={styles.hint}>{RESUBSCRIBE_HINT}</span>}
+            </Fact>
+            <Fact label="Reviews">
+              <label className={`switch-row ${styles.switchRow}`}>
+                <input type="checkbox" className="switch" checked={!c.review_opt_out && !c.marketing_opt_out && !c.reviewed_at} disabled={c.marketing_opt_out || Boolean(c.reviewed_at)} onChange={(e) => update.mutate({ review_opt_out: !e.target.checked })} />
+                Gets review asks
+              </label>
+              {c.marketing_opt_out ? (
+                <span className={styles.hint}>Off while they're unsubscribed from marketing</span>
+              ) : c.reviewed_at ? (
+                <span className={styles.hint}>Left a Google review, so not asked</span>
+              ) : null}
+            </Fact>
+            <Fact label="Photos">
+              <label className={`switch-row ${styles.switchRow}`}>
+                <input type="checkbox" className="switch" checked={!c.social_photos_opt_out} onChange={(e) => update.mutate({ social_photos_opt_out: !e.target.checked })} />
+                Can be posted on social pages
+              </label>
+              {c.social_photos_opt_out && <span className={styles.hint}>Photos of their property aren't offered for posts</span>}
+              <ClientShowcaseNote clientId={c.id} optedOut={c.social_photos_opt_out} />
+            </Fact>
+          </>
+        )}
+        <Fact label="Notes" wide>{c.notes && <span className="pre-wrap">{c.notes}</span>}</Fact>
+      </Facts>
+      {canSell && contacts.data?.length === 0 && <div className={styles.addContact}><AddContact clientId={c.id} /></div>}
+    </Section>
+  );
+
   return (
     <>
-      <BackLink to="/clients">Clients</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: "/clients", label: "Clients" }}
         title={c.display_name}
+        status={<EntityStatus kind="client" status={c.status} />}
+        meta={[
+          c.company_name && c.company_name !== c.display_name && <span>{c.company_name}</span>,
+          ...c.tags.map((t) => <span key={t} className="tag">{t}</span>),
+          c.reviewed_at && <ReviewedChip clientId={c.id} />,
+          <ClientShowcaseChip clientId={c.id} />,
+          c.marketing_opt_out && <span className={styles.flag}><Icon name="megaphone" size={13} />Unsubscribed from marketing</span>,
+          c.review_opt_out && !c.marketing_opt_out && <span className={styles.flag}><Icon name="star" size={13} />No review asks</span>,
+          c.social_photos_opt_out && <span className={styles.flag}><Icon name="image" size={13} />No social photos</span>,
+          stopped && <span className={styles.flag}><Icon name="messages" size={13} />Texts off</span>,
+        ]}
         actions={
+          canSell && (
+            <>
+              <Button icon="requests" className="hide-mobile" onClick={() => setDialog("request")}>New request</Button>
+              <Button variant="primary" icon="plus" className="hide-mobile" onClick={() => setDialog("quote")}>New quote</Button>
+            </>
+          )
+        }
+        more={canSell ? more : undefined}
+        moreTitle={c.display_name}
+      >
+        {/* A phone's hero (Mobile-Work.dc.html, Client): their initials over the name, centered. */}
+        <span className={styles.hero} aria-hidden="true">{initials(c.display_name)}</span>
+        {quick.length > 0 && <div className={styles.quick}>{quick}</div>}
+        {/* A phone's money first, under the ways to reach them; a desktop has it in Details. */}
+        {owed > 0 && (
+          <button type="button" className={styles.owes} onClick={showInvoices}>
+            <span>Balance</span>
+            <span className={styles.owesFigure}>
+              <b>{formatMoney(owed)}</b>
+              {pastDue > 0 && <span className={styles.pastDue}>{pastDue < owed ? `${formatMoney(pastDue)} ${statusText("invoice", "overdue").toLowerCase()}` : statusText("invoice", "overdue")}</span>}
+            </span>
+            <Icon name="chevronRight" size={16} />
+          </button>
+        )}
+        {c.status === "archived" && (
+          <div className="callout callout-warning">
+            <Icon name="archive" size={16} />
+            <div className="grow">This client is archived.</div>
+            {isOffice && <Button size="sm" onClick={() => update.mutate({ status: "active" })} loading={update.isPending && update.variables?.status === "active"}>Restore client</Button>}
+          </div>
+        )}
+      </DetailHeader>
+
+      <DetailColumns
+        grouped
+        side={
           <>
-            {canSell && <Button icon="requests" onClick={() => setDialog("request")}>New request</Button>}
-            {canSell && <Button variant="primary" icon="plus" onClick={() => setDialog("quote")}>New quote</Button>}
-            {canSell && (
-              <Menu
-                items={[
-                  { label: "Edit client", icon: "edit", onSelect: () => setDialog("edit") },
-                  { label: "Copy Client Hub link", icon: "link", onSelect: () => hubLink.mutate() },
-                  { label: RESET_LINKS_LABEL, icon: "refresh", onSelect: resetClientLinks, hidden: !isOffice },
-                  { label: "Send autopay invite by email", icon: "card", onSelect: () => autopayInvite.mutate("email"), disabled: !c.email, hidden: !seesMoney || !autopayOn || !session.config.features.email },
-                  { label: "Send autopay invite by text", icon: "card", onSelect: () => autopayInvite.mutate("sms"), disabled: !c.phone || textsOff(c), hidden: !seesMoney || !autopayOn || !session.config.features.sms },
-                  { separator: true, hidden: !marketing },
-                  // A client who already left a Google review isn't asked again: the one line says so.
-                  { label: "Already left a Google review", icon: "star", onSelect: () => undefined, disabled: true, hidden: !marketing || !c.reviewed_at },
-                  { label: "Ask for a review by email", icon: "star", onSelect: () => review.mutate("email"), disabled: cannotAsk("email"), hidden: !marketing || Boolean(c.reviewed_at) },
-                  { label: "Ask for a review by text", icon: "star", onSelect: () => review.mutate("sms"), disabled: cannotAsk("sms"), hidden: !marketing || Boolean(c.reviewed_at) },
-                  { label: "Ask for a review by text and email", icon: "star", onSelect: () => review.mutate("both"), disabled: !bothWays, hidden: !marketing || Boolean(c.reviewed_at) },
-                  { label: "Ask for referrals by email", icon: "gift", onSelect: () => referralAsk.mutate(), hidden: !marketing,
-                    disabled: !referralsReady(session.company.settings) || Boolean(referralAskRefusal(c, session.config.features.email)) },
-                  { label: "Copy referral link", icon: "link", onSelect: () => referralLink.mutate(), hidden: !marketing },
-                  { separator: true, hidden: !isOffice },
-                  { label: c.status === "archived" ? "Restore client" : "Archive client", icon: c.status === "archived" ? "undo" : "archive", onSelect: () => update.mutate({ status: c.status === "archived" ? "active" : "archived" }), hidden: !isOffice },
-                  { label: "Merge into another client", icon: "users", onSelect: () => setDialog("merge"), hidden: !seesMoney },
-                  { label: "Delete client", icon: "trash", danger: true, onSelect: deleteClient, hidden: !isOffice },
-                ]}
-              />
-            )}
+            {details}
+            {seesMoney && autopayOn && <AutopayCard client={c} />}
+            <ContactsCard clientId={c.id} canEdit={canSell} canSetTexts={isOffice} />
           </>
         }
-      />
-      <div className="page-meta">
-        <EntityStatus kind="client" status={c.status} />
-        {c.company_name && c.company_name !== c.display_name && <span className="muted">{c.company_name}</span>}
-        {c.tags.map((t) => <span key={t} className="tag">{t}</span>)}
-        {c.marketing_opt_out && <span className="chip chip-amber">Unsubscribed from marketing</span>}
-        {c.review_opt_out && <span className="chip chip-amber">No review asks</span>}
-        {c.social_photos_opt_out && <span className="chip chip-amber">No social photos</span>}
-        <ClientShowcaseChip clientId={c.id} />
-        {c.reviewed_at && <ReviewedChip clientId={c.id} />}
-        {stopped && <span className="chip chip-amber">Texts off</span>}
-      </div>
-      {c.status === "archived" && (
-        <div className="callout callout-warning">
-          <Icon name="archive" size={20} />
-          <div className="grow">This client is archived.</div>
-          {isOffice && <Button size="sm" onClick={() => update.mutate({ status: "active" })} loading={update.isPending && update.variables?.status === "active"}>Restore client</Button>}
-        </div>
-      )}
-
-      <div className="two-col">
-        <div className="wide stack-lg">
-          <section className="stack" aria-labelledby="props-title">
-            <div className="section-head">
-              <h2 id="props-title" className="section-title">Properties</h2>
-              {canSell && c.properties.length > 0 && <Button size="sm" icon="plus" onClick={() => setProperty({})}>Add property</Button>}
-            </div>
-            {c.properties.length === 0 ? (
-              <div className="card">
-                <EmptyState inline title="No service address yet" action={canSell && <Button icon="plus" onClick={() => setProperty({})}>Add property</Button>} />
-              </div>
-            ) : (
-              <div className="grid-cards">
-                {c.properties.map((p) => {
-                  const codes = accessFor(p.id);
-                  // A label that only repeats the street isn't a name: the address is the heading then.
-                  const label = p.label?.trim() && p.label.trim().toLowerCase() !== p.line1.trim().toLowerCase() ? p.label.trim() : null;
-                  return (
-                    <div key={p.id} className="card card-pad stack-sm">
-                      <div className="row-between" style={{ alignItems: "flex-start" }}>
-                        <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                          {label ? (
-                            <>
-                              <strong>{label}</strong>
-                              {/* Sized by its wrapper: .address-link takes its font from around it. */}
-                              <span className="text-sm"><MapsLink place={p}>{addressLine(p)}</MapsLink></span>
-                            </>
-                          ) : (
-                            <strong><MapsLink place={p}>{addressLine(p)}</MapsLink></strong>
-                          )}
-                        </div>
-                        {canSell && (
-                          <Menu
-                            triggerClassName="btn btn-sm btn-ghost btn-icon"
-                            label="Property actions"
-                            items={[
-                              { label: "Edit property", icon: "edit", onSelect: () => setProperty({ row: p, access: codes }) },
-                              { label: "Measure on the map", icon: "area", onSelect: () => navigate(`/measure?property=${p.id}${p.lat != null ? `&lat=${p.lat}&lng=${p.lng}` : ""}`) },
-                              { label: "Remove property", icon: "trash", danger: true, hidden: !isOffice, onSelect: () => removeLater(p) },
-                            ]}
-                          />
-                        )}
-                      </div>
-                      {(codes?.gate_code || codes?.lockbox_code) && (
-                        <div className="row wrap text-sm" style={{ gap: 12 }}>
-                          {codes.gate_code && <span><Icon name="lock" size={14} /> Gate <strong>{codes.gate_code}</strong></span>}
-                          {codes.lockbox_code && <span><Icon name="lock" size={14} /> Lockbox <strong>{codes.lockbox_code}</strong></span>}
-                        </div>
-                      )}
-                      {codes?.instructions && <span className="muted small pre-wrap">{codes.instructions}</span>}
-                      {p.notes && <span className="muted small pre-wrap">{p.notes}</span>}
-                      {(p.tags.length > 0 || p.lot_size_sqft != null) && (
-                        <div className="row wrap" style={{ gap: 6 }}>
-                          {p.lot_size_sqft != null && <span className="muted small">Lot {Number(p.lot_size_sqft).toLocaleString("en-US")} sq ft</span>}
-                          {p.tags.map((t) => <span key={t} className="tag">{t}</span>)}
-                        </div>
-                      )}
-                      {shownCustomFields(propertyFields, p.custom_fields).length > 0 && <dl className="kv small" style={{ margin: 0 }}><CustomFieldList fields={propertyFields} values={p.custom_fields} /></dl>}
-                      <PropertyEquipment propertyId={p.id} inCard />
-                      <div className="row wrap" style={{ marginTop: 4 }}>
-                        <MapsLink className="btn btn-sm btn-ghost" place={p}><Icon name="navigation" size={14} />Directions</MapsLink>
-                        {p.lat == null && <span className="muted small" title="Routing and weather checks need a map location">Not on the map yet</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* Clear of the sticky top bar when the balance scrolls here. */}
-          <section ref={workRef} className="stack" aria-label="Work" style={{ scrollMarginTop: "calc(var(--topbar-height) + 16px)" }}>
-            {noWork ? (
-              <div className="card">
-                <EmptyState inline title={isOffice ? "No requests, quotes, jobs or invoices yet" : "No requests, quotes or jobs yet"} action={canSell && <Button icon="plus" onClick={() => setDialog("quote")}>New quote</Button>} />
-              </div>
-            ) : (
-              <>
-                <div className="underline-tabs" role="tablist" aria-label="Work for this client">
-                  {tabs.map((t) => (
-                    <button key={t} id={`work-tab-${t}`} type="button" role="tab" aria-selected={tab === t} aria-controls="work-panel" onClick={() => setPicked(t)}>
-                      {t[0].toUpperCase() + t.slice(1)} <span className="badge">{work.isPending ? "·" : counts[t]}</span>
-                    </button>
-                  ))}
-                </div>
-                <div id="work-panel" className="card" role="tabpanel" aria-labelledby={tab ? `work-tab-${tab}` : undefined}>
-                  {work.isPending && [0, 1, 2].map((i) => <div key={i} className="card-row"><Skeleton width={40} /><Skeleton width="45%" /><span className="grow" /><Skeleton width={84} height={22} radius={999} /></div>)}
-                  {work.error && <ErrorState compact error={work.error} onRetry={() => work.refetch()} />}
-                  {work.data && tab === "requests" && (
-                    <WorkList empty="No requests yet" rows={work.data.requests.map((r) => ({ to: `/requests/${r.id}`, number: r.number, title: r.title, right: formatDate(r.created_at), status: <EntityStatus kind="request" status={r.status} /> }))} />
-                  )}
-                  {work.data && tab === "quotes" && (
-                    <WorkList
-                      empty="No quotes yet"
-                      rows={work.data.quotes.map((q) => {
-                        const price = listPrice(q);
-                        return { to: `/quotes/${q.id}`, number: q.number, title: q.title, right: price.from ? `From ${formatMoney(price.amount)}` : formatMoney(price.amount), status: <EntityStatus kind="quote" status={q.status} /> };
-                      })}
-                    />
-                  )}
-                  {work.data && tab === "jobs" && (
-                    <WorkList empty="No jobs yet" rows={work.data.jobs.map((j) => ({ to: `/jobs/${j.id}`, number: j.number, title: j.title, right: j.kind === "recurring" ? "Recurring" : canSell ? formatMoney(j.financials?.contract_total ?? 0) : "", status: <EntityStatus kind="job" status={j.status} /> }))} />
-                  )}
-                  {work.data && tab === "invoices" && (
-                    <WorkList empty="No invoices yet" rows={work.data.invoices.map((i) => ({ to: `/invoices/${i.id}`, number: i.number, title: i.due_on ? `Due ${formatDate(i.due_on)}` : "Invoice", right: formatMoney(i.balance_due > 0 ? i.balance_due : i.total), status: <EntityStatus kind="invoice" status={i.status} /> }))} />
-                  )}
-                </div>
-              </>
-            )}
-          </section>
-
-          <PhotosCard clientId={c.id} />
-
-          {c.properties.length > 0 && <PlansCard scope={{ kind: "client", properties: c.properties.map((p) => ({ id: p.id, label: p.label || p.line1 })) }} />}
-
-          <Timeline clientId={c.id} />
-        </div>
-
-        <aside className="narrow stack">
-          {/* How to reach them and where the account stands, in one card. Cards of their own are for sections you act on. */}
-          <div className="card card-pad stack-sm">
-            <div className="row-between">
-              <strong>Details</strong>
-              {canSell && <Button size="sm" variant="ghost" icon="edit" onClick={() => setDialog("edit")}>Edit</Button>}
-            </div>
-            <dl className="kv">
-              <dt>Email</dt><dd>{c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : "—"}</dd>
-              <dt>Phone</dt><dd>{c.phone ? <a href={`tel:${c.phone}`}>{c.phone}</a> : "—"}</dd>
-              {isOffice && c.phone ? (
-                <>
-                  <dt>Texts</dt>
-                  <dd>
-                    <TextsSwitch clientId={c.id} name={c.display_name} phone={c.phone} stop={stopFor(c.phone)} since={c.sms_opt_out_at} />
-                    {/* Where their number came from: the record of their say-so to be texted. */}
-                    {!stopped && <span className="muted small" style={{ display: "block" }}>{textConsentLine(c.sms_consent_source, c.sms_consent_at ? formatDate(c.sms_consent_at) : null)}</span>}
-                  </dd>
-                </>
-              ) : c.sms_opt_out_at ? (
-                <><dt>Texts</dt><dd>Off since {formatDate(c.sms_opt_out_at)}. They asked not to be texted.</dd></>
-              ) : null}
-              {owed > 0 && (
-                <>
-                  <dt>Balance</dt>
-                  <dd>
-                    <button type="button" className="link-btn tabular" style={pastDue > 0 ? { color: "var(--danger)" } : undefined} onClick={showInvoices}>{formatMoney(owed)}</button>
-                    {pastDue > 0 && <span className="muted">{pastDue < owed ? ` · ${formatMoney(pastDue)} ${statusText("invoice", "overdue").toLowerCase()}` : ` · ${statusText("invoice", "overdue")}`}</span>}
-                  </dd>
-                </>
-              )}
-              {writtenOff > 0 && <><dt>Written off</dt><dd className="tabular">{formatMoney(writtenOff)}</dd></>}
-              <dt>Lead source</dt><dd>{c.lead_source ?? "—"}</dd>
-              <CustomFieldList fields={clientFields} values={c.custom_fields} />
-              {referrer && <><dt>Referred by</dt><dd><Link to={`/clients/${referrer.id}`}>{referrer.display_name}</Link></dd></>}
-              {credits.data?.some((r) => Number(r.credit_left) > 0) && (
-                <>
-                  <dt>Referral credit</dt>
-                  <dd className="stack-sm" style={{ gap: 2 }}>
-                    {credits.data.filter((r) => Number(r.credit_left) > 0).map((r) => (
-                      <span key={r.referral_id}>
-                        {creditMoney(Number(r.credit_left), session.company.currency)} for referring {r.friend_name}. {r.auto_apply ? "Goes on their next invoice." : "Kept off invoices."}
+      >
+        <Section
+          title="Properties"
+          count={c.properties.length || undefined}
+          action={canSell && c.properties.length > 0 && <button type="button" onClick={() => setProperty({})}>Add property</button>}
+        >
+          {c.properties.length === 0 ? (
+            <EmptyState inline title="No service address yet" action={canSell && <Button icon="plus" onClick={() => setProperty({})}>Add property</Button>} />
+          ) : (
+            <ul className="rel" role="list" aria-label="Properties">
+              {c.properties.map((p) => {
+                const codes = accessFor(p.id);
+                // A label that only repeats the street isn't a name: the address is the heading then.
+                const label = p.label?.trim() && p.label.trim().toLowerCase() !== p.line1.trim().toLowerCase() ? p.label.trim() : null;
+                const custom = shownCustomFields(propertyFields, p.custom_fields);
+                return (
+                  <li key={p.id} className={styles.prop}>
+                    <div className={styles.propMain}>
+                      <span className={styles.propHead}>
+                        <span className={styles.propName}>{label ?? addressLine(p)}</span>
+                        {label && <><span className={styles.propSep}> · </span><span className={styles.propAddress}>{addressLine(p)}</span></>}
                       </span>
-                    ))}
-                  </dd>
-                </>
-              )}
-              <dt>Client since</dt><dd>{formatDate(c.created_at)}</dd>
-              {billing?.line1 && <><dt>Billing</dt><dd>{addressLine(billing)}</dd></>}
-              {c.payment_terms_days != null && <><dt>Payment terms</dt><dd>{c.payment_terms_days === 0 ? "Due on receipt" : `Due in ${c.payment_terms_days} days`}</dd></>}
-              {c.tax_exempt && <><dt>Tax</dt><dd>Tax exempt{c.tax_exempt_note ? ` · ${c.tax_exempt_note}` : ""}</dd></>}
-              {isOffice && (
-                <>
-                  <dt>Marketing</dt>
-                  <dd>
-                    <label className="switch-row" style={{ fontWeight: 400 }}>
-                      <input type="checkbox" className="switch" checked={!c.marketing_opt_out} onChange={(e) => update.mutate({ marketing_opt_out: !e.target.checked })} />
-                      Gets campaigns, review and referral asks
-                    </label>
-                    {c.marketing_opt_out && <span className="muted small" style={{ display: "block" }}>{RESUBSCRIBE_HINT}</span>}
-                  </dd>
-                  <dt>Reviews</dt>
-                  <dd>
-                    <label className="switch-row" style={{ fontWeight: 400 }}>
-                      <input type="checkbox" className="switch" checked={!c.review_opt_out && !c.marketing_opt_out && !c.reviewed_at} disabled={c.marketing_opt_out || Boolean(c.reviewed_at)} onChange={(e) => update.mutate({ review_opt_out: !e.target.checked })} />
-                      Gets review asks
-                    </label>
-                    {c.marketing_opt_out ? (
-                      <span className="muted small" style={{ display: "block" }}>Off while they're unsubscribed from marketing</span>
-                    ) : c.reviewed_at ? (
-                      <span className="muted small" style={{ display: "block" }}>Left a Google review, so not asked</span>
-                    ) : null}
-                  </dd>
-                  <dt>Photos</dt>
-                  <dd>
-                    <label className="switch-row" style={{ fontWeight: 400 }}>
-                      <input type="checkbox" className="switch" checked={!c.social_photos_opt_out} onChange={(e) => update.mutate({ social_photos_opt_out: !e.target.checked })} />
-                      Can be posted on social pages
-                    </label>
-                    {c.social_photos_opt_out && <span className="muted small" style={{ display: "block" }}>Photos of their property aren't offered for posts</span>}
-                    <ClientShowcaseNote clientId={c.id} optedOut={c.social_photos_opt_out} />
-                  </dd>
-                </>
-              )}
-            </dl>
-            {c.notes && <p className="muted small pre-wrap" style={{ margin: 0 }}>{c.notes}</p>}
-            {canSell && contacts.data?.length === 0 && <AddContact clientId={c.id} />}
-          </div>
-          {seesMoney && autopayOn && <AutopayCard client={c} />}
-          <ContactsCard clientId={c.id} canEdit={canSell} canSetTexts={isOffice} />
-        </aside>
-      </div>
+                      <MetaLine
+                        className={styles.propLine}
+                        parts={[
+                          codes?.gate_code && <span>Gate <b>{codes.gate_code}</b></span>,
+                          codes?.lockbox_code && <span>Lockbox <b>{codes.lockbox_code}</b></span>,
+                          p.lot_size_sqft != null && `Lot ${Number(p.lot_size_sqft).toLocaleString("en-US")} sq ft`,
+                          ...custom.map((f) => `${f.label}: ${f.text}`),
+                          p.tags.length > 0 && <span className={styles.propTags}>{p.tags.map((t) => <span key={t} className="tag">{t}</span>)}</span>,
+                          p.lat == null && <span className={styles.offMap} title="Routing and weather checks need a map location">Not on the map yet</span>,
+                        ]}
+                      />
+                      {codes?.instructions && <span className={styles.propNote}>{codes.instructions}</span>}
+                      {p.notes && <span className={styles.propNote}>{p.notes}</span>}
+                      <PropertyEquipment propertyId={p.id} inRow adding={equipmentFor === p.id} onAddingDone={() => setEquipmentFor(null)} />
+                    </div>
+                    <div className={styles.propActions}>
+                      <MapsLink className="btn btn-sm" place={p}><Icon name="navigation" size={18} className={styles.dirIcon} /><span className={styles.dirText}>Directions</span></MapsLink>
+                      {canSell && (
+                        <Menu
+                          triggerClassName="btn btn-sm btn-ghost btn-icon"
+                          label={`More for ${label ?? p.line1}`}
+                          title={label ?? addressLine(p)}
+                          items={[
+                            { label: "Edit property", icon: "edit", onSelect: () => setProperty({ row: p, access: codes }) },
+                            { label: "Add equipment", icon: "wrench", onSelect: () => setEquipmentFor(p.id) },
+                            { label: "Measure on the map", icon: "area", onSelect: () => navigate(`/measure?property=${p.id}${p.lat != null ? `&lat=${p.lat}&lng=${p.lng}` : ""}`) },
+                            { separator: true, hidden: !isOffice },
+                            { label: "Remove property", icon: "trash", danger: true, hidden: !isOffice, onSelect: () => removeLater(p) },
+                          ]}
+                        />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Section>
+
+        {/* Clear of the sticky top bar when the balance scrolls here. */}
+        <div ref={workRef} className={styles.workAnchor}>
+          {noWork ? (
+            <Section title="Work">
+              <EmptyState inline title={isOffice ? "No requests, quotes, jobs or invoices yet" : "No requests, quotes or jobs yet"} action={canSell && <Button icon="plus" onClick={() => setDialog("quote")}>New quote</Button>} />
+            </Section>
+          ) : (
+            <Section title="Work" className={styles.work}>
+              <div className="underline-tabs" role="tablist" aria-label="Work for this client">
+                {tabs.map((t) => (
+                  <button key={t} id={`work-tab-${t}`} type="button" role="tab" aria-selected={tab === t} aria-controls="work-panel" onClick={() => setPicked(t)}>
+                    {WORK_LABELS[t]} <span className="badge">{work.isPending ? "·" : counts[t]}</span>
+                  </button>
+                ))}
+              </div>
+              <div id="work-panel" role="tabpanel" aria-labelledby={tab ? `work-tab-${tab}` : undefined}>
+                {work.isPending && <div className="rel">{[0, 1, 2].map((i) => <div key={i} className="rel-row"><Skeleton width={36} /><Skeleton width="45%" /><span className="grow" /><Skeleton width={84} /></div>)}</div>}
+                {work.error && <ErrorState compact error={work.error} onRetry={() => work.refetch()} />}
+                {work.data && tab === "requests" && (
+                  <WorkList empty="No requests yet" rows={work.data.requests.map((r) => ({ to: `/requests/${r.id}`, number: r.number, title: r.title, end: <><EntityStatus kind="request" status={r.status} /><span className={styles.date}>{formatDate(r.created_at)}</span></> }))} />
+                )}
+                {work.data && tab === "quotes" && (
+                  <WorkList
+                    empty="No quotes yet"
+                    rows={work.data.quotes.map((q) => {
+                      const price = listPrice(q);
+                      return { to: `/quotes/${q.id}`, number: q.number, title: q.title, end: <><EntityStatus kind="quote" status={q.status} /><b>{price.from ? `From ${formatMoney(price.amount)}` : formatMoney(price.amount)}</b></> };
+                    })}
+                  />
+                )}
+                {work.data && tab === "jobs" && (
+                  <WorkList
+                    empty="No jobs yet"
+                    rows={work.data.jobs.map((j) => ({ to: `/jobs/${j.id}`, number: j.number, title: j.title, end: <><EntityStatus kind="job" status={j.status} />{j.kind === "recurring" ? <span className={styles.date}>Recurring</span> : canSell ? <b>{formatMoney(j.financials?.contract_total ?? 0)}</b> : null}</> }))}
+                  />
+                )}
+                {work.data && tab === "invoices" && (
+                  <WorkList
+                    empty="No invoices yet"
+                    rows={work.data.invoices.map((i) => ({ to: `/invoices/${i.id}`, number: i.number, title: i.due_on ? `Due ${formatDate(i.due_on)}` : "Invoice", end: <><EntityStatus kind="invoice" status={i.status} /><b>{formatMoney(i.balance_due > 0 ? i.balance_due : i.total)}</b></> }))}
+                  />
+                )}
+              </div>
+            </Section>
+          )}
+        </div>
+
+        <PhotosCard clientId={c.id} />
+
+        {c.properties.length > 0 && <PlansCard scope={{ kind: "client", properties: c.properties.map((p) => ({ id: p.id, label: p.label || p.line1 })) }} />}
+
+        <Timeline clientId={c.id} />
+      </DetailColumns>
+
+      {canSell && (
+        <ActionBar>
+          <Button icon="requests" onClick={() => setDialog("request")}>New request</Button>
+          <Button variant="primary" icon="plus" onClick={() => setDialog("quote")}>New quote</Button>
+        </ActionBar>
+      )}
 
       {dialog === "edit" && <EditClientDialog open onClose={() => setDialog(null)} client={c} />}
       {dialog === "merge" && <MergeClientsDialog client={c} onClose={() => setDialog(null)} />}
@@ -536,19 +599,13 @@ export function ClientPage() {
   );
 }
 
-function WorkList({ rows, empty }: { rows: Array<{ to: string; number: number | null; title: string; right: string; status: React.ReactNode }>; empty: string }) {
+/** One kind of their work as small rows: its number, its title, and its status with money or a date on the right. */
+function WorkList({ rows, empty }: { rows: Array<{ to: string; number: number | null; title: string; end: ReactNode }>; empty: string }) {
   if (!rows.length) return <EmptyState inline title={empty} />;
   return (
-    <>
-      {rows.map((r) => (
-        <Link key={r.to} to={r.to} className="card-row">
-          <span className="muted tabular" style={{ width: 48 }}>{r.number != null ? `#${r.number}` : "—"}</span>
-          <span className="grow strong ellipsis">{r.title}</span>
-          <span className="tabular hide-mobile">{r.right}</span>
-          <span style={{ width: 150, display: "flex", justifyContent: "flex-end" }}>{r.status}</span>
-        </Link>
-      ))}
-    </>
+    <RelatedList>
+      {rows.map((r) => <RelatedRow key={r.to} to={r.to} lead={r.number != null ? `#${r.number}` : undefined} title={r.title} end={r.end} />)}
+    </RelatedList>
   );
 }
 
@@ -566,5 +623,6 @@ function ReviewedChip({ clientId }: { clientId: string }) {
   });
   const rating = review.data?.[0]?.rating;
   const words = rating ? `Left a ${rating}-star Google review` : "Left a Google review";
-  return sees ? <Link className="chip chip-green" to={`/marketing?tab=reviews&client=${clientId}`}>{words}</Link> : <span className="chip chip-green">{words}</span>;
+  const star = <Icon name="star" size={13} />;
+  return sees ? <Link className={styles.star} to={`/marketing?tab=reviews&client=${clientId}`}>{star}{words}</Link> : <span className={styles.star}>{star}{words}</span>;
 }

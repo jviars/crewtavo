@@ -8,7 +8,7 @@ import { adminLevel, isPlaceholderEmail, isRole, isSubLogin, SUB_LOGIN_MARK, typ
 import type { Env } from "../env";
 import { emailAuthLink } from "../lib/auth";
 import { renderEmail } from "../lib/email";
-import { dbError, HttpError, must } from "../lib/http";
+import { dbError, HttpError, must, signInHome } from "../lib/http";
 import { sendEmail } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 
@@ -73,15 +73,16 @@ export async function welcomeLink(env: Env, base: string, email: string): Promis
     console.error("Couldn't create an invite link", error);
     throw new HttpError(500, "Couldn't make the invite link. Try again in a moment.");
   }
-  return emailAuthLink(env, base, data.properties.hashed_token, "recovery", true);
+  return emailAuthLink(env, data.properties.hashed_token, "recovery", true);
 }
 
 /**
  * The invitation: a link to set up their account or, without one, a note that they now have access.
  * It goes out from the company's own mailbox (Settings → Email), not Supabase's mailer, which on
- * hosted projects only reaches the project's own team.
+ * hosted projects only reaches the project's own team. `adminAccount`: the account has admin-level
+ * access, so its link only goes through a mailbox an owner connected (lib/notify.ts sendEmail).
  */
-export async function sendInvite(s: TeamScope, to: { email: string; name?: string | null }, link: string | null) {
+export async function sendInvite(s: TeamScope, to: { email: string; name?: string | null }, link: string | null, adminAccount = false) {
   const company = must(await s.db.from("companies").select("name, email").eq("id", s.companyId).maybeSingle());
   const inviter = (await s.db.from("profiles").select("full_name").eq("user_id", s.userId).maybeSingle()).data?.full_name || "Your team";
   const first = to.name?.trim().split(/\s+/)[0];
@@ -93,6 +94,7 @@ export async function sendInvite(s: TeamScope, to: { email: string; name?: strin
     s.env,
     { to: to.email, subject: link ? `Join ${company.name} on Crewtavo` : `You now have access to ${company.name}`, ...renderEmail({ companyName: company.name, text }), replyTo: company.email ?? undefined, fromName: company.name },
     s.companyId,
+    { adminAccount: Boolean(link) && adminAccount },
   );
 }
 
@@ -129,13 +131,15 @@ export async function invitePerson(s: TeamScope, body: { email: string; full_nam
   // Someone who was this company's sub: their old sign-in gives way to the team's (formerSub).
   const wasSub = userId ? await formerSub(s, userId) : false;
   if (!userId) {
+    // Before the account is made: its link can't be, without the instance's own address.
+    signInHome(s.env);
     const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email, options: { data: { full_name: body.full_name ?? "" }, redirectTo: `${s.baseUrl}/` } });
     if (error || !data.user) {
       console.error("Invite failed", error);
       throw new HttpError(400, /already|registered/i.test(error?.message ?? "") ? "That email already has an account. Try again in a moment." : "Couldn't create the invite. Check the email address and try again.");
     }
     userId = data.user.id;
-    link = await emailAuthLink(s.env, s.baseUrl, data.properties.hashed_token, "invite");
+    link = await emailAuthLink(s.env, data.properties.hashed_token, "invite");
   } else if ((await inviteStatus(s.env, s.companyId, userId)).status === "pending") {
     // Invited before but never signed in (the first link expired, or never arrived): a fresh set-up
     // link instead of "sign in as usual", since they don't have a password yet.
@@ -151,7 +155,7 @@ export async function invitePerson(s: TeamScope, body: { email: string; full_nam
   const { error } = await s.db.from("memberships").upsert({ company_id: s.companyId, user_id: userId, role: body.role, role_id: body.role_id ?? null, active: true });
   if (error) throw dbError(error);
 
-  const sent = await sendInvite(s, { email, name: body.full_name }, link);
+  const sent = await sendInvite(s, { email, name: body.full_name }, link, givesAdmin);
   return { user_id: userId, invited: !existing, emailed: sent.sent, reason: sent.sent ? null : sent.reason ?? null, link };
 }
 

@@ -14,11 +14,14 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { FormError } from "@/components/ui/Field";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import p from "./Prefs.module.css";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** The most rows shown before "Show all". */
@@ -147,8 +150,8 @@ export function StripeCards({ enabled, termsVersion }: { enabled: boolean; terms
     },
   });
 
-  if (cards.isPending) return <section className="card card-pad stack-sm" aria-busy="true"><Skeleton width="50%" /><Skeleton width="80%" /><Skeleton width="70%" /></section>;
-  if (cards.error) return <div className="card"><ErrorState compact title="The cards saved in Stripe couldn't load" error={cards.error} onRetry={() => cards.refetch()} /></div>;
+  if (cards.isPending) return <Loading label="Loading the cards saved in Stripe"><SectionSkeleton rows={3} /></Loading>;
+  if (cards.error) return <ErrorState compact title="The cards saved in Stripe couldn't load" error={cards.error} onRetry={() => cards.refetch()} />;
   if (!rows.length) return null;
 
   const shown = all ? rows : rows.slice(0, SHOWN);
@@ -170,58 +173,66 @@ export function StripeCards({ enabled, termsVersion }: { enabled: boolean; terms
   const reach = (r: StripeCardRow) => (r.turned_off ? "Turned autopay off" : byEmail(r) ? null : byText(r) ? "By text" : "No email or phone to send to");
 
   return (
-    <section className="card" aria-labelledby="stripe-cards-title">
-      <div className="card-head">
-        <strong id="stripe-cards-title">{plural(rows.length, "client has", "clients have")} a card saved in Stripe.</strong>
-      </div>
-      <div className="card-pad stack-sm" style={{ paddingBottom: 8 }}>
-        <span className="muted small">
-          They aren't charged from Crewtavo until they agree. Ask them with a Confirm autopay link: they see their card and your terms, and tap once. Stop charging each one by hand in Stripe from the day they move over; their client page says when.
-        </span>
-        {!enabled && <span className="small" style={{ fontWeight: 600 }}>Turn on autopay above and save first.</span>}
-      </div>
-      {owner && choosable.length > 1 && (
-        <label className="card-row checkbox" style={{ fontWeight: 400 }}>
-          <input type="checkbox" checked={chosen.length === choosable.length} onChange={(e) => setPicked(new Set(e.target.checked ? choosable.map((r) => r.client_id) : []))} />
-          <span className="muted small">Select all</span>
-        </label>
-      )}
-      {shown.map((r) => {
-        const note = reach(r);
-        const body = (
-          <span className="grow" style={{ display: "grid", gap: 2, minWidth: 0 }}>
-            <Link to={`/clients/${r.client_id}`} className="strong ellipsis">{r.name}</Link>
-            <span className="muted small">{r.card}{r.expires ? ` · expires ${r.expires}` : ""}{note ? ` · ${note}` : ""}</span>
-          </span>
-        );
-        return owner ? (
-          <label key={r.client_id} className="card-row checkbox" style={{ fontWeight: 400 }}>
-            <input type="checkbox" checked={picked.has(r.client_id)} disabled={r.turned_off} onChange={(e) => toggle(r.client_id, e.target.checked)} aria-label={`Choose ${r.name}`} />
-            {body}
-          </label>
-        ) : (
-          <div key={r.client_id} className="card-row">{body}</div>
-        );
-      })}
-      {rows.length > SHOWN && (
-        <div className="list-foot">
-          <span>{all ? `All ${rows.length}` : `${SHOWN} of ${rows.length}`}</span>
-          <Button size="sm" variant="ghost" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${rows.length}`}</Button>
+    <Section level={3} title="Cards saved in Stripe" count={rows.length}>
+      <p className="set-note">
+        {plural(rows.length, "client has", "clients have")} a card saved in Stripe. They aren't charged from Crewtavo until they agree. Ask them with a Confirm autopay link: they see their card and your terms, and tap once. Stop charging each one by hand in Stripe from the day they move over; their client page says when.
+      </p>
+      {!enabled && (
+        <div className={`callout callout-warning ${p.gapTop}`}>
+          <Icon name="alert" size={16} />
+          <div className="grow">Turn on autopay above and save first.</div>
         </div>
       )}
-      <div className="card-pad stack-sm">
+      <ul className={`${p.choices} ${p.after}`} role="list" aria-label="Clients with a card saved in Stripe">
+        {owner && choosable.length > 1 && (
+          <li>
+            <label className={p.choice}>
+              <input type="checkbox" checked={chosen.length === choosable.length} onChange={(e) => setPicked(new Set(e.target.checked ? choosable.map((r) => r.client_id) : []))} />
+              <span className={`${p.rowText} ${p.quiet}`}>Select all</span>
+            </label>
+          </li>
+        )}
+        {shown.map((r) => {
+          const note = reach(r);
+          const body = (
+            <span className={p.rowText}>
+              <Link to={`/clients/${r.client_id}`} className={`ellipsis ${p.name}`}>{r.name}</Link>
+              <span className={p.hint}>{r.card}{r.expires ? ` · expires ${r.expires}` : ""}{note ? ` · ${note}` : ""}</span>
+            </span>
+          );
+          return (
+            <li key={r.client_id}>
+              {owner ? (
+                <label className={p.choice}>
+                  <input type="checkbox" checked={picked.has(r.client_id)} disabled={r.turned_off} onChange={(e) => toggle(r.client_id, e.target.checked)} aria-label={`Choose ${r.name}`} />
+                  {body}
+                </label>
+              ) : (
+                <div className={p.choice}>{body}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {rows.length > SHOWN && (
+        <div className={p.more}>
+          <span>{all ? `All ${rows.length}` : `${SHOWN} of ${rows.length}`}</span>
+          <button type="button" className="link-btn small" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${rows.length}`}</button>
+        </div>
+      )}
+      <div className={p.after}>
         <FormError error={send.error ?? vouch.error} />
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button variant="primary" icon="send" loading={send.isPending} disabled={!enabled || (!features.email && !features.sms)} onClick={askSend}>
+        <div className={p.groupSave} style={{ marginTop: 0 }}>
+          <Button icon="send" loading={send.isPending} disabled={!enabled || (!features.email && !features.sms)} onClick={askSend}>
             {chosen.length ? `Send Confirm autopay links to ${chosen.length}` : "Send Confirm autopay links"}
           </Button>
           {owner && (
-            <Button icon="check" wrap loading={vouch.isPending} disabled={!enabled || !chosen.length} onClick={askVouch}>These clients agreed to be charged automatically</Button>
+            <Button icon="check" variant="ghost" wrap loading={vouch.isPending} disabled={!enabled || !chosen.length} onClick={askVouch}>These clients agreed to be charged automatically</Button>
           )}
         </div>
-        {!features.email && !features.sms && <span className="muted small">Connect email in Settings → Email, or set up texting, to send links.</span>}
-        {owner && <span className="muted small">For clients who already agreed with you some other way. Tick them, then record it. Owners only.</span>}
+        {!features.email && !features.sms && <p className="set-note">Connect email in Settings → Email, or set up texting, to send links.</p>}
+        {owner && <p className="set-note">For clients who already agreed with you some other way. Tick them, then record it. Owners only.</p>}
       </div>
-    </section>
+    </Section>
   );
 }

@@ -28,6 +28,19 @@ const STEPS: Array<{ icon: IconName; title: string; body: string }> = [
   { icon: "check", title: "Save, then share it", body: "Saving keeps a picture of the drawing. Put it on a quote or invoice, and choose whether the client sees it there." },
 ];
 
+/** The keys, on a keyboard (MeasurePage's own: the tools' letters and the rest). */
+const SHORTCUTS: Array<[string, string]> = [
+  ["A", "Area"],
+  ["X", "Cut out"],
+  ["L", "Line"],
+  ["C", "Count"],
+  ["E", "Edit"],
+  ["F", "Fit to shapes"],
+  ["Delete", "Remove the selected shape"],
+  ["Ctrl Z", "Undo"],
+  ["?", "This help"],
+];
+
 export function MeasureHelp({ open, onClose, touch }: { open: boolean; onClose: () => void; touch: boolean }) {
   const tap = touch ? "Tap" : "Click";
   return (
@@ -36,27 +49,36 @@ export function MeasureHelp({ open, onClose, touch }: { open: boolean; onClose: 
         <ol className="measure-help-steps">
           {STEPS.map((s) => (
             <li key={s.title}>
-              <span className="measure-help-icon" aria-hidden="true"><Icon name={s.icon} size={20} /></span>
-              <span className="grow"><strong>{s.title}</strong><span className="muted">{s.body}</span></span>
+              <span className="measure-help-icon" aria-hidden="true"><Icon name={s.icon} size={16} /></span>
+              <span className="grow"><strong>{s.title}</strong><span>{s.body}</span></span>
             </li>
           ))}
         </ol>
-        <div className="callout">
-          <Icon name="info" size={20} />
-          <div className="grow stack-sm">
-            <span>Tips</span>
-            <ul className="measure-help-tips">
-              <li>{tap} the first point (or press Enter) to close an area. Double-{tap.toLowerCase()} finishes a line.</li>
-              <li>Made a mistake? Undo takes back the last point while you draw{touch ? "" : " (Ctrl+Z or ⌘Z)"}. {touch ? "Cancel" : "Esc"} drops the shape you're drawing.</li>
-              <li>Edit lets you drag corners. Drag the small dots between corners to add one. Pick an area in Edit and press Cut out to turn it into a cutout.</li>
-              <li>Roofs: set the pitch under Roof pitch and edges. From lidar reads it from free USGS lidar for each roof you've drawn, without leaving the office; or measure it with your phone on the roof or from a photo. A porch or dormer at another pitch gets its own from its row in Shapes. Mark lines as eaves, rakes, ridges, hips or valleys for drip edge and ridge cap.</li>
-              <li>The map starts on Auto, which picks the sharpest imagery for wherever you are (Google satellite, when your team added a Google key). The Imagery button lets you choose a source yourself, switch to Terrain, lay slope and 2 ft contour lines over the map (US), and turn street names and house numbers on or off.</li>
-              {touch && <li>Need more room? The full-screen button at the top right fills the screen with the map. Press it again to get back to the page and its totals.</li>}
-              <li>New site where the aerial still shows dirt? Under Plan on the map, put the site plan on the map, line it up by {touch ? "tapping" : "clicking"} the same two spots on the plan and the aerial, and draw over it.</li>
-              {!touch && <li>Shortcuts: A area, X cut out, L line, C count, E edit, F fit to shapes, Delete removes the selected shape.</li>}
-            </ul>
-          </div>
-        </div>
+        <section className="measure-help-more" aria-labelledby="measure-help-tips">
+          <h3 id="measure-help-tips">Tips</h3>
+          <ul className="measure-help-tips">
+            <li>{tap} the first point (or press Enter) to close an area. Double-{tap.toLowerCase()} finishes a line.</li>
+            <li>Made a mistake? Undo takes back the last point while you draw{touch ? "" : " (Ctrl+Z or ⌘Z)"}. {touch ? "Cancel" : "Esc"} drops the shape you're drawing.</li>
+            <li>Edit lets you drag corners. Drag the small dots between corners to add one. Pick an area in Edit and press Cut out to turn it into a cutout.</li>
+            <li>Roofs: set the pitch under Roof pitch and edges. From lidar reads it from free USGS lidar for each roof you've drawn, without leaving the office; or measure it with your phone on the roof or from a photo. A porch or dormer at another pitch gets its own from its row in Shapes. Mark lines as eaves, rakes, ridges, hips or valleys for drip edge and ridge cap.</li>
+            <li>The map starts on Auto, which picks the sharpest imagery for wherever you are (Google satellite, when your team added a Google key). The Imagery button lets you choose a source yourself, switch to Terrain, lay slope and 2 ft contour lines over the map (US), and turn street names and house numbers on or off.</li>
+            {touch && <li>Need more room? The full-screen button at the top right fills the screen with the map. Press it again to get back to the page and its totals.</li>}
+            <li>New site where the aerial still shows dirt? Under Plan on the map, put the site plan on the map, line it up by {touch ? "tapping" : "clicking"} the same two spots on the plan and the aerial, and draw over it.</li>
+          </ul>
+        </section>
+        {!touch && (
+          <section className="measure-help-more" aria-labelledby="measure-help-keys">
+            <h3 id="measure-help-keys">Shortcuts</h3>
+            <dl className="measure-help-keys">
+              {SHORTCUTS.map(([key, what]) => (
+                <div key={key}>
+                  <dt>{key.split(" ").map((k) => <kbd key={k} className="kbd">{k}</kbd>)}</dt>
+                  <dd>{what}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
         <div className="form-actions">
           <Button variant="primary" onClick={onClose}>Got it</Button>
         </div>

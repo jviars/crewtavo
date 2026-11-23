@@ -7,14 +7,18 @@ import { featureOn } from "@/components/shell/nav";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { CardSkeleton, Loading } from "@/components/ui/Skeleton";
+import { Menu } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { useSopIndex } from "../kb/kbData";
+import { SaveBar, SettingsActions, SwitchRow } from "./SettingsKit";
+import styles from "./settings.module.css";
+import { Select } from "@/components/ui/Select";
 
 interface Item {
   key: string;
@@ -47,7 +51,7 @@ export function ChecklistSettings() {
   const session = useSession();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
-  const listRef = useListAnimation<HTMLDivElement>();
+  const listRef = useListAnimation<HTMLUListElement>();
   const key = ["checklist-templates", session.company.id];
   const templates = useQuery({
     queryKey: key,
@@ -92,26 +96,35 @@ export function ChecklistSettings() {
       commit: () => remove.mutateAsync(template.id),
     });
 
-  if (templates.isPending) return <Loading><div className="two-col"><div className="narrow"><CardSkeleton lines={4} /></div><div className="wide"><CardSkeleton lines={6} /></div></div></Loading>;
-  if (templates.error) return <div className="card"><ErrorState error={templates.error} onRetry={() => templates.refetch()} /></div>;
+  if (templates.isPending) return <Loading><div className={styles.checklists}><SectionSkeleton rows={3} /><SectionSkeleton rows={6} /></div></Loading>;
+  if (templates.error) return <ErrorState error={templates.error} onRetry={() => templates.refetch()} />;
   const current = templates.data?.find((t) => t.id === selected) ?? null;
 
   return (
-    <div className="two-col">
-      <aside className="narrow stack-sm">
-        <div className="card" ref={listRef}>
-          {templates.data?.map((t) => (
-            <button key={t.id} type="button" className="card-row" style={{ background: t.id === selected ? "var(--fill-2)" : undefined }} onClick={() => setSelected(t.id)}>
-              <Icon name="clipboard" size={16} />
-              <span className="grow"><strong>{t.name}</strong><span className="muted small" style={{ display: "block" }}>{t.items.length} items{t.active ? "" : " · hidden"}</span></span>
-            </button>
-          ))}
-          {!templates.data?.length && <EmptyState inline title="No checklists yet" />}
+    <>
+      <SettingsActions><Button icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New checklist</Button></SettingsActions>
+      {!templates.data?.length ? (
+        <EmptyState inline title="No checklists yet" action={<Button onClick={() => create.mutate()}>Make your first checklist</Button>} />
+      ) : (
+        <div className={styles.checklists}>
+          <nav className={styles.templates} aria-label="Checklists">
+            <ul role="list" ref={listRef}>
+              {templates.data.map((t) => (
+                <li key={t.id}>
+                  <button type="button" className={styles.template} aria-current={t.id === selected ? "true" : undefined} onClick={() => setSelected(t.id)}>
+                    <span className={styles.templateName}>{t.name}</span>
+                    <span className={styles.templateMeta}>{t.items.length} {t.items.length === 1 ? "item" : "items"}{t.active ? "" : " · hidden"}{t.every_job ? " · every job" : ""}</span>
+                    {/* On a phone the one being edited is ticked, as a phone's list of choices has it. */}
+                    {t.id === selected && <span className={styles.templateCheck} aria-hidden="true"><Icon name="check" size={18} /></span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <div className={styles.editor}>{current ? <TemplateEditor key={current.id} template={current} services={services.data ?? []} onDelete={() => deleteTemplate(current)} /> : null}</div>
         </div>
-        <Button icon="plus" loading={create.isPending} onClick={() => create.mutate()}>New checklist</Button>
-      </aside>
-      <div className="wide">{current ? <TemplateEditor key={current.id} template={current} services={services.data ?? []} onDelete={() => deleteTemplate(current)} /> : null}</div>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -119,7 +132,7 @@ function TemplateEditor({ template, services, onDelete }: { template: Template; 
   const session = useSession();
   const queryClient = useQueryClient();
   const [t, setT] = useState(template);
-  const itemsRef = useListAnimation<HTMLDivElement>();
+  const itemsRef = useListAnimation<HTMLOListElement>();
   const dirty = JSON.stringify(t) !== JSON.stringify(template);
   const save = useMutation({
     meta: { inline: true },
@@ -141,67 +154,68 @@ function TemplateEditor({ template, services, onDelete }: { template: Template; 
   };
 
   return (
-    <div className="card card-pad stack">
-      <Field label="Checklist name"><input className="input" value={t.name} maxLength={120} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
-      <label className="switch-row">
-        <input type="checkbox" className="switch" checked={t.every_job} onChange={(e) => setT({ ...t, every_job: e.target.checked })} />
-        <span>
-          Use on every job
-          <span className="muted small" style={{ display: "block", fontWeight: 400 }}>It comes up by itself on every visit, whatever the job has on it.</span>
-        </span>
-      </label>
-      {!t.every_job && (
-        <ServicesPicker
-          value={t.service_ids}
-          services={services}
-          onChange={(service_ids) => setT({ ...t, service_ids })}
-          work={t.work.filter(isPavingWork)}
-          calculator={featureOn(session.company.settings, "paving_app")}
-          onWork={(work) => setT({ ...t, work })}
-        />
-      )}
-      <label className="switch-row"><input type="checkbox" className="switch" checked={t.active} onChange={(e) => setT({ ...t, active: e.target.checked })} />Crews can use this checklist</label>
-      <label className="switch-row">
-        <input type="checkbox" className="switch" checked={t.show_to_client} onChange={(e) => setT({ ...t, show_to_client: e.target.checked })} />
-        <span>
-          Show to client
-          <span className="muted small" style={{ display: "block", fontWeight: 400 }}>Finished answers show on their past visit in the Client Hub and print on the invoice. Photos aren't included.</span>
-        </span>
-      </label>
-      <div className="stack-sm" ref={itemsRef}>
-        {t.items.map((item, i) => (
-          <div key={item.key} className="card" style={{ padding: 12, boxShadow: "none", background: "var(--fill)", display: "grid", gap: 8 }}>
-            <div className="row">
-              <span className="muted tabular small" style={{ width: 20 }}>{i + 1}</span>
-              <input className="input input-sm grow" value={item.label} maxLength={200} placeholder="What should the crew check or record?" onChange={(e) => setItem(i, { label: e.target.value })} aria-label="Item label" />
-              <Select className="select input-sm" style={{ width: 130 }} value={item.type} onChange={(e) => setItem(i, { type: e.target.value as Item["type"], options: e.target.value === "choice" ? item.options ?? ["Yes", "No"] : undefined })} aria-label="Item type">
-                {TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </Select>
-            </div>
-            <div className="row wrap" style={{ paddingLeft: 28 }}>
-              <label className="checkbox small"><input type="checkbox" checked={item.required} onChange={(e) => setItem(i, { required: e.target.checked })} />Required</label>
-              {item.type === "choice" && <input className="input input-sm grow" value={(item.options ?? []).join(", ")} placeholder="Options, separated by commas" onChange={(e) => setItem(i, { options: e.target.value.split(",").map((o) => o.trim()) })} aria-label="Options" />}
-              <Select className="select input-sm" style={{ maxWidth: 240 }} value={item.sop_page_id ?? ""} onChange={(e) => setItem(i, { sop_page_id: e.target.value || undefined })} aria-label="Guide for this item" title="Crews open this guide from the item on their visit">
-                <option value="">No guide</option>
-                {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft: crews can't see it)" : ""}</option>)}
-                {item.sop_page_id && guides.data && !guides.data.pages.some((g) => g.id === item.sop_page_id) && <option value={item.sop_page_id}>A deleted guide</option>}
-              </Select>
-              <span className="grow" />
-              <Button size="sm" variant="ghost" icon="chevronUp" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)} />
-              <Button size="sm" variant="ghost" icon="chevronDown" aria-label="Move down" disabled={i === t.items.length - 1} onClick={() => move(i, 1)} />
-              <Button size="sm" variant="ghost" icon="trash" aria-label="Remove item" onClick={() => setT({ ...t, items: t.items.filter((_, j) => j !== i) })} />
-            </div>
+    <div className="settings-body">
+      <div className={styles.nameRow}>
+        <Field label="Checklist name"><input className="input" value={t.name} maxLength={120} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
+        <Menu label={`More for ${template.name}`} title={template.name} items={[{ label: "Delete checklist", icon: "trash", danger: true, onSelect: onDelete }]} />
+      </div>
+      <Section level={3} title="When it comes up">
+        <div className="set-rows">
+          <SwitchRow label="Use on every job" hint="It comes up by itself on every visit, whatever the job has on it." checked={t.every_job} onChange={(on) => setT({ ...t, every_job: on })} />
+        </div>
+        {!t.every_job && (
+          <div className={styles.services}>
+            <ServicesPicker
+              value={t.service_ids}
+              services={services}
+              onChange={(service_ids) => setT({ ...t, service_ids })}
+              work={t.work.filter(isPavingWork)}
+              calculator={featureOn(session.company.settings, "paving_app")}
+              onWork={(work) => setT({ ...t, work })}
+            />
           </div>
-        ))}
-        <Button size="sm" variant="ghost" icon="plus" style={{ justifySelf: "start" }} disabled={t.items.length >= MAX_CHECKLIST_ITEMS} onClick={() => setT({ ...t, items: [...t.items, { key: slug(`item ${t.items.length + 1}`, t.items.map((x) => x.key)), label: "", type: "check", required: false }] })}>Add item</Button>
-      </div>
+        )}
+      </Section>
+      <Section level={3} title="Who sees it">
+        <div className="set-rows">
+          <SwitchRow label="Crews can use this checklist" checked={t.active} onChange={(on) => setT({ ...t, active: on })} />
+          <SwitchRow label="Show to client" hint="Finished answers show on their past visit in the Client Hub and print on the invoice. Photos aren't included." checked={t.show_to_client} onChange={(on) => setT({ ...t, show_to_client: on })} />
+        </div>
+      </Section>
+      <Section level={3} title="Items" count={t.items.length} action={<button type="button" disabled={t.items.length >= MAX_CHECKLIST_ITEMS} onClick={() => setT({ ...t, items: [...t.items, { key: slug(`item ${t.items.length + 1}`, t.items.map((x) => x.key)), label: "", type: "check", required: false }] })}><Icon name="plus" size={14} />Add item</button>}>
+        <ol className={styles.items} ref={itemsRef}>
+          {t.items.map((item, i) => (
+            <li key={item.key} className={styles.item}>
+              <span className={styles.itemNumber} aria-hidden="true">{i + 1}</span>
+              <div className={styles.itemMain}>
+                <input className="input input-sm" value={item.label} maxLength={200} placeholder="What should the crew check or record?" onChange={(e) => setItem(i, { label: e.target.value })} aria-label={`Item ${i + 1}`} />
+                <Select className="select input-sm" value={item.type} onChange={(e) => setItem(i, { type: e.target.value as Item["type"], options: e.target.value === "choice" ? item.options ?? ["Yes", "No"] : undefined })} aria-label="Item type">
+                  {TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </Select>
+              </div>
+              <div className={styles.itemMore}>
+                <label className="checkbox small"><input type="checkbox" checked={item.required} onChange={(e) => setItem(i, { required: e.target.checked })} />Required</label>
+                {item.type === "choice" && <input className="input input-sm grow" value={(item.options ?? []).join(", ")} placeholder="Options, separated by commas" onChange={(e) => setItem(i, { options: e.target.value.split(",").map((o) => o.trim()) })} aria-label="Options" />}
+                <Select className={`select input-sm ${styles.guide}`} value={item.sop_page_id ?? ""} onChange={(e) => setItem(i, { sop_page_id: e.target.value || undefined })} aria-label="Guide for this item" title="Crews open this guide from the item on their visit">
+                  <option value="">No guide</option>
+                  {(guides.data?.pages ?? []).map((g) => <option key={g.id} value={g.id}>{g.title}{g.status === "draft" ? " (draft: crews can't see it)" : ""}</option>)}
+                  {item.sop_page_id && guides.data && !guides.data.pages.some((g) => g.id === item.sop_page_id) && <option value={item.sop_page_id}>A deleted guide</option>}
+                </Select>
+                <span className="grow" />
+                <Button size="sm" variant="ghost" icon="chevronUp" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)} />
+                <Button size="sm" variant="ghost" icon="chevronDown" aria-label="Move down" disabled={i === t.items.length - 1} onClick={() => move(i, 1)} />
+                <Button size="sm" variant="ghost" icon="trash" aria-label="Remove item" onClick={() => setT({ ...t, items: t.items.filter((_, j) => j !== i) })} />
+              </div>
+            </li>
+          ))}
+        </ol>
+        {!t.items.length && <EmptyState inline title="No items yet" />}
+      </Section>
       <FormError error={save.error} />
-      <div className="form-actions">
-        <Button variant="danger" icon="trash" onClick={onDelete}>Delete</Button>
-        <span className="spacer" />
-        {dirty && <Button onClick={() => setT(template)}>Discard changes</Button>}
+      <SaveBar note={dirty ? "Unsaved changes" : null}>
         <Button variant="primary" loading={save.isPending} done={saved} disabled={!dirty && !saved} onClick={() => save.mutate()}>Save checklist</Button>
-      </div>
+        {dirty && <Button variant="ghost" onClick={() => setT(template)}>Discard changes</Button>}
+      </SaveBar>
     </div>
   );
 }
@@ -227,7 +241,7 @@ function ServicesPicker({ value, services, onChange, work, calculator, onWork }:
   return (
     <Field label="Use on jobs with" optional hint={value.length || work.length ? "It comes up by itself on visits for jobs with any of these." : "With none, crews can pick it on any job."}>
       {chosen.length + work.length > 0 && (
-        <div className="row wrap" style={{ gap: 6 }}>
+        <div className={`row wrap ${styles.tags}`}>
           {chosen.map((s) => (
             <span key={s.id} className="tag">
               {s.name}

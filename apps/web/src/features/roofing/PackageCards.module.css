@@ -18,15 +18,16 @@
 .highlight { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .highlight :global(.input) { flex: 1; min-width: 0; margin-right: 4px; font-weight: 400; }
 
-/* The package cards an estimate starts from (PackagePicker) */
+/* The package cards an estimate starts from (PackagePicker): picked-choice tiles, the one picked
+   ringed in green, with a quiet foot to offer it as an option. */
 .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr)); gap: 12px; }
 .pick {
   position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden;
-  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--page);
   transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
 }
 .pick:hover { border-color: var(--border-strong); }
-.pick[data-on] { border-color: var(--green); box-shadow: var(--ring); }
+.pick[data-on] { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
 .pickMain {
   display: flex; flex-direction: column; flex: 1; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 0;
   background: none; color: var(--ink); font: inherit; font-weight: 400; text-align: left; cursor: pointer;
@@ -34,31 +35,43 @@
 .pickMain:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
 .pickMain[aria-disabled="true"] { cursor: default; }
 .pickPicture { width: 100%; border-radius: 0; }
-.pickText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; justify-items: start; min-width: 0; padding: 12px 14px 14px; }
-/* A long tier word stops at the card's edge. */
-.pickText :global(.chip) { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-.pickText strong { font-size: var(--fs-16); letter-spacing: var(--tracking-tight); overflow-wrap: anywhere; }
-.pickPrice { font-size: var(--fs-13); color: var(--text-2); }
-.pickText small { font-size: var(--fs-13); color: var(--text-3); }
+.pickText { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; justify-items: start; min-width: 0; padding: 10px 12px 12px; }
+/* The tier: a small quiet label over the name. A long one stops at the card's edge. */
+.pickText :global(.chip) { display: inline-block; max-width: 100%; height: 20px; margin-bottom: 2px; padding: 0 7px; overflow: hidden; text-overflow: ellipsis; line-height: 20px; font-size: var(--fs-11); font-weight: 700; color: var(--text-2); }
+.pickText strong { font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pickPrice { font-size: var(--fs-13); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pickText small { font-size: var(--fs-12); color: var(--text-3); }
 /* A package still on the example warranty setup gave it (flagExamples). */
-.pickFlag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-13); font-weight: 600; color: var(--warning); }
+.pickFlag { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; font-size: var(--fs-12); font-weight: 600; color: var(--warning); }
 .pickCheck, .pickNumber {
-  position: absolute; top: 10px; right: 10px; display: grid; place-items: center; width: 26px; height: 26px;
-  border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 3px var(--surface);
+  position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 50%; background: var(--green-solid, var(--green)); color: #fff; box-shadow: 0 0 0 2px var(--page);
 }
-.pickNumber { font-size: var(--fs-14); font-weight: 700; font-variant-numeric: tabular-nums; }
+.pickNumber { font-size: var(--fs-13); font-weight: 700; font-variant-numeric: tabular-nums; }
 .pickOffer, .pickFoot {
   display: flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--control); padding: 0 12px;
-  border: 0; border-top: 1px solid var(--divider); background: var(--fill); font: inherit; font-size: var(--fs-13); font-weight: 700;
+  border: 0; border-top: 1px solid var(--row-divider); background: none; font: inherit; font-size: var(--fs-13); font-weight: 600;
 }
-.pickOffer { color: var(--green-dark); cursor: pointer; }
-.pickOffer:hover { background: var(--fill-2); }
+.pickOffer { color: var(--text-2); cursor: pointer; }
+.pickOffer :global(svg) { color: var(--quiet); }
+.pickOffer:hover { background: var(--fill); color: var(--ink); }
 .pickOffer:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
-.pickFoot { color: var(--text-3); font-weight: 600; }
-.pickNote { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
+.pickFoot { color: var(--quiet); font-weight: 500; }
+.pickNote { margin: 0; font-size: var(--fs-12); color: var(--text-3); }
 /* On a phone the cards stack, so the picture moves to the side. */
 @media (max-width: 600px) {
   .pickMain { flex-direction: row; align-items: stretch; }
   .pickPicture { width: 96px; aspect-ratio: auto; min-height: 72px; }
   .pickText { padding: 12px 44px 12px 14px; }
+  .pickOffer, .pickFoot { min-height: 44px; font-size: var(--fs-14); }
+}
+/* Highlights: each line a field with quiet move and remove buttons. */
+.highlight :global(.btn-icon) { color: var(--quiet); }
+.highlight :global(.btn-icon:hover:not(:disabled)) { color: var(--ink); }
+.addLine { justify-self: start; }
+/* A finger's 44px on a phone. */
+@media (max-width: 900px) {
+  .highlight { gap: 0; }
+  .highlight :global(.btn-icon) { width: 44px; height: 44px; }
+  .addLine { display: inline-flex; align-items: center; min-height: 44px; }
 }

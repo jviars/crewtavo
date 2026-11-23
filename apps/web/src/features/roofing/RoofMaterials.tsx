@@ -73,11 +73,13 @@ export function RoofMaterials({ quote, editable, live = editable, onChanged, opt
   if (!supplier.data && !anyPriced) {
     return (
       <div className="callout" role="note">
-        <Icon name="truck" size={20} />
-        <span className="grow stack-sm" style={{ gap: 6 }}>
-          <span>See exactly what this roof's materials cost. Connect your ABC Supply account and every bundle, roll and piece is priced at your branch, at your prices.</span>
-          {canSetUp ? <Link className="btn btn-sm" style={{ justifySelf: "start" }} to="/apps/abc_supply">Set up ABC Supply</Link> : <span className="muted small" style={{ fontWeight: 400 }}>An owner or admin can install ABC Supply in Apps.</span>}
-        </span>
+        <Icon name="truck" size={16} />
+        <div className="grow">
+          <div>See exactly what this roof's materials cost.</div>
+          Connect your ABC Supply account and every bundle, roll and piece is priced at your branch, at your prices.
+          {!canSetUp && " An owner or admin can install ABC Supply in Apps."}
+        </div>
+        {canSetUp && <Link className="btn btn-sm" to="/apps/abc_supply">Set up ABC Supply</Link>}
       </div>
     );
   }
@@ -118,7 +120,7 @@ export function RoofMaterials({ quote, editable, live = editable, onChanged, opt
   const where = branch && supplier.data?.environment === "sandbox" ? `${branch} (ABC's sandbox test prices)` : branch;
 
   return (
-    <section className="stack-sm" style={{ gap: 10 }} aria-labelledby="roof-materials">
+    <section className="material-card" aria-labelledby="roof-materials">
       <div className="material-summary">
         <span className="grow">
           <strong id="roof-materials">Materials for this roof</strong>
@@ -150,9 +152,9 @@ export function RoofMaterials({ quote, editable, live = editable, onChanged, opt
           return (
             <div key={line.id} className="material-line" data-optional={!counts(line) || undefined}>
               <div className="material-line-head">
-                <strong className="grow">{choice && <span className="chip chip-blue estimate-choice">{choice}</span>}{line.name}</strong>
+                <strong className="grow">{line.name}{choice && <span className="tag material-choice">{choice}</span>}</strong>
                 <span className="muted small nowrap">{formatNumber(Number(line.quantity), Number(line.quantity) < 100 ? 1 : 0)} {line.unit}</span>
-                <strong className="num">{rows.length ? formatMoney(lineCost(rows)) : <span className="muted">—</span>}</strong>
+                <strong className="num">{rows.length ? formatMoney(lineCost(rows)) : null}</strong>
               </div>
               {rows.length > 0 && (
                 <ul className="material-items">
@@ -165,7 +167,7 @@ export function RoofMaterials({ quote, editable, live = editable, onChanged, opt
                       <span className="num nowrap small">
                         {formatNumber(row.quantity)} {uomName(row)}{row.quantity === 1 ? "" : "s"} × {row.unit_price === null ? <span className="muted" title={row.note ?? undefined}>call for price</span> : formatMoneyCents(row.unit_price)}
                       </span>
-                      <strong className="num">{row.total === null ? <span className="muted">—</span> : formatMoney(row.total)}</strong>
+                      <strong className="num">{row.total === null ? null : formatMoney(row.total)}</strong>
                       {canEdit && row.link && (
                         <span className="material-actions">
                           <button type="button" className="icon-btn" aria-label={`Change how many ${row.name} per ${unit}`} onClick={() => setEditing({ link: row.link!, unit })}><Icon name="edit" size={14} /></button>

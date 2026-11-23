@@ -7,12 +7,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { NumberInput } from "@/components/ui/NumberInput";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import p from "./Prefs.module.css";
 import { changedNumbers, HIGHEST_NUMBER, nextNumberProblem, NUMBER_KINDS, type NextNumber } from "./nextNumbers";
+import { NumberInput } from "@/components/ui/NumberInput";
 
 export function NextNumbers() {
   const { company } = useSession();
@@ -42,39 +44,41 @@ export function NextNumbers() {
   });
   const done = useJustDone(save);
 
-  if (numbers.isPending) return <CardSkeleton lines={3} />;
-  if (numbers.error) return <div className="card"><ErrorState error={numbers.error} onRetry={() => numbers.refetch()} /></div>;
+  if (numbers.isPending) return <Loading label="Loading the next numbers"><SectionSkeleton rows={2} /></Loading>;
+  if (numbers.error) return <ErrorState error={numbers.error} onRetry={() => numbers.refetch()} />;
 
   return (
-    <form className="card card-pad stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-      <strong>Numbering</strong>
-      <span className="muted small">
-        The number the next one of each gets. Coming from another system, set each to one more than the last you used there: 4311 if your last invoice was #4310. It can&apos;t be a number already used here, or one below it.
-      </span>
-      <div className="form-grid">
-        {NUMBER_KINDS.map(({ kind, label }) => {
-          const row = saved.find((s) => s.kind === kind);
-          return (
-            <Field key={kind} label={label} error={problems[kind]} hint={highest(kind) > 0 ? `The highest used so far is #${highest(kind)}.` : "None made yet."}>
-              <NumberInput
-                className="input"
-                inputMode="numeric"
-                min={1}
-                max={HIGHEST_NUMBER}
-                step={1}
-                required
-                value={typed[kind] ?? String(row?.next_number ?? 1)}
-                onChange={(e) => setTyped({ ...typed, [kind]: e.target.value })}
-              />
-            </Field>
-          );
-        })}
-      </div>
-      <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start" }}>
-        <FormChecks />
-        <Button type="submit" variant="primary" loading={save.isPending} done={done} disabled={!changes.length}>Save numbers</Button>
-      </div>
+    <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
+      <Section level={3} title="Numbering">
+        <p className="set-note">
+          The number the next one of each gets. Coming from another system, set each to one more than the last you used there: 4311 if your last invoice was #4310. It can&apos;t be a number already used here, or one below it.
+        </p>
+        <div className="set-grid">
+          {NUMBER_KINDS.map(({ kind, label }) => {
+            const row = saved.find((s) => s.kind === kind);
+            return (
+              <Field key={kind} label={label} error={problems[kind]} hint={highest(kind) > 0 ? `The highest used so far is #${highest(kind)}.` : "None made yet."}>
+                <NumberInput
+                  className="input"
+                  inputMode="numeric"
+                  min={1}
+                  max={HIGHEST_NUMBER}
+                  step={1}
+                  required
+                  value={typed[kind] ?? String(row?.next_number ?? 1)}
+                  onChange={(e) => setTyped({ ...typed, [kind]: e.target.value })}
+                />
+              </Field>
+            );
+          })}
+        </div>
+        <FormError error={save.error} />
+        <div className={p.groupSave}>
+          <Button type="submit" size="sm" loading={save.isPending} done={done} disabled={!changes.length}>Save numbers</Button>
+          {changes.length > 0 && !save.isPending && <span className="set-save-note">{changes.length === 1 ? "1 unsaved change" : `${changes.length} unsaved changes`}</span>}
+          <FormChecks />
+        </div>
+      </Section>
     </form>
   );
 }

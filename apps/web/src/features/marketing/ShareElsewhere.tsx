@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/toast";
+import styles from "./Presence.module.css";
 import { canShareFiles, downloadFile, shareFiles, shareWithSheet, type ShareSource } from "./socialShare";
 
 export function ShareElsewhere({ post, caption, open, onClose }: { post: ShareSource | null; caption: string; open: boolean; onClose: () => void }) {
@@ -43,14 +44,14 @@ export function ShareElsewhere({ post, caption, open, onClose }: { post: ShareSo
         ) : urls.length > 0 ? (
           <div className="thumbs">
             {files.data!.map((file, i) => (
-              <div key={file.name} className="stack-sm" style={{ gap: 6 }}>
+              <div key={file.name} className={styles.thumbCell}>
                 <div className="thumb"><img src={urls[i]} alt={`Picture ${i + 1}`} /></div>
                 <Button size="sm" icon="download" onClick={() => downloadFile(file)}>Download</Button>
               </div>
             ))}
           </div>
         ) : null}
-        {caption.trim() ? <blockquote className="pre-wrap small" style={{ margin: 0, paddingLeft: 12, borderLeft: "3px solid var(--border)" }}>{caption.trim()}</blockquote> : <span className="muted small">No caption yet.</span>}
+        {caption.trim() ? <blockquote className={`pre-wrap ${styles.quote}`}>{caption.trim()}</blockquote> : <span className="muted small">No caption yet.</span>}
         <div className="form-actions">
           {caption.trim() && <Button icon="copy" onClick={() => copyText(caption.trim(), "Caption copied. Paste it on X, LinkedIn or Nextdoor.")}>Copy caption</Button>}
           {sheet && <Button variant="primary" icon="share" onClick={share}>Share</Button>}

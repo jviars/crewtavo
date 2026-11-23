@@ -45,7 +45,9 @@ test("the More sheet and a dialog close when pulled down on a phone", async ({ a
   await page.locator(".mobile-nav").getByRole("button", { name: "More" }).click();
   const sheet = page.getByRole("dialog", { name: "All sections" });
   await expect(sheet).toBeVisible();
-  const grip = await centre(page, ".sheet");
+  // Once it has slid all the way up, so the grip is found where it stays.
+  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+  const grip = await centre(page, ".more-sheet .sheet-grab");
   await drag(cdp, grip, { x: grip.x, y: grip.y + 30 });
   await expect(sheet).toBeVisible();
   await page.waitForTimeout(600);
@@ -72,7 +74,7 @@ test("holding a job on a phone picks it instead of opening it", async ({ as, dat
   const cdp = await touches(page);
   await page.goto("/jobs");
   await page.getByLabel("Search jobs").fill(String(job.number));
-  const row = page.locator("tbody tr").filter({ hasText: job.title });
+  const row = page.locator(".il-row").filter({ hasText: job.title });
   await expect(row).toBeVisible();
 
   const box = await row.boundingBox();

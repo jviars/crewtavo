@@ -1,10 +1,17 @@
-/* Settings → Storage: how full storage is, the limit, who's using it, by role and by area. */
+/* Settings → Storage: how full storage is, the limit, photos and videos, who's using it, by role and by area. */
 
-.page { max-width: 860px; }
-.title { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.gap { margin-top: 14px; }
+.line { display: block; margin-top: 10px; }
+.subhead { margin: 18px 0 0; font-size: var(--fs-12); font-weight: 600; color: var(--text-2); }
+.where { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); }
+
+/* What's stored: the figure, against the limit. */
+.figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 12px; }
+.big { font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.of { font-size: var(--fs-13); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* What's stored against the limit: files in use, then the Trash, and a mark at the limit once past it. */
-.meter { position: relative; display: flex; height: 12px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+.meter { position: relative; display: flex; height: 8px; margin-top: 10px; border-radius: var(--radius-pill); background: var(--fill-2); overflow: hidden; }
 .meter > span { flex: none; height: 100%; transition: width var(--dur-slow) var(--ease-out); }
 .live { background: var(--green); }
 .live[data-level="warning"] { background: var(--warning); }
@@ -12,59 +19,69 @@
 .trash { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--text-3) 55%, transparent) 0 4px, color-mix(in srgb, var(--text-3) 30%, transparent) 4px 8px); }
 .mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--ink); }
 
-.legend { gap: 6px 16px; color: var(--text-3); }
+.legend { gap: 6px 16px; margin-top: 8px; font-size: var(--fs-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-pill); }
 .keyLive { background: var(--green); }
 .keyTrash { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--text-3) 55%, transparent) 0 3px, color-mix(in srgb, var(--text-3) 30%, transparent) 3px 6px); }
 
-/* The limit: Railway's default, none, or a size. */
-.choices { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.choice { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
-.choice:has(input:checked) { border-color: var(--green); box-shadow: var(--ring); }
-.choice > input { flex: none; margin-top: 3px; }
-.choiceBody { display: grid; gap: 2px; min-width: 0; font-size: 14px; }
-.choiceBody > span { overflow-wrap: anywhere; }
-.size { width: 150px; max-width: 100%; margin-top: 6px; }
+/* A size or an amount typed into a choice. */
+.size { width: 150px; max-width: 100%; }
 
-/* Who's using it. */
-.people { table-layout: fixed; }
-.people td { overflow-wrap: anywhere; }
-.usedCol { width: 26%; }
-.limitCol { width: 34%; }
-.used { display: grid; gap: 4px; justify-items: end; }
-.used :global(.progress) { width: 120px; max-width: 100%; height: 6px; }
+/* Who's using it, and by role: a row each, on hairlines. */
+.people { display: grid; grid-template-columns: minmax(0, 1fr); margin: 12px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--divider); }
+.person {
+  display: grid; align-items: center; gap: 4px 16px; min-height: 52px; padding: 10px 0; border-bottom: 1px solid var(--row-divider);
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 160px) minmax(120px, 190px) 80px;
+  font-size: var(--fs-13);
+}
+.person.role { grid-template-columns: minmax(0, 1fr) minmax(120px, 190px) 80px; }
+.who { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.who strong { font-weight: 600; color: var(--ink); }
+.who > span { font-size: var(--fs-12); color: var(--text-3); }
+.used { display: grid; gap: 5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.used :global(.progress) { width: 100%; max-width: 140px; height: 4px; }
 .used [data-level="warning"] > span { background: var(--warning); }
 .used [data-level="danger"] > span, .used [data-level="full"] > span { background: var(--danger); }
-.limit { display: grid; gap: 2px; justify-items: start; }
-.note { margin: 0; padding: 12px 20px 0; }
-/* Words the column headings say, for when the table stacks. */
-.stacked { display: none; }
+.limit { display: grid; gap: 1px; min-width: 0; color: var(--text-2); }
+.source { font-size: var(--fs-12); color: var(--text-3); }
+.set { display: flex; justify-content: flex-end; }
+/* A row's action as quiet words, as a section's is; a phone's stay green, as its other actions are. */
+.set :global(.link-btn) { font-size: var(--fs-12); color: var(--text-2); }
+.set :global(.link-btn:hover) { color: var(--ink); text-decoration: none; }
 
-/* By role. */
-.roleRow { flex-wrap: wrap; }
-.roleRow > :first-child { flex: 1 1 110px; min-width: 0; }
-.roleLimit { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; }
-
-/* By area. */
-.areas { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
-.areas li { display: grid; grid-template-columns: minmax(120px, 170px) 1fr auto; align-items: center; gap: 12px; font-size: 14px; }
-.bar { height: 8px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
+/* By area: a bar each, biggest first. */
+.areas { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.areas li { display: grid; grid-template-columns: minmax(120px, 180px) 1fr 72px; align-items: center; gap: 12px; font-size: var(--fs-13); color: var(--text-2); }
+.bar { height: 6px; border-radius: var(--radius-pill); background: var(--fill-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
 .bar[data-area="trash"] > span { background: var(--text-3); }
-.amount { font-variant-numeric: tabular-nums; font-weight: 600; }
+.amount { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; color: var(--ink); }
 
-.notes { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 14px; line-height: 1.5; }
-
-/* Photos and videos: the video choices under the photo switch. */
-.divided { padding-top: 14px; border-top: 1px solid var(--divider); }
+.notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); }
 
 @media (max-width: 900px) {
-  .used { justify-items: start; }
-  .stacked { display: inline; }
-  .notStacked { display: none; }
-}
-@media (max-width: 520px) {
+  .big { font-size: var(--fs-30); }
+  .of, .person, .notes, .areas li { font-size: var(--fs-15); }
+  .legend, .who > span, .source { font-size: var(--fs-13); }
+  /* A person: their name on top, what they use and their limit under it, and Set limit on the right. */
+  .person, .person.role {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "who who set" "used limit set";
+    align-items: start; row-gap: 2px; column-gap: 8px; min-height: 56px; padding: 12px 0;
+  }
+  .person.role { grid-template-areas: "who who set" "limit limit set"; }
+  .who { grid-area: who; }
+  .used { grid-area: used; grid-template-columns: auto auto; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-3); }
+  .used :global(.progress) { width: 48px; }
+  .limit { grid-area: limit; display: flex; flex-wrap: wrap; gap: 0 8px; font-size: var(--fs-13); color: var(--text-3); }
+  .person:not(.role) .limit::before, .limit > * + .source::before { content: "·"; color: var(--quiet); }
+  .limit > * + .source::before { margin-right: 8px; }
+  .set { grid-area: set; align-self: center; }
+  .set :global(.link-btn) { min-height: 44px; font-size: var(--fs-14); color: var(--green); }
+  .people { border-top: 0; }
+  :global(.m-grouped) :global(.sec:not(.sec-flush)) > :global(.sec-body) > .people { margin-block: 0; }
+  :global(.m-grouped) .people > :last-child { border-bottom: 0; }
   .areas li { grid-template-columns: 1fr auto; }
   .areas li .bar { grid-column: 1 / -1; grid-row: 2; }
 }

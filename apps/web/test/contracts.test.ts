@@ -381,8 +381,8 @@ describe("where Settings lists contract terms and packages", () => {
   it("shows Contract terms to the people who manage Settings, beside the document style", () => {
     const office = items("office", ["sales", "settings"]);
     expect(has(office, (i) => "tab" in i && i.tab === "contracts")).toBe(true);
-    const business = settingsGroups(session("owner", [])).find((g) => g.title === "Business")!.items.map((i) => i.label);
-    expect(business.indexOf("Contract terms")).toBe(business.indexOf("Document style") + 1);
+    const quotes = settingsGroups(session("owner", [])).find((g) => g.title === "Quotes and invoices")!.items.map((i) => i.label);
+    expect(quotes.indexOf("Contract terms")).toBe(quotes.indexOf("Document style") + 1);
     expect(has(items("office", ["sales"]), (i) => "tab" in i && i.tab === "contracts")).toBe(false);
     expect(has(items("estimator", ["sales", "settings"]), (i) => "tab" in i && i.tab === "contracts")).toBe(false);
   });

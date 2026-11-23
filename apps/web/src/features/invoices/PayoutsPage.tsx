@@ -5,20 +5,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { DetailHeader } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { BackLink, PageHeader, useDocumentTitle } from "@/components/ui/PageHeader";
-import { ListPageSkeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { useDocumentTitle } from "@/components/ui/PageHeader";
+import { InboxPageSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { everyRow } from "@/lib/paging";
 import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { intlLocale } from "@/lib/i18n";
 import { can, hasRole, useSession } from "@/lib/session";
-import { Stat } from "../finance/Charts";
 import { stripeFeesSince } from "./totals";
+import styles from "./invoices.module.css";
 
 const STATUS: Record<string, { label: string; tone: Tone }> = {
   paid: { label: "Deposited", tone: "good" },
@@ -71,12 +73,15 @@ function PayoutsScreen() {
     },
   });
 
-  if (data.isPending) return <ListPageSkeleton columns={6} tabs={0} />;
+  if (data.isPending) return <InboxPageSkeleton tabs={0} groups={2} />;
   const d = data.data;
   const recent = (d?.payouts ?? []).filter((p) => p.status === "paid" && p.arrival_on >= since);
   const coming = (d?.payouts ?? []).filter((p) => p.status === "pending" || p.status === "in_transit");
   const byPayout = new Map<string, NonNullable<typeof d>["payments"]>();
   for (const payment of d?.payments ?? []) byPayout.set(payment.payout_id!, [...(byPayout.get(payment.payout_id!) ?? []), payment]);
+  // By the month they reach the bank, newest first, as a bank statement reads.
+  const months = new Map<string, NonNullable<typeof d>["payouts"]>();
+  for (const p of d?.payouts ?? []) months.set(p.arrival_on.slice(0, 7), [...(months.get(p.arrival_on.slice(0, 7)) ?? []), p]);
 
   const exportCsv = () =>
     downloadCsv(
@@ -92,74 +97,90 @@ function PayoutsScreen() {
 
   return (
     <>
-      <BackLink to="/invoices">Invoices</BackLink>
-      <PageHeader title="Deposits" actions={<Menu items={[{ label: "Download as spreadsheet", icon: "download", onSelect: exportCsv, disabled: !d?.payouts.length }]} />} />
-      <p className="page-subtitle">Money Stripe sent to your bank, what it kept in fees, and the payments in each deposit.</p>
+      <DetailHeader
+        crumb={{ to: "/invoices", label: "Invoices" }}
+        title="Deposits"
+        more={[{ label: "Download as spreadsheet", icon: "download", onSelect: exportCsv, disabled: !d?.payouts.length }]}
+      >
+        <p className={`page-lede ${styles.lede}`}>Money Stripe sent to your bank, what it kept in fees, and the payments in each deposit.</p>
+      </DetailHeader>
       {d && (
-        <div className="stat-row">
-          <Stat label="Deposited, last 30 days" value={formatMoney(recent.reduce((sum, p) => sum + Number(p.amount), 0))} hint={`${recent.length} ${recent.length === 1 ? "deposit" : "deposits"}`} />
-          <Stat label="Stripe fees, last 30 days" value={formatMoneyCents(d.fees)} hint="On payments received" />
-          <Stat label="On the way" value={formatMoney(coming.reduce((sum, p) => sum + Number(p.amount), 0))} hint={coming.length ? `Next ${formatDate(coming.at(-1)!.arrival_on)}` : "Nothing pending"} />
-        </div>
+        <StatStrip label="Deposit totals">
+          <Stat label="Deposited, last 30 days" value={formatMoney(recent.reduce((sum, p) => sum + Number(p.amount), 0))} note={`${recent.length} ${recent.length === 1 ? "deposit" : "deposits"}`} />
+          <Stat label="Stripe fees, last 30 days" value={formatMoneyCents(d.fees)} note="On payments received" />
+          <Stat label="On the way" value={formatMoney(coming.reduce((sum, p) => sum + Number(p.amount), 0))} note={coming.length ? `Next ${formatDate(coming.at(-1)!.arrival_on)}` : "Nothing pending"} />
+        </StatStrip>
       )}
       {data.error && !d ? (
-        <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>
+        <ErrorState error={data.error} onRetry={() => data.refetch()} />
       ) : !d?.payouts.length ? (
-        <div className="card">
-          <EmptyState icon="dollar" title="No deposits yet" action={<Link className="btn" to="/apps">Open Apps</Link>}>
-            When Stripe sends money to your bank, it shows up here. To bring in deposits you already have, import your Stripe history from Apps.
-          </EmptyState>
-        </div>
+        <EmptyState icon="bank" title="No deposits yet" action={<Link className="btn" to="/apps">Open Apps</Link>}>
+          When Stripe sends money to your bank, it shows up here. To bring in deposits you already have, import your Stripe history from Apps.
+        </EmptyState>
       ) : (
-        <div className="card">
-          <table className="table table-stack">
-            <thead><tr><th>Date</th><th>Status</th><th className="num">Payments</th><th className="num">Stripe fees</th><th className="num">Deposited</th><th aria-label="Details" /></tr></thead>
-            <tbody>
-              {d.payouts.map((p) => {
+        [...months].map(([month, payouts]) => (
+          <Section key={month} title={monthName(month, today)} count={payouts.length} action={<span className={styles.monthSum}>{formatMoneyCents(payouts.filter((p) => p.status === "paid").reduce((sum, p) => sum + Number(p.amount), 0))} deposited</span>}>
+            <RelatedList label={monthName(month, today)}>
+              {payouts.map((p) => {
                 const payments = byPayout.get(p.id) ?? [];
                 const expanded = open === p.id;
+                const status = STATUS[p.status] ?? { label: p.status, tone: "muted" as Tone };
                 return (
                   <Fragment key={p.id}>
-                    <tr className={payments.length ? "row-link" : undefined} onClick={() => payments.length && setOpen(expanded ? null : p.id)}>
-                      <td>{formatDate(p.arrival_on)}</td>
-                      <td><StatusPill {...(STATUS[p.status] ?? { label: p.status, tone: "muted" as Tone })} />{p.failure_message && <div className="small" style={{ color: "var(--danger)" }}>{p.failure_message}</div>}</td>
-                      <td className="num tabular">{p.gross_amount === null ? "—" : formatMoneyCents(p.gross_amount)}</td>
-                      <td className="num tabular">{p.fee_amount === null ? "—" : `−${formatMoneyCents(p.fee_amount)}`}</td>
-                      <td className="num tabular strong">{formatMoneyCents(p.amount)}</td>
-                      <td className="num">
-                        {payments.length > 0 && (
-                          <Button size="sm" variant="ghost" aria-expanded={expanded} onClick={(e) => { e.stopPropagation(); setOpen(expanded ? null : p.id); }}>
-                            {payments.length} {payments.length === 1 ? "payment" : "payments"} <Icon name={expanded ? "chevronUp" : "chevronDown"} size={14} />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                    {expanded &&
-                      payments.map((payment) => {
-                        const invoice = payment.invoice as { id: string; number: number } | null;
-                        const client = payment.client as { id: string; display_name: string } | null;
-                        return (
-                          <tr key={payment.id} className="muted">
-                            <td className="small">{formatDate(payment.received_at)}</td>
-                            <td className="small">
-                              {client ? <Link to={`/clients/${client.id}`} className="cell-link">{client.display_name}</Link> : "—"}
-                              {invoice && <> · <Link to={`/invoices/${invoice.id}`} className="cell-link">#{invoice.number}</Link></>}
-                              {" · "}{METHODS[payment.method] ?? payment.method}
-                            </td>
-                            <td className="num tabular small">{formatMoneyCents(Number(payment.amount) + Number(payment.tip_amount))}</td>
-                            <td className="num tabular small">{Number(payment.fee_amount) ? `−${formatMoneyCents(payment.fee_amount)}` : ""}</td>
-                            <td className="num tabular small">{formatMoneyCents(Number(payment.amount) + Number(payment.tip_amount) - Number(payment.fee_amount))}</td>
-                            <td />
-                          </tr>
-                        );
-                      })}
+                    <RelatedRow
+                      title={formatDate(p.arrival_on)}
+                      sub={[
+                        <StatusPill {...status} />,
+                        p.gross_amount !== null && `${formatMoneyCents(p.gross_amount)} in payments`,
+                        p.failure_message && <span className={`meta-break ${styles.failed}`}>{p.failure_message}</span>,
+                        // Opens the payments under it: at the end of its line (its own line on a phone), so the money keeps the right edge.
+                        payments.length > 0 && (
+                          <span className="meta-break">
+                            <button type="button" className={`link-btn ${styles.toggle}`} aria-expanded={expanded} aria-controls={expanded ? `deposit-${p.id}` : undefined} onClick={() => setOpen(expanded ? null : p.id)}>
+                              {payments.length} {payments.length === 1 ? "payment" : "payments"} <Icon name={expanded ? "chevronUp" : "chevronDown"} size={14} />
+                            </button>
+                          </span>
+                        ),
+                      ]}
+                      end={
+                        <span className={styles.depositEnd}>
+                          <b className={p.status === "failed" || p.status === "canceled" ? styles.voided : undefined}>{formatMoneyCents(p.amount)}</b>
+                          {p.fee_amount !== null && Number(p.fee_amount) !== 0 && <span className="il-sub">−{formatMoneyCents(p.fee_amount)} fees</span>}
+                        </span>
+                      }
+                    />
+                    {expanded && (
+                      <li className={styles.inDeposit}>
+                        <ul className="rel" role="list" id={`deposit-${p.id}`} aria-label={`Payments in the ${formatDate(p.arrival_on)} deposit`}>
+                          {payments.map((payment) => {
+                            const invoice = payment.invoice as { id: string; number: number } | null;
+                            const client = payment.client as { id: string; display_name: string } | null;
+                            const gross = Number(payment.amount) + Number(payment.tip_amount);
+                            return (
+                              <RelatedRow
+                                key={payment.id}
+                                to={invoice ? `/invoices/${invoice.id}` : client ? `/clients/${client.id}` : undefined}
+                                title={client?.display_name ?? (invoice ? `Invoice #${invoice.number}` : "Payment")}
+                                detail={client && invoice ? `#${invoice.number}` : undefined}
+                                sub={[formatDate(payment.received_at), METHODS[payment.method] ?? payment.method, Number(payment.fee_amount) ? `${formatMoneyCents(gross)} less ${formatMoneyCents(payment.fee_amount)} fee` : null]}
+                                end={formatMoneyCents(gross - Number(payment.fee_amount))}
+                              />
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    )}
                   </Fragment>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </RelatedList>
+          </Section>
+        ))
       )}
     </>
   );
 }
+
+/** "November", or "November 2025" from another year. */
+const monthName = (month: string, today: string) =>
+  new Date(`${month}-15T12:00:00`).toLocaleDateString(intlLocale(), month.slice(0, 4) === today.slice(0, 4) ? { month: "long" } : { month: "long", year: "numeric" });

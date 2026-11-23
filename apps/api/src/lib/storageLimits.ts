@@ -9,8 +9,9 @@
  *    with or without "Bearer ") has role "authenticated" and a sub;
  *  - an upload to a signed upload link is whoever the link was made for (the owner in its token;
  *    Storage ignores Authorization there). Links the server makes (booking forms, sub paperwork) are
- *    made for nobody, so they're never checked here (a booking form's files are held to the sizes
- *    its visitor gave once they've arrived, routes/public.ts).
+ *    made for nobody, so the limits don't apply to them; instead each is held to the size its visitor
+ *    gave, has to say its size, and counts against the day's worth of strangers' uploads
+ *    (guardServerLink, lib/publicUploads.ts).
  * Every token is checked as Storage checks it (HS256, signed with the instance's JWT_SECRET, not run
  * out) before anything is read for it: one that isn't genuine is nobody's, so it's sent on for
  * Storage to turn down, and nobody's numbers are read or shown for it. The numbers are read, and a
@@ -40,6 +41,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { companyStorageFull, FILE_DEFAULTS, FILE_RULE_FOLDERS, fileSettings, isVideo, personStorageFull, STORAGE_FULL, storageFolderRule, videoRefusal, type FileSettings } from "@crewtavo/core/storage";
+import { BIGGER_THAN_SAID, FORM_ROOM, LINK_RUN_OUT, UPLOADS_PAUSED, type PublicUploads, type UploadRecord } from "./publicUploads";
 import type { Db } from "./supabase";
 
 /** How long one reading of a company's and a person's numbers is used. */
@@ -131,6 +133,11 @@ export interface StorageUpload {
   /** The type the upload gives its file, and the name it's stored under, to tell a video. */
   contentType?: string | null;
   name?: string | null;
+  /**
+   * Sent to a link the server made (a booking form's, a sub's paperwork; no owner), genuine and for
+   * uploading: the stored name the link is for, as its token says (Storage takes nothing else there).
+   */
+  serverLink?: string;
 }
 
 /**
@@ -402,10 +409,30 @@ export function signedInUser(request: Request, secret: string | null | undefined
  */
 export function linkOwner(token: string | null | undefined, secret: string | null | undefined): string | null {
   const claims = verifiedClaims(token, secret);
-  if (!claims) return null;
-  const forUploading = claims.scope === "upload" || (claims.scope === undefined && "upsert" in claims);
-  return forUploading && typeof claims.owner === "string" && claims.owner ? claims.owner : null;
+  if (!claims || !forUploading(claims)) return null;
+  return typeof claims.owner === "string" && claims.owner ? claims.owner : null;
 }
+
+const forUploading = (claims: Record<string, unknown>) => claims.scope === "upload" || (claims.scope === undefined && "upsert" in claims);
+
+/**
+ * The stored name a signed upload link the server made is for: its token is genuine, for uploading,
+ * made for nobody (Storage's signUploadObjectUrl puts no owner in it for the service key), and names
+ * a file in the files bucket (url "files/<name>", which Storage holds the upload to). Null for any
+ * other token, a person's link among them.
+ */
+export function serverLinkPath(token: string | null | undefined, secret: string | null | undefined): string | null {
+  const claims = verifiedClaims(token, secret);
+  if (!claims || !forUploading(claims) || (claims.owner !== undefined && claims.owner !== null && claims.owner !== "")) return null;
+  const url = claims.url;
+  return typeof url === "string" && url.startsWith(`${FILES}/`) && url.length > FILES.length + 1 ? url.slice(FILES.length + 1) : null;
+}
+
+/** The server-made link a token is, when it's one, for StorageUpload's serverLink. */
+const serverLinkOf = (token: string | null, secret: string | null | undefined) => {
+  const path = serverLinkPath(token, secret);
+  return path === null ? {} : { serverLink: path };
+};
 
 const tusKey = (key: string) => {
   if (!key.length) return false;
@@ -520,14 +547,17 @@ export function uploadOf(request: Request, secret: string | null | undefined): S
     if (!meta || meta.bucketName !== FILES || !meta.objectName) return null;
     const place = placeOf(meta.objectName, false);
     // On a signed link's route Storage goes by the link and ignores Authorization.
-    const user = RESUMABLE_SIGNED.test(path) ? linkOwner(request.headers.get("x-signature"), secret) : signedInUser(request, secret);
-    return place && { ...place, user, bytes: sizeOf(request.headers.get("upload-length")), resumable: true, contentType: meta.contentType ?? null, name: meta.objectName };
+    const signedLink = RESUMABLE_SIGNED.test(path);
+    const token = request.headers.get("x-signature");
+    const user = signedLink ? linkOwner(token, secret) : signedInUser(request, secret);
+    return place && { ...place, user, bytes: sizeOf(request.headers.get("upload-length")), resumable: true, contentType: meta.contentType ?? null, name: meta.objectName, ...(signedLink ? serverLinkOf(token, secret) : {}) };
   }
   const signed = path.match(SIGNED_UPLOAD);
   if (signed) {
     if (method !== "PUT" || decoded(signed[1]!) !== FILES) return null;
     const place = placeOf(signed[2]!, true);
-    return place && { ...place, user: linkOwner(url.searchParams.get("token"), secret), bytes: sizeOf(request.headers.get("content-length")), ...kindOf(request, signed[2]!) };
+    const token = url.searchParams.get("token");
+    return place && { ...place, user: linkOwner(token, secret), bytes: sizeOf(request.headers.get("content-length")), ...kindOf(request, signed[2]!), ...serverLinkOf(token, secret) };
   }
   const direct = path.match(DIRECT_UPLOAD);
   if (direct && (method === "POST" || method === "PUT") && decoded(direct[1]!) === FILES) {
@@ -545,12 +575,95 @@ export function storageFull(message: string, video = false): Response {
   return Response.json({ statusCode: String(STORAGE_FULL.status), error: video ? "Video not allowed" : STORAGE_FULL.error, message }, { status: STORAGE_FULL.status });
 }
 
+/** A refusal in Storage's own shape, which the app reads its message from. */
+const refusal = (status: number, error: string, message: string) => Response.json({ statusCode: String(status), error, message }, { status });
+
+/** A file through a link the server made goes in one request, as the booking form and the paperwork page send it. */
+export const ONE_REQUEST = "Send the file through this link in one request.";
+
+/**
+ * How much of a file through a link the server made arrives before it's counted: each step's worth
+ * is counted as it comes in, and what's left when the file is all in. Far fewer counts than pieces,
+ * and an upload past the day's worth stops within a step of it.
+ */
+export const COUNTED_EVERY = 16 * 1024 * 1024;
+
+/**
+ * An upload through a link the server made for someone without an account (a booking form's file,
+ * a sub's paperwork): it has to say its size, its link has to be on record and not run out, it may
+ * be no bigger than the size given when the link was made (with a form's envelope: FORM_ROOM), and
+ * it goes in one request (a resumable one could be made and never sent). Its bytes count against
+ * the visitor's and the business's day (lib/publicUploads.ts) as they arrive, so only what's really
+ * sent uses the day up: a size said and never sent counts for nothing. Once the day is spent the
+ * upload is cut off where it is and turned away, and a new one isn't started. When the record can't
+ * be read the upload goes ahead as before: a budget never stops normal use.
+ */
+async function guardServerLink(uploads: PublicUploads, visitor: string, upload: StorageUpload & { serverLink: string }, request: Request, send: (request: Request) => Promise<Response>): Promise<Response> {
+  if (upload.resumable) return refusal(400, "Bad Request", ONE_REQUEST);
+  if (upload.bytes === null) return refusal(411, "Length Required", "Send the file's size (Content-Length) with the upload.");
+  let made: UploadRecord | null;
+  try {
+    made = await uploads.find(upload.serverLink);
+  } catch (error) {
+    couldNotRead(error);
+    return send(request);
+  }
+  if (!made || made.company !== upload.company || made.expiresAt <= Date.now()) return refusal(403, "Forbidden", LINK_RUN_OUT);
+  if (upload.bytes > made.maxBytes + FORM_ROOM) return refusal(413, "Payload too large", BIGGER_THAN_SAID);
+  // Only asks (counts nothing): a day that's spent turns the upload away before it starts.
+  if (!(await uploads.spend(made.company, visitor, 0))) return refusal(429, "Too Many Requests", UPLOADS_PAUSED);
+  if (!request.body) return send(request);
+  const company = made.company;
+  const size = upload.bytes;
+  let arrived = 0;
+  let waiting = 0;
+  let paused = false;
+  const count = async () => {
+    const bytes = waiting;
+    waiting = 0;
+    if (bytes > 0 && !(await uploads.spend(company, visitor, bytes))) paused = true;
+  };
+  const counted = request.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      async transform(chunk, controller) {
+        arrived += chunk.byteLength;
+        waiting += chunk.byteLength;
+        // The last piece is counted before it goes on, so Storage never has the whole of a file the
+        // day had no room for.
+        if (waiting >= COUNTED_EVERY || arrived >= size) await count();
+        if (paused) return controller.error(new Error(UPLOADS_PAUSED));
+        controller.enqueue(chunk);
+      },
+      async flush(controller) {
+        await count();
+        if (paused) controller.error(new Error(UPLOADS_PAUSED));
+      },
+    }),
+  );
+  const res = await send(new Request(request.url, { method: request.method, headers: request.headers, body: counted, duplex: "half" } as RequestInit));
+  return paused ? refusal(429, "Too Many Requests", UPLOADS_PAUSED) : res;
+}
+
+/** What guardStorage needs for uploads through links the server made: their records and budgets, and who's sending. */
+export interface ServerLinkGuard {
+  uploads: PublicUploads;
+  /** The visitor's address, as this deployment's proxy gives it. */
+  visitor: string;
+}
+
 /**
  * The gateway's part, for a request that may store a file (gateway.ts's storesFile): refuses an
  * upload a limit doesn't allow with 507, and sends the rest on. An upload Storage doesn't take
  * comes off the numbers again. `secret`: the instance's JWT_SECRET, which checks who's uploading.
+ * `links`: an upload through a link the server made is held to it (guardServerLink).
  */
-export async function guardStorage(source: SnapshotSource, secret: string | null | undefined, request: Request, send: (request: Request) => Promise<Response>): Promise<Response> {
+export async function guardStorage(
+  source: SnapshotSource,
+  secret: string | null | undefined,
+  request: Request,
+  send: (request: Request) => Promise<Response>,
+  links?: ServerLinkGuard,
+): Promise<Response> {
   const piece = arrivingAt(request);
   if (piece) {
     // A resumable upload's piece: once the last one is in, the file is stored, so the next reading
@@ -563,6 +676,7 @@ export async function guardStorage(source: SnapshotSource, secret: string | null
     return res;
   }
   const upload = uploadOf(request, secret);
+  if (upload?.serverLink !== undefined && links) return guardServerLink(links.uploads, links.visitor, { ...upload, serverLink: upload.serverLink }, request, send);
   if (!upload?.user) return send(request);
   const rule = storageFolderRule(upload.folder);
   // One that doesn't say its size could be any size (a resumable upload's pieces aren't checked

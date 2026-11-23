@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
+import { Fact, Facts, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
@@ -28,6 +28,7 @@ import { waitingScopeLine, type JobLineAdd } from "./fieldActions";
 import { visitExtrasKey, waitingExtra, type ExtraScopeLine } from "./FieldExtras";
 import { useSignal } from "./OfflineNote";
 import { msg, t } from "@/lib/i18n";
+import { Select } from "@/components/ui/Select";
 
 /**
  * Add work: an item from the price list and how many. The office's price applies, and the crew never
@@ -63,7 +64,7 @@ export function AddWork({ visitId, jobId, toVisit = false }: { visitId: string; 
   });
   return (
     <>
-      <Button icon="plus" style={{ justifySelf: "start" }} onClick={() => setOpen(true)}>{t("Add work")}</Button>
+      <button type="button" className="field-add" onClick={() => setOpen(true)}><Icon name="plus" size={18} />{t("Add work")}</button>
       {open && (
         <AddWorkDialog
           toVisit={toVisit}
@@ -165,33 +166,30 @@ export function VisitInvoice({ visitId, jobId, kind }: { visitId: string; jobId:
   const inv = invoice.data;
   const balance = Number(inv?.balance_due ?? 0);
   return (
-    <section className="card card-pad stack-sm">
-      <div className="row-between">
-        <strong>{inv ? t("Invoice #{number}", { number: inv.number }) : t("Invoice")}</strong>
-        {inv && <EntityStatus kind="invoice" status={inv.status} />}
-      </div>
-      {!online && <span className="muted small"><Icon name="wifiOff" size={14} /> {t("Invoicing and payments need signal.")}</span>}
+    <Section title={inv ? t("Invoice #{number}", { number: inv.number }) : t("Invoice")} action={inv && <EntityStatus kind="invoice" status={inv.status} />} className="visit-invoice">
+      {!online && <p className="field-hint"><Icon name="wifiOff" size={14} /> {t("Invoicing and payments need signal.")}</p>}
       {invoice.isPending ? (online && <Skeleton height={44} radius={8} />) : inv ? (
         <>
-          <div className="row-between">
-            <span className="muted">{t("Total")}</span>
-            <strong className="tabular" style={{ fontSize: 22 }}>{formatMoneyCents(Number(inv.total))}</strong>
-          </div>
-          {balance !== Number(inv.total) && <div className="row-between"><span className="muted">{balance > 0 ? t("Still owed") : t("Paid")}</span><span className="tabular">{balance > 0 ? formatMoneyCents(balance) : <Icon name="check" size={16} />}</span></div>}
-          <div className="field-actions">
-            <Button icon="send" className="big-action" disabled={!online} onClick={() => setDialog("send")}>{t("Send to client")}</Button>
-            {balance > 0 && <Button variant="primary" icon="cash" className="big-action" disabled={!online} onClick={() => setDialog("payment")}>{t("Record cash or check")}</Button>}
+          <Facts>
+            <Fact label={t("Total")}><span className="visit-invoice-total tabular">{formatMoneyCents(Number(inv.total))}</span></Fact>
+            {balance !== Number(inv.total) && <Fact label={balance > 0 ? t("Still owed") : t("Paid")}>{balance > 0 ? <span className="tabular">{formatMoneyCents(balance)}</span> : <Icon name="check" size={16} />}</Fact>}
+          </Facts>
+          <div className="visit-invoice-acts">
+            <Button icon="send" disabled={!online} onClick={() => setDialog("send")}>{t("Send to client")}</Button>
+            {balance > 0 && <Button variant="primary" icon="cash" disabled={!online} onClick={() => setDialog("payment")}>{t("Record cash or check")}</Button>}
           </div>
         </>
       ) : (
-        <Button variant="primary" icon="invoice" className="big-action" disabled={!online} loading={create.isPending} onClick={() => create.mutate()}>{t("Create invoice")}</Button>
+        <div className="visit-invoice-acts">
+          <Button variant="primary" icon="invoice" disabled={!online} loading={create.isPending} onClick={() => create.mutate()}>{t("Create invoice")}</Button>
+        </div>
       )}
       <FormError error={create.error ?? invoice.error} />
       {dialog === "send" && inv && (
         <SendDialog kind="invoice" id={inv.id} number={inv.number} email={inv.client?.email ?? null} phone={inv.client?.phone ?? null} textsOffSince={inv.client?.sms_opt_out_at} onClose={() => setDialog(null)} onSent={refresh} />
       )}
       {dialog === "payment" && inv && <CashOrCheckDialog invoice={{ id: inv.id, client_id: inv.client_id, balance, draft: inv.status === "draft" }} onClose={() => setDialog(null)} onSaved={refresh} />}
-    </section>
+    </Section>
   );
 }
 

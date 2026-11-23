@@ -8,17 +8,20 @@ import { askingFor } from "@crewtavo/core/subs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { linkToken } from "@/lib/linkToken";
 import { publicFetch } from "@/lib/publicApi";
+import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "./ClientKit";
+import p from "./paperwork.module.css";
 import { fileSize, isAbort, uploadToLink } from "../plans/plans";
 import { asksForEndDate, endDateProblem, greeting, kindsFor, needsEndDate, neededWhy, UPLOAD_ACCEPT, uploadProblem, withType } from "../subs/paperwork";
 import { getLocale, msg, t } from "@/lib/i18n";
 
 interface PaperworkView {
-  company: { name: string; logo: string | null };
+  /** `color`: the business's brand color, when the server sends it (else the kit's navy). */
+  company: { name: string; logo: string | null; color?: string | null };
   sub: { name: string };
   needed: Array<{ requirement: string; label: string; state: "missing" | "expiring" | "expired"; expires_on: string | null }>;
   waiting: string[];
@@ -42,7 +45,8 @@ const REQUIREMENT_LABELS: Record<string, string> = { w9: "W-9", liability: msg("
 const localToday = () => new Date().toLocaleDateString("en-CA");
 
 export function PaperworkPage() {
-  const { token = "" } = useParams();
+  const { token: raw = "" } = useParams();
+  const token = linkToken(raw);
   const path = `/public/paperwork/${encodeURIComponent(token)}`;
   const view = useQuery({ queryKey: ["paperwork", token], retry: false, queryFn: () => publicFetch<PaperworkView>(path) });
   const [items, setItems] = useState<Item[] | null>(null);
@@ -115,99 +119,92 @@ export function PaperworkPage() {
   const allSent = sent.length > 0 && list.length === 0;
 
   return (
-    <div className="public-page" style={{ paddingTop: 20 }}>
-      <div className="public-wrap" style={{ maxWidth: 560 }}>
-        {view.isPending && <div className="card card-pad stack-sm"><Skeleton width="45%" height={14} /><Skeleton width="80%" height={26} /><Skeleton height={220} radius={8} /></div>}
-        {view.error && (
-          <div className="card">
-            <div className="empty-state error-state">
-              <span className="empty-icon"><Icon name="link" size={24} /></span>
-              <h3>{t("This link isn't working")}</h3>
-              <p>{(view.error as Error).message}</p>
-            </div>
-          </div>
-        )}
+    <ClientPage color={data?.company.color}>
+      {data && <ClientHeader name={data.company.name} logo={data.company.logo} sub={t("Paperwork")} />}
+      <ClientBody width="narrow">
+        {view.isPending && <ClientSkeleton lines={2} />}
+        {view.error && <Broken title={t("This link isn't working")}>{(view.error as Error).message}</Broken>}
         {data && (
           <>
-            <header className="public-brand">
-              {data.company.logo ? <img className="logo" src={data.company.logo} alt="" /> : <span className="tile" aria-hidden="true">{data.company.name.slice(0, 2).toUpperCase()}</span>}
-              <strong>{data.company.name}</strong>
-            </header>
-
             {sent.length > 0 && (
-              <div className="card card-pad stack-sm" style={{ textAlign: "center", justifyItems: "center", padding: 28 }} role="status">
-                <span className="success-mark"><Icon name="check" size={30} bold /></span>
-                <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)" }}>{t("Thanks, it's in")}</h1>
-                <p style={{ margin: 0 }}>{t.plural(sent.length, { one: "{company} got {list}. They'll check it and get in touch if anything's missing.", other: "{company} got {list}. They'll check them and get in touch if anything's missing." }, { company: data.company.name, list: getLocale() === "en" ? askingFor(sent.map((label) => ({ label }))) : sent.map((label) => t(label)).join(", ") })}</p>
-                {allSent && <Button variant="ghost" onClick={() => setSent([])}>{t("Send something else")}</Button>}
-              </div>
+              <Done role="status" headingLevel={allSent ? 1 : 2} title={t("Thanks, it's in")}>
+                <p className={k.doneText}>{t.plural(sent.length, { one: "{company} got {list}. They'll check it and get in touch if anything's missing.", other: "{company} got {list}. They'll check them and get in touch if anything's missing." }, { company: data.company.name, list: getLocale() === "en" ? askingFor(sent.map((label) => ({ label }))) : sent.map((label) => t(label)).join(", ") })}</p>
+                {allSent && <Button className={k.soft} onClick={() => setSent([])}>{t("Send something else")}</Button>}
+              </Done>
             )}
 
             {!allSent && (
-              <form className="card card-pad stack" noValidate onSubmit={onSubmit}>
+              <form className={cx(k.form, k.loose)} noValidate onSubmit={onSubmit} aria-labelledby={sent.length === 0 ? "paperwork-title" : undefined}>
                 {sent.length === 0 && (
-                  <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: "var(--tracking-display)", margin: 0 }}>
-                    {list.length ? greeting(data.sub.name, data.company.name) : t("Hi {sub}, you're all set", { sub: data.sub.name })}
-                  </h1>
-                )}
-                {list.length === 0 && sent.length === 0 && (
-                  <p className="muted" style={{ margin: 0 }}>{t("{company} has everything they need from you right now. If your insurance changed, you can still send the new one below.", { company: data.company.name })}</p>
-                )}
-                {data.waiting.length > 0 && sent.length === 0 && (
-                  <div className="callout callout-info">
-                    <Icon name="info" size={20} />
-                    <div className="grow" style={{ fontWeight: 400 }}>{t("Already sent, waiting for {company} to check: {list}.", { company: data.company.name, list: data.waiting.map((w) => t(REQUIREMENT_LABELS[w] ?? w)).join(", ") })}</div>
-                  </div>
-                )}
-
-                {list.map((item) => (
-                  <ItemCard
-                    key={item.key}
-                    item={item}
-                    kindLabel={kindLabel}
-                    maxBytes={data.max_bytes}
-                    disabled={submit.isPending}
-                    fileProblem={failed[item.key] ?? fileProblem(item)}
-                    dateProblem={touched || item.expires_on ? dateProblem(item) : null}
-                    onChange={(patch) => update(item.key, patch)}
-                    onRemove={data.needed.some((n) => n.requirement === item.key) ? undefined : () => setItems((all) => (all ?? []).filter((i) => i.key !== item.key))}
-                  />
-                ))}
-
-                {extras.length > 0 && (
-                  <details className="more-options" open={list.length === 0 || undefined}>
-                    <summary>{t("Send something else")}</summary>
-                    <div className="row wrap" style={{ gap: 8 }}>
-                      {extras.map((e) => (
-                        <button key={e.key} type="button" className="btn" onClick={() => setItems([...list, { key: e.key, label: e.label, kinds: e.kinds, kind: e.kinds[0]!, why: null, file: null, expires_on: "" }])}>
-                          <Icon name="plus" size={14} />{t(e.label)}
-                        </button>
-                      ))}
-                    </div>
-                  </details>
+                  <section className={p.intro}>
+                    <h1 id="paperwork-title" className={k.titleMd}>
+                      {list.length ? greeting(data.sub.name, data.company.name) : t("Hi {sub}, you're all set", { sub: data.sub.name })}
+                    </h1>
+                    {list.length === 0 && (
+                      <p className={k.text}>{t("{company} has everything they need from you right now. If your insurance changed, you can still send the new one below.", { company: data.company.name })}</p>
+                    )}
+                    {data.waiting.length > 0 && (
+                      <div className="callout callout-info">
+                        <Icon name="info" size={16} />
+                        <div className="grow" style={{ fontWeight: 400 }}>{t("Already sent, waiting for {company} to check: {list}.", { company: data.company.name, list: data.waiting.map((w) => t(REQUIREMENT_LABELS[w] ?? w)).join(", ") })}</div>
+                      </div>
+                    )}
+                  </section>
                 )}
 
-                {sending && (
-                  <div className="stack-sm" role="status" aria-live="polite">
-                    <div className="row-between small"><span className="strong">{t("Sending your {document}", { document: sending.label === "W-9" ? "W-9" : t(sending.label).toLowerCase() })}</span><span className="muted tabular">{Math.round(sending.progress * 100)}%</span></div>
-                    <div className="progress"><span style={{ width: `${Math.round(sending.progress * 100)}%` }} /></div>
-                    <span className="muted small">{t("Keep this page open until it's done.")}</span>
-                  </div>
-                )}
-                {touched && !picked.length && list.length > 0 && <div className="form-error" role="alert">{t("Choose a file or take a photo to send.")}</div>}
-                <FormError error={submit.error} />
+                <div className={p.items}>
+                  {list.map((item) => (
+                    <ItemCard
+                      key={item.key}
+                      className={k.card}
+                      item={item}
+                      kindLabel={kindLabel}
+                      maxBytes={data.max_bytes}
+                      disabled={submit.isPending}
+                      fileProblem={failed[item.key] ?? fileProblem(item)}
+                      dateProblem={touched || item.expires_on ? dateProblem(item) : null}
+                      onChange={(patch) => update(item.key, patch)}
+                      onRemove={data.needed.some((n) => n.requirement === item.key) ? undefined : () => setItems((all) => (all ?? []).filter((i) => i.key !== item.key))}
+                    />
+                  ))}
+
+                  {extras.length > 0 && (
+                    <details className={cx("more-options", p.extras)} open={list.length === 0 || undefined}>
+                      <summary>{t("Send something else")}</summary>
+                      <div className={p.extraList}>
+                        {extras.map((e) => (
+                          <button key={e.key} type="button" className={k.choice} onClick={() => setItems([...list, { key: e.key, label: e.label, kinds: e.kinds, kind: e.kinds[0]!, why: null, file: null, expires_on: "" }])}>
+                            <Icon name="plus" size={16} />{t(e.label)}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+
                 {list.length > 0 && (
-                  <Button type="submit" variant="primary" size="lg" icon="send" loading={submit.isPending} block>
-                    {picked.length > 1 ? t("Send {count} documents", { count: picked.length }) : t("Send")}
-                  </Button>
+                  <div className={k.bar}>
+                    {sending && (
+                      <div className={k.sending} role="status" aria-live="polite">
+                        <div className={k.sendingHead}><span>{t("Sending your {document}", { document: sending.label === "W-9" ? "W-9" : t(sending.label).toLowerCase() })}</span><span>{Math.round(sending.progress * 100)}%</span></div>
+                        <div className="progress"><span style={{ width: `${Math.round(sending.progress * 100)}%` }} /></div>
+                        <span className={k.note}>{t("Keep this page open until it's done.")}</span>
+                      </div>
+                    )}
+                    {touched && !picked.length && <div className="form-error" role="alert">{t("Choose a file or take a photo to send.")}</div>}
+                    <FormError error={submit.error} />
+                    <Button type="submit" variant="primary" size="lg" className={k.cta} icon="send" loading={submit.isPending} block>
+                      {picked.length > 1 ? t("Send {count} documents", { count: picked.length }) : t("Send")}
+                    </Button>
+                  </div>
                 )}
               </form>
             )}
-            <p className="public-foot">{t("Only {company} sees what you send.", { company: data.company.name })}</p>
+            <p className={k.foot}>{t("Only {company} sees what you send.", { company: data.company.name })}</p>
           </>
         )}
-      </div>
-    </div>
+      </ClientBody>
+    </ClientPage>
   );
 }
 
@@ -222,6 +219,7 @@ export function ItemCard({
   onChange,
   onRemove,
   today = localToday(),
+  className,
 }: {
   item: Item;
   kindLabel: (kind: string) => string;
@@ -233,54 +231,57 @@ export function ItemCard({
   onRemove?: () => void;
   /** The earliest end date offered: the phone's today here, the company's for a signed-in sub. */
   today?: string;
+  /** A card of its own on the paperwork link; flat inside a signed-in sub's dialog. */
+  className?: string;
 }) {
   const pick = (files: FileList | null) => {
     const file = files?.[0];
     if (file) onChange({ file });
   };
   return (
-    <section className="stack-sm" style={{ padding: 14, borderRadius: "var(--radius-card)", border: `1px solid ${fileProblem || dateProblem ? "var(--danger)" : "var(--border)"}` }} aria-label={t(item.label)}>
-      <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+    <section className={cx(p.item, className)} data-problem={fileProblem || dateProblem ? true : undefined} aria-label={t(item.label)}>
+      <div className={p.itemHead}>
         <span className="grow">
-          <strong style={{ fontSize: 16 }}>{t(item.label)}</strong>
-          {item.why && <span className="muted small" style={{ display: "block" }}>{item.why}</span>}
+          <strong className={p.itemName}>{t(item.label)}</strong>
+          {item.why && <span className={p.itemWhy}>{item.why}</span>}
         </span>
-        {onRemove && <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={t("Don't send {document}", { document: t(item.label) })} disabled={disabled} onClick={onRemove}><Icon name="x" size={14} /></button>}
+        {onRemove && <button type="button" className={k.iconBtn} aria-label={t("Don't send {document}", { document: t(item.label) })} disabled={disabled} onClick={onRemove}><Icon name="x" size={16} /></button>}
       </div>
       {item.kinds.length > 1 && (
-        <div className="segmented" role="group" aria-label={t("What you're sending for {document}", { document: t(item.label) })}>
-          {item.kinds.map((k) => (
-            <button key={k} type="button" aria-pressed={item.kind === k} disabled={disabled} onClick={() => onChange({ kind: k })}>
-              {k === "wc_exemption" ? t("I'm exempt") : k === "workers_comp" ? t("Certificate") : t(kindLabel(k))}
+        <div className={cx("segmented", p.kinds)} role="group" aria-label={t("What you're sending for {document}", { document: t(item.label) })}>
+          {item.kinds.map((kind) => (
+            <button key={kind} type="button" aria-pressed={item.kind === kind} disabled={disabled} onClick={() => onChange({ kind })}>
+              {kind === "wc_exemption" ? t("I'm exempt") : kind === "workers_comp" ? t("Certificate") : t(kindLabel(kind))}
             </button>
           ))}
         </div>
       )}
       {item.file ? (
-        <div className="row" style={{ gap: 8 }}>
-          <Icon name={item.file.type.startsWith("image/") ? "image" : "file"} size={16} />
-          <span className="grow" style={{ overflowWrap: "anywhere" }}>{item.file.name} <span className="muted small">{fileSize(item.file.size)}</span></span>
-          <button type="button" className="btn btn-sm btn-ghost" disabled={disabled} onClick={() => onChange({ file: null })}>{t("Change")}</button>
+        <div className={p.file}>
+          <Icon name={item.file.type.startsWith("image/") ? "image" : "file"} size={18} />
+          <span className={k.fileName}>{item.file.name}<small>{fileSize(item.file.size)}</small></span>
+          <button type="button" className={k.link} disabled={disabled} onClick={() => onChange({ file: null })}>{t("Change")}</button>
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
-          <label className="btn" aria-disabled={disabled}>
-            <Icon name="camera" size={16} />{t("Take a photo")}
+        <div className={p.picks}>
+          <label className={cx("btn", p.pick)} aria-disabled={disabled}>
+            <Icon name="camera" size={18} />{t("Take a photo")}
             <input type="file" className="sr-only" accept="image/*" capture="environment" disabled={disabled} onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
           </label>
-          <label className="btn" aria-disabled={disabled}>
-            <Icon name="upload" size={16} />{t("Choose a file")}
+          <label className={cx("btn", p.pick)} aria-disabled={disabled}>
+            <Icon name="upload" size={18} />{t("Choose a file")}
             <input type="file" className="sr-only" accept={UPLOAD_ACCEPT} disabled={disabled} onChange={(e) => { pick(e.target.files); e.target.value = ""; }} />
           </label>
         </div>
       )}
       {fileProblem && <span className="field-error" role="alert">{fileProblem}</span>}
+      {/* What the file can be, under the buttons that pick it. */}
+      {!item.file && !fileProblem && <span className={p.hint}>{t("A PDF or a clear photo, up to {size}.", { size: fileSize(maxBytes) })}</span>}
       {asksForEndDate(item.kind) && (
         <Field label={t("Ends on")} optional={!needsEndDate(item.kind)} hint={dateProblem ? undefined : t("The expiration date on it.")} error={dateProblem}>
           <input className="input" type="date" value={item.expires_on} min={today} disabled={disabled} onChange={(e) => onChange({ expires_on: e.target.value })} />
         </Field>
       )}
-      {!item.file && !fileProblem && <span className="muted small">{t("A PDF or a clear photo, up to {size}.", { size: fileSize(maxBytes) })}</span>}
     </section>
   );
 }

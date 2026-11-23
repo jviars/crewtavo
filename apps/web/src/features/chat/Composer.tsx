@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEv
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
@@ -242,8 +243,8 @@ export function Composer({
   const placeholder = t("Message {channel}", { channel: channel.kind === "announcement" ? channel.name : `#${channel.name}` });
   return (
     <div className={s.foot}>
-      <TypingLine channelId={channel.id} />
       <div className={s.composer}>
+        <TypingLine channelId={channel.id} />
         {suggest && matches.length > 0 && (
           <div className={s.suggest} role="listbox" aria-label={t("People and roles to mention")}>
             <div className={s.suggestHead}>{t("Mention")}</div>
@@ -257,7 +258,7 @@ export function Composer({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => choose(o)}
               >
-                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={28} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={20} />}
+                {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={22} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={16} />}
                 <span style={{ fontWeight: 600, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? t("@everyone") : o.label}</span>
                 {o.hint && <small>{o.hint}</small>}
               </button>
@@ -282,7 +283,7 @@ export function Composer({
             ))}
             {job && (
               <span className={s.chip}>
-                <span className={s.jobIcon}><Icon name="job" size={16} /></span>
+                <span className={s.jobIcon}><Icon name="job" size={15} /></span>
                 <span>{job.number ? `${t("Job #{number}", { number: job.number })} · ` : ""}{job.title}</span>
                 <button type="button" className="icon-btn" aria-label={t("Remove the job")} onClick={() => setJob(null)}><Icon name="x" size={14} /></button>
               </span>
@@ -290,8 +291,8 @@ export function Composer({
           </div>
         )}
         <div className={s.composerRow}>
-          <button type="button" className={`icon-btn ${s.composerBtn}`} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
-            <Icon name="camera" size={20} />
+          <button type="button" className={s.composerBtn} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
+            <Icon name="camera" size={17} />
           </button>
           <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
           <textarea
@@ -307,15 +308,16 @@ export function Composer({
             onBlur={() => setTimeout(() => setSuggest(null), 150)}
             maxLength={4000}
           />
-          <button type="button" className={`icon-btn ${s.composerBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
-            <Icon name="job" size={20} />
+          <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
+            <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>
-          <button type="button" className={s.sendBtn} aria-label={t("Send")} title={t("Send")} disabled={!canSend} onClick={submit}>
-            <Icon name="send" size={20} />
+          <button type="button" className={`btn btn-sm btn-primary ${s.sendBtn}`} aria-label={t("Send")} disabled={!canSend} onClick={submit}>
+            <span className={s.sendIcon} aria-hidden="true"><Icon name="arrowUp" size={19} /></span>
+            <span className={s.sendText}>{t("Send")}</span>
           </button>
         </div>
       </div>
-      {send.error && <div className="field-error" style={{ marginTop: 6 }}>{(send.error as Error).message}</div>}
+      {send.error && <div className="field-error" style={{ margin: "6px 4px 0" }}>{(send.error as Error).message}</div>}
       <JobPicker open={pickingJob} onClose={() => setPickingJob(false)} onPick={(j) => { setJob(j); setPickingJob(false); input.current?.focus(); }} />
     </div>
   );
@@ -374,21 +376,22 @@ function JobPicker({ open, onClose, onPick }: { open: boolean; onClose: () => vo
   });
   return (
     <Dialog open={open} onClose={onClose} title={t("Link a job")} size="sm">
-      <div className="dialog-body stack-sm">
-        <input className="input" type="search" placeholder={t("Search jobs by title or number")} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("Search jobs")} />
+      <div className={`dialog-body stack-sm ${s.jobPicker}`}>
+        <SearchField value={q} onChange={setQ} placeholder={t("Search jobs by title or number")} label={t("Search jobs")} shortcut={false} autoFocus />
         {jobs.isPending && <span className="muted small">{t("Loading jobs…")}</span>}
         {jobs.data?.length === 0 && <span className="muted small">{t("No jobs match.")}</span>}
-        <div className="stack-sm" style={{ gap: 4 }}>
-          {jobs.data?.map((j) => (
-            <button key={j.id} type="button" className="card-row" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--surface)", textAlign: "left", cursor: "pointer" }} onClick={() => onPick(j)}>
-              <span className={s.jobIcon}><Icon name="job" size={16} /></span>
-              <span className="grow">
-                <strong style={{ display: "block" }}>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>
-                <span className="muted small">{j.client?.display_name ?? ""}</span>
-              </span>
-            </button>
-          ))}
-        </div>
+        {Boolean(jobs.data?.length) && (
+          <ul className={s.jobList}>
+            {jobs.data?.map((j) => (
+              <li key={j.id}>
+                <button type="button" className={s.jobRow} onClick={() => onPick(j)}>
+                  <strong>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>
+                  {j.client?.display_name && <span>{j.client.display_name}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Dialog>
   );

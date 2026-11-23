@@ -6,8 +6,10 @@
 import { addressLine } from "@crewtavo/core/postcards";
 import { useQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/Icon";
+import { Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import styles from "./Marketing.module.css";
 import { proofLink } from "./postcardForm";
 
 type Address = { line1?: string; line2?: string | null; city?: string; region?: string; postal_code?: string } | null;
@@ -20,26 +22,25 @@ export function PostcardProofs({ campaignId }: { campaignId: string }) {
   });
   if (!proofs.data?.length) return null;
   return (
-    <section className="card" aria-labelledby="postcard-proofs">
-      <div className="card-pad" style={{ paddingBottom: 8 }}>
-        <h2 id="postcard-proofs" className="section-title" style={{ fontSize: 16 }}>Mailed to us</h2>
-      </div>
-      {proofs.data.map((p) => {
-        const to = p.address as Address;
-        const link = proofLink({ proof_url: p.proof_url, proof_at: p.created_at });
-        return (
-          <div key={p.id} className="card-row">
-            <div className="grow" style={{ minWidth: 0 }}>
-              <strong style={{ display: "block" }}>{formatDate(p.created_at)} · {p.mode === "live" ? "Live key: mailed" : "Test key: not mailed"}</strong>
-              <span className="muted small" style={{ display: "block", overflowWrap: "anywhere" }}>{to?.line1 ? addressLine({ line1: to.line1, line2: to.line2, city: to.city ?? "", region: to.region ?? "", postal_code: to.postal_code ?? "" }) : ""}</span>
-              {link && <a className="small" href={link} target="_blank" rel="noreferrer">See the card as Lob drew it <Icon name="external" size={12} /></a>}
-            </div>
-            <span className="small" style={p.status === "failed" ? { color: "var(--danger)", fontWeight: 600 } : undefined}>
-              {p.status === "failed" ? `Failed: ${p.error ?? "Lob couldn't make it"}` : p.status === "sending" ? "Being made" : p.mode === "live" ? `Mailed${p.expected_delivery ? `, expected ${formatDate(p.expected_delivery)}` : ""}` : "Made in test mode"}
-            </span>
-          </div>
-        );
-      })}
-    </section>
+    <Section title="Mailed to us" count={proofs.data.length} flush>
+      <ul className="rel" aria-label="Cards mailed to us">
+        {proofs.data.map((p) => {
+          const to = p.address as Address;
+          const link = proofLink({ proof_url: p.proof_url, proof_at: p.created_at });
+          return (
+            <li key={p.id} className={styles.recipient}>
+              <div className={styles.recipientBody}>
+                <span className={styles.recipientName}>{formatDate(p.created_at)} · {p.mode === "live" ? "Live key: mailed" : "Test key: not mailed"}</span>
+                <div className={styles.recipientMeta}>{to?.line1 ? addressLine({ line1: to.line1, line2: to.line2, city: to.city ?? "", region: to.region ?? "", postal_code: to.postal_code ?? "" }) : ""}</div>
+                {link && <a className={styles.recipientMeta} href={link} target="_blank" rel="noreferrer">See the card as Lob drew it <Icon name="external" size={12} /></a>}
+              </div>
+              <span className={styles.recipientEnd} data-tone={p.status === "failed" ? "danger" : undefined}>
+                {p.status === "failed" ? `Failed: ${p.error ?? "Lob couldn't make it"}` : p.status === "sending" ? "Being made" : p.mode === "live" ? `Mailed${p.expected_delivery ? `, expected ${formatDate(p.expected_delivery)}` : ""}` : "Made in test mode"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
   );
 }

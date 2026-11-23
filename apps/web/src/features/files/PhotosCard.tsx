@@ -12,7 +12,8 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { canDrawOn, DrawOnPhoto, OriginalLink } from "@/components/DrawOnPhoto";
 import { featureOn } from "@/components/shell/nav";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
+import { Section } from "@/components/ui/Section";
 import { FormError } from "@/components/ui/Field";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -24,6 +25,7 @@ import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { setPhotoShareable } from "../field/fieldActions";
 import { SHARE_NOTES, ShareToggle, shareToggleState } from "../marketing/ShareToggle";
+import styles from "./files.module.css";
 import { galleryOf, usePhotoGallery } from "./PhotoGallery";
 
 interface RecordPhoto {
@@ -127,19 +129,26 @@ export function PhotosCard(props: { jobId: string } | { clientId: string }) {
   const postThese = () => navigate(`/marketing?tab=social&compose=photos&photos=${shared.slice(0, MAX_PHOTOS).map((p) => p.id).join(",")}${jobId ? `&job=${jobId}` : ""}`);
 
   return (
-    <section className="stack" aria-labelledby={`photos-${jobId ?? clientId}`}>
-      <div className="section-head">
-        <h2 id={`photos-${jobId ?? clientId}`} className="section-title">Photos</h2>
-        {posts && rows.length > 0 && (
-          <div className="row wrap" style={{ gap: 8 }}>
-            {markable.length > 0 && <Button size="sm" variant="ghost" loading={marking} onClick={() => markAll.mutate()}>Mark all OK to share</Button>}
-            {shared.length > 0 && <Button size="sm" icon="share" onClick={postThese}>Post these photos</Button>}
-          </div>
-        )}
-      </div>
-      <div className="card card-pad stack">
+    <Section
+      title="Photos"
+      count={rows.length || undefined}
+      id={`photos-${jobId ?? clientId}`}
+      className={styles.photos}
+      // One action: posting them once some are OK to share, marking them until then (Mark all also sits under the photos then).
+      action={
+        posts && shared.length > 0 ? (
+          <Button size="sm" icon="share" onClick={postThese}>Post these photos</Button>
+        ) : posts && markable.length > 0 ? (
+          <Button size="sm" loading={marking} onClick={() => markAll.mutate()}>Mark all OK to share</Button>
+        ) : undefined
+      }
+    >
+      {photos.data && !rows.length && !markAll.error ? (
+        <EmptyState inline title="No photos yet">Photos the crew takes on visits show here.</EmptyState>
+      ) : (
+      <div className={styles.photoBody}>
         {photos.isPending ? (
-          <div className="thumbs">{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={120} radius={8} />)}</div>
+          <div className={cx("thumbs", styles.photoGrid)}>{[0, 1, 2, 3].map((i) => <Skeleton key={i} height={120} radius={8} />)}</div>
         ) : photos.error ? (
           <ErrorState compact error={photos.error} onRetry={() => photos.refetch()} />
         ) : !rows.length ? (
@@ -148,25 +157,25 @@ export function PhotosCard(props: { jobId: string } | { clientId: string }) {
           groupPhotos(rows, Boolean(clientId)).map((group) => {
             const shown = galleryOf(group.photos, (p) => p.file_name);
             return (
-              <div key={group.key} className="stack-sm">
-                <div className="row-between">
-                  <strong className="small">{group.title}</strong>
-                  {clientId && group.jobId && <Link className="small" to={`/jobs/${group.jobId}`}>Open job</Link>}
+              <div key={group.key} className={styles.photoSet}>
+                <div className={styles.photoHead}>
+                  <h3 className={styles.photoGroup}>{group.title}</h3>
+                  {clientId && group.jobId && <Link className={styles.photoGroupLink} to={`/jobs/${group.jobId}`}>Open job</Link>}
                 </div>
-                <div className="thumbs" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))" }}>
+                <div className={cx("thumbs", styles.photoGrid)}>
                   {group.photos.map((p) => {
                     const state = shareToggleState(session, p, p.cant_share === "client_opt_out");
                     const note = !p.can_share && p.cant_share && p.cant_share !== "client_opt_out" && state !== "hidden" ? (p.cant_share === "format" ? SHARE_NOTES.unsupported : CANT_SHARE[p.cant_share as CantShare]) : null;
                     return (
-                      <div key={p.id} className="stack-sm" style={{ gap: 4 }}>
+                      <div key={p.id} className={styles.photo}>
                         <div className="thumb">
                           {p.url ? <a href={p.url} target="_blank" rel="noreferrer" aria-label={`Open ${p.file_name}`} onClick={gallery.opener(shown, p.id, group.title)}><img src={p.url} alt={p.file_name} loading="lazy" /></a> : <span className="muted small">Unavailable</span>}
                           {p.can_share && <ShareToggle photo={p} onShown={(shareable) => show(p.id, shareable)} />}
                           {p.marked_path && <OriginalLink url={p.originalUrl} label={p.file_name} />}
                           {canDrawOn(session, p) && <DrawOnPhoto photo={p} label={p.file_name} onSaved={() => void queryClient.invalidateQueries({ queryKey: key })} />}
                         </div>
-                        {p.shareable && p.can_share && state === "ready" && <span className="chip chip-green" style={{ justifySelf: "start" }}>OK to share</span>}
-                        {note && <span className="muted small">{note}</span>}
+                        {p.shareable && p.can_share && state === "ready" && <span className={styles.okToShare}>OK to share</span>}
+                        {note && <span className={styles.photoNote}>{note}</span>}
                       </div>
                     );
                   })}
@@ -176,10 +185,16 @@ export function PhotosCard(props: { jobId: string } | { clientId: string }) {
           })
         )}
         <FormError error={markAll.error} />
-        {optedOut && <span className="muted small">{CLIENT_OPT_OUT} Their photos stay out of Marketing → Social.</span>}
-        {marketing && rows.some((p) => p.can_share) && <span className="muted small">Photos marked OK to share can be posted from Marketing → Social. Check a photo doesn't show a house number, a car plate or people's faces.</span>}
+        {optedOut && <span className={styles.photoNote}>{CLIENT_OPT_OUT} Their photos stay out of Marketing → Social.</span>}
+        {marketing && rows.some((p) => p.can_share) && (
+          <span className={styles.photoNote}>
+            Photos marked OK to share can be posted from Marketing → Social. Check a photo doesn't show a house number, a car plate or people's faces.
+            {posts && shared.length > 0 && markable.length > 0 && <> <button type="button" className="link-btn" disabled={marking} onClick={() => markAll.mutate()}>{marking ? "Marking…" : "Mark all OK to share"}</button></>}
+          </span>
+        )}
       </div>
+      )}
       {gallery.dialog}
-    </section>
+    </Section>
   );
 }

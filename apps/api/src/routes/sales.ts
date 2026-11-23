@@ -12,6 +12,7 @@ import {
   OFFICE,
   pitchProblem,
   SALES,
+  seesInvoices,
   summarizeFeatureCollection,
   validateFormula,
   type FeatureCollection,
@@ -24,6 +25,7 @@ import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
+import { noAssistants } from "../lib/noAssistants";
 import { roofSegments } from "../services/external";
 import { applyMeasurement } from "../services/measurements";
 import { draftQuote, setQuoteAi } from "../services/quoteDrafts";
@@ -33,7 +35,7 @@ import { BATCH_JOBS, convertQuote, invoiceJobs, quoteFromRequest, remindInvoices
 export const sales = new Hono<AppEnv>();
 
 /** The person's client, their company, and the address client links use (services/sales.ts). */
-const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c) });
+const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c), noMoney: !seesInvoices(c.var.role, c.var.permissions) });
 
 // ---------------------------------------------------------------------------------------------
 // Requests and quotes
@@ -88,8 +90,11 @@ sales.post("/quotes/:id/send", requireUser, requireCompany(SALES, "sales"), asyn
   return c.json(await sendQuote(scope(c), param(c, "id"), await readJson(c, sendSchema)));
 });
 
-/** The client's link for a quote or invoice, without sending it or changing its status (preview, PDF). */
-sales.get("/:kind{quotes|invoices}/:id/link", requireUser, requireCompany(SALES), async (c) => {
+/**
+ * The client's link for a quote or invoice, without sending it or changing its status (preview, PDF).
+ * It opens without a sign-in, so never for an AI assistant (lib/noAssistants.ts).
+ */
+sales.get("/:kind{quotes|invoices}/:id/link", requireUser, noAssistants, requireCompany(SALES), async (c) => {
   const kind = c.req.param("kind") === "quotes" ? "quote" : "invoice";
   const id = param(c, "id");
   const table = kind === "quote" ? "quotes" : "invoices";

@@ -12,15 +12,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
+import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { Select } from "@/components/ui/Select";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
+import { Section } from "@/components/ui/Section";
+import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { kit, Row, Step, Steps, SwitchLine } from "./PanelKit";
+import { Select } from "@/components/ui/Select";
 
 export interface PlanStatus {
   status: "connected" | "disconnected";
@@ -67,13 +71,16 @@ export function ManageUsage({ href = USAGE_URL }: { href?: string }) {
 /**
  * The card. `where`: on the ChatGPT app's page it always shows (for the owners and admins who get
  * there); in Settings it shows for anyone who may connect a plan or has one to deal with, and not
- * at all otherwise.
+ * at all otherwise. `level`: its heading's level, an h3 in Settings (beside the tab's other sections,
+ * under the tab's own title), where its words are also note-sized, as Settings' other notes are.
  */
-export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
+export function ChatGptPlanCard({ where, level = where === "settings" ? 3 : 2 }: { where: "app" | "settings"; level?: 2 | 3 }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const query = useChatGptPlan();
   const key = planKey(session.userId, session.company.id);
+  // In Settings its words are note-sized, as the tab's other notes are.
+  const note = where === "settings" ? cx(kit.note, kit.small) : kit.note;
   // Sign-in under way: OpenAI's page for it, and the address pasted back.
   const [signIn, setSignIn] = useState<{ url: string } | null>(null);
   const [address, setAddress] = useState("");
@@ -141,7 +148,7 @@ export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
   });
   const gotIt = useMutation({ mutationFn: () => api.post("/ai/chatgpt/notice", {}), onSettled: () => queryClient.invalidateQueries({ queryKey: key }) });
 
-  if (query.isPending) return where === "app" ? <section className="card card-pad"><Skeleton height={80} radius={8} /></section> : null;
+  if (query.isPending) return where === "app" ? <div aria-busy="true" aria-label="Loading"><SectionSkeleton rows={2} /></div> : null;
   // A server from before this (the page can be newer than the server for a moment during an update).
   if (!query.data) return null;
   const { plan, allowed, fallback } = query.data;
@@ -160,35 +167,48 @@ export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
   const picked = model.isPending ? model.variables : plan.model;
   // What answers this person's asks while their plan can't.
   const meanwhile = fallback ? `Meanwhile, what you ask uses ${session.company.name}'s own key.` : "Nothing else is set up to answer instead, so AI is paused for you until then.";
+  const working = connected && plan.problem !== "sign_in";
+  const more: MenuEntry[] = [
+    { label: "Check for new models", icon: "refresh", hidden: !working || plan.model_locked, disabled: models.isPending, onSelect: () => models.mutate() },
+    { separator: true },
+    { label: connected ? "Disconnect" : "Forget this sign-in", icon: connected ? "logout" : "x", danger: true, disabled: disconnect.isPending, onSelect: askDisconnect },
+  ];
 
   return (
-    <section className="card card-pad stack-sm" aria-labelledby="chatgpt-plan" style={{ gap: 10 }}>
-      <h2 id="chatgpt-plan" className="section-title" style={{ fontSize: 16 }}>Use your ChatGPT plan</h2>
-      <span className="muted small">Complete eligible AI requests in this app with usage included in your ChatGPT plan or credits balance.</span>
+    <Section
+      id="chatgpt-plan"
+      title="Use your ChatGPT plan"
+      level={level}
+      className={kit.panel}
+      action={(connected || plan.problem === "sign_in") && <Menu items={more} label="More for your ChatGPT plan" title="Your ChatGPT plan" />}
+    >
+      <p className={where === "settings" ? note : kit.text}>Complete eligible AI requests in this app with usage included in your ChatGPT plan or credits balance.</p>
 
-      {connected && plan.problem !== "sign_in" && (
+      {working && (
         <>
-          <div className="row wrap" style={{ gap: 10 }}>
-            <Icon name="check" size={16} />
-            <span className="grow">
-              <strong>Using ChatGPT plan</strong>{plan.email ? <> · {plan.email}</> : null}
-            </span>
-            <ManageUsage href={usage} />
+          <div className={kit.rows}>
+            <Row
+              // Green only while the plan answers; at its limit (or not eligible) the callout below says why, and this stays quiet.
+              lead={<span className={cx(kit.roundIcon, !plan.problem && kit.good)}><Icon name={plan.problem ? "pause" : "check"} size={16} /></span>}
+              title={<strong>Using ChatGPT plan</strong>}
+              sub={plan.email}
+              end={<ManageUsage href={usage} />}
+            />
           </div>
-          <span className="muted small">
+          <p className={note}>
             Yours alone: what you ask Crewtavo's AI yourself (a rewrite, a caption, a reply, an answer from your guides, a receipt you add) is answered on your ChatGPT account.
             Other people's asks, and anything Crewtavo drafts by itself, {fallback ? "use the company's own key" : "need a key of the company's"}.
-          </span>
+          </p>
         </>
       )}
 
       {connected && plan.problem === "usage_limit" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 6 }}>
-            <span>ChatGPT · Usage limit reached</span>
-            <span style={{ fontWeight: 400 }}>Review your plan or this app's limit in ChatGPT settings. {meanwhile}</span>
-            <div className="row wrap" style={{ gap: 8 }}>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>ChatGPT · Usage limit reached</div>
+            <span>Review your plan or this app's limit in ChatGPT settings. {meanwhile}</span>
+            <div className={kit.actions}>
               <a className="btn btn-primary btn-sm" href={usage} target="_blank" rel="noreferrer">Manage usage <Icon name="external" size={12} /></a>
               <Button size="sm" loading={retry.isPending} onClick={() => retry.mutate()}>Try again</Button>
             </div>
@@ -197,11 +217,11 @@ export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
       )}
       {connected && plan.problem === "not_eligible" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 6 }}>
-            <span>ChatGPT says your plan can't be used here</span>
-            <span style={{ fontWeight: 400 }}>{ELIGIBLE} {meanwhile}</span>
-            <div className="row wrap" style={{ gap: 8 }}>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>ChatGPT says your plan can't be used here</div>
+            <span>{ELIGIBLE} {meanwhile}</span>
+            <div className={kit.actions}>
               <Button size="sm" loading={retry.isPending} onClick={() => retry.mutate()}>Try again</Button>
             </div>
           </div>
@@ -209,83 +229,84 @@ export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
       )}
       {plan.problem === "sign_in" && (
         <div className="callout callout-warning" role="status">
-          <Icon name="alert" size={20} />
-          <div className="grow stack-sm" style={{ gap: 6 }}>
-            <span>Sign in again</span>
-            <span style={{ fontWeight: 400 }}>Your ChatGPT sign-in has ended, so your plan isn't being used. {meanwhile}</span>
+          <Icon name="alert" size={16} />
+          <div className={cx("grow", kit.calloutBody)}>
+            <div>Sign in again</div>
+            <span>Your ChatGPT sign-in has ended, so your plan isn't being used. {meanwhile}</span>
           </div>
         </div>
       )}
 
-      {connected && plan.problem !== "sign_in" && (
+      {working && (
         plan.model_locked ? (
-          <span className="muted small">Whoever runs this Crewtavo server set the model to <strong>{plan.model}</strong> (OPENAI_MODEL), so it isn't picked here.</span>
+          <p className={note}>Whoever runs this Crewtavo server set the model to <strong>{plan.model}</strong> (OPENAI_MODEL), so it isn't picked here.</p>
         ) : (
-          <div className="row wrap" style={{ gap: 8 }}>
-            <Select className="select grow" style={{ maxWidth: 320 }} value={picked ?? ""} disabled={model.isPending} onChange={(e) => model.mutate(e.target.value)} aria-label="Model your ChatGPT plan uses">
+          <Field label="Model">
+            <Select className="select" style={{ maxWidth: 320 }} value={picked ?? ""} disabled={model.isPending || models.isPending} onChange={(e) => model.mutate(e.target.value)} aria-label="Model your ChatGPT plan uses">
               {picked && !plan.models.some((m) => m.slug === picked) && <option value={picked}>{picked} (not listed anymore)</option>}
               {plan.models.map((m) => <option key={m.slug} value={m.slug}>{m.display_name}</option>)}
             </Select>
-            <Button icon="refresh" loading={models.isPending} onClick={() => models.mutate()}>Check for new models</Button>
-          </div>
+          </Field>
         )
       )}
 
       {(!connected || plan.problem === "sign_in") && (allowed || plan.problem === "sign_in") && (
         <>
           {plan.problem !== "sign_in" && (
-            <span className="muted small">
+            <p className={note}>
               For you alone: what you ask Crewtavo's AI yourself is answered on your own ChatGPT account, and your plan pays for it. Other people's asks, and anything Crewtavo drafts by itself,
               use the company's key. {ELIGIBLE}
-            </span>
+            </p>
           )}
           {allowed ? (
-            <div className="row wrap" style={{ gap: 10 }}>
+            <div className={kit.actions}>
               <Button variant="primary" loading={start.isPending} onClick={() => begin()}>Continue with ChatGPT</Button>
               {plan.registered && plan.email && !signIn && (
                 <button type="button" className="link-btn small" disabled={start.isPending} onClick={() => begin(true)}>Use a different account than {plan.email}</button>
               )}
             </div>
           ) : (
-            <span className="muted small">{session.company.name} has turned off using your own ChatGPT plan, so it can't be connected again for now.</span>
+            <p className={note}>{session.company.name} has turned off using your own ChatGPT plan, so it can't be connected again for now.</p>
           )}
           {signIn && (
-            <form className="stack-sm" onSubmit={paste}>
-              <ol className="app-steps">
-                <li>
-                  ChatGPT's sign-in opened in a new tab. Sign in there and allow Crewtavo.{" "}
-                  <a href={signIn.url} target="_blank" rel="noreferrer">Open it again <Icon name="external" size={12} /></a>
-                </li>
-                <li>
-                  Your browser then goes to an address that starts with <code>http://127.0.0.1:1455</code> and says the page can't be reached. That's expected: the address is all that's needed, and nothing is meant to open there.
-                </li>
-                <li>Copy that whole address from the address bar and paste it here. It works once, within ten minutes.</li>
-              </ol>
-              <div className="row" style={{ gap: 8 }}>
-                <input
-                  className="input grow"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="http://127.0.0.1:1455/auth/callback?code=…"
-                  value={address}
-                  onChange={(e) => { setAddress(e.target.value); finish.reset(); }}
-                  aria-label="The address your browser ended up on"
-                />
-                <Button type="submit" loading={finish.isPending} disabled={!address.trim()}>Connect</Button>
-              </div>
-              {finish.error && <span className="field-error" role="alert">{(finish.error as Error).message}</span>}
+            <form className={kit.form} onSubmit={paste}>
+              <Steps>
+                <Step>
+                  <span>
+                    ChatGPT's sign-in opened in a new tab. Sign in there and allow Crewtavo.{" "}
+                    <a href={signIn.url} target="_blank" rel="noreferrer">Open it again <Icon name="external" size={12} /></a>
+                  </span>
+                </Step>
+                <Step>
+                  <span>
+                    Your browser then goes to an address that starts with <code className={kit.code}>http://127.0.0.1:1455</code> and says the page can't be reached. That's expected: the address is all that's needed, and nothing is meant to open there.
+                  </span>
+                </Step>
+                <Step>
+                  <span>Copy that whole address from the address bar and paste it here. It works once, within ten minutes.</span>
+                  <div className={kit.pasteRow}>
+                    <input
+                      className="input"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="http://127.0.0.1:1455/auth/callback?code=…"
+                      value={address}
+                      onChange={(e) => { setAddress(e.target.value); finish.reset(); }}
+                      aria-label="The address your browser ended up on"
+                    />
+                    <Button type="submit" loading={finish.isPending} disabled={!address.trim()}>Connect</Button>
+                  </div>
+                  {finish.error && <span className="field-error" role="alert">{(finish.error as Error).message}</span>}
+                </Step>
+              </Steps>
             </form>
           )}
           {start.error && <span className="field-error" role="alert">{(start.error as Error).message}</span>}
         </>
       )}
 
-      {(connected || plan.problem === "sign_in") && (
-        <div className="row wrap" style={{ gap: 8 }}>
-          <Button size="sm" variant="ghost" loading={disconnect.isPending} onClick={askDisconnect}>{connected ? "Disconnect" : "Forget this sign-in"}</Button>
-          {where === "settings" && <span className="muted small">An OpenAI API key for the whole company is added by an owner or admin under Apps → ChatGPT.</span>}
-        </div>
-      )}
+      {where === "settings" && (connected || plan.problem === "sign_in") && <p className={cx(kit.note, kit.small)}>An OpenAI API key for the whole company is added by an owner or admin under Apps → ChatGPT.</p>}
+      {(disconnect.isPending || models.isPending) && <p className={cx(kit.note, kit.small)} role="status">{disconnect.isPending ? "Disconnecting…" : "Checking for new models…"}</p>}
 
       {/* Shown once, the first time someone connects, as OpenAI asks. */}
       <Dialog open={welcome} onClose={() => { setWelcome(false); gotIt.mutate(); }} title="You're using your ChatGPT plan" size="sm">
@@ -296,7 +317,7 @@ export function ChatGptPlanCard({ where }: { where: "app" | "settings" }) {
           </div>
         </div>
       </Dialog>
-    </section>
+    </Section>
   );
 }
 
@@ -323,15 +344,17 @@ export function TeamPlansSwitch() {
     save.mutate(next);
   };
   return (
-    <section className="card card-pad stack-sm" aria-label="ChatGPT plans for the team" style={{ gap: 8 }}>
-      <label className="switch-row">
-        <input type="checkbox" className="switch" checked={on} disabled={save.isPending} onChange={(e) => change(e.target.checked)} />
-        Let everyone on my team use their own ChatGPT plan
-      </label>
-      <span className="muted small">
-        Each person connects theirs under <Link to="/settings?tab=assistants" style={{ textDecoration: "underline" }}>Settings → AI assistants</Link>. What they ask Crewtavo's AI themselves then goes to OpenAI on their own ChatGPT account, and their plan pays for it.
-        Off, only owners and admins can connect one. Subcontractors never can.
-      </span>
-    </section>
+    <Section title="ChatGPT plans for the team" className={kit.panel}>
+      <SwitchLine
+        label="Let everyone on my team use their own ChatGPT plan"
+        checked={on}
+        disabled={save.isPending}
+        onChange={change}
+        hint={<>
+          Each person connects theirs under <Link to="/settings?tab=assistants" style={{ textDecoration: "underline" }}>Settings → AI assistants</Link>. What they ask Crewtavo's AI themselves then goes to OpenAI on their own ChatGPT account, and their plan pays for it.
+          Off, only owners and admins can connect one. Subcontractors never can.
+        </>}
+      />
+    </Section>
   );
 }

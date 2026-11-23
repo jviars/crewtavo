@@ -9,15 +9,16 @@ import { APPLICANT_STATUSES, applicantStatusLabel, DETAIL_LABELS, FILE_ACCEPT, f
 import { fieldLabel } from "@crewtavo/core/websiteForms";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
+import { type MenuEntry } from "@/components/ui/Menu";
+import { BackLink } from "@/components/ui/PageHeader";
+import { Fact, Facts, RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, NoAccess, PageError } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -26,11 +27,11 @@ import { formatDate, formatDateTime, timeAgo } from "@/lib/format";
 import { can, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { formatPhoneTyping } from "@/lib/validate";
-import { ContactLine } from "../clients/ContactsCard";
 import { storedUndoToast, TRASH_PATH } from "../drive/trash";
-import { WebVisitRows } from "../marketing/WebVisitRows";
+import { WebVisitFacts } from "../marketing/WebVisitRows";
 import { APPLICANT_FIELDS, APPLICANT_TONES, deleteApplicant, fileLinks, filesJson, isWaiting, otherApplications, refreshApplicants, seesApplicants, uploadApplicantFile, type Applicant } from "./applicants";
 import styles from "./Applicants.module.css";
+import { Select } from "@/components/ui/Select";
 
 /** The next step from each status, as the page's main button. */
 const NEXT: Partial<Record<ApplicantStatus, { label: string; icon: IconName; to: ApplicantStatus }>> = {
@@ -136,27 +137,30 @@ function ApplicantDetail() {
     if (ok) remove.mutate();
   };
 
+  const more: MenuEntry[] = [
+    { label: "Edit details", icon: "edit", kbd: "E", onSelect: () => setDialog("edit") },
+    { label: a.files.length ? "Add a file" : "Add their résumé", icon: "upload", hidden: a.files.length >= 5, onSelect: () => fileInput.current?.click() },
+    { label: a.interview_at ? "Change the interview" : "Set an interview time", icon: "calendar", kbd: "I", onSelect: () => setDialog("interview") },
+    {
+      label: "Move to",
+      icon: "arrowRight",
+      end: applicantStatusLabel(a.status),
+      items: APPLICANT_STATUSES.map((s) => ({ label: s.label, checked: a.status === s.key, onSelect: () => a.status !== s.key && save.mutate({ status: s.key }) })),
+    },
+    { separator: true },
+    { label: "Delete applicant", icon: "trash", danger: true, onSelect: askDelete },
+  ];
+  const visit = a.web_visit;
+
   return (
     <>
-      <BackLink to="/applicants">Applicants</BackLink>
-      <PageHeader
+      <DetailHeader
+        crumb={{ to: "/applicants", label: "Applicants" }}
         title={a.name}
-        actions={
-          <>
-            {next && <Button variant="primary" icon={next.icon} loading={save.isPending && save.variables?.status === next.to} onClick={step}>{next.label}</Button>}
-            <Menu
-              items={[
-                { label: "Edit details", icon: "edit", onSelect: () => setDialog("edit") },
-                { label: a.files.length ? "Add a file" : "Add their résumé", icon: "upload", onSelect: () => fileInput.current?.click() },
-                { label: a.interview_at ? "Change the interview" : "Set an interview time", icon: "calendar", onSelect: () => setDialog("interview") },
-                { separator: true },
-                { label: "Not hired", icon: "x", hidden: a.status === "not_hired" || a.status === "hired", onSelect: () => save.mutate({ status: "not_hired" }) },
-                { label: "Reopen", icon: "undo", hidden: a.status !== "not_hired", onSelect: () => save.mutate({ status: "reviewing" }) },
-                { label: "Delete applicant", icon: "trash", danger: true, onSelect: askDelete },
-              ]}
-            />
-          </>
-        }
+        status={<StatusPill label={applicantStatusLabel(a.status)} tone={APPLICANT_TONES[a.status]} />}
+        meta={[a.position && <span key="pos" className="tag">{a.position}</span>, <span key="at" title={formatDateTime(a.created_at, tz)}>Applied {timeAgo(a.created_at)}</span>]}
+        actions={next && <Button variant="primary" icon={next.icon} loading={save.isPending && save.variables?.status === next.to} onClick={step}>{next.label}</Button>}
+        more={more}
       />
       <input
         ref={fileInput}
@@ -169,21 +173,16 @@ function ApplicantDetail() {
           if (file) addFile.mutate(file);
         }}
       />
-      <div className="page-meta">
-        <StatusPill label={applicantStatusLabel(a.status)} tone={APPLICANT_TONES[a.status]} />
-        {a.position && <span className="chip">{a.position}</span>}
-        <span className="muted" title={formatDateTime(a.created_at, tz)}>Applied {timeAgo(a.created_at)}</span>
-      </div>
 
       {isWaiting(a) && (
-        <div className="callout callout-warning"><Icon name="clock" size={20} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
+        <div className="callout callout-warning"><Icon name="clock" size={16} /><div className="grow">{first} applied {timeAgo(a.created_at)} and hasn't heard back yet.</div></div>
       )}
       {a.status === "interview" && a.interview_at && (
-        <div className="callout callout-info"><Icon name="calendar" size={20} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
+        <div className="callout callout-info"><Icon name="calendar" size={16} /><div className="grow">Interview {formatDateTime(a.interview_at, tz)}.</div></div>
       )}
       {a.status === "hired" && (
         <div className="callout callout-good" role="status">
-          <Icon name="check" size={20} />
+          <Icon name="check" size={16} />
           <div className="grow">
             {managesTeam ? `Hired. Invite ${first} to your team so they can sign in and see their visits.` : `Hired. An admin can invite ${first} to your team in Settings → People.`}
           </div>
@@ -191,123 +190,123 @@ function ApplicantDetail() {
         </div>
       )}
 
-      <div className="two-col">
-        <div className="wide stack-lg">
-          <section className="card card-pad stack-sm">
-            <strong>About {first}</strong>
-            {details.length || answers.length ? (
-              <dl className="kv" style={{ marginTop: 4 }}>
-                {details.map((k) => (
-                  <div key={k} style={{ display: "contents" }}>
-                    <dt>{DETAIL_LABELS[k]}</dt>
-                    <dd className="pre-wrap">{a[k]}</dd>
-                  </div>
-                ))}
-                {answers.map(([key, value]) => (
-                  <div key={key} style={{ display: "contents" }}>
-                    {/* The form's other questions, under its own field names. */}
-                    <dt>{fieldLabel(key)}</dt>
-                    <dd className="pre-wrap">{Array.isArray(value) ? value.join(", ") : String(value)}</dd>
-                  </div>
-                ))}
-              </dl>
-            ) : (
-              <span className="muted">Nothing else was sent with the application.</span>
-            )}
-            {a.message && (
-              <>
-                <strong style={{ marginTop: 10 }}>In {first === a.name ? "their" : `${first}'s`} words</strong>
-                <p className="pre-wrap" style={{ margin: 0 }}>{a.message}</p>
-              </>
-            )}
-          </section>
-
-          <section className="stack">
-            <div className="section-head">
-              <h2 className="section-title">Résumé and files</h2>
-              {a.files.length > 0 && a.files.length < 5 && <Button size="sm" icon="upload" loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add a file</Button>}
-            </div>
-            <div className="card">
-              {a.files.length === 0 && (
-                <EmptyState inline title="No résumé yet" action={<Button loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add their résumé</Button>} />
+      <DetailColumns
+        grouped
+        side={
+          <>
+            <Section title="Contact">
+              {a.email || a.phone ? (
+                <Facts>
+                  <Fact label="Email">{a.email && <a href={`mailto:${a.email}`}>{a.email}</a>}</Fact>
+                  <Fact label="Phone">{a.phone && <><a href={`tel:${a.phone}`}>{a.phone}</a><span className={styles.dot}> · </span><a href={`sms:${a.phone}`}>Text them</a></>}</Fact>
+                </Facts>
+              ) : (
+                <EmptyState inline title="No email or phone" />
               )}
+            </Section>
+
+            <Section title="Where it stands">
+              <Facts>
+                <Fact label="Status">
+                  <Select className={`select ${styles.status}`} value={a.status} onChange={(e) => save.mutate({ status: e.target.value as ApplicantStatus })} aria-label="Status">
+                    {APPLICANT_STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </Select>
+                </Fact>
+                <Fact label="Since"><span title={formatDate(a.status_changed_at)}>{formatDate(a.status_changed_at)} ({timeAgo(a.status_changed_at)})</span></Fact>
+                <Fact label="Your rating"><Stars value={a.rating} onChange={(rating) => save.mutate({ rating })} /></Fact>
+                <Fact label="Interview">
+                  <span className={styles.interviewFact}>
+                    <span>{a.interview_at ? formatDateTime(a.interview_at, tz) : "Not set"}</span>
+                    <button type="button" className="link-btn" onClick={() => setDialog("interview")}>{a.interview_at ? "Change" : "Set a time"}</button>
+                  </span>
+                </Fact>
+              </Facts>
+            </Section>
+
+            <Section title="Application">
+              <Facts>
+                <Fact label="Applied">{formatDateTime(a.created_at, tz)}</Fact>
+                <Fact label="Through">{a.website_form_id ? (a.form ? `Your website's ${a.form.name}` : "Your website") : "Added by the office"}</Fact>
+                {visit && <WebVisitFacts visit={visit} did="applied" />}
+              </Facts>
+            </Section>
+
+            {(others.data?.length ?? 0) > 0 && (
+              <Section title="Applied before" count={others.data!.length}>
+                <RelatedList>
+                  {others.data!.map((o) => (
+                    <RelatedRow key={o.id} to={`/applicants/${o.id}`} title={o.position ?? "An application"} sub={formatDate(o.created_at)} end={<StatusPill label={applicantStatusLabel(o.status)} tone={APPLICANT_TONES[o.status as ApplicantStatus] ?? "muted"} />} />
+                  ))}
+                </RelatedList>
+              </Section>
+            )}
+          </>
+        }
+      >
+        <Section title={`About ${first}`}>
+          {details.length || answers.length ? (
+            <Facts>
+              {details.map((k) => (
+                <Fact key={k} label={DETAIL_LABELS[k]} wide={(a[k]?.length ?? 0) > 60}><span className="pre-wrap">{a[k]}</span></Fact>
+              ))}
+              {answers.map(([key, value]) => {
+                const text = Array.isArray(value) ? value.join(", ") : String(value);
+                // The form's other questions, under its own field names.
+                return <Fact key={key} label={fieldLabel(key)} wide={text.length > 60}><span className="pre-wrap">{text}</span></Fact>;
+              })}
+            </Facts>
+          ) : (
+            <EmptyState inline title="Nothing else was sent with the application." />
+          )}
+        </Section>
+
+        {a.message && (
+          <Section title={`In ${first === a.name ? "their" : `${first}'s`} words`}>
+            <p className={styles.words}>{a.message}</p>
+          </Section>
+        )}
+
+        <Section
+          title="Résumé and files"
+          count={a.files.length || undefined}
+          action={a.files.length > 0 && a.files.length < 5 && <Button icon="upload" loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add a file</Button>}
+        >
+          {a.files.length === 0 ? (
+            <EmptyState inline title="No résumé yet" action={<Button size="sm" icon="upload" loading={addFile.isPending} slowHint={false} onClick={() => fileInput.current?.click()}>Add their résumé</Button>} />
+          ) : (
+            <RelatedList>
               {a.files.map((f) => {
                 const link = a.links[f.path];
                 return (
-                  <div key={f.path} className="card-row">
-                    <Icon name="file" size={20} />
-                    <span className="grow" style={{ minWidth: 0 }}>
-                      <strong style={{ display: "block" }}>{isResume(f, a.files) ? "Résumé" : fileLabel(f.field)}</strong>
-                      <span className="muted small" style={{ overflowWrap: "anywhere" }}>{f.name} · {fileSize(f.size)}</span>
-                    </span>
-                    {link && <a className="btn btn-sm" href={link.open} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>}
-                    {link && <a className="btn btn-sm btn-icon" href={link.save} aria-label={`Download ${f.name}`} title="Download"><Icon name="download" size={14} /></a>}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon="trash"
-                      aria-label={`Remove ${f.name}`}
-                      onClick={async () => (await confirm({ title: `Remove ${f.name}?`, body: `It goes to the Trash for ${TRASH_DAYS} days.`, confirmLabel: "Remove", danger: true })) && removeFile.mutate(f)}
-                    />
-                  </div>
+                  <RelatedRow
+                    key={f.path}
+                    lead={<span className="rel-icon"><Icon name="file" size={15} /></span>}
+                    title={isResume(f, a.files) ? "Résumé" : fileLabel(f.field)}
+                    // On a phone, beside three buttons, the size goes under the name rather than after a dangling dot.
+                    sub={[f.name, <span key="size" className="meta-break">{fileSize(f.size)}</span>]}
+                    actions={
+                      <>
+                        {link && <a className="btn btn-sm" href={link.open} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Open</a>}
+                        {link && <a className="btn btn-sm btn-icon" href={link.save} aria-label={`Download ${f.name}`} title="Download"><Icon name="download" size={14} /></a>}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon="trash"
+                          aria-label={`Remove ${f.name}`}
+                          title="Remove"
+                          onClick={async () => (await confirm({ title: `Remove ${f.name}?`, body: `It goes to the Trash for ${TRASH_DAYS} days.`, confirmLabel: "Remove", danger: true })) && removeFile.mutate(f)}
+                        />
+                      </>
+                    }
+                  />
                 );
               })}
-            </div>
-          </section>
+            </RelatedList>
+          )}
+        </Section>
 
-          <NotesCard key={a.notes ?? ""} notes={a.notes} saving={save.isPending && save.variables && "notes" in save.variables} saved={notesSaved} onSave={(notes) => save.mutate({ notes })} />
-        </div>
-
-        <aside className="narrow stack">
-          <div className="card card-pad stack-sm">
-            <strong style={{ fontSize: 16 }}>{a.name}</strong>
-            {a.email && <ContactLine icon="mail" href={`mailto:${a.email}`}>{a.email}</ContactLine>}
-            {a.phone && <ContactLine icon="phone" href={`tel:${a.phone}`}>{a.phone}</ContactLine>}
-            {a.phone && <a href={`sms:${a.phone}`} className="row small" style={{ gap: 8 }}><Icon name="messages" size={14} />Text them</a>}
-            {a.location && <span className="row muted small" style={{ gap: 8 }}><Icon name="pin" size={14} />{a.location}</span>}
-          </div>
-
-          <div className="card card-pad stack-sm">
-            <strong>Where it stands</strong>
-            <Field label="Status">
-              <Select className="select" value={a.status} onChange={(e) => save.mutate({ status: e.target.value as ApplicantStatus })}>
-                {APPLICANT_STATUSES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-              </Select>
-            </Field>
-            <span className="muted small">Since {formatDate(a.status_changed_at)} ({timeAgo(a.status_changed_at)})</span>
-            <div className="stack-sm" style={{ gap: 4, marginTop: 6 }}>
-              <span className="small strong">Your rating</span>
-              <Stars value={a.rating} onChange={(rating) => save.mutate({ rating })} />
-            </div>
-            <div className="row-between" style={{ gap: 8, marginTop: 6 }}>
-              <span className="small">
-                <span className="strong">Interview</span>
-                <span className="muted" style={{ display: "block" }}>{a.interview_at ? formatDateTime(a.interview_at, tz) : "Not set"}</span>
-              </span>
-              <Button size="sm" onClick={() => setDialog("interview")}>{a.interview_at ? "Change" : "Set a time"}</Button>
-            </div>
-          </div>
-
-          <div className="card card-pad stack-sm">
-            <strong>Application</strong>
-            <dl className="kv">
-              <dt>Applied</dt><dd>{formatDateTime(a.created_at, tz)}</dd>
-              <dt>Through</dt><dd>{a.website_form_id ? (a.form ? `Your website's ${a.form.name}` : "Your website") : "Added by the office"}</dd>
-              {a.web_visit && <WebVisitRows visit={a.web_visit} did="applied" />}
-            </dl>
-            {(others.data?.length ?? 0) > 0 && (
-              <div className="stack-sm" style={{ gap: 6, marginTop: 8 }}>
-                <span className="small strong">Applied before</span>
-                {others.data!.map((o) => (
-                  <Link key={o.id} to={`/applicants/${o.id}`} className="small">
-                    {o.position ?? "An application"}, {formatDate(o.created_at)} · {applicantStatusLabel(o.status)}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        </aside>
-      </div>
+        <NotesCard key={a.notes ?? ""} notes={a.notes} saving={save.isPending && save.variables && "notes" in save.variables} saved={notesSaved} onSave={(notes) => save.mutate({ notes })} />
+      </DetailColumns>
 
       {dialog === "edit" && <EditApplicantDialog applicant={a} onClose={() => setDialog(null)} onSave={(patch) => save.mutateAsync(patch).then(() => setDialog(null))} />}
       {dialog === "interview" && (
@@ -339,12 +338,13 @@ function NotesCard({ notes, saving, saved, onSave }: { notes: string | null; sav
   const [text, setText] = useState(notes ?? "");
   const dirty = text.trim() !== (notes ?? "");
   return (
-    <section className="card card-pad stack-sm">
-      <strong>Notes</strong>
-      <span className="muted small">For the office: how the call went, references, what to ask in the interview. The applicant never sees them.</span>
-      <textarea className="textarea" rows={5} maxLength={10000} value={text} onChange={(e) => setText(e.target.value)} aria-label="Notes" />
-      <Button style={{ justifySelf: "start" }} loading={saving} done={saved} disabled={!dirty && !saved} onClick={() => onSave(text.trim() || null)}>Save notes</Button>
-    </section>
+    <Section title="Notes" flush>
+      <div className={styles.notes}>
+        <span className={styles.hint}>For the office: how the call went, references, what to ask in the interview. The applicant never sees them.</span>
+        <textarea className="textarea" rows={5} maxLength={10000} value={text} onChange={(e) => setText(e.target.value)} aria-label="Notes" />
+        <Button style={{ justifySelf: "start" }} loading={saving} done={saved} disabled={!dirty && !saved} onClick={() => onSave(text.trim() || null)}>Save notes</Button>
+      </div>
+    </Section>
   );
 }
 

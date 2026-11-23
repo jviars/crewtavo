@@ -18,8 +18,7 @@ import { countsOn, lineTotal, optionLabels, optionLines, toCents } from "@crewta
 import { promoCodeOf, removedPromoWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Button } from "@/components/ui/Button";
-import { Combobox, ComboboxPopup, usePickerLayer } from "@/components/ui/Combobox";
+import { Button, cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { NumberInput } from "@/components/ui/NumberInput";
@@ -332,66 +331,65 @@ export function LineItems({
   const chipOf = (line: Line) => addOnLabel(line, { offers, tier: tiers?.get(line.id) });
 
   return (
-    <div className="card">
+    <div className="lines">
       {editable ? (
         <div role="table" aria-label="Line items" ref={listRef}>
-          <div className="lines-head" role="row">
+          {/* No column heads over nothing: the empty line below says there are none yet. */}
+          {shown.length > 0 && <div className="lines-head" role="row">
             <span role="columnheader">Item</span>
             <span role="columnheader" className="num">Qty</span>
             <span role="columnheader">Unit</span>
             <span role="columnheader" className="num">Price</span>
             <span role="columnheader" className="num">Total</span>
             <span role="columnheader"><span className="sr-only">Actions</span></span>
-          </div>
+          </div>}
           {shown.map((line, i) => {
             const actions = (
               <Menu
-                triggerClassName="btn btn-sm btn-ghost btn-icon"
+                triggerClassName="btn btn-sm btn-ghost btn-icon line-more"
                 label={`Actions for ${line.name}`}
+                title={line.name}
                 items={[
-                  { label: "Edit", icon: "edit", hidden: openId === line.id, onSelect: () => setOpenId(line.id) },
+                  { label: "Edit", icon: "edit", kbd: "E", hidden: openId === line.id, onSelect: () => setOpenId(line.id) },
+                  { label: "Duplicate", icon: "copy", hidden: isPromoLine(table, line), kbd: "D", onSelect: () => duplicate.mutate(line) },
+                  { separator: true },
                   { label: "Move up", icon: "chevronUp", disabled: i === 0, onSelect: () => move.mutate({ id: line.id, dir: -1 }) },
                   { label: "Move down", icon: "chevronDown", disabled: i === shown.length - 1, onSelect: () => move.mutate({ id: line.id, dir: 1 }) },
-                  { label: "Duplicate", icon: "copy", hidden: isPromoLine(table, line), onSelect: () => duplicate.mutate(line) },
                   { separator: true },
                   { label: "Remove", icon: "trash", danger: true, onSelect: () => remove.mutate(line) },
                 ]}
               />
             );
             return openId === line.id ? (
-              <LineRow key={line.id} table={table} line={line} editable withOptions={withOptions} showCosts={showCosts} place={place} viewing={viewing} addOn={chipOf(line)} saveStatus={saveStatus} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} rule={ruleOf(line)} drawings={drawings.data} />
+              <LineRow key={line.id} table={table} line={line} withOptions={withOptions} showCosts={showCosts} place={place} viewing={viewing} saveStatus={saveStatus} onChanged={onChanged} onDone={() => setOpenId(null)} actions={actions} rule={ruleOf(line)} drawings={drawings.data} />
             ) : (
               <LineSummary key={line.id} line={line} withOptions={withOptions} shared={offers && line.option_id == null} addOn={chipOf(line)} onOpen={() => setOpenId(line.id)} actions={actions} />
             );
           })}
         </div>
       ) : (
-        <table className="table table-stack" aria-label="Line items">
-          <thead>
-            <tr>
-              <th>Item</th>
-              <th className="num" style={{ width: 90 }}>Qty</th>
-              <th style={{ width: 80 }}>Unit</th>
-              <th className="num" style={{ width: 110 }}>Price</th>
-              <th className="num" style={{ width: 120 }}>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.length === 0 && <tr><td colSpan={5} className="muted">No line items</td></tr>}
-            {shown.map((line) => (
-              <LineRow key={line.id} table={table} line={line} editable={false} withOptions={withOptions} showCosts={false} place={place} viewing={viewing} addOn={chipOf(line)} onChanged={onChanged} />
-            ))}
-          </tbody>
-        </table>
+        // As the editable list reads, without a way in: a signed quote, a paid invoice.
+        <div role="table" aria-label="Line items">
+          {shown.length > 0 && <div className="lines-head lines-head-static" role="row">
+            <span role="columnheader">Item</span>
+            <span role="columnheader" className="num">Qty</span>
+            <span role="columnheader">Unit</span>
+            <span role="columnheader" className="num">Price</span>
+            <span role="columnheader" className="num">Total</span>
+          </div>}
+          {shown.map((line) => (
+            <LineSummary key={line.id} line={line} withOptions={withOptions} shared={Boolean(place) && line.option_id == null} addOn={chipOf(line)} />
+          ))}
+        </div>
       )}
-      {/* One quiet line, right above the ways to add one. */}
-      {editable && shown.length === 0 && <EmptyState inline title={offers ? `Nothing on ${viewingName} yet` : "No line items yet"} />}
+      {/* One quiet line (outside the table, which has no row for it), right above the ways to add one. */}
+      {shown.length === 0 && <EmptyState inline title={!editable ? "No line items" : offers ? `Nothing on ${viewingName} yet` : "No line items yet"} />}
       {editable && (
-        <div className="card-pad row wrap" style={{ borderTop: "1px solid var(--divider)", paddingTop: 14, paddingBottom: 14 }}>
-          <ServicePicker services={services.data ?? []} loading={services.isPending || add.isPending} onPick={(id) => add.mutate(id)} />
-          <Button icon="plus" onClick={() => add.mutate(null)} disabled={add.isPending}>Custom item</Button>
+        <div className="lines-add">
+          <ServicePicker services={services.data ?? []} loading={services.isPending || add.isPending} pending={services.isPending} onPick={(id) => add.mutate(id)} />
+          <Button size="sm" variant="ghost" icon="plus" onClick={() => add.mutate(null)} disabled={add.isPending}>Custom item</Button>
           {/* What the options bar offered before there were any: one package to price it from, or two or three side by side. */}
-          {onOfferOptions && <Button icon="package" onClick={onOfferOptions}>{lines.length ? "Offer options" : "Pick packages"}</Button>}
+          {onOfferOptions && <Button size="sm" variant="ghost" icon="package" onClick={onOfferOptions}>{lines.length ? "Offer options" : "Pick packages"}</Button>}
           {offers && (
             <div className={`segmented ${styles.addTo}`} role="group" aria-label="New lines go">
               <button type="button" aria-pressed={!addToEvery} onClick={() => setAddToEvery(false)}><span>Only on {viewingName}</span></button>
@@ -399,8 +397,13 @@ export function LineItems({
             </div>
           )}
           {showCosts && totals.costed && (
-            <span className="muted small" style={{ marginLeft: "auto" }}>
-              Cost {formatMoneyCents(totals.cost)} · Margin <strong style={{ color: totals.price - totals.cost < 0 ? "var(--danger)" : "var(--ink)" }}>{totals.price > 0 ? `${Math.round(((totals.price - totals.cost) / totals.price) * 100)}%` : "—"}</strong>
+            <span className="lines-cost">
+              Cost {formatMoneyCents(totals.cost)}
+              {totals.price > 0 && (
+                <>
+                  {" · "}Margin <strong data-tone={totals.price - totals.cost < 0 ? "danger" : undefined}>{Math.round(((totals.price - totals.cost) / totals.price) * 100)}%</strong>
+                </>
+              )}
             </span>
           )}
         </div>
@@ -409,60 +412,35 @@ export function LineItems({
   );
 }
 
-type PriceListService = { id: string; name: string; unit: string; unit_price: number; category: string | null };
-
 /**
- * "Add from price list": its button opens a search of the services (Base UI's Combobox, with the
- * search in the list). Type to narrow it, then click one, or use the arrow keys and Enter.
+ * "Add from price list": the price list as a menu with a search field (a sheet on a phone), each
+ * service with its category under it and its price on the right. Typing narrows it; the arrow keys
+ * go from the field to the services.
  */
-function ServicePicker({ services, loading, onPick }: { services: PriceListService[]; loading: boolean; onPick: (id: string) => void }) {
-  const button = useRef<HTMLButtonElement>(null);
-  const [layer, place] = usePickerLayer();
+function ServicePicker({ services, loading, pending, onPick }: { services: Array<{ id: string; name: string; unit: string; unit_price: number; category: string | null }>; loading: boolean; pending: boolean; onPick: (id: string) => void }) {
   const [term, setTerm] = useState("");
-  const matches = services.filter((s) => `${s.name} ${s.category ?? ""}`.toLowerCase().includes(term.trim().toLowerCase())).slice(0, 50);
-
+  const words = term.trim().toLowerCase();
+  const matches = services.filter((s) => `${s.name} ${s.category ?? ""}`.toLowerCase().includes(words)).slice(0, 50);
   return (
-    <Combobox.Root<PriceListService>
-      items={matches}
-      filter={null}
-      value={null}
-      onValueChange={(s) => s && onPick(s.id)}
-      inputValue={term}
-      onInputValueChange={(next, { reason }) => reason !== "item-press" && setTerm(next)}
-      onOpenChange={(open) => {
-        if (!open) return;
-        place(button.current);
-        setTerm("");
-      }}
-      itemToStringLabel={(s) => s.name}
-      isItemEqualToValue={(a, b) => a.id === b.id}
-      autoHighlight
-    >
-      {/* Outlined like the other ways to add: the page's next step is its only solid button. Named
-          outright, as a combobox isn't named by the words in it the way a button is. */}
-      <Combobox.Trigger ref={button} className="btn" aria-label="Add from price list" disabled={loading && !services.length}>
-        {loading ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <Icon name="list" size={16} />}
-        Add from price list
-      </Combobox.Trigger>
-      <ComboboxPopup container={layer} className="picker-popup-search" label="Your price list">
-        <div className="picker-search">
-          <span className="addon"><Icon name="search" size={14} /></span>
-          <Combobox.Input className="input input-sm" placeholder="Search your services" aria-label="Search services" />
-        </div>
-        <Combobox.Empty className="picker-empty">{services.length ? "No services match" : "Your price list is empty. Add services in Settings."}</Combobox.Empty>
-        <Combobox.List className="picker-list">
-          {(s: PriceListService) => (
-            <Combobox.Item key={s.id} value={s} className="menu-item picker-option" style={{ height: "auto", padding: "8px 10px" }}>
-              <span className="grow" style={{ minWidth: 0 }}>
-                <span className="ellipsis" style={{ display: "block" }}>{s.name}</span>
-                {s.category && <span className="muted small">{s.category}</span>}
-              </span>
-              <span className="muted small tabular">{formatMoneyCents(s.unit_price)}/{s.unit}</span>
-            </Combobox.Item>
-          )}
-        </Combobox.List>
-      </ComboboxPopup>
-    </Combobox.Root>
+    // Outlined like the other ways to add: the page's next step is its only solid button.
+    <Menu
+      align="start"
+      label="Add from price list"
+      title="Price list"
+      triggerClassName="btn btn-sm lines-price-list"
+      trigger={<>{loading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="list" size={14} />}Add from price list</>}
+      search={{ value: term, onChange: setTerm, placeholder: "Search your services", label: "Search services" }}
+      footer={pending ? { text: "Loading your price list…" } : !services.length ? { text: "Your price list is empty. Add services in Settings." } : undefined}
+      items={matches.map((s) => ({
+        label: s.name,
+        description: s.category ?? undefined,
+        end: `${formatMoneyCents(s.unit_price)}/${s.unit}`,
+        onSelect: () => {
+          setTerm("");
+          onPick(s.id);
+        },
+      }))}
+    />
   );
 }
 
@@ -524,27 +502,43 @@ export const addOnLabel = (line: Pick<Line, "optional" | "selected" | "option_gr
   line.optional ? `${offers && line.option_group ? "Pick one" : (tier ?? "Optional")}${line.selected ? " · chosen" : ""}` : null;
 
 /** A line as it reads to the office: click anywhere on it to edit. `shared`: on every option of a quote that offers options. `addOn`: its add-on chip (addOnLabel). */
-function LineSummary({ line, withOptions, shared, addOn, onOpen, actions }: { line: Line; withOptions: boolean; shared: boolean; addOn: string | null; onOpen: () => void; actions: React.ReactNode }) {
+function LineSummary({ line, withOptions, shared, addOn, onOpen, actions }: { line: Line; withOptions: boolean; shared: boolean; addOn: string | null; onOpen?: () => void; actions?: React.ReactNode }) {
   const excluded = withOptions && line.optional && !line.selected;
   // Rounded to the cent as the database rounds it (1.5 × $0.35 is $0.53).
   const amount = lineTotal(line.quantity, line.unit_price);
   const qty = formatNumber(Number(line.quantity), Number(line.quantity) % 1 ? 2 : 0);
+  // Read only, each part is a cell of its own; to edit, the whole line is one button.
+  const cell = onOpen ? undefined : "cell";
+  const parts = (
+    <>
+      <span className="name-cell" role={cell}>
+        <strong>{line.name}</strong>
+        {(addOn || shared || !line.taxable) && (
+          <span className="line-tags">
+            {addOn && <span className="tag">{addOn}</span>}
+            {shared && <span className="tag">On every option</span>}
+            {!line.taxable && <span className="tag">No tax</span>}
+          </span>
+        )}
+        {line.description && <span className={cx("line-desc", onOpen ? "ellipsis-2" : "pre-wrap")}>{line.description}</span>}
+      </span>
+      <span className="num line-qty" role={cell}>{qty}</span>
+      <span className="line-unit" role={cell}>{line.unit}</span>
+      <span className="num line-price" role={cell}>{formatMoneyCents(line.unit_price)}</span>
+      <span className="num total" role={cell}>{excluded ? <span className="line-out">Not included</span> : formatMoneyCents(amount)}</span>
+    </>
+  );
+  if (!onOpen) {
+    return (
+      <div className="line-view line-static" role="row" data-excluded={excluded || undefined}>
+        <div className="line-open" role="none">{parts}</div>
+      </div>
+    );
+  }
   return (
     <div className="line-view" role="row" data-excluded={excluded || undefined}>
       <div role="cell">
-        <button type="button" className="line-open" onClick={onOpen} aria-label={`Edit ${line.name}`}>
-          <span className="name-cell">
-            <strong>{line.name}</strong>
-            {addOn && <span className="chip" style={{ marginLeft: 6 }}>{addOn}</span>}
-            {shared && <span className="chip" style={{ marginLeft: 6 }}>On every option</span>}
-            {!line.taxable && <span className="chip" style={{ marginLeft: 6 }}>No tax</span>}
-            {line.description && <span className="muted small ellipsis-2" style={{ display: "block" }}>{line.description}</span>}
-          </span>
-          <span className="num">{qty}</span>
-          <span>{line.unit}</span>
-          <span className="num">{formatMoneyCents(line.unit_price)}</span>
-          <span className="num total">{excluded ? <span className="muted">Not included</span> : formatMoneyCents(amount)}</span>
-        </button>
+        <button type="button" className="line-open" onClick={onOpen} aria-label={`Edit ${line.name}`}>{parts}</button>
       </div>
       <div role="cell">{actions}</div>
     </div>
@@ -552,19 +546,17 @@ function LineSummary({ line, withOptions, shared, addOn, onOpen, actions }: { li
 }
 
 /**
- * A line as a row: its fields to edit, or (not `editable`) as it reads. `place`: the quote's options,
- * when it offers them, for where the line is; `viewing` is the option looked at. `addOn`: its add-on
- * chip (addOnLabel). `saveStatus`: the page header's, which each save reports to.
+ * A line open for editing, its fields in a row. `place`: the quote's options,
+ * when it offers them, for where the line is; `viewing` is the option looked at. `saveStatus`: the
+ * page header's, which each save reports to.
  */
-function LineRow({ table, line, editable, withOptions, showCosts, place, viewing, addOn, saveStatus, onChanged, onDone, actions, rule = null, drawings = [] }: {
+function LineRow({ table, line, withOptions, showCosts, place, viewing, saveStatus, onChanged, onDone, actions, rule = null, drawings = [] }: {
   table: Table;
   line: Line;
-  editable: boolean;
   withOptions: boolean;
   showCosts: boolean;
   place: ReadonlyArray<{ id: string; name: string }> | null;
   viewing: string | null;
-  addOn: string | null;
   saveStatus?: SaveStatusHandle;
   onChanged: () => void;
   onDone?: () => void;
@@ -635,27 +627,11 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
   const excluded = withOptions && line.optional && !line.selected;
   const amount = lineTotal(draft.quantity, draft.unit_price);
 
-  if (!editable) {
-    return (
-      <tr style={excluded ? { opacity: 0.55 } : undefined}>
-        <td>
-          <strong>{line.name}</strong>
-          {addOn && <span className="chip" style={{ marginLeft: 6 }}>{addOn}</span>}
-          {place && line.option_id == null && <span className="chip" style={{ marginLeft: 6 }}>On every option</span>}
-          {line.description && <div className="muted small pre-wrap">{line.description}</div>}
-        </td>
-        <td className="num">{formatNumber(Number(line.quantity), Number(line.quantity) % 1 ? 2 : 0)}</td>
-        <td>{line.unit}</td>
-        <td className="num">{formatMoneyCents(line.unit_price)}</td>
-        <td className="num">{excluded ? <span className="muted">—</span> : formatMoneyCents(amount)}</td>
-      </tr>
-    );
-  }
 
   return (
     <div className="line-edit" role="row" data-excluded={excluded || undefined} data-saving={save.isPending || undefined}>
       <div className="name-cell" role="cell">
-        <input className="input" aria-label="Item name" value={draft.name} maxLength={200} onChange={(e) => { setDraft({ ...draft, name: e.target.value }); edited(); }} onBlur={commitText("name")} onKeyDown={blurOnEnter} style={{ fontWeight: 700 }} autoFocus={Boolean(onDone)} onFocus={(e) => line.name === "New item" && e.target.select()} />
+        <input className="input" aria-label="Item name" value={draft.name} maxLength={200} onChange={(e) => { setDraft({ ...draft, name: e.target.value }); edited(); }} onBlur={commitText("name")} onKeyDown={blurOnEnter} autoFocus={Boolean(onDone)} onFocus={(e) => line.name === "New item" && e.target.select()} />
       </div>
       <div className="num" role="cell"><span className="cell-label" aria-hidden="true">Qty</span>
         <NumberField label="Quantity" value={Number(draft.quantity)} disabled={promo} describedBy={promo ? promoHint : undefined} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ quantity: v })} />
@@ -666,8 +642,8 @@ function LineRow({ table, line, editable, withOptions, showCosts, place, viewing
       <div className="num" role="cell"><span className="cell-label" aria-hidden="true">Price</span>
         <NumberField label="Unit price" step="0.01" prefix="$" value={Number(draft.unit_price)} disabled={promo} describedBy={promo ? promoHint : undefined} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_price: v })} />
       </div>
-      <div className="total" role="cell"><span className="cell-label">Total</span>{excluded ? <span className="muted">Not included</span> : formatMoneyCents(amount)}</div>
-      <div role="cell" style={{ paddingTop: 3 }}>{actions}</div>
+      <div className="total" role="cell"><span className="cell-label">Total</span>{excluded ? <span className="line-out">Not included</span> : formatMoneyCents(amount)}</div>
+      <div role="cell" className="line-edit-actions">{actions}</div>
       <div className="wide-cell" role="cell">
         <textarea
           className="textarea"

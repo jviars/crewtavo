@@ -6,35 +6,44 @@
  * measure goes to a salesperson to measure on site (flow/MeasureOnSite.tsx), and one measured by a
  * report (EagleView, Hover) has its numbers typed in instead of being drawn (flow/RoofReport.tsx).
  *
+ * A record page (Page-Quote.dc.html, Mobile-Sales Quote): the crumb, title, its stage as a dot and
+ * words with the client, address and number, "Open the quote" and a More menu; the steps as a strip
+ * under the title; then each step a section on a hairline (an inset card on a phone). Only the step
+ * the project is at has a green button.
+ *
  * The estimate is the estimate kit's (useEstimateQuote), so a tap on − or + shows at once; the rest
  * of the project (its dates, deposit and job) loads beside it (flow/data.ts). The pieces every trade
- * shares (the progress pills, the step cards, the invoices) are paving/ProjectFlow's.
+ * shares (the step strip, the step sections, the invoices) are paving/ProjectFlow's.
  */
 import { isReportRoof } from "@crewtavo/core/roofing";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
-import { BackLink, PageHeader } from "@/components/ui/PageHeader";
+import { BackLink } from "@/components/ui/PageHeader";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState, NoAccess } from "@/components/ui/States";
+import { StatusPill } from "@/components/ui/StatusPill";
 import { addressLine, formatMoney, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { readApproval } from "../documents/data";
 import { usePictures } from "../measure/drawings";
-import { FlowProgress, InvoiceStepBody, invoiceStatus, measureLinkFor, StepCard, TakeoffEmpty, useJobInvoices, useScrollToHash, type FlowTrade } from "../paving/ProjectFlow";
+import { FlowProgress, InvoiceStepBody, invoiceStatus, measureLinkFor, StepCard, useJobInvoices, useScrollToHash, type FlowTrade } from "../paving/ProjectFlow";
 import { ROOF_STEPS, roofStep, type RoofStepId } from "./data";
 import { counts, firstName, useEstimateQuote } from "./estimate";
-import { useFreshEstimate, useRefreshProject, useRoofProject, useTeam, useWatchProject } from "./flow/data";
+import { blankTab, useFreshEstimate, useOpenPreview, useRefreshProject, useRoofProject, useTeam, useWatchProject } from "./flow/data";
 import { EstimateStep } from "./flow/EstimateStep";
 import { CantMeasureButton, MeasureOnSiteCard } from "./flow/MeasureOnSite";
 import { RoofReportButton } from "./flow/RoofReport";
-import { personName, rangeState, rangeStepStatus, visitStepStatus } from "./flow/model";
+import { capital, homeownerName, isPriced, personName, rangeState, rangeStepStatus, visitStepStatus } from "./flow/model";
+import { projectStage } from "./flow/projects";
 import type { SendChannel, SendMode } from "./flow/RangeCard";
 import { RangeStep } from "./flow/RangeStep";
 import { RoofCard } from "./flow/RoofCard";
 import { RoofSchedule } from "./flow/RoofSchedule";
 import { SendEstimateDialog } from "./flow/SendEstimateDialog";
 import { VisitStep } from "./flow/VisitStep";
+import styles from "./flow/flow.module.css";
 
 export const ROOFING: FlowTrade<RoofStepId> = {
   id: "roofing",
@@ -79,9 +88,10 @@ function RoofProject() {
   useFreshEstimate(id);
   const refresh = useRefreshProject(id);
   const team = useTeam();
+  const navigate = useNavigate();
+  const preview = useOpenPreview(id);
   const seesInvoices = hasRole(session, "admin", "office");
-  const job = project.data?.jobs[0] ?? null;
-  const invoices = useJobInvoices(job, seesInvoices);
+  const invoices = useJobInvoices(project.data?.jobs[0] ?? null, seesInvoices);
   const pictures = usePictures([estimate.data?.takeoff?.snapshot_path]);
   useScrollToHash(Boolean(estimate.data && project.data));
   // Out with the homeowner, or out on the roof: their answer shows here when it comes.
@@ -109,6 +119,7 @@ function RoofProject() {
   const extras = project.data;
   const tz = session.company.timezone;
   const step = roofStep({ ...quote, jobs: extras.jobs }, takeoff, invoices.data ?? []);
+  const stage = projectStage({ ...quote, jobs: extras.jobs }, Boolean(takeoff));
   const at = (s: RoofStepId) => ROOF_STEPS.findIndex((x) => x.id === s);
   const done = (s: RoofStepId) => step === "done" || at(step) > at(s);
   const reached = (s: RoofStepId) => step === "done" || at(step) >= at(s);
@@ -131,54 +142,75 @@ function RoofProject() {
     : quote.measure_on_site_at
       ? ["Measure on site", firstName(personName(team.data, quote.salesperson_id))].filter(Boolean).join(" · ")
       : "Not measured yet";
+  const Who = capital(homeownerName(quote.client?.display_name));
+  const job = extras.jobs[0] ?? null;
 
   return (
     <>
-      <BackLink to={ROOFING.path}>{ROOFING.name}</BackLink>
-      <PageHeader title={quote.title} actions={<Link className="btn" to={`/quotes/${quote.id}`}>Open the quote</Link>} />
-      <p className="page-subtitle">{[quote.client?.display_name, quote.property ? addressLine(quote.property) : null, quote.number ? `Estimate #${quote.number}` : null].filter(Boolean).join(" · ")}</p>
+      <DetailHeader
+        crumb={{ to: ROOFING.path, label: ROOFING.name }}
+        title={quote.title}
+        status={<StatusPill label={stage.label} tone={stage.tone} />}
+        meta={[
+          quote.client && <Link key="client" className={styles.metaLink} to={`/clients/${quote.client.id}`}>{quote.client.display_name}</Link>,
+          quote.property ? addressLine(quote.property) : null,
+          quote.number ? `Estimate #${quote.number}` : null,
+        ]}
+        actions={<Link className="btn" to={`/quotes/${quote.id}`}><Icon name="quote" size={16} />Open the quote</Link>}
+        more={[
+          { label: `See what ${Who} sees`, icon: "eye", kbd: "P", disabled: !isPriced(quote) || preview.isPending, onSelect: () => preview.mutate(blankTab()) },
+          { label: takeoff ? "Measure again" : "Measure the roof", icon: "ruler", kbd: "M", hidden: !measureLink || isReportRoof(takeoff), onSelect: () => navigate(measureLink!) },
+          { label: quote.priced_on_site_at ? "Open the site visit" : "Start the site visit", icon: "tablet", kbd: "V", hidden: !reached("visit") || rangeState(quote) === "signed" || rangeState(quote) === "closed" || !quote.lines.length, onSelect: () => navigate(`/roofing/${quote.id}/visit`) },
+          { separator: true },
+          { label: "Open the client", icon: "user", hidden: !quote.client, onSelect: () => navigate(`/clients/${quote.client!.id}`) },
+          { label: job?.number ? `Open job #${job.number}` : "Open the job", icon: "job", hidden: !job, onSelect: () => navigate(`/jobs/${job!.id}`) },
+        ]}
+      />
 
       <FlowProgress steps={ROOF_STEPS} step={step} />
       {(quote.status === "lost" || quote.status === "archived") && (
         <div className="callout callout-danger" role="status">
-          <Icon name="alert" size={20} />
+          <Icon name="alert" size={16} />
           <span className="grow">This estimate was marked {quote.status === "lost" ? "lost" : "archived"}. <Link to={`/quotes/${quote.id}`}>Reopen it from the quote</Link> to pick it up again.</span>
         </div>
       )}
 
-      <div className="stack" style={{ gap: 16 }}>
-        <StepCard id="takeoff" n={1} title={label("takeoff")} status={takeoffStatus} done={Boolean(takeoff)} current={step === "takeoff"}>
+      <DetailColumns grouped>
+        <StepCard
+          id="takeoff"
+          n={1}
+          title={label("takeoff")}
+          status={takeoffStatus}
+          done={Boolean(takeoff)}
+          current={step === "takeoff"}
+          action={
+            // A roof typed in from a report goes back to its numbers, not to the map.
+            takeoff && (isReportRoof(takeoff) ? (
+              <RoofReportButton quote={quote} takeoff={takeoff} label="Change the numbers" icon />
+            ) : (
+              measureLink && <Link className={styles.stepAction} to={measureLink}><Icon name="edit" size={14} /><span className={styles.actionWords}>Measure again</span></Link>
+            ))
+          }
+        >
           {!takeoff && quote.measure_on_site_at ? (
             <MeasureOnSiteCard quote={quote} measureLink={measureLink} canSell />
           ) : !takeoff ? (
-            <div className="stack-sm">
-              <TakeoffEmpty trade={ROOFING} measureLink={measureLink} />
-              <div className="row wrap" style={{ gap: 12 }}>
-                <RoofReportButton quote={quote} label="Enter measurements from a report" />
+            <div className={styles.stepBody}>
+              <p className={styles.stepLead}>{ROOFING.takeoff.text}</p>
+              <div className={styles.tools}>
+                {measureLink && <Link className={step === "takeoff" ? "btn btn-primary" : "btn"} to={measureLink}><Icon name="area" size={16} />{ROOFING.takeoff.start}</Link>}
+                <RoofReportButton quote={quote} label="Enter measurements from a report" button />
                 <CantMeasureButton quote={quote} />
               </div>
             </div>
           ) : (
-            <RoofCard
-              takeoff={takeoff}
-              picture={takeoff.snapshot_path ? pictures.data?.[takeoff.snapshot_path] : undefined}
-              editLink={measureLink}
-              // A roof typed in from a report goes back to its numbers, not to the map.
-              action={isReportRoof(takeoff) ? <RoofReportButton quote={quote} takeoff={takeoff} label="Change the numbers" /> : undefined}
-            />
+            <RoofCard takeoff={takeoff} picture={takeoff.snapshot_path ? pictures.data?.[takeoff.snapshot_path] : undefined} />
           )}
         </StepCard>
 
-        <StepCard
-          id="estimate"
-          n={2}
-          title={label("estimate")}
-          status={estimateStatus}
-          done={done("estimate")}
-          current={step === "estimate"}
-        >
+        <StepCard id="estimate" n={2} title={label("estimate")} status={estimateStatus} done={done("estimate")} current={step === "estimate"}>
           {!takeoff && !quote.lines.length ? (
-            <span className="muted small">{quote.options.length ? `Measure the roof first; each of the ${quote.options.length} options is priced from its package once it's measured.` : ROOFING.takeoff.first}</span>
+            <p className={styles.note}>{quote.options.length ? `Measure the roof first; each of the ${quote.options.length} options is priced from its package once it's measured.` : ROOFING.takeoff.first}</p>
           ) : (
             <EstimateStep
               quote={quote}
@@ -206,9 +238,9 @@ function RoofProject() {
         </StepCard>
 
         <StepCard id="invoice" n={6} title={label("invoice")} status={invoiceStatus(job, invoices.data)} done={step === "done"} current={step === "invoice"}>
-          <InvoiceStepBody job={job} seesInvoices={seesInvoices} invoices={invoices.data} />
+          <InvoiceStepBody job={job} seesInvoices={seesInvoices} invoices={invoices.data} primary={step === "invoice"} />
         </StepCard>
-      </div>
+      </DetailColumns>
 
       {sending && (
         <SendEstimateDialog

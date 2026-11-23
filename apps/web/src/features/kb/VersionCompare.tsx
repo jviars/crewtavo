@@ -1,8 +1,10 @@
 /**
- * Two versions of a guide side by side (one under the other on a phone): what was taken out on the
- * left, what's new on the right, the changed words marked, and long unchanged stretches folded.
+ * Two versions of a guide side by side (one under the other on a phone), as KB-Extras draws them:
+ * what was taken out marked on the left, what's new on the right, an unchanged heading across both
+ * as the section the change is in, and long unchanged stretches folded.
  */
 import { Fragment, useMemo, useState } from "react";
+import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/States";
 import { sanitizeHtml } from "@/lib/html";
 import { blocksOf, compareBlocks, wordChanges, type Block, type Row } from "./diff";
@@ -35,14 +37,27 @@ export function VersionCompare({ before, after }: { before: Version; after: Vers
           let hidden = 0;
           while (i + hidden < rows.length && !near[i + hidden]) hidden++;
           return (
-            <button key={i} type="button" className="diff-fold" onClick={() => setUnfolded(true)}>
-              {hidden} unchanged {hidden === 1 ? "part" : "parts"} · Show all
-            </button>
+            <div key={i} className="diff-fold" role="row">
+              <span role="cell">
+                <Icon name="sort" size={13} />
+                <span>{hidden} unchanged {hidden === 1 ? "part" : "parts"}</span>
+                <span aria-hidden="true">·</span>
+                <button type="button" onClick={() => setUnfolded(true)}>Show all</button>
+              </span>
+            </div>
+          );
+        }
+        // An unchanged heading reads as the section the changes under it are in, across both sides.
+        if (row.kind === "same" && row.before.kind === "heading") {
+          return (
+            <div key={i} className="diff-row diff-sec" role="row">
+              <span role="cell">{row.before.text}</span>
+            </div>
           );
         }
         return <DiffRow key={i} row={row} />;
       })}
-      <p className="diff-summary muted small">{changed} {changed === 1 ? "change" : "changes"}</p>
+      <p className="diff-summary">{changed} {changed === 1 ? "change" : "changes"}</p>
     </div>
   );
 }
@@ -60,9 +75,11 @@ function DiffRow({ row }: { row: Row }) {
 function Cell({ block, side, kind, parts }: { block: Block | null; side: "before" | "after"; kind: Row["kind"]; parts?: Array<{ text: string; changed: boolean }> }) {
   if (!block) return <span className="diff-cell" role="cell" data-empty />;
   const Mark = side === "before" ? "del" : "ins";
+  // A block taken out or added is marked whole; a changed one, just its words that changed.
+  const whole = kind === "removed" || kind === "added" || (kind === "changed" && block.kind === "media");
   return (
     <span className="diff-cell" role="cell" data-block={block.kind} data-kind={kind}>
-      {parts ? parts.map((p, i) => <Fragment key={i}>{p.changed ? <Mark>{p.text}</Mark> : p.text}</Fragment>) : block.text}
+      {whole ? <Mark>{block.text}</Mark> : parts ? parts.map((p, i) => <Fragment key={i}>{p.changed ? <Mark>{p.text}</Mark> : p.text}</Fragment>) : block.text}
     </span>
   );
 }

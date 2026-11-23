@@ -73,10 +73,10 @@ select public.create_company('Daylight Lawn', 'general') as co \gset
 \o
 \echo 'How the clock works is a company setting'
 \o /dev/null
-select twd.check((select settings -> 'clock' ->> 'mode' = 'day' from public.companies where id = :'co'), 'a new company starts on the whole-day clock');
+select twd.check((select public.company_settings(id) -> 'clock' ->> 'mode' = 'day' from public.companies where id = :'co'), 'a new company starts on the whole-day clock');
 -- Settings → Company saving the rest of the Time clock card (the previous app version doesn't send the mode).
 select public.merge_company_settings(:'co', '{"clock": {"record_location": true, "breaks": "paid"}}');
-select twd.check((select settings -> 'clock' = '{"mode": "day", "record_location": true, "breaks": "paid"}'::jsonb from public.companies where id = :'co'), 'saving the other clock settings keeps it');
+select twd.check((select public.company_settings(id) -> 'clock' = '{"mode": "day", "record_location": true, "breaks": "paid"}'::jsonb from public.companies where id = :'co'), 'saving the other clock settings keeps it');
 reset role;
 select twd.check(private.clock_mode(:'co') = 'day', 'and the database reads it as the whole day');
 set local role authenticated;

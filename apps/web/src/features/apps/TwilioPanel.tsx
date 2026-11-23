@@ -12,10 +12,11 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Fact, Facts, Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
-import { copyText } from "@/lib/clipboard";
 import { formatPhoneTyping } from "@/lib/validate";
 import type { AppRow, TwilioState } from "./catalog";
+import { CodeRow, Fold, Step, Steps, kit } from "./PanelKit";
 
 const TWILIO_CONSOLE = "https://console.twilio.com/";
 const TWILIO_NUMBERS = "https://console.twilio.com/us1/develop/phone-numbers/manage/incoming";
@@ -27,9 +28,12 @@ export function TwilioPanel({ app, onChanged }: { app: AppRow; onChanged: () => 
   return (
     <>
       {state?.server && (
-        <section className="card card-pad stack-sm" aria-label="Texting" style={{ gap: 6 }}>
-          <div className="row" style={{ gap: 10 }}><Icon name="check" size={16} /><span className="grow">Texts go out from the Twilio number set up for this server</span></div>
-          <span className="muted small">Nothing to do here. To text from your own number instead, connect your Twilio account below.</span>
+        <section className="callout callout-good" aria-label="Texting">
+          <Icon name="check" size={16} />
+          <div className="grow">
+            <div>Texts go out from the Twilio number set up for this server</div>
+            Nothing to do here. To text from your own number instead, connect your Twilio account below.
+          </div>
         </section>
       )}
       <ConnectForm
@@ -62,24 +66,21 @@ function ConnectForm({ app, changing, optional, onSaved, onCancel }: { app: AppR
     save.reset();
   };
   return (
-    <section id="app-setup" className="card card-pad stack" aria-labelledby="twilio-setup-title">
-      <div className="stack-sm" style={{ gap: 4 }}>
-        <h2 id="twilio-setup-title" className="section-title" style={{ fontSize: 16 }}>{changing ? "Change your Twilio account" : optional ? "Use your own Twilio account" : "Connect your Twilio account"}</h2>
-        <span className="muted small">
-          About five minutes once you have a Twilio number. Twilio bills you directly for the texts you send, a fraction of a cent to a few cents each. In the US, Twilio also asks you to register
-          your business before a new number can text (A2P 10DLC), which can take a few days.
-        </span>
-        <span className="muted small">{TEXT_CONSENT_HINT}</span>
-      </div>
-      <ol className="app-steps">
-        <li>
+    <Section className={kit.panel} id="app-setup" title={changing ? "Change your Twilio account" : optional ? "Use your own Twilio account" : "Connect your Twilio account"}>
+      <p className={kit.note}>
+        About five minutes once you have a Twilio number. Twilio bills you directly for the texts you send, a fraction of a cent to a few cents each. In the US, Twilio also asks you to register
+        your business before a new number can text (A2P 10DLC), which can take a few days.
+      </p>
+      <p className={kit.note}>{TEXT_CONSENT_HINT}</p>
+      <Steps>
+        <Step>
           <a className="btn btn-sm" href={TWILIO_CONSOLE} target="_blank" rel="noreferrer">Open your Twilio console <Icon name="external" size={12} /></a>
-          <span className="muted small" style={{ display: "block", marginTop: 4 }}>No account yet? Sign up there, then buy a phone number that can send SMS.</span>
-        </li>
-        <li>On the console's first page, under <strong>Account Info</strong>, copy the <strong>Account SID</strong> and the <strong>Auth Token</strong> (click the eye to show it).</li>
-        <li>Copy your number from <a href={TWILIO_NUMBERS} target="_blank" rel="noreferrer">Phone Numbers → Active numbers</a>.</li>
-        <li>Paste all three here. Crewtavo checks them with Twilio before saving, at no cost.</li>
-      </ol>
+          <p className={kit.note}>No account yet? Sign up there, then buy a phone number that can send SMS.</p>
+        </Step>
+        <Step>On the console's first page, under <strong>Account Info</strong>, copy the <strong>Account SID</strong> and the <strong>Auth Token</strong> (click the eye to show it).</Step>
+        <Step>Copy your number from <a href={TWILIO_NUMBERS} target="_blank" rel="noreferrer">Phone Numbers → Active numbers</a>.</Step>
+        <Step>Paste all three here. Crewtavo checks them with Twilio before saving, at no cost.</Step>
+      </Steps>
       <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
           <Field label="Account SID" hint="Starts with AC." requiredMessage="Paste your Account SID.">
@@ -102,7 +103,7 @@ function ConnectForm({ app, changing, optional, onSaved, onCancel }: { app: AppR
           {onCancel && <Button onClick={onCancel}>Cancel</Button>}
         </div>
       </form>
-    </section>
+    </Section>
   );
 }
 
@@ -114,48 +115,44 @@ function Connected({ app, state, onChanged, onChange }: { app: AppRow; state: Tw
   });
   return (
     <>
-      <section className="card card-pad stack-sm" aria-label="Twilio account" style={{ gap: 6 }}>
-        <div className="row wrap" style={{ gap: 10 }}>
-          <Icon name={app.status === "error" ? "alert" : "check"} size={16} />
-          <span className="grow">
-            {app.status === "error" ? <strong>Twilio isn't accepting this account anymore</strong> : <>Connected{app.account_label ? <> to <strong>{app.account_label}</strong></> : null}</>}
-          </span>
-          <Button size="sm" onClick={onChange}>Change account</Button>
-        </div>
-        {app.last_error && <span className="small" style={{ color: "var(--danger)", fontWeight: 600 }}>{app.last_error}</span>}
-        <span className="muted small">Reminders, on-my-way texts and the texts you send from Messages go out from this number.</span>
-      </section>
-      <section className="card card-pad stack-sm" aria-labelledby="twilio-incoming" style={{ gap: 10 }}>
-        <h2 id="twilio-incoming" className="section-title" style={{ fontSize: 16 }}>Replies from clients</h2>
+      <Section className={kit.panel} title="Twilio account" action={<button type="button" onClick={onChange}><Icon name="edit" size={14} />Change account</button>}>
+        {app.status === "error" && (
+          <div className="callout callout-danger" role="alert">
+            <Icon name="alert" size={16} />
+            <div className="grow"><div>Twilio isn't accepting this account anymore</div>{app.last_error}</div>
+          </div>
+        )}
+        {app.status !== "error" && app.last_error && <span className="field-error">{app.last_error}</span>}
+        <Facts>
+          <Fact label="Connected to">{app.status !== "error" && (app.account_label ?? "Connected")}</Fact>
+        </Facts>
+        <p className={kit.note}>Reminders, on-my-way texts and the texts you send from Messages go out from this number.</p>
+      </Section>
+      <Section className={kit.panel} title="Replies from clients">
         {state.webhook_set ? (
-          <div className="row" style={{ gap: 10 }}><Icon name="check" size={16} /><span className="grow">Texts to your number come into Messages, and STOP is honoured.</span></div>
+          <span className="app-status"><Icon name="check" size={16} />Texts to your number come into Messages, and STOP is honoured.</span>
         ) : (
           <>
-            <span className="muted small">
+            <p className={kit.note}>
               For replies to land in Messages, your Twilio number has to send incoming texts to this address.
               {state.other_webhook ? <> Right now it sends them to <span style={{ overflowWrap: "anywhere" }}>{state.other_webhook}</span>, which this would replace.</> : null}
-            </span>
+            </p>
             {state.reachable ? (
-              <div className="row wrap" style={{ gap: 8 }}>
-                <Button variant="primary" loading={point.isPending} onClick={() => point.mutate()}>Set it up for me</Button>
-              </div>
+              <Button variant="primary" loading={point.isPending} onClick={() => point.mutate()}>Set it up for me</Button>
             ) : (
-              <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>Twilio can only reach a public https address, and this Crewtavo doesn't have one yet. Texts still go out.</span>
+              <div className="callout callout-warning" role="note">
+                <Icon name="alert" size={16} />
+                <div className="grow">Twilio can only reach a public https address, and this Crewtavo doesn't have one yet. Texts still go out.</div>
+              </div>
             )}
             <FormError error={point.error} />
           </>
         )}
-        <details>
-          <summary className="small" style={{ cursor: "pointer" }}>{state.webhook_set ? "The address Twilio uses" : "Or set it yourself in Twilio"}</summary>
-          <div className="stack-sm small" style={{ gap: 6, marginTop: 8 }}>
-            <div className="row wrap" style={{ gap: 8 }}>
-              <code className="code-pill grow">{state.webhook_url}</code>
-              <Button size="sm" icon="copy" onClick={() => copyText(state.webhook_url, "Address copied")}>Copy</Button>
-            </div>
-            <span className="muted">In Twilio, open <a href={TWILIO_NUMBERS} target="_blank" rel="noreferrer">Phone Numbers → Active numbers</a>, click your number, and under <strong>Messaging configuration</strong> set <strong>A message comes in</strong> to Webhook, this address, HTTP POST. Then save.</span>
-          </div>
-        </details>
-      </section>
+        <Fold summary={state.webhook_set ? "The address Twilio uses" : "Or set it yourself in Twilio"}>
+          <CodeRow value={state.webhook_url} name="Address for incoming texts" done="Address copied" />
+          <p className={kit.note}>In Twilio, open <a href={TWILIO_NUMBERS} target="_blank" rel="noreferrer">Phone Numbers → Active numbers</a>, click your number, and under <strong>Messaging configuration</strong> set <strong>A message comes in</strong> to Webhook, this address, HTTP POST. Then save.</p>
+        </Fold>
+      </Section>
     </>
   );
 }

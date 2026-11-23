@@ -69,7 +69,7 @@ export function LidarPitch({
     <Dialog open onClose={onClose} title="Roof pitch from lidar" description="USGS has flown lidar over most of the US. This reads your roof's slope from it: free, and nothing to set up." size="md">
       <div className="dialog-body stack">
         {error ? (
-          <div className="callout"><Icon name="info" size={20} /><span className="grow">{error}</span></div>
+          <div className="callout callout-info"><Icon name="info" size={16} /><span className="grow">{error}</span></div>
         ) : !reading ? (
           <div className="lidar-progress" role="status" aria-live="polite">
             <span className="spinner" style={{ width: 18, height: 18 }} />
@@ -82,24 +82,24 @@ export function LidarPitch({
             <div className="lidar-sections">
               {reading.sections.map((s) => (
                 <div key={s.id} className="lidar-section">
-                  {s.pitch ? <RoofGlyph rise={riseOf(s.pitch) ?? 0} size={36} /> : <Icon name="alert" size={20} />}
-                  <div className="grow stack-sm" style={{ gap: 2 }}>
+                  <span className="lidar-glyph" data-missing={!s.pitch || undefined}>{s.pitch ? <RoofGlyph rise={riseOf(s.pitch) ?? 0} size={32} /> : <Icon name="alert" size={16} />}</span>
+                  <div className="lidar-section-body">
                     <strong>{roofs.length > 1 ? name(s.id) : "Your roof"}{s.pitch ? `: ${pitchLabel(s.pitch)}` : ""}</strong>
-                    <span className="muted small">
+                    <span className="lidar-note">
                       {s.pitch
                         ? `Measured ${formatNumber(s.rise!, 1)}/12 from ${formatNumber(s.points)} points.`
                         : "Too little of it showed up in the lidar (trees, or built since the survey)."}
                     </span>
-                    {s.alsoPitch && <span className="small">Part of it reads {pitchLabel(s.alsoPitch)}, maybe a porch or dormer. Draw that part as its own area to give it its own pitch.</span>}
+                    {s.alsoPitch && <span className="lidar-also">Part of it reads {pitchLabel(s.alsoPitch)}, maybe a porch or dormer. Draw that part as its own area to give it its own pitch.</span>}
                   </div>
                   {several && s.pitch && <Button size="sm" onClick={() => onUseSection!(s.id, s.pitch!)}>Use</Button>}
                 </div>
               ))}
             </div>
-            {reading.density < SPARSE && <div className="callout"><Icon name="info" size={20} /><span className="grow">The lidar is thin here ({formatNumber(reading.density, 1)} points per square meter), so check the pitch on site before you order.</span></div>}
+            {reading.density < SPARSE && <div className="callout callout-warning"><Icon name="alert" size={16} /><span className="grow">The lidar is thin here ({formatNumber(reading.density, 1)} points per square meter), so check the pitch on site before you order.</span></div>}
             {reading.planes.length > 0 && (
-              <details className="small">
-                <summary style={{ cursor: "pointer", fontWeight: 600 }}>What it found ({reading.planes.length} roof {reading.planes.length === 1 ? "plane" : "planes"})</summary>
+              <details className="lidar-found">
+                <summary>What it found ({reading.planes.length} roof {reading.planes.length === 1 ? "plane" : "planes"})</summary>
                 <ul className="lidar-planes">
                   {reading.planes.map((p, i) => (
                     <li key={i}>{formatNumber(p.rise, 1)}/12 facing {facingWord(p.facing)}, about {formatNumber(Math.round(p.planSqft / 10) * 10)} sq ft from above</li>
@@ -107,9 +107,9 @@ export function LidarPitch({
                 </ul>
               </details>
             )}
-            <span className="muted small">
+            <p className="lidar-note">
               From USGS lidar flown in {result!.survey.year ?? "an unknown year"} ({result!.survey.name.replace(/_/g, " ")}). If the roof was replaced or added onto since, check it on site. {LIDAR_CREDIT}.
-            </span>
+            </p>
           </>
         )}
         <div className="form-actions">

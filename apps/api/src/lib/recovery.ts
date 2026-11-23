@@ -15,9 +15,10 @@
  *   starts with it, and only once (claimed in public.app_secrets, so restarts and replicas can't
  *   reuse it).
  */
+import { ADMINS } from "@crewtavo/core";
 import type { Env } from "../env";
 import { keyedHash } from "./crypto";
-import { emailConfigured } from "./notify";
+import { emailConfigured, mailboxOwnerSet } from "./notify";
 import { adminClient } from "./supabase";
 
 export const RECOVERY_WINDOW_MS = 60 * 60_000;
@@ -98,12 +99,17 @@ export const spareKeyHash = (env: Env, userId: string, key: string) => keyedHash
 export async function accountCanEmail(env: Env, userId: string): Promise<boolean> {
   if (emailConfigured(env)) return true;
   const admin = adminClient(env);
-  const { data: memberships } = await admin.from("memberships").select("company_id").eq("user_id", userId).eq("active", true);
+  const { data: memberships } = await admin.from("memberships").select("company_id, role").eq("user_id", userId).eq("active", true);
   const companies = (memberships ?? []).map((m) => m.company_id);
   if (!companies.length) return false;
   // A mailbox whose sign-in failed can't send a reset link either, so it doesn't count.
-  const { data } = await admin.from("integrations").select("company_id").eq("provider", "email").eq("status", "connected").in("company_id", companies).limit(1);
-  return Boolean(data?.length);
+  const { data } = await admin.from("integrations").select("company_id").eq("provider", "email").eq("status", "connected").in("company_id", companies);
+  for (const { company_id } of data ?? []) {
+    // Nor, for an owner or an admin there, one an owner didn't connect: it doesn't send their links (lib/notify.ts).
+    const role = memberships?.find((m) => m.company_id === company_id)?.role ?? "";
+    if (!(ADMINS as readonly string[]).includes(role) || (await mailboxOwnerSet(env, company_id))) return true;
+  }
+  return false;
 }
 
 /** Make and save a new set for an account (the old set stops working), returning the keys to show once. */

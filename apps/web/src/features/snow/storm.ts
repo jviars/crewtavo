@@ -35,6 +35,43 @@ export function standingOf(site: { paused: boolean; located: boolean; rules: Sno
   return { group: "schedule", label: "To schedule", tone: "warning", note: site.told ? "Crew told" : auto ? "Crew hears and it's scheduled within the hour, 10am to 10pm" : "Crew hears within the hour, 10am to 10pm", plan };
 }
 
+/** A customer's triggers in a line: "Plow at 2 in, salt at 1 in, again every 4 in". `noSalt` says so when it isn't salted. */
+export function triggersText(rules: SnowRules, noSalt = false): string {
+  return [
+    `Plow at ${inchesText(rules.trigger_in)}`,
+    rules.salt_trigger_in != null ? `salt at ${inchesText(rules.salt_trigger_in)}` : noSalt && "no salting",
+    rules.repeat_in != null && `again every ${inchesText(rules.repeat_in)}`,
+  ].filter(Boolean).join(", ");
+}
+
+/** How soon a customer is cleared, short enough for a row's right edge: "Clear by 6 AM · first". Null when it's neither promised nor ranked. */
+export function clearText(clearBy: string | null, priority: number): string | null {
+  const rank = priority === 1 ? "first" : priority === 3 ? "after the others" : null;
+  if (clearBy) return [`Clear by ${clockText(clearBy)}`, rank].filter(Boolean).join(" · ");
+  return priority === 1 ? "First priority" : priority === 3 ? "After the others" : null;
+}
+
+/**
+ * What the subcontractors asked about a customer said, as one tone for its crew line: red if anyone
+ * can't go, amber while anyone hasn't answered, green once everyone asked can go, and none when
+ * nobody on it was asked.
+ */
+export function answersTone(said: Array<boolean | null>): "good" | "warning" | "danger" | undefined {
+  if (!said.length) return undefined;
+  if (said.some((a) => a === false)) return "danger";
+  if (said.some((a) => a == null)) return "warning";
+  return "good";
+}
+
+/** A storm that's here today, piled by what's left: to schedule (or more to schedule, as it grew), late, under way, and done. */
+export const TODAY_GROUPS = ["schedule", "late", "going", "done"] as const;
+export type TodayGroup = (typeof TODAY_GROUPS)[number];
+export function todayGroup(row: { visits: number; more: number; progress: { status: string; late: boolean } }): TodayGroup {
+  if (!row.visits || row.more > 0) return "schedule";
+  if (row.progress.status === "completed") return "done";
+  return row.progress.late ? "late" : "going";
+}
+
 /**
  * A storm that's here today, from its visits (the cancelled ones left out): the least far along
  * decides, and it's late once `clock` ("07:30", the business's time) passes `clearBy` with work left.

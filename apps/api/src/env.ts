@@ -50,6 +50,12 @@ export interface Env {
    * add to X-Forwarded-For ("x-forwarded-for:2"), or "connection" for none. See lib/visitor.ts.
    */
   CREWTAVO_VISITOR_IP?: string;
+  /**
+   * Mail servers on a private network that a company's mailbox may send through (lib/smtp.ts
+   * smtpReach): exact names or addresses, separated by commas, e.g. "192.168.1.10,mail.office.lan".
+   * Unset, Settings → Email only reaches mail servers on the internet.
+   */
+  CREWTAVO_SMTP_PRIVATE_HOSTS?: string;
 
   /**
    * Where Graph API calls go instead of https://graph.facebook.com: a local stub, for checking the

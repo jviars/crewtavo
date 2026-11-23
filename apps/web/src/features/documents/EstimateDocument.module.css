@@ -139,10 +139,11 @@
 .notes { font-size: 12px; line-height: 1.6; white-space: pre-line; }
 .notes .eyebrow { margin-bottom: 4px; }
 /* "What clients say": the business's Google reviews, when it prints them on its quotes. */
-.reviews { display: grid; gap: 8px; font-size: 12px; line-height: 1.55; }
+.reviews { display: grid; gap: 6px; font-size: 12px; line-height: 1.55; }
 .reviewsRating { font-weight: 600; color: var(--doc-ink); }
 .reviewsRating span { color: #e3a008; }
-.review { margin: 0; padding: 8px 12px; border-left: 3px solid var(--doc-rule); }
+/* A list of reviews on hairlines, the words first and who wrote them under: no bar down the side. */
+.review { margin: 0; padding-top: 8px; border-top: 1px solid var(--doc-rule); }
 .review blockquote { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .review blockquote a { color: inherit; text-decoration: underline; }
 .review figcaption { margin-top: 2px; font-size: 11px; color: var(--doc-text-2); }
@@ -182,7 +183,8 @@
 .clauseList ul,
 .clauseList ol { margin: 0; padding-left: 18px; }
 .clauseList p { margin: 0; }
-.clauseQuote { padding: 2px 0 2px 12px; border-left: 3px solid var(--doc-rule); }
+/* A quoted passage is set in from both sides, as quotations are in a contract. */
+.clauseQuote { padding: 2px 18px; }
 .clauseQuote > * { margin: 0; }
 .clauseQuote ul,
 .clauseQuote ol { padding-left: 20px; }
@@ -236,7 +238,8 @@
 .sheet { width: 100%; min-width: 0; display: flex; justify-content: center; }
 .frame { flex: none; position: relative; }
 .stack { position: absolute; top: 0; left: 0; transform-origin: top left; }
-.sheet .page { border-radius: 4px; box-shadow: 0 1px 3px rgba(15, 42, 53, 0.08), 0 16px 40px -16px rgba(15, 42, 53, 0.3); }
+/* A sheet of paper on the screen: a hairline edge and a soft lift, in either theme. */
+.sheet .page { border-radius: 6px; box-shadow: 0 0 0 1px rgba(15, 42, 53, 0.06), 0 1px 2px rgba(15, 42, 53, 0.06), 0 18px 40px -22px rgba(15, 42, 53, 0.32); }
 
 /* The copy that's measured (usePaper): laid out like the pages, never seen. */
 .measure { position: fixed; top: 0; left: -10000px; display: block; width: var(--box-w); visibility: hidden; pointer-events: none; contain: layout style; }

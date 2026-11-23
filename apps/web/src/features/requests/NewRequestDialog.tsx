@@ -3,11 +3,19 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
-import { Select } from "@/components/ui/Select";
+import { Icon, type IconName } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { ClientPicker, PropertySelect, type PickedClient } from "../clients/ClientForm";
 import { ClientRequired } from "../quotes/NewQuoteDialog";
+import styles from "./RequestPage.module.css";
+
+/** How a request someone logs came in, with the icon its row on Requests shows. */
+const SOURCES: Array<{ value: string; label: string; icon: IconName }> = [
+  { value: "phone", label: "Phone", icon: "phone" },
+  { value: "email", label: "Email", icon: "mail" },
+  { value: "manual", label: "In person", icon: "users" },
+];
 
 /** Log a request that came in by phone, email or in person. */
 export function NewRequestDialog({ open, onClose, onCreated, initialClient = null }: { open: boolean; onClose: () => void; onCreated: (id: string) => void; initialClient?: PickedClient }) {
@@ -56,11 +64,15 @@ export function NewRequestDialog({ open, onClose, onCreated, initialClient = nul
         </Field>
         <Field label="Details" optional><textarea className="textarea" value={details} onChange={(e) => setDetails(e.target.value)} maxLength={4000} /></Field>
         <Field label="How did it come in?">
-          <Select className="select" value={source} onChange={(e) => setSource(e.target.value)}>
-            <option value="phone">Phone</option>
-            <option value="email">Email</option>
-            <option value="manual">In person</option>
-          </Select>
+          {/* Three short choices: a switch, not a list to open. */}
+          <div className={`segmented ${styles.sources}`} role="group" aria-label="How did it come in?">
+            {SOURCES.map((s) => (
+              <button key={s.value} type="button" aria-pressed={source === s.value} onClick={() => setSource(s.value)}>
+                <Icon name={s.icon} size={15} />
+                {s.label}
+              </button>
+            ))}
+          </div>
         </Field>
         <FormError error={create.error} />
         <div className="form-actions">

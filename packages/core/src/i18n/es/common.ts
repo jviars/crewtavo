@@ -55,6 +55,8 @@ export default {
   "Settings": "Configuración",
   "Profile": "Perfil",
   "Settings sections": "Secciones de configuración",
+  "Quotes and invoices": "Cotizaciones y facturas",
+  "Scheduling": "Agenda",
   "Automate and connect": "Automatizar y conectar",
   "AI assistants": "Asistentes de IA",
   "About": "Acerca de",
@@ -70,6 +72,7 @@ export default {
   "New client": "Nuevo cliente",
   "New request": "Nueva solicitud",
   "New quote": "Nueva cotización",
+  "New job": "Nuevo trabajo",
   "New measurement": "Nueva medición",
   "New invoice": "Nueva factura",
   "New visit or task": "Nueva visita o tarea",
@@ -95,17 +98,11 @@ export default {
   "Create": "Crear",
 
   // Search (components/shell/CommandPalette.tsx)
-  "Property": "Propiedad",
   "Job": "Trabajo",
   "Guide": "Guía",
-  "Campaign": "Campaña",
-  "Automation": "Automatización",
   "Price list": "Lista de precios",
   "Subcontractor": "Subcontratista",
-  "File": "Archivo",
-  "Applicant": "Solicitante de empleo",
   "Property equipment": "Equipo de la propiedad",
-  "Promo code": "Código de promoción",
   "New guide": "Nueva guía",
   "New automation": "Nueva automatización",
   "New subcontractor": "Nuevo subcontratista",
@@ -113,6 +110,12 @@ export default {
   "Recent": "Recientes",
   "Best match": "Lo más parecido",
   "Results": "Resultados",
+  "Properties": "Propiedades",
+  "Measurements": "Mediciones",
+  "Campaigns": "Campañas",
+  "Automations": "Automatizaciones",
+  "Files": "Archivos",
+  "{first} then {second}": "{first} y luego {second}",
   "Search and commands": "Búsqueda y comandos",
   "Search anything: clients, jobs, files, apps, settings… or type a command": "Busca lo que sea: clientes, trabajos, archivos, aplicaciones, configuración… o escribe un comando",
   "Esc": "Esc",
@@ -120,14 +123,12 @@ export default {
   "Searching…": "Buscando…",
   "No results for “{query}”": "No hay resultados para “{query}”",
   "to move": "para moverte",
-  "Enter": "Enter",
   "to open": "para abrir",
   "to close": "para cerrar",
 
   // Help (components/shell/Help.tsx)
   "Help": "Ayuda",
   "Ask AI about Crewtavo": "Pregúntale a la IA sobre Crewtavo",
-  "How do I send invoices in a batch?": "¿Cómo envío varias facturas a la vez?",
   "Ask Claude": "Preguntarle a Claude",
   "Ask ChatGPT": "Preguntarle a ChatGPT",
   "It reads Crewtavo's docs to answer. Leave out client names.": "Lee la documentación de Crewtavo para responder. No pongas nombres de clientes.",
@@ -135,7 +136,6 @@ export default {
   "Crewtavo docs": "Documentación de Crewtavo",
   "Your company's guides": "Las guías de tu empresa",
   "Connect Claude or ChatGPT": "Conectar Claude o ChatGPT",
-  "Have it do the work in Crewtavo": "Que haga el trabajo en Crewtavo",
   "Report a problem": "Reportar un problema",
   "Public on GitHub, with no promise of a reply. Leave out client details.": "Es público en GitHub y no se promete respuesta. No pongas datos de clientes.",
   "Stuck on something else? Ask someone at {company}.": "¿Atorado con otra cosa? Pregúntale a alguien de {company}.",
@@ -572,6 +572,12 @@ export default {
   "Use a different email": "Usar otro correo",
   "That link has expired or was already used. Ask whoever sent it for a new one, or sign in below.": "Ese enlace ya venció o ya se usó. Pídele uno nuevo a quien te lo mandó, o inicia sesión aquí abajo.",
   "Couldn't open that link. Check your connection and try again.": "No se pudo abrir ese enlace. Revisa tu conexión e intenta de nuevo.",
+  "That link has expired or was already used. Ask whoever sent it for a new one.": "Ese enlace ya venció o ya se usó. Pídele uno nuevo a quien te lo mandó.",
+  "an account without an email address": "una cuenta sin dirección de correo",
+  "Switch accounts?": "¿Cambiar de cuenta?",
+  "Switch accounts": "Cambiar de cuenta",
+  "This link signs in as <b>{link}</b>. You're signed in here as <b>{current}</b>.": "Este enlace inicia sesión como <b>{link}</b>. Aquí tienes la sesión abierta como <b>{current}</b>.",
+  "Only switch if you asked for this link yourself. A link someone else sent you signs you in to their account.": "Cambia solo si tú pediste este enlace. Un enlace que te mandó otra persona te deja en su cuenta.",
 
   // What the app says when something doesn't go through (lib/api.ts, lib/files.ts, lib/resumable.ts)
   "Couldn't connect to Crewtavo. Try again in a moment.": "No se pudo conectar con Crewtavo. Intenta de nuevo en un momento.",
@@ -590,9 +596,61 @@ export default {
   "Paperwork for {company}": "Documentos para {company}",
   "That file didn't come through. Try sending it again.": "Ese archivo no llegó. Intenta enviarlo de nuevo.",
 
+  // The app's frame and notifications (components/shell/AppShell.tsx, Notifications.tsx)
+  "{count} past due": { one: "{count} vencida", other: "{count} vencidas" },
+  "Match device": "Igual que el dispositivo",
+  "Earlier": "Anteriores",
+  "Mark all read": "Marcar todo como leído",
+
+  // The text editor's insert menu (components/ui/RichTextEditor.tsx)
+  "Text and lists": "Texto y listas",
+  "Callouts": "Recuadros",
+  "Blocks": "Bloques",
+  "Media and links": "Imágenes, videos y enlaces",
+  "A faster or better way to do it": "Una forma más rápida o mejor de hacerlo",
+  "Something nobody can skip": "Algo que nadie se puede saltar",
+  "Could hurt someone or damage property": "Podría lastimar a alguien o dañar la propiedad",
+  "or drop one in": "o arrastra una aquí",
+  "Video": "Video",
+  "YouTube or Vimeo": "YouTube o Vimeo",
+  "Insert": "Insertar",
+  "to insert": "para insertar",
+
+  // Lists, toolbars, menus and record pages (components/ui/InboxList.tsx, Toolbar.tsx, Menu.tsx, DetailPage.tsx)
+  "Actions": "Acciones",
+  "Unread": "Sin leer",
+  "Select": "Seleccionar",
+  "Load more": "Cargar más",
+  "Not assigned": "Sin asignar",
+  "Back": "Atrás",
+  "Sort: {order}": "Ordenar: {order}",
+  "Sort": "Ordenar",
+  "{filter}, {count} selected": "{filter}, {count} seleccionados",
+
+  // The sign-in page's picture of the app, and waiting for the link (features/auth/LoginPage.tsx)
+  "Weekly mowing": "Corte de pasto semanal",
+  "Leaf cleanup": "Limpieza de hojas",
+  "Holiday lights": "Luces navideñas",
+  "{done} of {total} done": "{done} de {total} terminadas",
+  "Quote #{number} approved": "Cotización #{number} aprobada",
+  "Requests, quotes, the schedule, invoices and your crews in one place.": "Solicitudes, cotizaciones, la agenda, facturas y tus cuadrillas en un solo lugar.",
+  "Hide": "Ocultar",
+  "Waiting for you to open the link": "Esperando a que abras el enlace",
+  "Not there after a minute? Check your spam folder.": "¿No llega en un minuto? Revisa la carpeta de spam.",
+  "Next you'll set up your business, then invite your team.": "Después vas a configurar tu empresa y luego invitar a tu equipo.",
+
+  // Picking tags (features/clients/ClientsPage.tsx)
+  "Tags": "Etiquetas",
+  "Any tag": "Cualquier etiqueta",
+  "Find a tag": "Busca una etiqueta",
+  "{count} tags": { one: "{count} etiqueta", other: "{count} etiquetas" },
+  "None picked": "Ninguna seleccionada",
+
+  // A client's pages (features/public/ClientKit.tsx)
+  "Call {name} at": "Llamar a {name} al",
+
   // A list row's right-click menu (components/ui/ContextMenu.tsx)
   "Open in a new tab": "Abrir en una pestaña nueva",
-  "Select": "Seleccionar",
   "Deselect": "Quitar selección",
 
   // A client's preview card, and a toast that waits on something (components/ui/ClientPreview.tsx, features/settings/NotificationSettings.tsx)

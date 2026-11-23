@@ -251,7 +251,7 @@ export async function draftQuote(s: SalesScope, requestId: string, userId: strin
 async function makeDraft(s: SalesScope, requestId: string, userId: string | null, auto: boolean): Promise<Drafted | null> {
   const request = await loadRequest(s.db, s.companyId, requestId);
   const [company, items] = await Promise.all([
-    s.db.from("companies").select("name, settings").eq("id", s.companyId).maybeSingle(),
+    adminClient(s.env).from("companies").select("name, settings").eq("id", s.companyId).maybeSingle(),
     s.db.from("services").select("id, name, description, category, unit, unit_price, taxable", { count: "exact" }).eq("company_id", s.companyId).eq("active", true).order("sort").order("name").limit(MAX_PRICE_ITEMS),
   ]);
   if (company.error || !company.data) throw new HttpError(404, "Company not found.");

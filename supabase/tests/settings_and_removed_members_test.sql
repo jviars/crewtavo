@@ -92,13 +92,15 @@ select settings as before from public.companies where id = :'co' \gset
 begin;
 set local role authenticated;
 select tsrm.as_user(:'bea');
-update public.companies set name = 'Uniform Paving LLC', settings = settings
+update public.companies set name = 'Uniform Paving LLC', settings = public.company_settings(id)
   || '{"drive": {"enabled": false}, "team_chat": {"enabled": true}, "careers": {"enabled": true}, "paving_app": {"enabled": false}, "roofing_app": {"enabled": true},
        "website_forms": {"enabled": true}, "website_analytics": {"enabled": true, "site": "evil.test"}, "weather_rules": [], "subs": {"remind_subs": true},
        "maps": {"default": "esri"}, "revenue_goal": 500000}'
 where id = :'co';
 commit;
-select tsrm.check((select name = 'Uniform Paving LLC' and settings #>> '{maps,default}' = 'esri' and settings ->> 'revenue_goal' = '500000' from public.companies where id = :'co'),
+-- The revenue goal is kept with the business's other figures crews don't read (company_private_settings).
+select tsrm.check((select name = 'Uniform Paving LLC' and settings #>> '{maps,default}' = 'esri' and settings -> 'revenue_goal' is null from public.companies where id = :'co')
+  and (select settings ->> 'revenue_goal' = '500000' from public.company_private_settings where company_id = :'co'),
   'an admin without the apps, settings or subs areas still saves the company''s details and the settings every admin has');
 select tsrm.check((select settings - array['maps', 'revenue_goal'] = :'before'::jsonb - array['maps', 'revenue_goal'] from public.companies where id = :'co'),
   'but the apps installed, the weather rules and how subs are reminded stay as they were');
@@ -112,14 +114,15 @@ select public.chat_set_enabled(:'co', true);
 select tsrm.as_user(:'bea');
 update public.companies set settings = :'stale'::jsonb || '{"revenue_goal": 600000}' where id = :'co';
 commit;
-select tsrm.check((select settings #>> '{team_chat,enabled}' = 'true' and settings ->> 'revenue_goal' = '600000' from public.companies where id = :'co'),
+select tsrm.check((select settings #>> '{team_chat,enabled}' = 'true' from public.companies where id = :'co')
+  and (select settings ->> 'revenue_goal' = '600000' from public.company_private_settings where company_id = :'co'),
   'a page open since before an app was installed doesn''t uninstall it when it saves');
 
 -- With the area, saving the company changes them as before; so does the server.
 begin;
 set local role authenticated;
 select tsrm.as_user(:'ada');
-update public.companies set settings = settings || '{"weather_rules": [{"max_rain_pct": 40}], "careers": {"enabled": true}}' where id = :'co';
+update public.companies set settings = public.company_settings(id) || '{"weather_rules": [{"max_rain_pct": 40}], "careers": {"enabled": true}}' where id = :'co';
 commit;
 select tsrm.check((select settings #>> '{weather_rules,0,max_rain_pct}' = '40' and settings #>> '{careers,enabled}' = 'true' from public.companies where id = :'co'),
   'an admin with the areas changes them by saving the company, as before');

@@ -1197,12 +1197,19 @@ export function PrintableDocument({ template, company, data, className }: Printa
 
 /**
  * Prints the PrintableDocument on this screen: as a PDF in a new tab (pdfPrint.ts), or, when that
- * can't open, the page itself once its lettering and pictures (the logo and the signatures) have
- * loaded and its pages are laid out with them, so the copy is never missing any. Gives up waiting
- * after a few seconds.
+ * can't open, the page itself (printPage).
  */
 export async function printDocument(waitMs = 4000): Promise<void> {
-  if (openPrintablePdf()) return;
+  if (openPrintablePdf("new tab", () => void printPage(waitMs))) return;
+  await printPage(waitMs);
+}
+
+/**
+ * Prints the page itself, with the PrintableDocument on it, once its lettering and pictures (the
+ * logo and the signatures) have loaded and its pages are laid out with them, so the copy is never
+ * missing any. Gives up waiting after a few seconds.
+ */
+export async function printPage(waitMs = 4000): Promise<void> {
   const images = Array.from(document.querySelectorAll<HTMLImageElement>("[data-printable-document] img, [data-paper-measure] img"));
   const loaded = images.map((img) =>
     img.complete

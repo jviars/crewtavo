@@ -10,7 +10,7 @@ import { friendlyIssue } from "../src/lib/http";
 import { cronMatches } from "../src/lib/cron";
 import { buildCalendar } from "../src/lib/ics";
 import { allow, allowStrict } from "../src/lib/limit";
-import { clientLink, clientLinks, readClientLink, sentToClient } from "../src/lib/links";
+import { clientLink, clientLinks, KEPT_LINK, readClientLink, sentToClient } from "../src/lib/links";
 import { buildMime } from "../src/lib/smtp";
 import { twilioSignature } from "../src/routes/messages";
 import { TOOLS } from "../src/assistant-tools";
@@ -63,10 +63,42 @@ describe("crypto", () => {
     expect((await request("/api/hub/abc.!!!")).status).toBe(404);
   });
 
+  it("reads only the two parts a token is made of, so one token can't be spelled many ways", async () => {
+    const token = await signToken(env, { id: "x", exp: Date.now() / 1000 + 60 });
+    expect(token.split(".")).toHaveLength(2);
+    for (const spelled of [`${token}.1`, `${token}..`, `${token}..2`, `${token}.1.`, `x.${token}`]) expect(await verifyToken(env, spelled), spelled).toBeNull();
+    expect(await verifyToken(env, token)).toMatchObject({ id: "x" });
+    // The full stop of the sentence a link ends (a text app takes it in) is the sentence's, not the token's.
+    expect(await verifyToken(env, `${token}.`)).toMatchObject({ id: "x" });
+    // Every link and token the server makes is two parts.
+    const url = await clientLink(env, "https://ops.example.com", { c: "company-1", t: "client", id: "client-1" });
+    expect(url.split("/hub/")[1]!.split(".")).toHaveLength(2);
+    expect((await request(`/api/hub/${url.split("/hub/")[1]}.1`)).status).toBe(404);
+  });
+
+  it("opens a referral, paperwork or unsubscribe link that a text app took the sentence's full stop into", async () => {
+    const refer = await clientLink(env, "https://ops.example.com", { c: "company-1", t: "refer", id: "client-1" });
+    const token = refer.split("/refer/")[1]!;
+    expect(await readClientLink(env, `${token}.`)).toMatchObject({ t: "refer", id: "client-1" });
+    expect(await readClientLink(env, `${token}.x`)).toBeNull();
+  });
+
   it("builds client links that decode to the same record", async () => {
     const url = await clientLink(env, "https://ops.example.com", { c: "company-1", t: "quote", id: "quote-1" });
     expect(url.startsWith("https://ops.example.com/hub/")).toBe(true);
     expect(await readClientLink(env, url.split("/hub/")[1])).toMatchObject({ c: "company-1", t: "quote", id: "quote-1" });
+  });
+
+  it("never lets a link minted from another outlive it", async () => {
+    const soon = Math.floor(Date.now() / 1000) + 3600;
+    const minted = await readClientLink(env, (await clientLink(env, "https://ops.example.com", { c: "company-1", t: "quote", id: "quote-1", exp: soon })).split("/hub/")[1]!);
+    expect(minted?.exp).toBe(soon);
+    // Its own lifetime when that's shorter, and without one, its kind's.
+    const later = Math.floor(Date.now() / 1000) + 400 * 86_400;
+    const capped = await readClientLink(env, (await clientLink(env, "https://ops.example.com", { c: "company-1", t: "quote", id: "quote-1", exp: later })).split("/hub/")[1]!);
+    expect(capped!.exp - Date.now() / 1000).toBeLessThanOrEqual(60 * 86_400);
+    const fresh = await readClientLink(env, (await clientLink(env, "https://ops.example.com", { c: "company-1", t: "client", id: "client-1" })).split("/hub/")[1]!);
+    expect(fresh!.exp - Date.now() / 1000).toBeGreaterThan(119 * 86_400);
   });
 });
 
@@ -364,6 +396,21 @@ describe("client links by kind", () => {
     const office = await readClientLink(env, links.office.split("/hub/")[1]!);
     expect(office).toMatchObject({ t: "invoice", id: "invoice-1", via: "office" });
     expect(office).not.toHaveProperty("own");
+    expect(office).not.toHaveProperty("nm");
+  });
+
+  it("marks the office's copy made for someone who doesn't see the money (nm), never the client's own", async () => {
+    const links = await clientLinks(env, "https://ops.example.com", { c: "co", t: "quote", id: "quote-1", nm: 1 });
+    expect(await readClientLink(env, links.office.split("/hub/")[1]!)).toMatchObject({ t: "quote", via: "office", nm: 1 });
+    expect(await readClientLink(env, links.own.split("/hub/")[1]!)).not.toHaveProperty("nm");
+  });
+
+  it("keeps no working link in the copy kept on the timeline, which crews and connected assistants read", async () => {
+    const links = await clientLinks(env, "https://ops.example.com", { c: "co", t: "quote", id: "quote-1" });
+    expect(links.kept).toBe(KEPT_LINK);
+    expect(links.kept).not.toMatch(/https?:|\/hub\//);
+    expect(await readClientLink(env, links.office.split("/hub/")[1]!)).toMatchObject({ t: "quote", via: "office" });
+    expect(await readClientLink(env, links.office.split("/hub/")[1]!)).not.toHaveProperty("nm");
   });
 
   it("knows a send to the client's own email or phone from one typed to anyone else", () => {
@@ -607,6 +654,22 @@ describe("email rendering", () => {
     // Only exactly tip=1.
     expect(html).toContain('href="https://ops.example.com/hub/inv?tip=10" style="display:inline-block;background:#3b7d23;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:8px">View online</a>');
     expect(renderEmail({ companyName: "Radford Lawn Care", text: "https://ops.example.com/hub/home?session=1&view=autopay" }).html).toContain(">Manage autopay</a>");
+  });
+
+  it("makes only links to this Crewtavo into buttons when told its address (an email carrying an outsider's words)", () => {
+    const request = "https://ops.example.com/requests/00000000-0000-4000-8000-000000000001";
+    const lookalike = "https://ops.example.com.evil.example/requests/00000000-0000-4000-8000-000000000002";
+    const { html } = renderEmail({ companyName: "Acme Lawn", text: `Message:\nhi\n\n${lookalike}\n\nhttps://evil.example/login\n\n${request}`, base: "https://ops.example.com" });
+    expect(html.match(/display:inline-block/g)).toHaveLength(1);
+    expect(html).toContain(`href="${request}" style="display:inline-block`);
+    expect(html).toContain(">Open the request</a>");
+    // The others are plain links in the text, written out as they are.
+    expect(html).toContain(`<a href="${lookalike}" style="color:#2c611a;font-weight:600;word-break:break-all">${lookalike}</a>`);
+    expect(html).toContain('<a href="https://evil.example/login" style="color:#2c611a;font-weight:600;word-break:break-all">https://evil.example/login</a>');
+    // Without the address, as before: any link on its own line is a button.
+    expect(renderEmail({ companyName: "Acme Lawn", text: "https://acme.example/spring" }).html).toContain('href="https://acme.example/spring" style="display:inline-block');
+    // With the address unknown (null: no APP_URL), none is.
+    expect(renderEmail({ companyName: "Acme Lawn", text: `Message:\nhi\n\n${request}`, base: null }).html).not.toContain("display:inline-block");
   });
 
   it("shows a one-time code large, on its own, and leaves the plain text as it is", () => {

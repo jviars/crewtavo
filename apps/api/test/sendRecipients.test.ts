@@ -31,7 +31,7 @@ const server = vi.hoisted(() => ({ tables: {} as Record<string, unknown> }));
 vi.mock("../src/lib/supabase", async (original) => ({ ...(await original<typeof import("../src/lib/supabase")>()), adminClient: () => stubDb(server.tables) }));
 vi.mock("../src/lib/links", async (original) => ({
   ...(await original<typeof import("../src/lib/links")>()),
-  clientLinks: async (_env: Env, baseUrl: string, link: { id: string }) => ({ own: `${baseUrl}/own/${link.id}`, office: `${baseUrl}/office/${link.id}` }),
+  clientLinks: async (_env: Env, baseUrl: string, link: { id: string }) => ({ own: `${baseUrl}/own/${link.id}`, office: `${baseUrl}/office/${link.id}`, kept: "[Client Hub link]" }),
 }));
 
 const CO = "00000000-0000-4000-8000-0000000000a1";
@@ -61,7 +61,15 @@ function stubDb(tables: Record<string, unknown>): Db {
   };
   return { from } as unknown as Db;
 }
-const scope = (settings: Record<string, unknown> = {}, who = client) => ({ db: stubDb({ companies: { ...company, settings }, clients: who, invoices: invoice }), env, companyId: CO, baseUrl: "https://ops.example.com" });
+/**
+ * The person's own client, and the company's settings on the server's: the browser's role doesn't
+ * read companies.settings (20261123100100_prices_and_settings_for_the_office.sql), so deliver reads
+ * the company with the server's key.
+ */
+const scope = (settings: Record<string, unknown> = {}, who = client) => {
+  server.tables = { ...server.tables, companies: { ...company, settings } };
+  return { db: stubDb({ clients: who, invoices: invoice }), env, companyId: CO, baseUrl: "https://ops.example.com" };
+};
 const refusal = async (work: Promise<unknown>) => {
   const error = await work.then(() => null, (e: unknown) => e);
   expect(error).toBeInstanceOf(HttpError);
@@ -85,7 +93,9 @@ describe("sending an invoice with nobody named", () => {
     expect(emails[1]!.text).toContain("/office/inv-1");
     expect(logged).toHaveLength(1);
     expect(logged[0]).toMatchObject({ channel: "email", recipients: [{ to: "pat@example.com", name: "Pat Lee" }, { to: "mo@example.com", name: "Mo Manager" }] });
-    expect(logged[0]!.body).toContain("/office/inv-1");
+    // The timeline's copy holds no link: the team reads it.
+    expect(logged[0]!.body).toContain("[Client Hub link]");
+    expect(logged[0]!.body).not.toContain("/office/inv-1");
   });
 
   it("goes to the client alone while the company hasn't turned contacts on", async () => {

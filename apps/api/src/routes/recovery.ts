@@ -13,7 +13,7 @@ import type { AppEnv, Env } from "../env";
 import { confirmAdminGrant, confirmPassword, emailAuthLink, passwordIn, requireCompany, requireUser } from "../lib/auth";
 import { safeEqual } from "../lib/crypto";
 import { renderEmail } from "../lib/email";
-import { appUrl, HttpError, must, readJson, uuid } from "../lib/http";
+import { appUrl, HttpError, must, readJson, signInHome, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { emailReady, sendEmail } from "../lib/notify";
 import { accountCanEmail, accountForEmail, recoverySetting, replaceSpareKeys, spareKeyHash, usedCodeName } from "../lib/recovery";
@@ -33,7 +33,7 @@ async function resetLink(env: Env, base: string, email: string, userId: string):
     throw new HttpError(500, "Couldn't make the link. Try again in a moment.");
   }
   // Someone who never signed in gets the "set your password" wording.
-  return emailAuthLink(env, base, data.properties.hashed_token, "recovery", !account.user?.last_sign_in_at);
+  return emailAuthLink(env, data.properties.hashed_token, "recovery", !account.user?.last_sign_in_at);
 }
 
 recovery.post("/team/:userId/password-link", requireUser, requireCompany(ADMINS, "team"), async (c) => {
@@ -57,7 +57,8 @@ recovery.post("/team/:userId/password-link", requireUser, requireCompany(ADMINS,
     throw new HttpError(403, "This person also uses Crewtavo with another business, so they need to reset their password themselves.");
   }
   // A way into an account with admin-level access asks for the password, as giving that access does.
-  if (await adminAccess(admin, companyId, here.role, here.role_id)) await confirmAdminGrant(c, await passwordIn(c));
+  const adminAccount = await adminAccess(admin, companyId, here.role, here.role_id);
+  if (adminAccount) await confirmAdminGrant(c, await passwordIn(c));
 
   const [target, requester, company] = await Promise.all([
     admin.from("profiles").select("email, full_name").eq("user_id", targetId).maybeSingle(),
@@ -84,7 +85,8 @@ recovery.post("/team/:userId/password-link", requireUser, requireCompany(ADMINS,
 
   if (await emailReady(c.env, companyId)) {
     const text = `${requesterName} made a link for you to choose a new password for ${companyName} on Crewtavo. It works once:\n\n${link}\n\nIf you didn't ask for this, tell ${requesterName} or the owner.`;
-    const sent = await sendEmail(c.env, { to: email, subject: `Choose a new password for ${companyName}`, ...renderEmail({ companyName, text }), replyTo: company.data?.email ?? undefined, fromName: companyName }, companyId);
+    // An admin's link goes through the company's mailbox only when an owner connected it (lib/notify.ts).
+    const sent = await sendEmail(c.env, { to: email, subject: `Choose a new password for ${companyName}`, ...renderEmail({ companyName, text }), replyTo: company.data?.email ?? undefined, fromName: companyName }, companyId, { adminAccount });
     if (sent.sent) return c.json({ emailed: true, link: null });
   }
   // No email: the admin hands it over in person or by text.
@@ -122,6 +124,8 @@ recovery.post("/auth/recover", async (c) => {
     (await allow(c.env, `recover:email:${email}`, 5, 3600)) &&
     (await allow(c.env, "recover:all", 100, 3600));
   if (!allowed) throw new HttpError(429, "Too many tries. Wait an hour and try again.");
+  // Before a key or the code is used up: the link it's for can't be made without the instance's address.
+  signInHome(c.env);
   const admin = adminClient(c.env);
 
   // The last resort: the code set on the server by whoever controls it.

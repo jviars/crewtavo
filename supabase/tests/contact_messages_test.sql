@@ -65,20 +65,20 @@ begin;
 set local role authenticated;
 select t_cm.as_user(:'cora');
 -- A page open since before the update saves the settings it read then, without the switch.
-update public.companies set settings = (settings - 'contact_messages') || '{"payment_terms_days": 21}' where id = :'co';
-select t_cm.check((select settings -> 'contact_messages' = '{"enabled": false, "pending": true}' and settings ->> 'payment_terms_days' = '21' from public.companies where id = :'co'),
+update public.companies set settings = (public.company_settings(id) - 'contact_messages') || '{"payment_terms_days": 21}' where id = :'co';
+select t_cm.check((select public.company_settings(id) -> 'contact_messages' = '{"enabled": false, "pending": true}' and public.company_settings(id) ->> 'payment_terms_days' = '21' from public.companies where id = :'co'),
   'a page saving old settings doesn''t take the switch away, and the rest of what it saved is saved');
-update public.companies set settings = jsonb_set(settings, '{contact_messages}', '{"enabled": true}') where id = :'co';
+update public.companies set settings = jsonb_set(public.company_settings(id), '{contact_messages}', '{"enabled": true}') where id = :'co';
 select public.merge_company_settings(:'co', '{"contact_messages": {"enabled": true}}');
-select t_cm.check((select settings -> 'contact_messages' = '{"enabled": false, "pending": true}' from public.companies where id = :'co'),
+select t_cm.check((select public.company_settings(id) -> 'contact_messages' = '{"enabled": false, "pending": true}' from public.companies where id = :'co'),
   'nor does saving the company turn it on');
 select t_cm.check(public.set_contact_messages(:'co', true), 'the owner turns it on');
-select t_cm.check((select (settings -> 'contact_messages' ->> 'enabled')::boolean and not (settings -> 'contact_messages' ->> 'pending')::boolean
-  and settings -> 'contact_messages' ->> 'changed_by' = :'cora' and settings ->> 'payment_terms_days' = '21' from public.companies where id = :'co'),
+select t_cm.check((select (public.company_settings(id) -> 'contact_messages' ->> 'enabled')::boolean and not (public.company_settings(id) -> 'contact_messages' ->> 'pending')::boolean
+  and public.company_settings(id) -> 'contact_messages' ->> 'changed_by' = :'cora' and public.company_settings(id) ->> 'payment_terms_days' = '21' from public.companies where id = :'co'),
   'which settles it, says who did, and leaves the other settings alone');
 select t_cm.as_user(:'abe');
 select t_cm.check(not public.set_contact_messages(:'co', false), 'an admin turns it off');
-select t_cm.check((select settings -> 'contact_messages' ->> 'enabled' = 'false' and settings -> 'contact_messages' ->> 'pending' = 'false' from public.companies where id = :'co'),
+select t_cm.check((select public.company_settings(id) -> 'contact_messages' ->> 'enabled' = 'false' and public.company_settings(id) -> 'contact_messages' ->> 'pending' = 'false' from public.companies where id = :'co'),
   'and off by choice isn''t asked about again');
 select t_cm.expect_error(format('select public.set_contact_messages(%L, null)', :'co'), 'it''s on or off');
 commit;

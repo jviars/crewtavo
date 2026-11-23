@@ -46,8 +46,9 @@ export function ErrorState({ error, onRetry, title, compact }: { error: unknown;
       </div>
     );
   }
+  // Nothing there isn't a failure: a missing record says so quietly, as an empty list does; a failed load is an alert.
   return (
-    <div className={`${compact ? "empty-state empty-state-sm" : "empty-state"} error-state`} role="alert">
+    <div className={`${compact ? "empty-state empty-state-sm" : "empty-state"}${notFound ? "" : " error-state"}`} role={notFound ? "status" : "alert"}>
       <span className="empty-icon"><Icon name={notFound ? "search" : "alert"} size={compact ? 20 : 24} /></span>
       <h3>{title ?? (notFound ? t("Not found") : t("Couldn't load this"))}</h3>
       <p>{badLink ? t("That link isn't valid. It may be incomplete or mistyped.") : errorMessage(error)}</p>

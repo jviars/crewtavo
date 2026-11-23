@@ -27,11 +27,15 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DetailColumns } from "@/components/ui/DetailPage";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { ListFoot, RowPerson } from "@/components/ui/InboxList";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
-import { CardSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { SectionSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
+import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -43,6 +47,7 @@ import { undoable } from "@/lib/undo";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { BOOKS, creditRoom, takesCredit } from "../invoices/creditRules";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
+import styles from "./Marketing.module.css";
 import { messageError, referralForm, referralPatch, rewardChanged, rewardError, type ReferralForm } from "./referralForm";
 import { useSettingsSaver } from "./useSettingsSaver";
 
@@ -74,22 +79,28 @@ export function Referrals() {
     queryFn: async () => unwrap(await supabase().rpc("referral_stats", { p_company: session.company.id })) as unknown as Stats,
   });
 
-  // The list runs the full width under the rest, so on a phone Ask for referrals comes before a long list.
+  // The list runs the full width under the rest, so on a phone Ask for referrals comes before a long
+  // list. Each part is a section on a hairline; a phone shows them as inset cards on the grey ground.
   return (
-    <div className="stack">
+    <>
       <Numbers stats={stats} />
-      <div className="two-col">
-        <div className="wide stack">
-          <AskAutomatically />
-          <CreditAndOffer />
-        </div>
-        <aside className="narrow stack">
-          <AskNow />
-          <TopReferrers stats={stats} />
-        </aside>
-      </div>
-      <ReferralList />
-    </div>
+      <DetailColumns
+        grouped
+        side={
+          <>
+            <AskNow />
+            <RecentAsks />
+            <TopReferrers stats={stats} />
+          </>
+        }
+      >
+        <AskAutomatically />
+        <CreditAndOffer />
+      </DetailColumns>
+      <DetailColumns grouped>
+        <ReferralList />
+      </DetailColumns>
+    </>
   );
 }
 
@@ -98,7 +109,7 @@ export const EARNED_HINT = "Not on an invoice yet";
 
 function Numbers({ stats }: { stats: UseQueryResult<Stats> }) {
   if (stats.isPending) return <StatsSkeleton count={4} />;
-  if (stats.error || !stats.data) return <div className="card"><ErrorState compact error={stats.error} onRetry={() => stats.refetch()} /></div>;
+  if (stats.error || !stats.data) return <ErrorState compact error={stats.error} onRetry={() => stats.refetch()} />;
   const { revenue, credits } = stats.data;
   // A percent credit isn't a figure until the friend pays, so then it's how many are waiting.
   const waiting = credits.pending_count === 1 ? "1 friend hasn't" : `${credits.pending_count.toLocaleString()} friends haven't`;
@@ -108,22 +119,17 @@ function Numbers({ stats }: { stats: UseQueryResult<Stats> }) {
       ? `${waiting} paid yet`
       : `${formatMoneyCents(credits.pending)} pending: ${waiting} paid yet`;
   return (
-    <div className="stat-row">
-      <div className="card stat">
-        <div className="label">Revenue from referrals</div>
-        <div className="value">{revenue === null ? "—" : formatMoneyCents(revenue)}</div>
-        <div className="hint">{revenue === null ? "Needs the Invoices area" : "What referred clients have paid, before tax"}</div>
-      </div>
+    <StatStrip label="Referrals">
+      {revenue !== null && <Stat label="Revenue from referrals" value={formatMoneyCents(revenue)} note="What referred clients have paid, before tax" />}
       {/* Only what's not on an invoice yet, as Marketing's overview says it; friends still to pay are their own line. */}
-      <div className="card stat">
-        <div className="label">Credits {statusText("credit", "earned").toLowerCase()}</div>
-        <div className="value">{formatMoneyCents(credits.earned)}</div>
-        <div className="hint">{EARNED_HINT}</div>
-        <div className="hint">{pending}</div>
-      </div>
-      <div className="card stat"><div className="label">Credits {statusText("credit", "applied").toLowerCase()}</div><div className="value">{formatMoneyCents(credits.applied)}</div><div className="hint">On clients' invoices</div></div>
-      <div className="card stat"><div className="label">Credits {statusText("credit", "issued").toLowerCase()}</div><div className="value">{formatMoneyCents(credits.given)}</div><div className="hint">Outside Crewtavo</div></div>
-    </div>
+      <Stat
+        label={`Credits ${statusText("credit", "earned").toLowerCase()}`}
+        value={formatMoneyCents(credits.earned)}
+        note={<>{EARNED_HINT}<span className={styles.noteLine}>{pending}</span></>}
+      />
+      <Stat label={`Credits ${statusText("credit", "applied").toLowerCase()}`} value={formatMoneyCents(credits.applied)} note="On clients' invoices" />
+      <Stat label={`Credits ${statusText("credit", "issued").toLowerCase()}`} value={formatMoneyCents(credits.given)} note="Outside Crewtavo" />
+    </StatStrip>
   );
 }
 
@@ -166,55 +172,59 @@ function AskAutomatically() {
 
   if (!allowed) {
     return (
-      <div className="card card-pad stack-sm">
-        <strong>Ask automatically</strong>
-        <p className="muted text-sm" style={{ margin: 0 }}>Owners and admins with the Automations area choose when clients are asked for referrals.</p>
-      </div>
+      <Section title="Ask automatically">
+        <p className={styles.fine}>Owners and admins with the Automations area choose when clients are asked for referrals.</p>
+      </Section>
     );
   }
-  if (rule.isPending) return <div className="card card-pad"><CardSkeleton lines={2} /></div>;
-  if (rule.error) return <div className="card"><ErrorState compact error={rule.error} onRetry={() => rule.refetch()} /></div>;
+  if (rule.isPending) return <Section title="Ask automatically"><SectionSkeleton rows={2} /></Section>;
+  if (rule.error) return <Section title="Ask automatically"><ErrorState compact error={rule.error} onRetry={() => rule.refetch()} /></Section>;
   const r = rule.data;
   const on = save.isPending ? save.variables : Boolean(r?.enabled);
   const custom = r && !isReferralRule(r);
 
   return (
-    <div className="card card-pad stack">
-      <div className="row-between">
-        <strong>Ask automatically</strong>
-        <label className="switch-row" style={{ fontWeight: 400 }}>
+    <Section
+      title="Ask automatically"
+      action={
+        <label className={`switch-row ${styles.switchLabel}`}>
           <input type="checkbox" className="switch" aria-label="Ask for referrals automatically" checked={on} disabled={!canSave || save.isPending || (!on && (!ready || !emailReady))}
             onChange={(e) => save.mutate(e.target.checked)} />
           {on ? "On" : "Off"}
         </label>
-      </div>
-      {!ready && (
-        <div className="callout callout-warning"><Icon name="alert" size={18} /><div className="grow">{REFERRALS_NOT_SET_UP} Until then there's nothing to tell them.</div></div>
-      )}
-      {!emailReady && (
-        <div className="callout callout-warning">
-          <Icon name="alert" size={18} />
-          <div className="grow">
-            {on ? "Email isn't connected, so referral asks won't go out until it is." : "Email isn't connected yet, so referral asks can't go out."}
-            <ConnectEmailHint then={on ? "to send them" : "to turn them on"} />
+      }
+    >
+      <div className="stack-sm">
+        {!ready && (
+          <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{REFERRALS_NOT_SET_UP} Until then there's nothing to tell them.</div></div>
+        )}
+        {!emailReady && (
+          <div className="callout callout-warning">
+            <Icon name="alert" size={16} />
+            <div className="grow">
+              {on ? "Email isn't connected, so referral asks won't go out until it is." : "Email isn't connected yet, so referral asks can't go out."}
+              <ConnectEmailHint then={on ? "to send them" : "to turn them on"} />
+            </div>
           </div>
-        </div>
-      )}
-      {custom && (
-        <div className="callout callout-info">
-          <Icon name="info" size={18} />
-          <div className="grow">You changed “{r.name}” in Automations, so only the switch above turns it on and off here. <Link to={`/automations/${r.id}`}>Open the rule</Link></div>
-        </div>
-      )}
-      <p className="muted small" style={{ margin: 0 }}>
-        {r ? referralRuleTiming(r) : "Goes out a week after a job is completed."} By email, at most once every 6 months per client.
-        {r && <> Change it in Automations: <Link to={`/automations/${r.id}`}>{r.name}</Link>.</>}
-      </p>
-      <p className="muted small" style={{ margin: 0 }}>Recurring clients aren't asked automatically. Ask them with Ask for referrals.</p>
-      {canSave && !r && <p className="muted small" style={{ margin: 0 }}>Turning it on puts the rule back in Automations.</p>}
-      {!canSave && <span className="muted small">Only owners and admins can change this.</span>}
-      <FormError error={save.error} />
-    </div>
+        )}
+        {custom && (
+          <div className="callout callout-info">
+            <Icon name="info" size={16} />
+            <div className="grow">You changed “{r.name}” in Automations, so only the switch above turns it on and off here. <Link to={`/automations/${r.id}`}>Open the rule</Link></div>
+          </div>
+        )}
+        <p className={styles.autoLine}>
+          {r ? referralRuleTiming(r) : "Goes out a week after a job is completed."} By email, at most once every 6 months per client.
+        </p>
+        <p className={styles.fine}>
+          Recurring clients aren't asked automatically. Ask them with Ask for referrals.
+          {r && <> Change it in Automations: <Link to={`/automations/${r.id}`}>{r.name}</Link>.</>}
+        </p>
+        {canSave && !r && <p className={styles.fine}>Turning it on puts the rule back in Automations.</p>}
+        {!canSave && <p className={styles.fine}>Only owners and admins can change this.</p>}
+        <FormError error={save.error} />
+      </div>
+    </Section>
   );
 }
 
@@ -231,54 +241,55 @@ function CreditAndOffer() {
   const percent = form.kind === "percent";
 
   return (
-    <form
-      className="card card-pad stack"
-      onSubmit={(e: FormEvent) => {
-        e.preventDefault();
-        if (valueError || emailError) return;
-        // settings.referrals has more than this form: what's there now is kept.
-        save.mutate((current) => referralPatch(form, current));
-      }}
-    >
-      <strong>Credit, offer and email</strong>
-      <Field
-        label="Credit for each friend who becomes a client"
-        error={valueError}
-        hint={percent
-          ? "A percentage of the friend's first job, after discounts and before tax. It goes on the client's next invoice once their friend pays their first one."
-          : "Goes on the client's next invoice once their friend pays their first one."}
+    <Section title="Credit, offer and email" flush>
+      <form
+        className="stack"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (valueError || emailError) return;
+          // settings.referrals has more than this form: what's there now is kept.
+          save.mutate((current) => referralPatch(form, current));
+        }}
       >
-        <div className="row wrap" style={{ gap: 8 }}>
-          <div className="segmented" role="group" aria-label="Kind of credit">
-            <button type="button" aria-pressed={!percent} disabled={!canSave} onClick={() => set({ kind: "amount" })}>$ amount</button>
-            <button type="button" aria-pressed={percent} disabled={!canSave} onClick={() => set({ kind: "percent" })}>% of their first job</button>
+        <Field
+          label="Credit for each friend who becomes a client"
+          error={valueError}
+          hint={percent
+            ? "A percentage of the friend's first job, after discounts and before tax. It goes on the client's next invoice once their friend pays their first one."
+            : "Goes on the client's next invoice once their friend pays their first one."}
+        >
+          <div className="row wrap" style={{ gap: 8 }}>
+            <div className="segmented" role="group" aria-label="Kind of credit">
+              <button type="button" aria-pressed={!percent} disabled={!canSave} onClick={() => set({ kind: "amount" })}>$ amount</button>
+              <button type="button" aria-pressed={percent} disabled={!canSave} onClick={() => set({ kind: "percent" })}>% of their first job</button>
+            </div>
+            <span className="input-group" style={{ width: 130 }}>
+              {!percent && <span className="addon">$</span>}
+              <input className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
+                placeholder={percent ? "10" : "50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
+              {percent && <span className="addon addon-right">%</span>}
+            </span>
           </div>
-          <span className="input-group" style={{ width: 130 }}>
-            {!percent && <span className="addon">$</span>}
-            <input className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
-              placeholder={percent ? "10" : "50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
-            {percent && <span className="addon addon-right">%</span>}
-          </span>
+        </Field>
+        <Field label="Offer shown to friends" optional hint="Written to the friend, like “10% off your first service”. It's on their referral page, and quoted in the Client Hub and the referral email.">
+          <input className="input" value={form.offer} maxLength={200} onChange={(e) => set({ offer: e.target.value })} disabled={!canSave} placeholder="10% off your first service" />
+        </Field>
+        <Field label="Referral email" error={emailError} hint="{{link}} is the client's own link. {{rewards}} says what they and their friend get.">
+          <textarea className="textarea" style={{ minHeight: 130 }} value={form.message} maxLength={2000} onChange={(e) => set({ message: e.target.value })} disabled={!canSave} />
+        </Field>
+        <FormError error={save.error} />
+        <div className="form-actions" style={{ justifyContent: "flex-start", alignItems: "center" }}>
+          {canSave ? (
+            <>
+              <Button type="submit" loading={save.isPending} done={saved} disabled={Boolean(valueError || emailError)}>Save</Button>
+              {rewardChanged(form, settings) && <span className="muted small">Friends already referred keep the credit they were offered.</span>}
+            </>
+          ) : (
+            <span className="muted small">Only owners and admins can change these.</span>
+          )}
         </div>
-      </Field>
-      <Field label="Offer shown to friends" optional hint="Written to the friend, like “10% off your first service”. It's on their referral page, and quoted in the Client Hub and the referral email.">
-        <input className="input" value={form.offer} maxLength={200} onChange={(e) => set({ offer: e.target.value })} disabled={!canSave} placeholder="10% off your first service" />
-      </Field>
-      <Field label="Referral email" error={emailError} hint="{{link}} is the client's own link. {{rewards}} says what they and their friend get.">
-        <textarea className="textarea" style={{ minHeight: 130 }} value={form.message} maxLength={2000} onChange={(e) => set({ message: e.target.value })} disabled={!canSave} />
-      </Field>
-      <FormError error={save.error} />
-      <div className="form-actions" style={{ justifyContent: "flex-start", alignItems: "center" }}>
-        {canSave ? (
-          <>
-            <Button type="submit" loading={save.isPending} done={saved} disabled={Boolean(valueError || emailError)}>Save</Button>
-            {rewardChanged(form, settings) && <span className="muted small">Friends already referred keep the credit they were offered.</span>}
-          </>
-        ) : (
-          <span className="muted small">Only owners and admins can change these.</span>
-        )}
-      </div>
-    </form>
+      </form>
+    </Section>
   );
 }
 
@@ -300,18 +311,6 @@ function AskNow() {
       ]);
       return { client: unwrap(who), last: unwrap(last) ?? null };
     },
-  });
-  const asks = useQuery({
-    queryKey: ["referral-asks", session.company.id],
-    queryFn: async () =>
-      unwrap(
-        await supabase()
-          .from("referral_asks")
-          .select("id, automatic, status, error, sent_at, client:clients(id, display_name)")
-          .eq("company_id", session.company.id)
-          .order("sent_at", { ascending: false })
-          .limit(5),
-      ),
   });
   const ask = useMutation({
     mutationFn: () => api.post<{ sent: boolean; detail: string }>("/referrals/request", { client_id: client!.id }),
@@ -336,59 +335,84 @@ function AskNow() {
   const waitsUntil = last ? new Date(Date.parse(last) + REFERRAL_GAP_DAYS * 86_400_000) : null;
 
   return (
-    <form className="card card-pad stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (client && !refusal && ready) ask.mutate(); }}>
-      <strong>Ask for referrals</strong>
-      <ClientPicker value={client} onChange={setClient} allowCreate={false} />
-      {client && picked.data && (
-        <span className="muted small">
-          {last ? `Last asked ${timeAgo(last)}` : "Not asked yet"}
-          {waitsUntil && waitsUntil > new Date() ? `, so automatic asks wait until ${formatDate(waitsUntil)}.` : "."}
-        </span>
-      )}
-      {!ready && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{REFERRALS_NOT_SET_UP}</span>}
-      {refusal && <span className="small" style={{ color: "var(--warning)", fontWeight: 600 }}>{refusal}</span>}
-      {!emailReady && refusal !== REFERRAL_EMAIL_NOT_CONNECTED && <span className="muted small">Email isn't connected yet.<ConnectEmailHint /></span>}
-      <div className="row wrap" style={{ gap: 8 }}>
-        <Button type="submit" variant="primary" icon="mail" loading={ask.isPending} disabled={!client || !ready || Boolean(refusal)}>Email their link</Button>
-        <Button icon="copy" loading={link.isPending} disabled={!client} onClick={() => link.mutate()}>Copy link</Button>
-      </div>
-      {Boolean(asks.data?.length) && (
-        <div className="stack-sm" style={{ marginTop: 8 }}>
-          <span className="muted small" style={{ fontWeight: 600 }}>Recent asks</span>
-          {asks.data!.map((a) => {
-            const c = a.client as { id: string; display_name: string } | null;
-            return (
-              <span key={a.id} className="small">
-                <Link to={`/clients/${c?.id}`}>{c?.display_name ?? "Client"}</Link>
-                <span className="muted"> · {timeAgo(a.sent_at)}{a.automatic ? " · automatic" : ""}</span>
-                {a.status === "failed" && <span style={{ color: "var(--danger)" }}> · Failed{a.error ? `: ${a.error}` : ""}</span>}
-              </span>
-            );
-          })}
+    <Section title="Ask for referrals" flush>
+      <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); if (client && !refusal && ready) ask.mutate(); }}>
+        <ClientPicker value={client} onChange={setClient} allowCreate={false} />
+        {client && picked.data && (
+          <p className={styles.fine}>
+            {last ? `Last asked ${timeAgo(last)}` : "Not asked yet"}
+            {waitsUntil && waitsUntil > new Date() ? `, so automatic asks wait until ${formatDate(waitsUntil)}.` : "."}
+          </p>
+        )}
+        {!ready && <p className={styles.autoNote} data-tone="warning">{REFERRALS_NOT_SET_UP}</p>}
+        {refusal && <p className={styles.autoNote} data-tone="warning">{refusal}</p>}
+        {!emailReady && refusal !== REFERRAL_EMAIL_NOT_CONNECTED && <p className={styles.fine}>Email isn't connected yet.<ConnectEmailHint /></p>}
+        <div className="row wrap" style={{ gap: 8 }}>
+          <Button type="submit" variant="primary" icon="mail" loading={ask.isPending} disabled={!client || !ready || Boolean(refusal)}>Email their link</Button>
+          <Button icon="copy" loading={link.isPending} disabled={!client} onClick={() => link.mutate()}>Copy link</Button>
         </div>
-      )}
-    </form>
+      </form>
+    </Section>
+  );
+}
+
+/** The last few asks, by hand or automatic, each with how it went. Nothing shows until there's one. */
+function RecentAsks() {
+  const session = useSession();
+  const asks = useQuery({
+    queryKey: ["referral-asks", session.company.id],
+    queryFn: async () =>
+      unwrap(
+        await supabase()
+          .from("referral_asks")
+          .select("id, automatic, status, error, sent_at, client:clients(id, display_name)")
+          .eq("company_id", session.company.id)
+          .order("sent_at", { ascending: false })
+          .limit(5),
+      ),
+  });
+  if (!asks.data?.length) return null;
+  return (
+    <Section title="Recent asks">
+      <RelatedList label="Recent asks">
+        {asks.data.map((a) => {
+          const c = a.client as { id: string; display_name: string } | null;
+          return (
+            <RelatedRow
+              key={a.id}
+              to={c ? `/clients/${c.id}` : undefined}
+              title={c?.display_name ?? "Client"}
+              sub={[timeAgo(a.sent_at), a.automatic && "automatic", a.status === "failed" && <span className={styles.failed}>Failed{a.error ? `: ${a.error}` : ""}</span>]}
+            />
+          );
+        })}
+      </RelatedList>
+    </Section>
   );
 }
 
 function TopReferrers({ stats }: { stats: UseQueryResult<Stats> }) {
+  const top = stats.data?.top_referrers;
   return (
-    <div className="card">
-      <div className="card-head"><strong>Top referrers</strong></div>
-      {stats.isPending && <div className="card-pad"><CardSkeleton lines={2} title={false} /></div>}
+    <Section title="Top referrers">
+      {stats.isPending && <SectionSkeleton rows={2} />}
       {stats.error && <ErrorState compact error={stats.error} onRetry={() => stats.refetch()} />}
-      {stats.data?.top_referrers.length === 0 && <EmptyState inline title="Nobody has referred a friend yet" />}
-      {stats.data?.top_referrers.map((t) => (
-        <div key={t.client_id} className="card-row">
-          <span className="grow">
-            <Link to={`/clients/${t.client_id}`} className="strong" style={{ color: "var(--ink)" }}>{t.name}</Link>
-            <span className="muted small" style={{ display: "block" }}>
-              {[plural(t.referrals, "referral"), `${t.won.toLocaleString()} won`, t.revenue === null ? null : formatMoneyCents(t.revenue)].filter(Boolean).join(" · ")}
-            </span>
-          </span>
-        </div>
-      ))}
-    </div>
+      {top?.length === 0 && <EmptyState inline title="Nobody has referred a friend yet" />}
+      {Boolean(top?.length) && (
+        <RelatedList label="Top referrers">
+          {top!.map((t) => (
+            <RelatedRow
+              key={t.client_id}
+              to={`/clients/${t.client_id}`}
+              lead={<RowPerson name={t.name} />}
+              title={t.name}
+              sub={[plural(t.referrals, "referral"), `${t.won.toLocaleString()} won`]}
+              end={t.revenue === null ? null : <b>{formatMoneyCents(t.revenue)}</b>}
+            />
+          ))}
+        </RelatedList>
+      )}
+    </Section>
   );
 }
 
@@ -422,9 +446,9 @@ function creditLeft(r: Referral) {
 }
 
 /** A referral's menu, or a space as wide as its button when there's nothing in it, so the pills line up. */
-function RowMenu({ items }: { items: MenuEntry[] }) {
-  if (!items.some((i) => !i.hidden && "onSelect" in i)) return <span aria-hidden="true" style={{ width: "var(--control-sm)", flexShrink: 0 }} />;
-  return <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label="Referral actions" items={items} />;
+function RowMenu({ items, title }: { items: MenuEntry[]; title: string }) {
+  if (!items.some((i) => !i.hidden && "onSelect" in i)) return <span aria-hidden="true" className={styles.menuSpace} />;
+  return <Menu triggerClassName="btn btn-sm btn-ghost btn-icon" label="Referral actions" title={title} items={items} />;
 }
 
 /** creditLine, with the invoices it names linked. */
@@ -506,54 +530,54 @@ function ReferralList() {
   const rows = referrals.data?.rows ?? [];
   const total = referrals.data?.total ?? 0;
   return (
-    <div className="card">
-      <div className="card-head"><strong>Referrals</strong></div>
-      {referrals.isPending && <div className="card-pad"><CardSkeleton lines={2} title={false} /></div>}
+    <Section title="Referrals" count={total || undefined}>
+      {referrals.isPending && <SectionSkeleton rows={2} />}
       {referrals.error && <ErrorState compact error={referrals.error} onRetry={() => referrals.refetch()} />}
       {referrals.data?.rows.length === 0 && <EmptyState inline title="No referrals yet">Share a client's link, or ask for referrals with Ask for referrals.</EmptyState>}
-      {rows.map((r) => {
-        const left = creditLeft(r);
-        const earned = r.reward_status === "earned";
-        const pill = referralPill(r);
-        return (
-          <div key={r.id} className="card-row">
-            <span className="grow" style={{ minWidth: 0 }}>
-              <span>
-                <Link to={r.referred ? `/clients/${r.referred.id}` : "#"} className="strong" style={{ color: "var(--ink)" }}>{r.referred?.display_name ?? r.referred_name}</Link>{" "}
-                <span className="muted">referred by</span> {r.referrer ? <Link to={`/clients/${r.referrer.id}`}>{r.referrer.display_name}</Link> : "a client"}
-              </span>
-              <span className="muted small" style={{ display: "block" }}>{timeAgo(r.created_at)} · <CreditWords parts={creditLine(r, r.credits, session.company.currency)} /></span>
-            </span>
-            <EntityStatus kind={pill.kind} status={pill.status} />
-            <RowMenu
-              items={[
-                { label: "Apply to an invoice…", icon: "invoice", hidden: !invoices || !earned || left <= 0, onSelect: () => { setApplying(r); setDialogOpen(true); } },
-                { label: "Apply automatically again", icon: "refresh", hidden: !invoices || !earned || r.auto_apply, onSelect: () => call.mutate({ fn: "referral_auto_apply", id: r.id, on: true }) },
-                { label: "Keep off invoices", icon: "pause", hidden: !invoices || !earned || !r.auto_apply, onSelect: () => call.mutate({ fn: "referral_auto_apply", id: r.id, on: false }) },
-                { label: "Mark given", icon: "gift", hidden: !(earned || (r.reward_status === "pending" && r.reward_kind === "amount" && Number(r.reward_value) > 0)), onSelect: () => markGiven(r) },
-                { label: "No credit for this one", icon: "x", danger: true, hidden: !(r.reward_status === "pending" || (earned && !r.credits.length && !Number(r.given_amount))), onSelect: () => noCredit(r) },
-                {
-                  label: "Give a credit anyway", icon: "gift",
-                  hidden: !(r.reward_status === "none" && ["self", "already_client", "by_hand"].includes(r.no_reward_reason ?? "") && Number(r.reward_value) > 0 && r.referrer?.id !== r.referred?.id),
-                  onSelect: () => giveAnyway(r),
-                },
-              ]}
-            />
-          </div>
-        );
-      })}
+      {rows.length > 0 && (
+        <RelatedList label="Referrals">
+          {rows.map((r) => {
+            const left = creditLeft(r);
+            const earned = r.reward_status === "earned";
+            const pill = referralPill(r);
+            const friend = r.referred?.display_name ?? r.referred_name;
+            return (
+              <RelatedRow
+                key={r.id}
+                title={r.referred ? <Link to={`/clients/${r.referred.id}`} className={styles.plainLink}>{friend}</Link> : friend}
+                detail={<>referred by {r.referrer ? <Link to={`/clients/${r.referrer.id}`} className={styles.plainLink}>{r.referrer.display_name}</Link> : "a client"}</>}
+                sub={[timeAgo(r.created_at), <span key="credit"><CreditWords parts={creditLine(r, r.credits, session.company.currency)} /></span>]}
+                end={<EntityStatus kind={pill.kind} status={pill.status} />}
+                actions={
+                  <RowMenu
+                    title={friend}
+                    items={[
+                      { label: "Apply to an invoice…", icon: "invoice", hidden: !invoices || !earned || left <= 0, onSelect: () => { setApplying(r); setDialogOpen(true); } },
+                      { label: "Apply automatically again", icon: "refresh", hidden: !invoices || !earned || r.auto_apply, onSelect: () => call.mutate({ fn: "referral_auto_apply", id: r.id, on: true }) },
+                      { label: "Keep off invoices", icon: "pause", hidden: !invoices || !earned || !r.auto_apply, onSelect: () => call.mutate({ fn: "referral_auto_apply", id: r.id, on: false }) },
+                      { label: "Mark given", icon: "gift", hidden: !(earned || (r.reward_status === "pending" && r.reward_kind === "amount" && Number(r.reward_value) > 0)), onSelect: () => markGiven(r) },
+                      {
+                        label: "Give a credit anyway", icon: "gift",
+                        hidden: !(r.reward_status === "none" && ["self", "already_client", "by_hand"].includes(r.no_reward_reason ?? "") && Number(r.reward_value) > 0 && r.referrer?.id !== r.referred?.id),
+                        onSelect: () => giveAnyway(r),
+                      },
+                      { separator: true },
+                      { label: "No credit for this one", icon: "x", danger: true, hidden: !(r.reward_status === "pending" || (earned && !r.credits.length && !Number(r.given_amount))), onSelect: () => noCredit(r) },
+                    ]}
+                  />
+                }
+              />
+            );
+          })}
+        </RelatedList>
+      )}
       {total > SHOWN && (
-        <div className="list-foot">
-          <span>Showing {rows.length.toLocaleString()} of {total.toLocaleString()}</span>
-          {rows.length < total ? (
-            <Button size="sm" variant="ghost" loading={referrals.isFetching} onClick={() => setLimit((l) => (l < PAGE ? PAGE : l + PAGE))}>Load more</Button>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={() => setLimit(SHOWN)}>Show less</Button>
-          )}
-        </div>
+        <ListFoot more={rows.length < total ? { onClick: () => setLimit((l) => (l < PAGE ? PAGE : l + PAGE)), loading: referrals.isFetching } : { onClick: () => setLimit(SHOWN), label: "Show less" }}>
+          Showing {rows.length.toLocaleString()} of {total.toLocaleString()}
+        </ListFoot>
       )}
       <ApplyDialog referral={applying} open={dialogOpen} onClose={() => setDialogOpen(false)} onExited={() => setApplying(null)} onApplied={refresh} />
-    </div>
+    </Section>
   );
 }
 
@@ -595,7 +619,7 @@ function ApplyDialog({ referral: r, open: isOpen, onClose, onExited, onApplied }
   return (
     <Dialog open={isOpen} onClose={onClose} onExited={onExited} title="Apply the referral credit" description={r ? `For referring ${r.referred_name}.` : undefined}>
       {open.isPending ? (
-        <CardSkeleton lines={2} title={false} />
+        <SectionSkeleton rows={2} />
       ) : open.error ? (
         <ErrorState compact error={open.error} onRetry={() => open.refetch()} />
       ) : !open.data?.length ? (
@@ -603,20 +627,21 @@ function ApplyDialog({ referral: r, open: isOpen, onClose, onExited, onApplied }
           {r?.auto_apply ? "It goes on their next one." : "It's kept off invoices, so apply it from here once they have one, or turn on Apply automatically again."}
         </EmptyState>
       ) : (
-        <div className="stack-sm">
+        <RelatedList label="Open invoices">
           {open.data.map((i) => (
-            <div key={i.id} className="row-between" style={{ gap: 12 }}>
-              <span className="grow">
-                Invoice #{i.number} · {statusText("invoice", i.status)}
-                <span className="muted small" style={{ display: "block" }}>
-                  {creditRoom(i) >= left ? `Takes all ${formatMoneyCents(left)}` : `Takes ${formatMoneyCents(creditRoom(i))} of ${formatMoneyCents(left)}`} · Invoice total {formatMoneyCents(Number(i.total))}
-                </span>
-                {i.books && <span className="muted small" style={{ display: "block" }}>{BOOKS[i.books]} has this invoice: the credit goes there too.</span>}
-              </span>
-              <Button size="sm" loading={apply.isPending && apply.variables === i.id} onClick={() => apply.mutate(i.id)}>Apply</Button>
-            </div>
+            <RelatedRow
+              key={i.id}
+              title={`Invoice #${i.number}`}
+              detail={statusText("invoice", i.status)}
+              sub={[
+                creditRoom(i) >= left ? `Takes all ${formatMoneyCents(left)}` : `Takes ${formatMoneyCents(creditRoom(i))} of ${formatMoneyCents(left)}`,
+                `Invoice total ${formatMoneyCents(Number(i.total))}`,
+                i.books && `${BOOKS[i.books]} has this invoice: the credit goes there too`,
+              ]}
+              actions={<Button size="sm" loading={apply.isPending && apply.variables === i.id} onClick={() => apply.mutate(i.id)}>Apply</Button>}
+            />
           ))}
-        </div>
+        </RelatedList>
       )}
       <FormError error={apply.error} />
     </Dialog>

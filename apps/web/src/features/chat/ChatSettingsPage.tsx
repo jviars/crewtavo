@@ -6,7 +6,7 @@
  * Roles themselves (who has which) are in Settings → Roles; this page only decides chat.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CHANNEL_PRESETS, CHAT_COLORS, channelSlug, type ChannelPreset, type ChatColor } from "@crewtavo/core/chat";
 import { Button, useJustDone } from "@/components/ui/Button";
@@ -15,14 +15,16 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { BackLink, PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
-import { Loading, Skeleton } from "@/components/ui/Skeleton";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
+import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
+import { FilterTabs } from "@/components/ui/Toolbar";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
 import { chatKeys, chatOn } from "./data";
 import { Avatar, badgeStyle, ChannelIcon, channelLabel, roleColor } from "./ui";
 import s from "./chat.module.css";
+import { Select } from "@/components/ui/Select";
 
 interface SettingsChannel {
   id: string;
@@ -73,6 +75,8 @@ export function ChatSettingsPage() {
   const session = useSession();
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") === "channels" ? "channels" : "roles";
+  // Add a channel is the Channels tab's one green button, in the header (on a phone, the floating one).
+  const [adding, setAdding] = useState(false);
   const allowed = hasRole(session, "admin");
   const data = useQuery({
     queryKey: chatKeys.settings(session.company.id),
@@ -84,29 +88,34 @@ export function ChatSettingsPage() {
     return (
       <>
         <BackLink to="/chat">Team chat</BackLink>
-        <div className="card"><EmptyState icon="chat" title="Team chat is off" action={<Link className="btn btn-primary" to="/apps/team_chat">Install it from Apps</Link>}>Install it to set up its channels and roles.</EmptyState></div>
+        <PageHeader title="Chat settings" />
+        <EmptyState icon="chat" title="Team chat is off" action={<Link className="btn btn-primary" to="/apps/team_chat">Install it from Apps</Link>}>Install it to set up its channels and roles.</EmptyState>
       </>
     );
   }
   return (
     <>
       <BackLink to="/chat">Team chat</BackLink>
-      <PageHeader title="Chat settings">
-        <p className="muted" style={{ margin: 0, flexBasis: "100%" }}>
-          Who sees each channel goes by role, the same roles as <Link to="/settings?tab=roles">Settings → Roles</Link>. Give someone a different role there.
-        </p>
-      </PageHeader>
-      <div className="segmented" role="group" aria-label="Chat settings" style={{ alignSelf: "flex-start" }}>
-        <button type="button" aria-pressed={tab === "roles"} onClick={() => setParams({}, { replace: true })}>Roles</button>
-        <button type="button" aria-pressed={tab === "channels"} onClick={() => setParams({ tab: "channels" }, { replace: true })}>Channels</button>
+      <PageHeader
+        title="Chat settings"
+        lede={<>Who sees each channel goes by role, the same roles as <Link to="/settings?tab=roles">Settings → Roles</Link>. Give someone a different role there.</>}
+        actions={tab === "channels" && data.data ? <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add a channel</Button> : undefined}
+      />
+      <div className={s.settingsTabs}>
+        <FilterTabs
+          label="Chat settings"
+          value={tab}
+          onChange={(next) => setParams(next === "channels" ? { tab: "channels" } : {}, { replace: true })}
+          options={[{ value: "roles", label: "Roles" }, { value: "channels", label: "Channels" }]}
+        />
       </div>
-      {data.error && <div className="card"><ErrorState error={data.error} onRetry={() => data.refetch()} /></div>}
+      {data.error && <ErrorState error={data.error} onRetry={() => data.refetch()} />}
       {data.isPending && (
         <Loading label="Loading chat settings" className="stack">
-          <Skeleton height={44} /><Skeleton height={220} /><Skeleton height={320} />
+          <SectionSkeleton rows={3} /><SectionSkeleton rows={5} />
         </Loading>
       )}
-      {data.data && (tab === "roles" ? <RolesTab data={data.data} /> : <ChannelsTab data={data.data} />)}
+      {data.data && (tab === "roles" ? <RolesTab data={data.data} /> : <ChannelsTab data={data.data} adding={adding} onAdding={setAdding} />)}
     </>
   );
 }
@@ -126,6 +135,16 @@ function RolesTab({ data }: { data: SettingsData }) {
   const [selected, setSelected] = useState(() => data.roles.find((r) => r.key === "crew_lead")?.key ?? data.roles[0]?.key ?? "owner");
   useEffect(() => setDraft(initial), [initial]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
+  // On a phone the roles are a row of chips that scrolls sideways: keep the picked one in sight (Crew lead starts off screen).
+  const roleNav = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const nav = roleNav.current;
+    const on = nav?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (!nav || !on || nav.scrollWidth <= nav.clientWidth) return;
+    const box = on.getBoundingClientRect();
+    const view = nav.getBoundingClientRect();
+    if (box.left < view.left || box.right > view.right) nav.scrollLeft += box.left - view.left - 16;
+  }, [selected]);
 
   // The bar stays a moment after saving, its button saying so, then leaves. A failure is a toast.
   const save = useMutation({
@@ -174,20 +193,20 @@ function RolesTab({ data }: { data: SettingsData }) {
   const custom = data.roles.filter((r) => r.custom);
 
   return (
-    <div className="row wrap" style={{ alignItems: "flex-start", gap: 28 }}>
-      <nav aria-label="Roles" className="stack-sm" style={{ flex: "1 1 220px", maxWidth: 300, gap: 2 }}>
-        <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", padding: "0 10px 4px" }}>Built-in roles</span>
+    <div className={s.rolesLayout}>
+      <nav ref={roleNav} aria-label="Roles" className={s.roleNav}>
+        <span className={s.roleNavLabel}>Built-in roles</span>
         {builtIn.map((r) => <RoleButton key={r.key} role={r} color={(draft.settings[r.key] ?? DEFAULT_SETTING).color} on={r.key === role.key} onClick={() => setSelected(r.key)} />)}
-        {custom.length > 0 && <span className="small strong muted" style={{ textTransform: "uppercase", letterSpacing: "var(--tracking-caps)", padding: "14px 10px 4px" }}>Custom roles</span>}
+        {custom.length > 0 && <span className={s.roleNavLabel}>Custom roles</span>}
         {custom.map((r) => <RoleButton key={r.key} role={r} color={(draft.settings[r.key] ?? draft.settings[r.base_role] ?? DEFAULT_SETTING).color} on={r.key === role.key} onClick={() => setSelected(r.key)} />)}
-        <Link to="/settings?tab=roles" className="small" style={{ padding: "10px" }}>Add or change roles in Settings</Link>
+        <Link to="/settings?tab=roles" className={s.roleNavLink}>Add or change roles in Settings</Link>
       </nav>
 
-      <div className="stack grow" style={{ flex: "999 1 520px", minWidth: 0 }}>
-        <div className="row wrap" style={{ gap: 12 }}>
-          <span className={s.jobIcon} style={{ width: 44, height: 44, background: badgeStyle(setting.color).background, color: roleColor(setting.color) }}><Icon name="lock" size={20} /></span>
+      <div className={s.roleMain}>
+        <div className={s.roleHead}>
+          <span className={s.roleHeadDot} style={{ background: roleColor(setting.color) }} aria-hidden="true" />
           <div className="grow" style={{ minWidth: 200 }}>
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "var(--tracking-tight)" }}>{role.label}</h2>
+            <h2 className={s.roleTitle}>{role.label}</h2>
             <span className="muted small">{role.custom ? `Custom role, at the ${baseLabel} level` : owner ? "Can see and do everything in chat" : "Built-in role"}{role.description ? ` · ${role.description}` : ""}</span>
           </div>
           <span className="row" style={{ gap: 0 }}>
@@ -199,19 +218,18 @@ function RolesTab({ data }: { data: SettingsData }) {
         </div>
 
         {customised && (
-          <div className="callout">
-            <Icon name="info" size={20} />
+          <div className="callout callout-info">
+            <Icon name="info" size={16} />
             <div className="grow"><span>This role has its own chat rules.</span><span style={{ display: "block", fontWeight: 400 }}>Without them it follows {baseLabel}.</span></div>
             <Button size="sm" onClick={followBase}>Follow {baseLabel}</Button>
           </div>
         )}
 
-        <section className="card" aria-labelledby="chat-look">
-          <div className="card-head"><h3 id="chat-look">How it looks in chat</h3></div>
-          <div className="card-pad stack-sm">
-            <strong>Name color</strong>
+        <Section title="How it looks in chat" flush>
+          <div className="stack-sm">
+            <strong className={s.fieldLabel}>Name color</strong>
             <span className="muted small">Names and @mentions for this role use this color.</span>
-            <div className="row wrap" style={{ gap: 4, marginLeft: -5 }}>
+            <div className={s.swatches}>
               {CHAT_COLORS.map((c) => (
                 <button key={c.key} type="button" className="icon-btn" style={{ borderRadius: "50%" }} aria-label={c.label} aria-pressed={setting.color === c.key} title={c.label} onClick={() => setSetting({ color: c.key })}>
                   <span style={{ width: 28, height: 28, borderRadius: "50%", display: "grid", placeItems: "center", background: roleColor(c.key), color: "var(--page)", boxShadow: setting.color === c.key ? "0 0 0 2px var(--surface), 0 0 0 4px var(--ink)" : "inset 0 0 0 1px rgba(0,0,0,.08)" }}>
@@ -220,28 +238,29 @@ function RolesTab({ data }: { data: SettingsData }) {
                 </button>
               ))}
             </div>
-            <div className={s.msg} data-head="" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-card)", padding: 12, marginTop: 6 }}>
+            <div className={`${s.msg} ${s.preview}`} data-head="">
               <span className={s.avatar} style={{ background: role.people[0]?.color || "var(--avatar)", cursor: "default" }} aria-hidden="true">{sample.split(/\s+/).map((w) => w[0]).slice(0, 2).join("")}</span>
               <div className={s.msgMain}>
                 <div className={s.msgHead}>
                   <span className={s.name} style={{ color: roleColor(setting.color), cursor: "default" }}>{sample}</span>
-                  <span className={s.roleBadge} style={badgeStyle(setting.color)}>{role.label}</span>
+                  <span className={s.role}>{role.label}</span>
                   <span className={s.time}>Today at 6:52 AM</span>
                 </div>
                 <p className={s.body}>Truck 3 is loaded. <span className={s.mention} data-role="" style={badgeStyle(setting.color)}>@{role.label}</span> bring water, it's a hot one.</p>
               </div>
             </div>
           </div>
+          <div className={s.switches}>
           <SwitchRow label="Show separately in the member list" hint={`People with this role get their own group, like "${role.label} · ${role.people.length}".`} checked={setting.show_separately} onChange={(v) => setSetting({ show_separately: v })} />
           <SwitchRow label="Anyone can @mention this role" hint={`Typing @${role.label} notifies everyone who has it. When this is off, only owners, admins, the office and a channel's managers can.`} checked={setting.mentionable} onChange={(v) => setSetting({ mentionable: v })} />
           {!owner && <SwitchRow label="Crew channels: their own crew only" hint="Someone on North crew sees North's channel but not the other crews'. Crews are set in Settings → Crews." checked={setting.own_crew_only} onChange={(v) => setSetting({ own_crew_only: v })} />}
-        </section>
+          </div>
+        </Section>
 
-        <section className="card" aria-labelledby="chat-access">
-          <div className="card-head"><h3 id="chat-access">Channel access</h3></div>
-          <p className="muted small" style={{ margin: 0, padding: "12px 20px 0" }}>Manage lets someone pin messages, change the topic and remove other people's messages.</p>
-          {owner && <div className="callout" style={{ margin: "12px 20px 0" }}><Icon name="lock" size={16} /><div className="grow"><span>Owners can see and do everything. This can't be changed.</span></div></div>}
-          <div style={{ overflowX: "auto", padding: "8px 0 12px" }}>
+        <Section title="Channel access" flush>
+          <p className="muted small" style={{ margin: "0 0 4px" }}>Manage lets someone pin messages, change the topic and remove other people's messages.</p>
+          {owner && <div className="callout callout-info" style={{ margin: "8px 0 0" }}><Icon name="lock" size={16} /><div className="grow"><span>Owners can see and do everything. This can't be changed.</span></div></div>}
+          <div className="card table-scroll" style={{ overflowX: "auto" }}>
             <table className="table" style={{ minWidth: 520 }}>
               <thead>
                 <tr><th scope="col">Channel</th><th scope="col" style={{ textAlign: "center" }}>Can see</th><th scope="col" style={{ textAlign: "center" }}>Can post</th><th scope="col" style={{ textAlign: "center" }}>Can manage</th></tr>
@@ -254,7 +273,7 @@ function RolesTab({ data }: { data: SettingsData }) {
                     <tr key={c.id}>
                       <th scope="row" style={{ fontWeight: 600 }}>
                         <span className="row" style={{ gap: 8 }}>
-                          <span className="muted"><ChannelIcon channel={c} size={16} /></span>
+                          <span className={s.hash}><ChannelIcon channel={c} size={14} /></span>
                           <span>
                             {c.name}
                             {(crew && setting.own_crew_only) || a.inherited ? (
@@ -273,7 +292,7 @@ function RolesTab({ data }: { data: SettingsData }) {
                             disabled={owner}
                             onChange={(e) => setAccess(c.id, what, e.target.checked)}
                             aria-label={`${role.label} ${what === "can_see" ? "can see" : what === "can_post" ? "can post in" : "can manage"} ${channelLabel(c)}`}
-                            style={{ width: 18, height: 18, accentColor: "var(--green)", cursor: owner ? "not-allowed" : "pointer" }}
+                            style={{ cursor: owner ? "not-allowed" : "pointer" }}
                           />
                         </td>
                       ))}
@@ -283,11 +302,11 @@ function RolesTab({ data }: { data: SettingsData }) {
               </tbody>
             </table>
           </div>
-        </section>
+        </Section>
 
         {(dirty || saved) && (
-          <div className="card row wrap" role="status" style={{ position: "sticky", bottom: 16, padding: "10px 10px 10px 18px", background: "var(--solid)", color: "var(--on-solid)", borderColor: "transparent", boxShadow: "var(--shadow-lg)", zIndex: 5 }}>
-            <strong className="grow" style={{ minWidth: 200 }}>{dirty ? "You have unsaved changes." : "Your changes are saved."}</strong>
+          <div className={s.saveBar} role="status">
+            <strong className="grow" style={{ minWidth: 180 }}>{dirty ? "You have unsaved changes." : "Your changes are saved."}</strong>
             {dirty && <Button variant="ghost" style={{ color: "var(--on-solid)" }} onClick={() => setDraft(initial)}>Reset</Button>}
             <Button variant="primary" loading={save.isPending} done={saved} onClick={() => dirty && save.mutate()}>Save changes</Button>
           </div>
@@ -299,26 +318,20 @@ function RolesTab({ data }: { data: SettingsData }) {
 
 function RoleButton({ role, color, on, onClick }: { role: SettingsRole; color: ChatColor; on: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      className="nav-link"
-      aria-current={on || undefined}
-      style={{ width: "100%", minHeight: 44, border: 0, font: "inherit", fontWeight: 600, background: on ? "var(--raised)" : "none", cursor: "pointer" }}
-      onClick={onClick}
-    >
-      <span style={{ width: 12, height: 12, borderRadius: "50%", background: roleColor(color), flex: "none" }} aria-hidden="true" />
-      <span className="grow" style={{ textAlign: "left" }}>{role.label}</span>
-      <span className="muted small">{role.people.length}</span>
+    <button type="button" className={s.roleButton} aria-current={on || undefined} onClick={onClick}>
+      <span className={s.roleDot} style={{ background: roleColor(color) }} aria-hidden="true" />
+      <span className="grow">{role.label}</span>
+      <span className={s.roleCount}>{role.people.length}</span>
     </button>
   );
 }
 
 function SwitchRow({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (on: boolean) => void }) {
   return (
-    <label className="card-row" style={{ cursor: "pointer", alignItems: "center" }}>
+    <label className={s.switchRow}>
       <span className="grow">
-        <strong style={{ display: "block" }}>{label}</strong>
-        <span className="muted small">{hint}</span>
+        <span className={s.fieldLabel}>{label}</span>
+        <span className="muted small" style={{ display: "block" }}>{hint}</span>
       </span>
       <input type="checkbox" className="switch" checked={checked} onChange={(e) => onChange(e.target.checked)} />
     </label>
@@ -344,10 +357,9 @@ function refFor(key: string, roles: SettingsRole[]) {
 // Channels
 // ---------------------------------------------------------------------------------------------
 
-function ChannelsTab({ data }: { data: SettingsData }) {
+function ChannelsTab({ data, adding, onAdding: setAdding }: { data: SettingsData; adding: boolean; onAdding: (on: boolean) => void }) {
   const { company } = useSession();
   const queryClient = useQueryClient();
-  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<SettingsChannel | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: chatKeys.all(company.id) });
   const update = useMutation({
@@ -371,45 +383,56 @@ function ChannelsTab({ data }: { data: SettingsData }) {
 
   return (
     <div className="stack">
-      <div className="row wrap" style={{ justifyContent: "space-between" }}>
-        <span className="muted">Who can see each channel is on the Roles tab.</span>
-        <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>Add a channel</Button>
-      </div>
-      {categories.map((cat) => (
-        <section key={cat} className="card" aria-label={cat}>
-          <div className="card-head"><h3>{cat}</h3></div>
-          {active.filter((c) => c.category === cat).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)).map((c) => (
-            <div key={c.id} className="card-row">
-              <span className="muted"><ChannelIcon channel={c} /></span>
-              <span className="grow">
-                <strong style={{ display: "block" }}>{c.name}</strong>
-                <span className="muted small">{c.topic || "No topic"}{c.crew_id ? ` · ${data.crews.find((x) => x.id === c.crew_id)?.name ?? "a crew"}'s channel` : ""}</span>
-              </span>
-              <Menu
-                items={[
-                  { label: "Edit", icon: "edit", onSelect: () => setEditing(c) },
-                  { label: "Move up", icon: "chevronUp", onSelect: () => void move(c, -1) },
-                  { label: "Move down", icon: "chevronDown", onSelect: () => void move(c, 1) },
-                  { label: "Archive", icon: "archive", onSelect: () => update.mutate({ id: c.id, archived: true }) },
-                ]}
-              />
-            </div>
-          ))}
-        </section>
-      ))}
+      <p className={s.channelsNote}>Who can see each channel is on the Roles tab.</p>
+      {categories.map((cat) => {
+        const list = active.filter((c) => c.category === cat).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+        return (
+          <Section key={cat} title={cat} count={list.length}>
+            <RelatedList>
+              {list.map((c) => (
+                <RelatedRow
+                  key={c.id}
+                  lead={<span className="rel-icon"><ChannelIcon channel={c} size={15} /></span>}
+                  title={c.name}
+                  sub={[c.topic || "No topic", c.crew_id ? `${data.crews.find((x) => x.id === c.crew_id)?.name ?? "a crew"}'s channel` : null]}
+                  actions={
+                    <Menu
+                      label={`Actions for ${c.name}`}
+                      title={c.name}
+                      align="end"
+                      items={[
+                        { label: "Edit", icon: "edit", kbd: "E", onSelect: () => setEditing(c) },
+                        { label: "Move", icon: "sort", items: [
+                          { label: "Move up", icon: "chevronUp", onSelect: () => void move(c, -1) },
+                          { label: "Move down", icon: "chevronDown", onSelect: () => void move(c, 1) },
+                        ] },
+                        { separator: true },
+                        { label: "Archive", icon: "archive", onSelect: () => update.mutate({ id: c.id, archived: true }) },
+                      ]}
+                    />
+                  }
+                />
+              ))}
+            </RelatedList>
+          </Section>
+        );
+      })}
       {archived.length > 0 && (
-        <section className="card" aria-label="Archived">
-          <div className="card-head"><h3>Archived</h3><span className="muted small">Read-only, and only owners, admins and the channel's managers see them.</span></div>
-          {archived.map((c) => (
-            <div key={c.id} className="card-row">
-              <span className="muted"><ChannelIcon channel={c} /></span>
-              <span className="grow"><strong>{c.name}</strong></span>
-              <Button size="sm" icon="restore" loading={update.isPending && update.variables?.id === c.id} onClick={() => update.mutate({ id: c.id, archived: false })}>Restore</Button>
-            </div>
-          ))}
-        </section>
+        <Section title="Archived" count={archived.length}>
+          <p className="muted small" style={{ margin: "0 0 4px" }}>Read-only, and only owners, admins and the channel's managers see them.</p>
+          <RelatedList>
+            {archived.map((c) => (
+              <RelatedRow
+                key={c.id}
+                lead={<span className="rel-icon"><ChannelIcon channel={c} size={15} /></span>}
+                title={c.name}
+                actions={<Button size="sm" icon="restore" loading={update.isPending && update.variables?.id === c.id} onClick={() => update.mutate({ id: c.id, archived: false })}>Restore</Button>}
+              />
+            ))}
+          </RelatedList>
+        </Section>
       )}
-      {data.channels.length === 0 && <div className="card"><EmptyState inline title="No channels yet" action={<Button onClick={() => setAdding(true)}>Add a channel</Button>} /></div>}
+      {data.channels.length === 0 && <EmptyState inline title="No channels yet" action={<Button onClick={() => setAdding(true)}>Add a channel</Button>} />}
       <AddChannel open={adding} onClose={() => setAdding(false)} crews={data.crews} categories={categories} onAdded={refresh} />
       <EditChannel channel={editing} onClose={() => setEditing(null)} categories={categories} onSaved={refresh} />
     </div>

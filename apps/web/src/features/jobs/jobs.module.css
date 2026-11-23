@@ -1,0 +1,184 @@
+/* Jobs (JobsPage, JobPage and their parts): the few looks the shared patterns don't draw. */
+
+/* ----- The Jobs list (Page-Jobs.dc.html) ----- */
+/* The next visit, with a small calendar before it. In a narrow row (a phone picking jobs) it's the last
+   part to give up room, so the day stays whole while "1 of 4 done" shortens. */
+.when { display: inline-flex; align-items: center; gap: 5px; }
+:global(.il-meta) > .when { flex-shrink: 0.05; }
+.when > svg { flex: none; color: var(--quiet); }
+/* Visits overdue on a late job: the one word in the row that's red. */
+.overdue { flex-shrink: 0 !important; color: var(--danger); font-weight: 600; }
+/* A repeating job's price is for each visit or month: the unit quiet after the figure. */
+.per { margin-left: 1px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+
+/* ----- A job's page (the detail pattern: DetailHeader, DetailColumns, Section) ----- */
+/* A section with more than one part under its heading (a list and its foot, a callout and facts). */
+.stacked > :global(.sec-body) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.stacked > :global(.sec-body) > :is(:global(.facts), :global(.rel)):not(:first-child) { margin-top: -4px; }
+/* The Visits section: a list and its foot ("Show 3 past visits"), as a list page's. */
+.visits { min-width: 0; }
+/* A quiet line under the header: how the job was marked complete, or when it's charged. */
+.note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: var(--fs-13); color: var(--text-3); }
+.note > svg { flex: none; color: var(--quiet); }
+.note > :global(.btn) { height: 28px; margin-left: 2px; }
+
+/* A visit: its day on the left ("Wed" over "Nov 4"), the title, a quiet line, its status and quick actions. */
+.visit { align-items: flex-start; }
+.visit > :global(.rel-end) { align-self: center; }
+.visit > :global(.rel-actions) { align-self: center; justify-content: flex-end; min-width: 132px; }
+.visit > :global(.rel-actions:empty) { visibility: hidden; }
+/* Complete: only its check on a desktop, where its title says it; the word too on a phone. */
+.phoneWord { display: none; }
+.visitDay { display: grid; justify-items: start; flex: none; width: 52px; min-width: 52px; padding-top: 1px; line-height: 1.25; color: var(--quiet); }
+.visitDay > span { font-size: var(--fs-11); }
+.visitDay > b { font-size: var(--fs-13); font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.visitDay[data-tone="danger"] > b { color: var(--danger); }
+.visit[data-done] .visitDay > b { color: var(--text-3); font-weight: 500; }
+.visit :global(.rel-body) { display: grid; gap: 2px; }
+.visit :global(.rel-sub) { margin-top: 0; }
+/* A visit's crew, with its color on the schedule. */
+.crew { display: inline-flex; align-items: center; gap: 5px; }
+.crew > i { flex: none; width: 7px; height: 7px; border-radius: 2px; }
+.hold { font-size: var(--fs-12); font-weight: 600; color: var(--warning); }
+.loadingRow { padding: 12px 0; }
+
+/* Job costing: the bar of costs and profit, a dot by each cost the color of its part. */
+.bar { display: flex; gap: 2px; height: 8px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-2); }
+.bar > span { min-width: 3px; transition: width var(--dur-slow) var(--ease-out); }
+.costKey { display: inline-flex; align-items: center; gap: 7px; }
+.costKey > i { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); }
+.costKey > strong { font-weight: 600; color: var(--ink); }
+.factNote { display: block; margin-top: 2px; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); text-align: left; }
+.notes { display: grid; gap: 4px; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
+.notes > p { margin: 0; }
+.instructions { margin-top: 4px; font-size: var(--fs-13); }
+.directions { cursor: pointer; }
+
+/* With a mouse, a visit's quick actions show over its status as its row is pointed at or has focus, as an
+   inbox row's do over its right column: the statuses keep the right edge and a long list stays quiet. */
+@media (hover: hover) and (pointer: fine) and (min-width: 901px) {
+  .visit > :global(.rel-end) { transition: opacity var(--dur-fast); }
+  .visit > :global(.rel-actions) { position: absolute; top: 50%; right: 0; min-width: 0; padding-left: 12px; background: var(--fill); opacity: 0; pointer-events: none; transform: translateY(-50%); transition: opacity var(--dur-fast); }
+  .visit:is(:hover, :focus-within) > :global(.rel-actions) { opacity: 1; pointer-events: auto; }
+  .visit:is(:hover, :focus-within):has(> :global(.rel-actions) > *) > :global(.rel-end) { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar > span { transition: none; }
+  .visit > :is(:global(.rel-actions), :global(.rel-end)) { transition: none; }
+}
+@media (max-width: 900px) {
+  .note { font-size: var(--fs-14); }
+  /* A visit on a phone: the day, the title and its line, the status on the right, and its quick
+     actions on a row of their own under the words. */
+  .visit { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; align-items: start; }
+  .visitDay { width: 48px; min-width: 48px; grid-row: 1 / span 2; }
+  .visit > :global(.rel-body) { grid-column: 2; grid-row: 1; }
+  .visit > :global(.rel-end) { grid-column: 3; grid-row: 1; align-self: start; padding-top: 1px; }
+  .visit > :global(.rel-actions) { grid-column: 2 / -1; grid-row: 2; align-self: start; justify-content: flex-start; min-width: 0; margin-left: -8px; }
+  .visit > :global(.rel-actions:empty) { display: none; }
+  .phoneWord { display: inline; }
+  /* The add buttons under the line items (+ Materials, + Expense): a finger's size. */
+  .adds > :global(.btn) { min-height: 44px; }
+  /* On the grouped page each section is a card: its parts take the card's own spacing, which collapses
+     between them in a block's flow (a grid's gap would add to it), and "Show 3 past visits" fills its row. */
+  :global(.m-grouped) .stacked > :global(.sec-body) { display: block; }
+  :global(.m-grouped) .stacked > :global(.sec-body) > :is(:global(.facts), :global(.rel)):not(:first-child) { margin-top: 0; }
+  :global(.m-grouped) .visits :global(.il-more) { flex: 1 1 auto; justify-content: center; height: 44px; }
+  .note > :global(.btn) { height: 44px; }
+  .visitDay > span { font-size: var(--fs-12); }
+  .visitDay > b { font-size: var(--fs-14); }
+  .hold { font-size: var(--fs-13); }
+  .factNote, .notes { font-size: var(--fs-13); }
+  .factNote { text-align: right; }
+}
+@media print {
+  .bar > span { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
+/* A late job's "3 overdue" comes last on a desktop and first on a phone: each copy hides on the other, with its dot. */
+@media (min-width: 901px) {
+  .phoneOnly, .phoneOnly + :global(.meta-dot) { display: none !important; }
+}
+@media (max-width: 900px) {
+  /* The list's phone rows (Mobile-Sales.dc.html, Jobs): no calendar before the day, no Recurring tag (the
+     price's "/visit" says it), a late job's "3 overdue" stands for the day it was due, and a multi-day
+     visit's "day 1 of 2" for the count done, so the line fits. */
+  .when > svg { display: none; }
+  .recurring { display: none; }
+  .wideOnly, .wideOnly + :global(.meta-dot), :global(.meta-dot):has(+ .wideOnly:last-child) { display: none !important; }
+}
+
+/* ----- A job's dialogs: new job, details, invoice, pause, extra work ----- */
+/* How a job repeats (RecurrenceEditor): its fields in the dialog's own flow, no box of their own. */
+.recur { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.every { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 6px; }
+.toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 400; }
+/* The rule said back with the next days: one quiet line to check against. */
+.recurSummary { display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: 10px; background: var(--fill-2); font-size: var(--fs-13); line-height: 1.45; }
+.recurSummary > svg { flex: none; height: 1.45em; color: var(--quiet); }
+.recurRule { font-weight: 600; color: var(--ink); }
+.recurNext { color: var(--text-2); }
+.recurNext > span:first-child { color: var(--text-3); }
+/* A dialog's question over its choices ("How is it priced?"), in a field label's type. */
+.legend { margin: 0 0 2px; padding: 0; font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
+.choices { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.choices > :global(.choice-row) { align-items: flex-start; gap: 12px; min-height: 0; padding: 10px 14px; font-size: var(--fs-13); line-height: 1.4; }
+.choices > :global(.choice-row) > input { flex: none; margin: 2px 0 0; }
+.choices > :global(.choice-row) strong { font-weight: 600; }
+.choices > :global(.choice-row) :global(.small) { font-size: var(--fs-12); }
+/* One-off or recurring: as wide as its words on a desktop, the full row on a phone. */
+.kindSwitch { justify-self: start; }
+
+@media (max-width: 900px) {
+  .recurSummary { font-size: var(--fs-14); }
+  .legend { font-size: var(--fs-14); }
+  .choices > :global(.choice-row) { padding: 12px 14px; font-size: var(--fs-15); }
+  .choices > :global(.choice-row) :global(.small) { font-size: var(--fs-13); }
+  .kindSwitch { justify-self: stretch; display: flex; }
+  .kindSwitch > button { flex: 1 1 0; }
+}
+
+/* ----- Filled-in checklists (FilledChecklists.tsx): on the job page and in the visit dialog ----- */
+/* Its own weight: in the visit dialog it sits in a field, whose label words are bold. */
+.checklist { display: grid; gap: 2px; min-width: 0; font-weight: 400; }
+.checklist + .checklist { margin-top: 10px; }
+.checklistHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.checklistName { min-width: 0; font-size: var(--fs-14); font-weight: 600; color: var(--ink); }
+.checklistMeta { font-size: var(--fs-12); color: var(--text-3); }
+.checklist > :global(.facts) { margin-top: 6px; }
+@media (max-width: 900px) {
+  .checklistName { font-size: var(--fs-15); }
+  .checklistMeta { font-size: var(--fs-13); }
+}
+
+/* ----- Extra work on a visit (VisitExtras.tsx): in the visit dialog and the job page's own dialog ----- */
+.extras { display: grid; gap: 8px; min-width: 0; }
+.extrasHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; padding-bottom: 8px; border-bottom: 1px solid var(--divider); }
+.extrasTitle { font-size: var(--fs-15); font-weight: 650; color: var(--ink); }
+.extrasHint { font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+.extrasHead + :global(.rel) { margin-top: -8px; }
+.extras > :global(.rel):first-child { border-top: 1px solid var(--divider); }
+/* Under a visit on the job page: each extra on its own short line. */
+.extraLine { display: flex; align-items: flex-start; gap: 6px; min-width: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--text-2); }
+/* On the first line's middle, however many lines the words take. */
+.extraLine > svg { flex: none; margin-top: calc(0.725em - 6px); color: var(--green); }
+.extraState { color: var(--text-3); }
+@media (max-width: 900px) {
+  .extrasTitle { font-size: var(--fs-16); }
+  .extrasHint, .extraLine { font-size: var(--fs-13); }
+}
+
+/* ----- Offering a sub the job (OfferDialogs.tsx) ----- */
+.preview { display: grid; gap: 4px; padding: 12px 14px; border-radius: 10px; background: var(--fill-2); }
+.previewLabel { font-size: var(--fs-12); color: var(--text-3); }
+.previewText { margin: 0; font-size: var(--fs-14); font-weight: 600; color: var(--ink); line-height: 1.45; }
+.previewNote { font-size: var(--fs-12); color: var(--text-3); }
+/* A new price's lines: hairline rows in the dialog's flow, the total on the last. */
+.priceLines { display: grid; min-width: 0; border-top: 1px solid var(--divider); }
+.priceLine { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.priceLine:last-child { align-items: center; border-bottom-color: var(--divider); }
+@media (max-width: 900px) {
+  .previewText { font-size: var(--fs-15); }
+  .previewLabel, .previewNote { font-size: var(--fs-13); }
+}

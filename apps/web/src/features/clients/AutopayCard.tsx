@@ -8,17 +8,19 @@
 import { AUTOPAY_BANK_LIMIT_REASON, AUTOPAY_STATUS_TEXT, autopayDueText, methodExpiry, methodLabel } from "@crewtavo/core/autopay";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
+import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
+import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { formatDate, formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import styles from "./clients.module.css";
 
 export interface AutopayMethod {
   id: string;
@@ -105,14 +107,17 @@ export function agreedText(a: Pick<AutopayAgreement, "source" | "accepted_at" | 
   return `Agreed ${day} on their client page`;
 }
 
-const STATE_CHIP: Record<Exclude<AutopayState, "none">, { label: string; className: string }> = {
-  active: { label: "Active", className: "chip chip-green" },
-  paused: { label: "Paused", className: "chip chip-amber" },
-  needs_update: { label: "Needs a new card", className: "chip chip-red" },
-  pending: { label: "Bank account being checked", className: "chip chip-blue" },
+/** Where it stands, as a dot and words: colored words only for a card someone has to replace. */
+const STATE_PILL: Record<AutopayState, { label: string; tone: Tone }> = {
+  none: { label: "Not set up", tone: "muted" },
+  active: { label: "Active", tone: "good" },
+  paused: { label: "Paused", tone: "pending" },
+  needs_update: { label: "Needs a new card", tone: "warning" },
+  pending: { label: "Bank account being checked", tone: "info" },
 };
 
-const CHARGE_TONE: Record<string, string> = { paid: "var(--green-dark)", failed: "var(--danger)", needs_client: "var(--danger)", needs_approval: "var(--warning)" };
+/** A charge's status: plain words, but red for one that failed and amber for one waiting on the office. */
+const CHARGE_TONE: Record<string, Tone> = { paid: "good", failed: "danger", needs_client: "danger", needs_approval: "warning", waiting: "info" };
 
 /** Everything the card shows about one client, under the client's own key. */
 export function useClientAutopay(clientId: string, enabled = true) {
@@ -172,19 +177,16 @@ export function AutopayCard({ client }: { client: { id: string; display_name: st
       align="start"
       items={[
         { label: "By email", icon: "mail", onSelect: () => invite.mutate("email"), disabled: !client.email || !features.email },
-        { label: "By text", icon: "smartphone", onSelect: () => invite.mutate("sms"), disabled: !client.phone || !features.sms },
+        { label: "By text", icon: "messages", onSelect: () => invite.mutate("sms"), disabled: !client.phone || !features.sms },
       ]}
     />
   );
 
-  const head = (chip: ReactNode) => (
-    <div className="row-between">
-      <strong id={`autopay-${client.id}`}>Autopay</strong>
-      {chip}
-    </div>
+  const section = (pill: ReactNode, body: ReactNode) => (
+    <Section title="Autopay" action={pill} id={`autopay-${client.id}`}>{body}</Section>
   );
-  if (autopay.isPending) return <div className="card card-pad stack-sm" aria-busy="true">{head(null)}<Skeleton width="70%" /><Skeleton width="50%" /></div>;
-  if (autopay.error) return <div className="card"><ErrorState compact title="Autopay couldn't load" error={autopay.error} onRetry={() => autopay.refetch()} /></div>;
+  if (autopay.isPending) return section(null, <div className={styles.autopay} aria-busy="true"><Skeleton width="70%" /><Skeleton width="50%" /></div>);
+  if (autopay.error) return section(null, <ErrorState compact title="Autopay couldn't load" error={autopay.error} onRetry={() => autopay.refetch()} />);
 
   const a = autopay.data!;
   const m = a.method;
@@ -201,73 +203,74 @@ export function AutopayCard({ client }: { client: { id: string; display_name: st
   };
   const reachable = (client.email && features.email) || (client.phone && features.sms);
 
-  return (
-    <section className="card card-pad stack-sm" aria-labelledby={`autopay-${client.id}`}>
-      {head(a.state === "none" ? <span className="chip">Not set up</span> : <span className={STATE_CHIP[a.state].className}>{STATE_CHIP[a.state].label}</span>)}
+  return section(
+    <StatusPill label={STATE_PILL[a.state].label} tone={STATE_PILL[a.state].tone} />,
+    <div className={styles.autopay}>
       {m && (
-        <span className="small row" style={{ gap: 6 }}>
+        <span className={styles.method}>
           <Icon name={m.type === "us_bank_account" ? "bank" : "card"} size={14} />
           <span className="grow">{label}{expires ? ` · expires ${expires}` : ""}</span>
         </span>
       )}
       {a.live ? (
         <>
-          <span className="muted small">{agreedText(a.live)}</span>
-          {a.since && <span className="muted small">Charged from Crewtavo since {formatDate(a.since)}</span>}
-          {a.state === "paused" && <span className="muted small">Nothing is charged until you turn it back on. Invoices go out with the Pay link meanwhile.</span>}
-          {a.state === "pending" && <span className="muted small">Charges start once Stripe has checked the bank account. This takes a few days.</span>}
-          {a.state === "needs_update" && <span className="small" style={{ color: "var(--danger)" }}>{m ? "The card was declined or can't be charged. They were sent a link to update it." : "The card was removed. They need to add one again from their client page."}</span>}
+          <p>{agreedText(a.live)}</p>
+          {a.since && <p>Charged from Crewtavo since {formatDate(a.since)}</p>}
+          {a.state === "paused" && <p>Nothing is charged until you turn it back on. Invoices go out with the Pay link meanwhile.</p>}
+          {a.state === "pending" && <p>Charges start once Stripe has checked the bank account. This takes a few days.</p>}
+          {a.state === "needs_update" && <p className={styles.bad}>{m ? "The card was declined or can't be charged. They were sent a link to update it." : "The card was removed. They need to add one again from their client page."}</p>}
         </>
       ) : (
         <>
-          {a.turnedOff?.revoked_via === "client" && <span className="muted small">Turned off by the client on {formatDate(a.turnedOff.revoked_at!)}</span>}
-          <span className="muted small">
+          {a.turnedOff?.revoked_via === "client" && <p>Turned off by the client on {formatDate(a.turnedOff.revoked_at!)}</p>}
+          <p>
             {!a.confirmable
               ? "Not set up. Send them the link to save a card and agree to be charged after each visit."
               : m!.source === "stripe_import"
                 ? "Saved in Stripe. Not charged until they confirm autopay."
                 : "Saved, but not charged until they agree to autopay."}
-          </span>
+          </p>
         </>
       )}
 
-      <div className="row wrap" style={{ gap: 8 }}>
-        {!a.live && reachable && inviteMenu(a.confirmable && m?.source === "stripe_import" ? "Send Confirm autopay link" : "Send autopay invite")}
-        {a.live && (a.state === "paused" ? (
-          <Button size="sm" icon="play" loading={pause.isPending} onClick={() => pause.mutate(false)}>Turn back on</Button>
-        ) : (
-          <Button size="sm" icon="pause" loading={pause.isPending} onClick={() => pause.mutate(true)}>Pause</Button>
-        ))}
-        {m && <Button size="sm" variant="ghost" icon="trash" loading={removeCard.isPending} onClick={askRemove}>Remove card</Button>}
-      </div>
-      {!a.live && !reachable && <span className="muted small">Add an email or phone to send the link{features.email || features.sms ? "" : ", and connect email in Settings → Email"}.</span>}
+      {(!a.live && reachable) || a.live || m ? (
+        <div className={styles.autopayActions}>
+          {!a.live && reachable && inviteMenu(a.confirmable && m?.source === "stripe_import" ? "Send Confirm autopay link" : "Send autopay invite")}
+          {a.live && (a.state === "paused" ? (
+            <Button size="sm" icon="play" loading={pause.isPending} onClick={() => pause.mutate(false)}>Turn back on</Button>
+          ) : (
+            <Button size="sm" icon="pause" loading={pause.isPending} onClick={() => pause.mutate(true)}>Pause</Button>
+          ))}
+          {m && <Button size="sm" variant="ghost" icon="trash" loading={removeCard.isPending} onClick={askRemove}>Remove card</Button>}
+        </div>
+      ) : null}
+      {!a.live && !reachable && <p>Add an email or phone to send the link{features.email || features.sms ? "" : ", and connect email in Settings → Email"}.</p>}
 
       {a.charges.length > 0 && (
-        <div className="stack-sm" style={{ gap: 4, marginTop: 4 }}>
-          <span className="muted small strong">Recent charges</span>
-          {a.charges.map((c) => {
-            // Paid with nothing on the card (credit the client had in Stripe paid it all): the invoice's total, said so.
-            const fromCredit = c.status === "paid" && c.charged_amount !== null && Number(c.charged_amount) === 0;
-            const amount = (fromCredit ? null : c.charged_amount) ?? c.invoice?.total ?? null;
-            const what = c.invoice?.number != null ? `Invoice #${c.invoice.number}` : "Next charge";
-            // Over the limit for their bank account: not charged, and the invoice is theirs to pay.
-            const overLimit = c.status === "called_off" && c.last_error === AUTOPAY_BANK_LIMIT_REASON;
-            const status = c.status === "waiting" ? `Charges ${autopayDueText(c.due_at, session.company.timezone)}` : fromCredit ? "Paid from Stripe credit" : overLimit ? "Theirs to pay" : AUTOPAY_STATUS_TEXT[c.status] ?? c.status;
-            const row = (
-              <>
-                <span className="grow ellipsis">{what}</span>
-                {amount != null && <span className="tabular">{formatMoneyCents(amount)}</span>}
-                <span style={{ color: CHARGE_TONE[c.status] ?? "var(--text-2)", fontWeight: 600 }}>{status}</span>
-              </>
-            );
-            return c.invoice_id ? (
-              <Link key={c.id} to={`/invoices/${c.invoice_id}`} className="row small" style={{ gap: 8 }} title={c.last_error ?? undefined}>{row}</Link>
-            ) : (
-              <span key={c.id} className="row small" style={{ gap: 8 }} title={c.last_error ?? undefined}>{row}</span>
-            );
-          })}
+        <div className={styles.charges}>
+          <span className={styles.chargesHead}>Recent charges</span>
+          <RelatedList label="Recent charges">
+            {a.charges.map((c) => {
+              // Paid with nothing on the card (credit the client had in Stripe paid it all): the invoice's total, said so.
+              const fromCredit = c.status === "paid" && c.charged_amount !== null && Number(c.charged_amount) === 0;
+              const amount = (fromCredit ? null : c.charged_amount) ?? c.invoice?.total ?? null;
+              const what = c.invoice?.number != null ? `Invoice #${c.invoice.number}` : "Next charge";
+              // Over the limit for their bank account: not charged, and the invoice is theirs to pay.
+              const overLimit = c.status === "called_off" && c.last_error === AUTOPAY_BANK_LIMIT_REASON;
+              const status = c.status === "waiting" ? `Charges ${autopayDueText(c.due_at, session.company.timezone)}` : fromCredit ? "Paid from Stripe credit" : overLimit ? "Theirs to pay" : AUTOPAY_STATUS_TEXT[c.status] ?? c.status;
+              return (
+                <RelatedRow
+                  key={c.id}
+                  to={c.invoice_id ? `/invoices/${c.invoice_id}` : undefined}
+                  title={what}
+                  sub={(c.status === "failed" || c.status === "needs_client") && c.last_error ? c.last_error : undefined}
+                  end={<>{amount != null && <b>{formatMoneyCents(amount)}</b>}<StatusPill label={status} tone={CHARGE_TONE[c.status] ?? "muted"} /></>}
+                />
+              );
+            })}
+          </RelatedList>
         </div>
       )}
-    </section>
+    </div>,
   );
 }

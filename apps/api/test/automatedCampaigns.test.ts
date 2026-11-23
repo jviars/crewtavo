@@ -24,7 +24,7 @@ vi.mock("../src/lib/notify", async (original) => ({
 const notify = await import("../src/lib/notify");
 const { BUSY_TRIES, busyWait, executeRun, loadContext, processAutomations } = await import("../src/services/automations");
 const { adminClient } = await import("../src/lib/supabase");
-const { readClientLink } = await import("../src/lib/links");
+const { KEPT_LINK, readClientLink } = await import("../src/lib/links");
 const { app } = await import("../src/app");
 const sendEmail = vi.mocked(notify.sendEmail);
 const sendSms = vi.mocked(notify.sendSms);
@@ -490,17 +490,16 @@ describe("Close pending quotes", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("emails the client their own quote link, and keeps the office's copy on the quote's timeline", async () => {
+  it("emails the client their own quote link, and keeps no link in the copy on the quote's timeline", async () => {
     const calls = world();
     expect(await executeRun(env, adminClient(env), run, env.APP_URL!)).toBe("done");
     const [begin] = rpcCalls(calls, "begin_campaign_send");
     expect(await readClientLink(env, begin.p_links[0].split("/hub/")[1])).toMatchObject({ t: "quote", id: QUOTE_ID, own: 1 });
-    // Estimators and the office read the timeline: its copy can't confirm a card or add a tip.
+    // Estimators, the office and any assistant connected as them read the timeline: no link that opens the quote as the client.
     const [kept] = writes(calls, "POST", "messages").map((c) => c.body);
     expect(kept).toMatchObject({ related_type: "quote", related_id: QUOTE_ID, subject: "Following up on your quote from Acme Lawn" });
-    const office = await readClientLink(env, kept.body.split("/hub/")[1].split(/\s/)[0]);
-    expect(office).toMatchObject({ t: "quote", id: QUOTE_ID, via: "office" });
-    expect(office).not.toHaveProperty("own");
+    expect(kept.body).toContain(KEPT_LINK);
+    expect(kept.body).not.toContain("/hub/");
   });
 
   it("sends both emails of a rule given a second one in Automations, each recorded as its own send", async () => {

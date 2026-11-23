@@ -1,5 +1,6 @@
 /** Report date ranges (in the company's time zone) and how to bucket them for charts. */
 import { addDays, localDate } from "@crewtavo/core/time";
+import { formatDate } from "@/lib/format";
 
 // The ranges themselves are shared with AI assistants' report tools (packages/core/src/reports.ts).
 export { hoursBetween, REPORT_PRESETS as PRESETS, resolveRange, type ReportPreset as PresetKey, type ReportRange as Range } from "@crewtavo/core/reports";
@@ -8,6 +9,14 @@ import type { ReportRange as Range } from "@crewtavo/core/reports";
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
 
 export const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+/** A day as a list says it: "Today", "Yesterday", "Wed, Nov 19" this past week, "Nov 3", or "Nov 3, 2025" from another year. */
+export function dayWords(day: string, today: string): string {
+  if (day === today) return "Today";
+  if (day === addDays(today, -1)) return "Yesterday";
+  if (day.slice(0, 4) !== today.slice(0, 4)) return formatDate(day);
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: day >= addDays(today, -6) ? "short" : undefined, month: "short", day: "numeric", timeZone: "UTC" });
+}
 
 export interface Bucket {
   key: string;

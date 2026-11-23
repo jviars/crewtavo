@@ -127,9 +127,9 @@ describe("a booking form that lets clients pick a time", () => {
       timezone: NY, timezone_label: "Eastern Time (New York)", minutes: 60, window_min: 0, needs_ok: false, needs_postal_code: false, first: "2026-11-03", last: "2027-01-01",
     });
     database({ form: { pick_time: false } });
-    expect(await (await get(FORM)).json()).toEqual({ company: { name: "Acme Roofing", phone: "540-555-0100", texts: false, privacy_url: null }, form: { name: "Free roof inspection", kind: "assessment", questions: [] } });
+    expect(await (await get(FORM)).json()).toEqual({ company: { name: "Acme Roofing", phone: "540-555-0100", logo: null, color: null, texts: false, privacy_url: null }, form: { name: "Free roof inspection", kind: "assessment", questions: [] } });
     // A business that can text says so, so the phone box says what giving a number agrees to.
-    expect((await (await get(FORM, connectedFrom("203.0.113.9", texting))).json()).company).toEqual({ name: "Acme Roofing", phone: "540-555-0100", texts: true, privacy_url: null });
+    expect((await (await get(FORM, connectedFrom("203.0.113.9", texting))).json()).company).toEqual({ name: "Acme Roofing", phone: "540-555-0100", logo: null, color: null, texts: true, privacy_url: null });
     database({ form: { requires_approval: true, service_area_zips: ["24141"] } });
     expect((await (await get(FORM)).json()).booking).toMatchObject({ needs_ok: true, needs_postal_code: true });
   });
