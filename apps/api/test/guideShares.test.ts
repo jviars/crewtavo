@@ -99,7 +99,7 @@ function fakeDb(w: ReturnType<typeof world>) {
       // One person's membership, or the owners and admins told something.
       case "memberships": return did(q, "in") ? [{ user_id: USER }] : { role: w.role, role_id: null };
       case "sop_pages": return w.guide;
-      case "companies": return { name: "Peak Lawn", phone: "540 555 0100", website: "https://peaklawn.example", settings: { branding: { color: "#226644" } } };
+      case "companies": return { name: "Peak Lawn", phone: "540 555 0100", website: "https://peaklawn.example", country: "GB", settings: { branding: { color: "#226644" } } };
       case "profiles": return { full_name: "Pat Owner" };
       case "sop_shares": {
         const insert = did(q, "insert");
@@ -346,7 +346,7 @@ describe("a shared guide's page", () => {
     const body = (await res.json()) as Record<string, any>;
     expect(body).toMatchObject({
       locked: false, title: "Caring for new sod", category: "Aftercare", revised_at: "2026-11-10T09:00:00Z", html: HTML, email: null,
-      company: { name: "Peak Lawn", phone: "540 555 0100", color: "#226644" },
+      company: { name: "Peak Lawn", phone: "540 555 0100", color: "#226644", country: "GB" },
       cover: `/api/public/guides/${TOKEN}/pictures/7c0a0000-0000-4000-8000-000000000002.jpg`,
     });
     // Another company's file and one outside kb/ are named in the guide, and never offered.

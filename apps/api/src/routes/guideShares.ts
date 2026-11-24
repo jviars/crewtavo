@@ -289,11 +289,11 @@ async function provenEmail(env: Env, key: string | null | undefined): Promise<st
   return payload?.k === "guide-reader" && typeof payload.e === "string" ? emailKey(payload.e) : null;
 }
 
-/** The business as the page shows it: its name, logo and colour, never anything of its team. */
+/** The business as the page shows it: its name, logo and colour, and its country for writing dates its way; never anything of its team. */
 async function brandOf(admin: Db, companyId: string) {
-  const { data: company } = await admin.from("companies").select("name, phone, website, settings").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("name, phone, website, country, settings").eq("id", companyId).maybeSingle();
   if (!company) throw new HttpError(404, GONE);
-  return { name: company.name, phone: company.phone, website: company.website, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null) };
+  return { name: company.name, phone: company.phone, website: company.website, country: company.country, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null) };
 }
 
 guideShares.post("/public/guides/:token", async (c) => {
