@@ -26,7 +26,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { createPortal, flushSync } from "react-dom";
 import { formatMoneyCents } from "@/lib/format";
 import { contractBlocks, type ContractBlock } from "@/lib/html";
-import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "./build";
+import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "./build";
 import styles from "./EstimateDocument.module.css";
 import { paginate, type PaperBlock, type PaperLayout } from "./paginate";
 import { openPrintablePdf, printableOnPage } from "./pdfPrint";
@@ -189,7 +189,7 @@ function paperOf(template: TemplateSettings, company: DocumentCompany, data: Doc
     });
   }
 
-  add({ key: "totals", node: <Totals data={data} />, space: GAP });
+  add({ key: "totals", node: <Totals data={data} company={company} />, space: GAP });
 
   paragraphs(data.notes).forEach((text, i) => {
     // The label stays with the note's first line (paper.ts never cuts above it).
@@ -674,6 +674,7 @@ function Letterhead({ template, company }: { template: TemplateSettings; company
   const tagline = template.tagline.trim();
   const license = template.show_license && template.license.trim() ? licenseLine(template.license) : null;
   const insurer = template.show_insurer && template.insurer.trim() ? `Insured by ${template.insurer.trim()}` : null;
+  const taxId = taxNumberLine(company);
   const website = websiteLabel(company.website);
   const contact = [company.phone, company.email].filter(Boolean).join(" · ");
   const name = (
@@ -691,11 +692,13 @@ function Letterhead({ template, company }: { template: TemplateSettings; company
         <div className={styles.name}>{company.name}</div>
         {tagline && <div className={styles.tagline}>{tagline}</div>}
         {line && <div className={styles.detailsLine}>{line}</div>}
-        {(license || insurer) && (
+        {(license || insurer || taxId) && (
           <div className={styles.detailsLine} style={{ paddingTop: 0 }}>
             {license && <span className={styles.license}>{license}</span>}
-            {license && insurer && " · "}
+            {license && (insurer || taxId) && " · "}
             {insurer}
+            {insurer && taxId && " · "}
+            {taxId}
           </div>
         )}
         <span className={styles.bar} aria-hidden="true" />
@@ -710,6 +713,7 @@ function Letterhead({ template, company }: { template: TemplateSettings; company
       {website && <div>{website}</div>}
       {license && <div className={styles.license}>{license}</div>}
       {insurer && <div>{insurer}</div>}
+      {taxId && <div>{taxId}</div>}
     </div>
   );
   if (template.header === "banner") {
@@ -745,7 +749,7 @@ function Mark({ company }: { company: DocumentCompany }) {
   );
 }
 
-function Totals({ data }: { data: DocumentData }) {
+function Totals({ data, company }: { data: DocumentData; company: DocumentCompany }) {
   const estimate = data.kind === "estimate";
   return (
     <dl className={styles.totals}>
@@ -765,7 +769,7 @@ function Totals({ data }: { data: DocumentData }) {
       ))}
       {data.tax > 0 && (
         <>
-          <dt>Tax</dt>
+          <dt>{taxLine(company, data)}</dt>
           <dd>{formatMoneyCents(data.tax)}</dd>
         </>
       )}

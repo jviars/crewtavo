@@ -630,6 +630,32 @@ describe("the page", () => {
     expect(html).toContain("--doc-color:#3b7d23");
   });
 
+  it("says the tax's name and rate in the totals, and the business's number for it with its details", () => {
+    const taxed = { ...SAMPLE_DOCUMENT, tax: 1464.32, taxRate: 0.08875, total: SAMPLE_DOCUMENT.total + 1464.32 };
+    // A US business: "Tax", with its rate, and no number.
+    expect(page({}, taxed)).toContain("<dt>Tax (8.875%)</dt>");
+    expect(page({}, { ...taxed, taxRate: undefined })).toContain("<dt>Tax</dt>");
+    expect(page({}, taxed)).not.toContain("Tax number");
+    // A UK business: its VAT number with its details, in each look, and VAT at its rate.
+    const vat = (template: Partial<TemplateSettings>, data: DocumentData = { ...taxed, taxRate: 0.2 }) =>
+      renderToStaticMarkup(createElement(EstimateDocument, { template: { ...DEFAULT_TEMPLATE, ...template }, company: { ...company, taxName: "VAT", taxNumber: "GB123456789" }, data }));
+    for (const header of ["classic", "banner", "centered"] as const) expect(vat({ header }), header).toContain("VAT number GB123456789");
+    expect(vat({})).toContain("<dt>VAT (20%)</dt>");
+    expect(vat({ license: "#RC-1", insurer: "Hartwell", header: "centered" })).toContain("Insured by Hartwell · VAT number GB123456789");
+    // No tax on it: no tax line, whatever it's called.
+    expect(vat({}, { ...SAMPLE_DOCUMENT, taxRate: 0.2 })).not.toContain("VAT (");
+  });
+
+  it("names the business's tax by its own word for it, else its country's", () => {
+    const row = { name: "Thames Roofing", address: null };
+    expect(documentCompany({ ...row, country: "US" })).toMatchObject({ taxName: "Tax", taxNumber: null });
+    expect(documentCompany({ ...row, country: "GB", settings: { tax_number: "GB 123 4567 89" } })).toMatchObject({ taxName: "VAT", taxNumber: "GB 123 4567 89" });
+    expect(documentCompany({ ...row, country: "CA" }).taxName).toBe("GST/HST");
+    // A business whose country isn't known yet (a sub's basics): the guess from its time zone.
+    expect(documentCompany({ ...row, timezone: "Europe/London" }).taxName).toBe("VAT");
+    expect(documentCompany({ ...row, country: "CA", settings: { tax_name: " HST ", tax_number: "  " } })).toMatchObject({ taxName: "HST", taxNumber: null });
+  });
+
   it("leaves off what the template turns off", () => {
     const html = page({ license: "#RC-104882", show_license: false, insurer: "Hartwell", show_insurer: false, page_numbers: false, terms: "", customer_signs: false, company_signs: false });
     expect(html).not.toContain("RC-104882");

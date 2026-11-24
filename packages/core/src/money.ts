@@ -102,6 +102,45 @@ export function taxRateFromPercent(percent: Amount): number {
   return Number(toUnits(percent, TAX_RATE_DECIMALS - 2)) / 10 ** TAX_RATE_DECIMALS;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The tax's name and the business's number for it (Settings → Company: settings.tax_name and
+// settings.tax_number), as quotes and invoices print them
+// ---------------------------------------------------------------------------------------------
+
+/** The longest a tax's name and a tax number can be. */
+export const TAX_NAME_MAX = 20;
+export const TAX_NUMBER_MAX = 30;
+
+/** What the tax is called where the business works, until it says otherwise: "VAT" in the UK, "GST/HST" in Canada, "Tax" elsewhere (the US as before). */
+export const countryTaxName = (country: string | null | undefined) => (country === "GB" ? "VAT" : country === "CA" ? "GST/HST" : "Tax");
+
+const settingText = (settings: unknown, key: string, max: number) => {
+  const value = settings && typeof settings === "object" && !Array.isArray(settings) ? (settings as Record<string, unknown>)[key] : null;
+  return typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, max) : null;
+};
+
+/** The tax's name on the business's quotes and invoices: its own (settings.tax_name), else its country's (countryTaxName). */
+export const taxName = (settings: unknown, country: string | null | undefined): string => settingText(settings, "tax_name", TAX_NAME_MAX) ?? countryTaxName(country);
+
+/** The business's registration number for its tax (settings.tax_number), as a VAT invoice must show it; null without one. */
+export const taxNumber = (settings: unknown): string | null => settingText(settings, "tax_number", TAX_NUMBER_MAX);
+
+/**
+ * What the number is called beside it: "VAT number", "GST/HST number" for a tax named in capitals
+ * like those (GST, HST, QST, TVA too), else "Tax number" ("Sales tax", "Tax").
+ */
+export const taxNumberLabel = (name: string) => (/^[A-Z]{2,5}(\/[A-Z]{2,5})*$/.test(name.trim()) ? `${name.trim()} number` : "Tax number");
+
+/**
+ * The tax's line in a document's totals: its name and the rate it was worked out at, "VAT (20%)",
+ * "Tax (8.875%)"; the name alone when the rate isn't above 0 or isn't known. The same wherever it's
+ * drawn (no locale).
+ */
+export function taxLineLabel(name: string, rate: Amount): string {
+  const percent = rate === null || rate === undefined || String(rate).trim() === "" ? 0 : taxPercent(rate);
+  return percent > 0 ? `${name} (${percent}%)` : name;
+}
+
 const TIERS = ["Good", "Better", "Best"];
 
 /**

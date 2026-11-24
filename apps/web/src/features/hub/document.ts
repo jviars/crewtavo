@@ -9,11 +9,12 @@
 import { AUTOPAY_YOURS_TO_PAY } from "@crewtavo/core/autopay";
 import { lateFeeNotice, type LateFee } from "@crewtavo/core/billing";
 import { depositFor, type ContractInput, type LibrarySection } from "@crewtavo/core/contracts";
+import { businessCountry } from "@crewtavo/core/countries";
 import { documentColor, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import type { ClientChecklist } from "@crewtavo/core/forms";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { normalizePitch, pitchFactor } from "@crewtavo/core/geo";
-import { chosenTotals, lineTotal, optionLabels, toCents, type Amount } from "@crewtavo/core/money";
+import { chosenTotals, lineTotal, optionLabels, taxName, taxNumber, toCents, type Amount } from "@crewtavo/core/money";
 import { dateIn, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { linkToken } from "@/lib/linkToken";
 import {
@@ -61,6 +62,10 @@ export interface HubCompany {
   address?: string[];
   /** The business's privacy policy link, when it set one (Settings → Company). */
   privacy_url?: string | null;
+  /** Where it works ("GB"), and what it calls its tax and its number for it (Settings → Company); left out by older servers. */
+  country?: string | null;
+  tax_name?: string | null;
+  tax_number?: string | null;
 }
 /** A map drawing the office chose to show the client, with the sizes measured on it. */
 export interface HubDrawing {
@@ -323,6 +328,8 @@ export interface InvoiceView {
     /** Referral credits (an older server sends none). */
     credit_amount?: number;
     credits?: Array<{ amount: number; note: string }>;
+    /** The rate its tax was worked out at, for "VAT (20%)" (left out by older servers). */
+    tax_rate?: number;
     tax_amount: number;
     total: number;
     retainage_amount: number;
@@ -341,8 +348,9 @@ export interface InvoiceView {
 /** The template a Hub page prints with: the business's, or the built-in look from an older server. */
 export const hubTemplate = (view: { template?: unknown }): TemplateSettings => templateSettings(view.template);
 
-/** The letterhead: the business as its clients see it. */
+/** The letterhead: the business as its clients see it, with what it calls its tax and its number for it. */
 export function hubLetterhead(company: HubCompany): DocumentCompany {
+  const tax = { tax_name: company.tax_name, tax_number: company.tax_number };
   return {
     name: company.name,
     phone: company.phone?.trim() || null,
@@ -351,6 +359,8 @@ export function hubLetterhead(company: HubCompany): DocumentCompany {
     address: company.address ?? [],
     logo: company.logo ?? null,
     settings: { branding: company.branding ?? null },
+    taxName: taxName(tax, businessCountry(company)),
+    taxNumber: taxNumber(tax),
   };
 }
 

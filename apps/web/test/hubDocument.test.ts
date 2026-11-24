@@ -148,10 +148,30 @@ describe("the Client Hub's documents", () => {
     expect(hubLetterhead(company)).toEqual({
       name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example",
       address: ["200 Main St", "Springfield, IL 62704"], logo: "/api/public/logo/c/l.png", settings: { branding: { color: "#1f4e79" } },
+      taxName: "Tax", taxNumber: null,
     });
     expect(hubLetterhead({ ...company, address: undefined, logo: undefined }).address).toEqual([]);
+    // What the business calls its tax and its number for it, or its country's name for it.
+    expect(hubLetterhead({ ...company, country: "GB", tax_number: " GB123456789 " })).toMatchObject({ taxName: "VAT", taxNumber: "GB123456789" });
+    expect(hubLetterhead({ ...company, country: "CA" }).taxName).toBe("GST/HST");
+    expect(hubLetterhead({ ...company, country: "CA", tax_name: "HST", tax_number: "123456789 RT0001" })).toMatchObject({ taxName: "HST", taxNumber: "123456789 RT0001" });
     expect(hubTemplate({ template: { header: "banner" } })).toEqual({ ...DEFAULT_TEMPLATE, header: "banner" });
     expect(hubTemplate({})).toEqual(DEFAULT_TEMPLATE);
+  });
+
+  it("says the tax's rate with its name in the totals, when the server sends it", () => {
+    expect(quoteDocument(quoteView()).taxRate).toBe(0.05);
+    const view: InvoiceView = {
+      kind: "invoice", home: null, company, can_pay: true, tips: false,
+      invoice: {
+        id: "i1", number: 79, status: "sent", subject: "Roof", notes: null, issued_on: "2026-10-01", due_on: "2026-10-31",
+        subtotal: 1000, discount_amount: 0, tax_rate: 0.2, tax_amount: 200, total: 1200, retainage_amount: 0, amount_paid: 0, balance_due: 1200, promo: null,
+        client: { display_name: "Dana Whitfield" }, lines: [{ name: "Roof", description: null, quantity: 1, unit: "ea", unit_price: 1000 }], payments: [],
+      },
+    };
+    expect(invoiceDocument(view).taxRate).toBe(0.2);
+    // An older server sends no rate for an invoice.
+    expect(invoiceDocument({ ...view, invoice: { ...view.invoice, tax_rate: undefined } })).not.toHaveProperty("taxRate");
   });
 
   it("draws a signed quote on the template its link sends, the one it was signed on", () => {

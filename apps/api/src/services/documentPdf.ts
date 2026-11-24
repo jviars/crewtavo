@@ -109,7 +109,18 @@ const block = z.union([
 /** What a page sends to be made into a PDF: the document as it shows it, and the business's currency. */
 export const documentPdfInput = z.object({
   template: z.unknown(),
-  company: z.object({ name: text(300), phone: text(100).nullable(), email: text(300).nullable(), website: text(500).nullable(), address: z.array(text(300)).max(10), logo: text(500).nullable(), settings: z.unknown().optional() }),
+  company: z.object({
+    name: text(300),
+    phone: text(100).nullable(),
+    email: text(300).nullable(),
+    website: text(500).nullable(),
+    address: z.array(text(300)).max(10),
+    logo: text(500).nullable(),
+    settings: z.unknown().optional(),
+    // What its tax is called and its number for it (left out by pages from before they printed).
+    taxName: text(40).optional(),
+    taxNumber: text(60).nullish(),
+  }),
   currency: text(3),
   timeZone: text(64).optional(),
   data: z.object({
@@ -127,6 +138,7 @@ export const documentPdfInput = z.object({
     discountLabel: text(200).optional(),
     credits: z.array(z.object({ label: text(300), amount })).max(50).optional(),
     tax: amount,
+    taxRate: amount.nullish(),
     taxExempt: text(300).optional(),
     total: amount,
     deposit: amount.nullish(),

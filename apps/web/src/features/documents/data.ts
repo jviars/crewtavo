@@ -74,7 +74,7 @@ export function useLetterhead() {
   return useQuery({
     queryKey: letterheadKey(company.id),
     queryFn: async (): Promise<DocumentCompany> => {
-      const [row, settings] = await Promise.all([supabase().from("companies").select("name, phone, email, website, address").eq("id", company.id).single(), loadSettings(company.id)]);
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, phone, email, website, address, country, timezone").eq("id", company.id).single(), loadSettings(company.id)]);
       return documentCompany({ ...unwrap(row), settings });
     },
     placeholderData: () => documentCompany(company),

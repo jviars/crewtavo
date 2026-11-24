@@ -217,6 +217,21 @@ describe("the PDF of an invoice", () => {
     expect(canada!.text).not.toContain("CA$");
   });
 
+  it("says the tax's name and rate, and the business's number for it with its details", async () => {
+    const taxed = { ...invoice, tax: 946, taxRate: 0.2, total: 5676, balanceDue: 5676 };
+    // A US business, as before but with the rate.
+    const [us] = await sheets({}, { ...taxed, taxRate: 0.08875 });
+    expect(has(us!, "Tax (8.875%) $946.00")).toBe(true);
+    expect(us!.text).not.toContain("number");
+    // A UK business: VAT, and its VAT number in each look.
+    const uk = { ...company, taxName: "VAT", taxNumber: "GB123456789" };
+    for (const header of ["classic", "banner", "centered"] as const) {
+      const [page] = await read(await documentPdf(env, { companyId: COMPANY_ID, template: { ...DEFAULT_TEMPLATE, header }, company: uk, data: taxed, currency: "GBP" }));
+      expect(has(page!, "VAT number GB123456789"), header).toBe(true);
+      expect(has(page!, "VAT (20%) £946.00"), header).toBe(true);
+    }
+  });
+
   it("prints a contract section from the blocks the page read, bold words and numbered items included", async () => {
     const section = {
       id: "s1",
@@ -358,6 +373,16 @@ describe("POST /api/public/documents/<name>.pdf", () => {
 
   /** The page the tab shows instead of a PDF: its status, and whether it's the page that says so. */
   const sorry = async (res: Response) => [res.status, res.headers.get("content-type")?.startsWith("text/html") && (await res.text()).includes("Couldn't make the PDF")];
+
+  it("keeps what the page says the tax is called, the business's number for it and the rate", async () => {
+    const uk = JSON.stringify({ template: templateSettings({}), company: { ...company, taxName: "VAT", taxNumber: "GB123456789" }, currency: "GBP", data: { ...invoice, tax: 946, taxRate: 0.2, total: 5676 } });
+    const res = await post(uk);
+    expect(res.status).toBe(200);
+    const [page] = await read(new Uint8Array(await res.arrayBuffer()));
+    expect(has(page!, "VAT number GB123456789") && has(page!, "VAT (20%)")).toBe(true);
+    // A page from before them sends none, and prints as it did.
+    expect((await post(sent({ ...invoice, tax: 946, total: 5676 }))).status).toBe(200);
+  });
 
   it("is only at a PDF's name", async () => {
     for (const file of ["Invoice%201042", "x.html", "%3Cscript%3E.pdf", `${"a".repeat(120)}.pdf`]) expect(await sorry(await post(sent(invoice), file)), file).toEqual([404, true]);

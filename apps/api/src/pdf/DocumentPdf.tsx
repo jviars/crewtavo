@@ -20,7 +20,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { contractBlocks, type ContractBlock } from "../../../web/src/lib/html";
 import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, PAGE_WIDTH } from "../../../web/src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "../../../web/src/features/documents/types";
-import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "../../../web/src/features/documents/words";
+import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
 import { richText } from "./richText";
 
 /** A picture as it goes in the PDF (a PNG or JPEG's bytes), with its size in pixels. */
@@ -196,7 +196,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
         )}
         {options.length > 0 && <Options options={options} pictures={pictures} look={look} />}
         <Lines lines={data.lines} look={look} />
-        <Totals data={data} look={look} />
+        <Totals data={data} company={company} look={look} />
 
         {paragraphs(data.notes).map((text, i) => (
           <View key={`n${i}`} style={{ marginTop: px(i ? NOTES_LINE : GAP) }} minPresenceAhead={i ? 0 : px(40)}>
@@ -295,12 +295,12 @@ function Lines({ lines, look }: { lines: DocumentLine[]; look: Look }) {
 }
 
 /** Subtotal down to the total, and on an invoice its payments and what's left. */
-function Totals({ data, look }: { data: DocumentData; look: Look }) {
+function Totals({ data, company, look }: { data: DocumentData; company: DocumentCompany; look: Look }) {
   const estimate = data.kind === "estimate";
   const rows: Array<{ label: string; value: string; grand?: boolean }> = [{ label: "Subtotal", value: money(data.subtotal, look) }];
   if (data.discount > 0) rows.push({ label: data.discountLabel || "Discount", value: `${look.minus}${money(data.discount, look)}` });
   for (const c of data.credits ?? []) rows.push({ label: c.label, value: `${look.minus}${money(c.amount, look)}` });
-  if (data.tax > 0) rows.push({ label: "Tax", value: money(data.tax, look) });
+  if (data.tax > 0) rows.push({ label: taxLine(company, data), value: money(data.tax, look) });
   if (data.taxExempt !== undefined) rows.push({ label: data.taxExempt ? `Tax exempt · ${data.taxExempt}` : "Tax exempt", value: money(0, look) });
   rows.push({ label: estimate && data.repeats ? "Total per visit" : "Total", value: money(data.total, look), grand: true });
   if (estimate && data.repeats) rows.push({ label: "How often", value: data.repeats });
@@ -521,6 +521,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
   const tagline = template.tagline.trim();
   const license = template.show_license && template.license.trim() ? licenseLine(template.license) : null;
   const insurer = template.show_insurer && template.insurer.trim() ? `Insured by ${template.insurer.trim()}` : null;
+  const taxId = taxNumberLine(company);
   const website = websiteLabel(company.website);
   const contact = [company.phone, company.email].filter(Boolean).join(" · ");
   const sheetTop = g.fullSheet ? px(PAGE_MARGIN) : 0;
@@ -533,11 +534,13 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
         <T size={24} lh={1.15} style={{ marginTop: px(6), fontWeight: 700, letterSpacing: px(0.24), color: look.textColor, textAlign: "center" }}>{company.name}</T>
         {!!tagline && <T size={12} style={{ marginTop: px(6), textTransform: "uppercase", letterSpacing: px(12 * 0.14), color: TEXT_2, textAlign: "center" }}>{tagline}</T>}
         {!!line && <T size={11.5} style={{ marginTop: px(6), paddingTop: px(4), color: TEXT_2, textAlign: "center" }}>{line}</T>}
-        {(license || insurer) && (
+        {(license || insurer || taxId) && (
           <T size={11.5} style={{ marginTop: px(6), color: TEXT_2, textAlign: "center" }}>
             {!!license && <Text style={{ color: INK, fontWeight: 600 }}>{license}</Text>}
-            {license && insurer && " · "}
+            {license && (insurer || taxId) && " · "}
             {insurer}
+            {insurer && taxId && " · "}
+            {taxId}
           </T>
         )}
         <View style={{ width: px(64), height: px(3), marginTop: px(14), borderRadius: px(2), backgroundColor: look.color }} />
@@ -554,6 +557,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
       ))}
       {!!license && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: banner ? look.onColor : INK, fontWeight: banner ? 700 : 600 }}>{license}</T>}
       {!!insurer && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{insurer}</T>}
+      {!!taxId && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{taxId}</T>}
     </View>
   );
   const name = (

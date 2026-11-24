@@ -19,6 +19,10 @@ export interface DocumentCompany {
   logo: string | null;
   /** companies.settings, for the brand color when the template has none (documentColor). */
   settings?: unknown;
+  /** What its tax is called ("VAT", "GST/HST": core taxName), in the totals; "Tax" without it. */
+  taxName?: string;
+  /** Its number for that tax (Settings → Company), printed with its details; null or left out without one. */
+  taxNumber?: string | null;
 }
 
 export interface DocumentLine {
@@ -101,6 +105,8 @@ export interface DocumentData {
   /** Invoices: referral credits after the discount, each under its note ("Referral credit: thanks for referring Maria"). */
   credits?: Array<{ label: string; amount: number }>;
   tax: number;
+  /** The rate the tax was worked out at (a fraction, as quotes.tax_rate keeps it), for "VAT (20%)" in the totals; without it, the tax's name alone. */
+  taxRate?: number | null;
   /** The client is tax exempt: the totals say "Tax exempt", with their certificate number or note when there is one. */
   taxExempt?: string;
   total: number;

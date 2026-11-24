@@ -1,9 +1,10 @@
 /**
- * The words and colors of an estimate or invoice: the business's initials, its website and license
- * as they print, the colors that read on its paper, quantities and dates. Plain functions, so the
- * server's PDF (apps/api/src/pdf) draws them the same as the pages do; build.ts passes them on.
+ * The words and colors of an estimate or invoice: the business's initials, its website, license and
+ * tax number as they print, the tax's line in the totals, the colors that read on its paper,
+ * quantities and dates. Plain functions, so the server's PDF (apps/api/src/pdf) draws them the same
+ * as the pages do; build.ts passes them on.
  */
-import type { Amount } from "@crewtavo/core/money";
+import { taxLineLabel, taxNumberLabel, type Amount } from "@crewtavo/core/money";
 
 /** "Ridgeline Roofing Co." -> "RR", for a business with no logo. */
 export function initials(name: string): string {
@@ -16,6 +17,13 @@ export const websiteLabel = (url: string | null | undefined) => (url ?? "").trim
 
 /** The license line: "License #RC-104882", unless they typed the word themselves. */
 export const licenseLine = (license: string) => (/^lic/i.test(license.trim()) ? license.trim() : `License ${license.trim()}`);
+
+/** The business's tax number as it prints with its details: "VAT number GB123456789", "GST/HST number 123456789 RT0001". Null without one. */
+export const taxNumberLine = (company: { taxName?: string; taxNumber?: string | null }) =>
+  company.taxNumber?.trim() ? `${taxNumberLabel(company.taxName?.trim() || "Tax")} ${company.taxNumber.trim()}` : null;
+
+/** The tax's line in the totals: its name and rate, "VAT (20%)", "Tax (8.875%)" (core taxLineLabel). */
+export const taxLine = (company: { taxName?: string }, data: { taxRate?: number | null }) => taxLineLabel(company.taxName?.trim() || "Tax", data.taxRate);
 
 // ---------------------------------------------------------------------------------------------
 // Colors on paper

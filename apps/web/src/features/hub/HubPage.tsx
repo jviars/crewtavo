@@ -32,6 +32,7 @@ import {
   initialSection,
   licenseLine,
   stillInitialed,
+  taxLine,
   websiteLabel,
   withInitials,
   type InitialedSections,
@@ -1372,7 +1373,7 @@ function QuoteTotals({ token, data, lines, optionId, chosen, editable, totals, e
           <div className="grow">{q.promo?.code} needs an order of at least {formatMoneyCents(short)}. Remove the code, or change your choices.</div>
         </div>
       )}
-      {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
+      {totals.tax > 0 && <div className="line"><span>{taxLine(hubLetterhead(data.company), { taxRate: q.tax_rate })}</span><span>{formatMoneyCents(totals.tax)}</span></div>}
       {q.client?.tax_exempt && totals.tax === 0 && <div className="line"><span>Tax exempt{q.client.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
       <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><span>{formatMoneyCents(totals.total)}</span></div>
       {q.recurrence_rule && <div className="line"><span>How often</span><span>{scheduleText(q.recurrence_rule, q.active_months)}</span></div>}
@@ -1635,7 +1636,7 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
                 onChanged={onChanged}
               />
               {(doc.data.credits ?? []).map((c, i) => <div key={i} className="line"><span>{c.label}</span><span className="nowrap">−{formatMoneyCents(c.amount)}</span></div>)}
-              {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
+              {Number(inv.tax_amount) > 0 && <div className="line"><span>{taxLine(doc.company, { taxRate: inv.tax_rate })}</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
               {inv.client?.tax_exempt && Number(inv.tax_amount) === 0 && <div className="line"><span>Tax exempt{inv.client.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
               <div className="line"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
               {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}
