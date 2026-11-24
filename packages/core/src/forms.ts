@@ -33,13 +33,34 @@ export const isPostalCode = (s: string) => /^[A-Za-z0-9][A-Za-z0-9 -]{0,9}$/.tes
 
 const postalKey = (s: string) => s.toUpperCase().replace(/\s+/g, "");
 
+/** A whole UK postcode without its space ("SW1A1AA": the outward code, then the inward one's digit and two letters), and an outward code alone ("SW1A", "M1"). */
+const UK_POSTCODE = /^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$/;
+const UK_OUTWARD = /^[A-Z]{1,2}[0-9][A-Z0-9]?$/;
+const isDigit = (ch: string | undefined) => ch !== undefined && ch >= "0" && ch <= "9";
+
+/**
+ * Whether a postal code is in an area, both written in capitals without spaces: it starts with the
+ * area's code. A UK postcode's districts would overlap that way, so there the area also has to end
+ * where a part of the outward code does: "SW1" takes SW1A 1AA but not SW10 1AA, "M1" takes M1 1AE
+ * but not M11 1AE, and "S" takes S1 1AA but not SW1A 1AA. US ZIPs ("220" takes 22001) and Canada's
+ * codes, whose letters and digits take turns, are as before. The empty area is everywhere. The
+ * database's private.postal_in_area (20261124100210_postcode_districts.sql) is the same.
+ */
+export function postalInArea(key: string, area: string): boolean {
+  if (!key.startsWith(area)) return false;
+  const outward = UK_POSTCODE.test(key) ? key.slice(0, -3) : UK_OUTWARD.test(key) ? key : null;
+  if (!area || !outward || area.length >= outward.length) return true;
+  return isDigit(area[area.length - 1]) !== isDigit(outward[area.length]);
+}
+
 /**
  * A booking form takes a request from its service areas, or anywhere when it has none. A postal code
  * is in an area when it starts with the area's code, ignoring case and spaces: "24141-1234" is in
- * "24141", and "M5V 2T6" in "M5V".
+ * "24141", and "M5V 2T6" in "M5V". A UK postcode's district is whole: "SW1A 1AA" is in "SW1", but
+ * "SW10 1AA" isn't (postalInArea).
  */
 export const inServiceArea = (postalCode: string | null | undefined, areas: readonly string[]) =>
-  !areas.length || areas.some((area) => postalKey(area) && postalKey(postalCode ?? "").startsWith(postalKey(area)));
+  !areas.length || areas.some((area) => postalKey(area) && postalInArea(postalKey(postalCode ?? ""), postalKey(area)));
 
 /**
  * A form ready to save: its link made from the slug or name, unique question keys, trimmed labels

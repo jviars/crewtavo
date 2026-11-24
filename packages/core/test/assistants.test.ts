@@ -26,6 +26,7 @@ import {
   normalizeIntakeForm,
   inServiceArea,
   isPostalCode,
+  postalInArea,
   MONEY_REFUSAL,
   toAssistantAccess,
 } from "../src";
@@ -128,6 +129,32 @@ describe("postal codes", () => {
     expect(inServiceArea(undefined, ["24141"])).toBe(false);
     // No areas: anywhere.
     expect(inServiceArea(undefined, [])).toBe(true);
+  });
+
+  it("takes a UK postcode only into an area that ends where a part of its district does", () => {
+    // The same cases as supabase/tests/postcode_districts_test.sql, for the database's private.postal_in_area.
+    const key = (s: string | null) => (s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const matches = (code: string | null, areas: string[]) => areas.filter((a) => postalInArea(key(code), key(a))).join(" ") || "-";
+    expect(matches("22001", ["220", "2200", "22001", "221"])).toBe("220 2200 22001");
+    expect(matches("K1A 0B6", ["K", "K1", "K1A", "K1A0", "K1A 0B6", "K1B", "M5V"])).toBe("K K1 K1A K1A0 K1A 0B6");
+    expect(matches("K1A", ["K", "K1", "K1A", "K1B"])).toBe("K K1 K1A");
+    expect(matches("SW1A 1AA", ["S", "SW", "SW1", "SW1A", "SW1A 1", "SW1A 1AA", "SW10", "SW1B"])).toBe("SW SW1 SW1A SW1A 1 SW1A 1AA");
+    expect(matches("SW10 1AA", ["S", "SW", "SW1", "SW10", "SW10 1"])).toBe("SW SW10 SW10 1");
+    expect(matches("SW19 2AB", ["SW1", "SW19"])).toBe("SW19");
+    expect(matches("M1 1AE", ["M", "M1", "M11", "M2"])).toBe("M M1 M11");
+    expect(matches("M11 1AE", ["M", "M1", "M11"])).toBe("M M11");
+    expect(matches("S1 1AA", ["S", "S1", "SW", "S11"])).toBe("S S1 S11");
+    expect(matches("EC1A 1BB", ["E", "EC", "EC1", "EC1A", "EC2"])).toBe("EC EC1 EC1A");
+    expect(matches("W1A 0AX", ["W", "W1", "W1A", "W10", "WC"])).toBe("W W1 W1A");
+    expect(matches("SW10", ["SW1", "SW10", "SW"])).toBe("SW10 SW");
+    // The empty area (a salesperson's "everywhere else") takes everything; no postal code is in no other.
+    expect(postalInArea("SW1A1AA", "")).toBe(true);
+    expect(matches(null, ["SW1", "K1A"])).toBe("-");
+    // A booking form's service areas, typed as people type them.
+    expect(inServiceArea("SW10 1AA", ["SW1"])).toBe(false);
+    expect(inServiceArea("sw1a 1aa", ["sw1"])).toBe(true);
+    expect(inServiceArea("M11 1AE", ["M1", "M2"])).toBe(false);
+    expect(inServiceArea("22001", ["220"])).toBe(true);
   });
 });
 
