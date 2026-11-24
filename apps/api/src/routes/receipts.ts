@@ -118,6 +118,12 @@ async function answerFor(c: Ctx, reading: ReceiptReading, jobId: string | null) 
   };
 }
 
+/** Where the business is (companies.country), which way round its receipts' dates are read (services/receipts.ts receiptSystem). */
+async function countryOf(c: Ctx): Promise<string | null> {
+  const { data } = await c.var.db.from("companies").select("country").eq("id", c.var.companyId).maybeSingle();
+  return data?.country ?? null;
+}
+
 const base64 = z.string().max(Math.ceil((READ_MAX_BYTES * 4) / 3) + 4, "That file is too large to read. Fill it in by hand.").regex(/^[A-Za-z0-9+/=\s]+$/);
 
 // Whoever can add an expense can have its receipt read: the team, the crew adding their own from a
@@ -126,7 +132,7 @@ receipts.post("/receipts/read", requireUser, requireCompany(STAFF), async (c) =>
   const body = await readJson(c, z.object({ file: base64, job_id: uuid.nullish() }));
   if (!readingOn(await companySettings(c))) throw new HttpError(409, OFF);
   if (!(await allowReceiptRead(c.env, c.var.companyId, c.var.userId))) throw new HttpError(429, USED_UP);
-  const reading = await readReceipt(c.env, { bytes: new Uint8Array(Buffer.from(body.file, "base64")) }, askerOf(c));
+  const reading = await readReceipt(c.env, { bytes: new Uint8Array(Buffer.from(body.file, "base64")) }, askerOf(c), await countryOf(c));
   return c.json(await answerFor(c, reading, body.job_id ?? null));
 });
 
@@ -155,7 +161,7 @@ receipts.post("/receipts/drafts/:id/read", requireUser, requireCompany(OFFICE, "
     if (file.error || !file.data) throw new HttpError(404, "The file couldn't be opened. Fill it in by hand.");
     // Asked for by whoever dropped it in, when that's the person whose page is reading it now: a
     // draft someone else left waiting is read for the company, not on this person's own account.
-    const reading = await readReceipt(c.env, { bytes: new Uint8Array(await file.data.arrayBuffer()) }, { companyId: c.var.companyId, userId: draft.user_id === c.var.userId ? c.var.userId : null });
+    const reading = await readReceipt(c.env, { bytes: new Uint8Array(await file.data.arrayBuffer()) }, { companyId: c.var.companyId, userId: draft.user_id === c.var.userId ? c.var.userId : null }, await countryOf(c));
     return c.json({ draft: await save({ status: "read", read: await answerFor(c, reading, draft.job_id) }) });
   } catch (err) {
     if (!(err instanceof HttpError)) throw err;
