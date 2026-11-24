@@ -7,6 +7,7 @@
  */
 import { intlLocale, msg, t } from "./i18n";
 import { isSquareUnit } from "./jobPay";
+import { moneyPrefix } from "./money";
 import type { PaperworkStatus } from "./subs";
 
 /** How an offer ended. A new price for agreed work that isn't taken leaves the pay agreed at the old one. */
@@ -41,12 +42,15 @@ export function respondByProblem(respondBy: string | Date | null | undefined, no
 // The offer in one line
 // ---------------------------------------------------------------------------------------------
 
-/** "$2,040", "$2,040.50": cents only when there are some. Mirrors private.money_short(). */
-export function moneyShort(amount: number | string | null | undefined): string {
+/**
+ * "$2,040", "$2,040.50": cents only when there are some, in the business's currency ("£2,040",
+ * "R 2,040": core moneyPrefix; US dollars when it isn't given). Mirrors private.money_short().
+ */
+export function moneyShort(amount: number | string | null | undefined, currency?: string | null): string {
   const n = Number(amount ?? 0) || 0;
   const cents = Math.round(n * 100);
   const whole = cents % 100 === 0;
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })}`;
+  return `${moneyPrefix(currency)}${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })}`;
 }
 
 /** "24 squares", "1 day", "120 lf", "2 ea": a quantity as a note reads it. Mirrors private.amount_words(). */
@@ -87,6 +91,8 @@ export interface OfferLineInput {
   /** Its lines, in their order. */
   lines: ReadonlyArray<{ basis: string; unit: string | null; quantity: number | string; amount: number | string }>;
   total: number | string;
+  /** The business's currency (companies.currency); US dollars when it isn't given. */
+  currency?: string | null;
 }
 
 /**
@@ -98,7 +104,7 @@ export function offerLine(o: OfferLineInput): string {
     .map((l, i) => ({ ...l, i }))
     .filter((l) => l.basis === "per_unit" && Number(l.quantity) > 0)
     .sort((a, b) => Number(b.amount) - Number(a.amount) || a.i - b.i)[0];
-  return [o.title, offerDays(o.dates), perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total)].filter(Boolean).join(", ");
+  return [o.title, offerDays(o.dates), perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total, o.currency)].filter(Boolean).join(", ");
 }
 
 /**
@@ -122,8 +128,8 @@ const answerByWords = (by: AnswerBy | null | undefined) => (by?.respondBy ? ` An
 export const offerText = (o: OfferLineInput, by?: AnswerBy | null) => `${offerLine(o)}.${answerByWords(by)} Open Crewtavo to accept or decline.`;
 
 /** What they get for a new price on agreed work. */
-export const changeText = (o: { title: string; total: number | string; agreed: number | string }, by?: AnswerBy | null) =>
-  `New price for ${o.title}: ${moneyShort(o.total)} (was ${moneyShort(o.agreed)}).${answerByWords(by)} Open Crewtavo to accept or decline.`;
+export const changeText = (o: { title: string; total: number | string; agreed: number | string; currency?: string | null }, by?: AnswerBy | null) =>
+  `New price for ${o.title}: ${moneyShort(o.total, o.currency)} (was ${moneyShort(o.agreed, o.currency)}).${answerByWords(by)} Open Crewtavo to accept or decline.`;
 
 // ---------------------------------------------------------------------------------------------
 // What's wrong with a sub's insurance (it only warns)

@@ -153,7 +153,9 @@ update public.companies set settings = settings - 'autopay' where id = :'starter
 select set_config('crewtavo.autopay', 'off', true);
 select tabt.check(private.autopay_terms_version(:'starter') = 'starter-lawn_exterior-3' and (select settings -> 'autopay' -> 'terms_version' is null from public.companies where id = :'starter'),
   'a company with none saved has nothing written into its settings');
-select tabt.check((select count(*) = 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'private' and p.proname = 'autopay_bank_text'), 'the function is there');
+-- With the one in the business's currency beside it (20261124100300_money_in_the_business_currency.sql).
+select tabt.check((select array_agg(pg_get_function_identity_arguments(p.oid) order by p.pronargs) = array['p_autopay jsonb', 'p_autopay jsonb, p_currency text']
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'private' and p.proname = 'autopay_bank_text'), 'the function is there');
 rollback;
 
 select last_value as checks from tabt.checks \gset

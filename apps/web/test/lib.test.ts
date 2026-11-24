@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/api", () => ({ supabase: () => ({}) }));
 const { uploadBody } = await import("../src/lib/files");
-const { dateIn, formatDateTime, formatMoney, formatMoneyCents, formatMoneyCompact, formatTime, moneyCurrency, setCurrency, timeZoneChoices } = await import("../src/lib/format");
+const { currencySymbol, dateIn, formatDateTime, formatMoney, formatMoneyCents, formatMoneyCompact, formatTime, moneyCurrency, setCurrency, timeZoneChoices } = await import("../src/lib/format");
 
 describe("dates and times in the company's zone", () => {
   it("gives the date where the company is, not the UTC date", () => {
@@ -30,7 +30,23 @@ describe("money in the business's currency", () => {
     expect(formatMoneyCompact(711)).toBe("£711");
     setCurrency("cad");
     expect(moneyCurrency()).toBe("CAD");
-    expect(formatMoneyCents(20)).toBe("CA$20.00");
+    // The symbol people there write: "$" for Canadian and Australian dollars, "R" for rand.
+    expect(formatMoneyCents(20)).toBe("$20.00");
+    setCurrency("AUD");
+    expect(formatMoneyCompact(12_345)).toBe("$12.3K");
+    setCurrency("ZAR");
+    expect(formatMoneyCents(1234.5)).toBe("R\u00a01,234.50");
+  });
+
+  it("puts the same symbol before a money box", () => {
+    expect(currencySymbol()).toBe("$");
+    setCurrency("CAD");
+    expect(currencySymbol()).toBe("$");
+    setCurrency("GBP");
+    expect(currencySymbol()).toBe("£");
+    expect(currencySymbol("EUR")).toBe("€");
+    expect(currencySymbol("ZAR")).toBe("R");
+    expect(currencySymbol("not money")).toBe("$");
   });
 
   it("keeps the last currency for a code that isn't one", () => {

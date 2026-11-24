@@ -195,6 +195,17 @@ describe("what a bank account agrees to", () => {
     expect(autopayBankText({ max_amount: null })).toBe(`${START} each charge is for the invoice it pays, and is taken automatically whatever its amount.`);
   });
 
+  it("names the limit in the business's currency, and a business in dollars reads exactly as before", () => {
+    expect(autopayBankText({ max_amount: 500 }, "USD")).toBe(autopayBankText({ max_amount: 500 }));
+    expect(autopayBankText({ max_amount: 500 }, "CAD")).toBe(autopayBankText({ max_amount: 500 }));
+    expect(autopayBankText({ max_amount: 1250.5 }, "GBP")).toBe(
+      `${START} charges of £1,250.50 or less are taken automatically. An invoice for more than £1,250.50 is not taken from your bank account: we send it to you to pay.`,
+    );
+    expect(autopayBankText({ max_amount: 500 }, "ZAR")).toContain("charges of R 500.00 or less");
+    expect(autopayBankText({ max_amount: null }, "EUR")).toBe(autopayBankText({ max_amount: null }));
+    expect(autopayTermsShown({ terms: "Our words.", timing: "end_of_day", days: null, max_amount: 300 }, "EUR")).toContain("more than €300.00 is not taken");
+  });
+
   it("promises no notice ahead of a charge, with a limit or without", () => {
     for (const max_amount of [500, null]) expect(autopayBankText({ max_amount })).not.toMatch(/notice|10 days|told|right to/i);
   });
@@ -232,6 +243,9 @@ describe("the most a bank account is charged", () => {
     expect(autopayAgreedCap(agreed(500))).toBe(500);
     expect(autopayAgreedCap(agreed(1250.5))).toBe(1250.5);
     expect(autopayAgreedCap(`Our words.\n\nWe charge right after each visit.\n\n${OLD}`)).toBe(500);
+    // In any business's currency.
+    const agreedIn = (currency: string) => autopayTermsShown({ terms: "Our words.", timing: "end_of_day", days: null, max_amount: 1250.5 }, currency);
+    for (const currency of ["USD", "CAD", "GBP", "EUR", "ZAR"]) expect(autopayAgreedCap(agreedIn(currency)), currency).toBe(1250.5);
   });
 
   it("finds none in words that name none, and never takes an amount in the business's own words for it", () => {
@@ -243,7 +257,7 @@ describe("the most a bank account is charged", () => {
     // The database reads the same paragraph for the same words.
     const body = sqlFunction("private.autopay_agreed_cap");
     expect(body).toContain("If you pay from a bank account:");
-    expect(body).toContain("more than \\$([0-9][0-9,]*(?:\\.[0-9]+)?)");
+    expect(body).toContain("more than (?:\\$|£|€|R )([0-9][0-9,]*(?:\\.[0-9]+)?)");
   });
 
   it("is the business's limit now, or the one the client agreed to when that's lower (private.autopay_bank_limit)", () => {

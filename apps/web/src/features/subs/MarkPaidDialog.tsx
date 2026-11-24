@@ -8,11 +8,12 @@ import { usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { readAmount } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
-import { companyCountry, formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, currencySymbol, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { markPaid, refreshPay } from "./payData";
 
@@ -52,8 +53,8 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
           {one ? (
             <Field label="Amount" requiredMessage="Enter the amount you paid." hint={Number(amount) !== total ? `Their pay comes to ${formatMoneyCents(total)}.` : undefined}>
               <span className="input-group">
-                <span className="addon">$</span>
-                <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
+                <span className="addon">{currencySymbol()}</span>
+                <DecimalInput className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
               </span>
             </Field>
           ) : (

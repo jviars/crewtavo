@@ -23,7 +23,8 @@ export interface JobDiscount {
 export type Words = Array<string | { invoice: { id: string; number: number | null } }>;
 
 /** "$15.00" in the business's currency (companies.currency), or "$25" with no cents. */
-const money = (amount: number, currency = "USD", digits = 2) => new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount);
+const money = (amount: number, currency = "USD", digits = 2) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount);
 const cents = (amount: number | string | null | undefined) => Math.round(Number(amount ?? 0) * 100);
 
 /** After the code on a quote: what it comes to on work that repeats. */

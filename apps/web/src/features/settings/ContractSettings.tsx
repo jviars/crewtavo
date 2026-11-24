@@ -220,7 +220,7 @@ export function contractPreview(input: {
   sample: DocumentData;
   template: TemplateSettings;
   library: readonly LibrarySection[];
-  company: { name: string; phone: string | null; timezone: string | null };
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null };
 }): { template: TemplateSettings; data: DocumentData } {
   const { kind, sample, template } = input;
   const estimate = kind === "estimate";
@@ -240,6 +240,7 @@ export function contractPreview(input: {
     deposit: estimate ? data.deposit : null,
     optionName: null,
     warranty: null,
+    currency: input.company.currency,
   });
   // Nobody initials an invoice (build.ts invoiceContract), so its sample has no box for it.
   const sections = resolveSections({ kind, template, library: input.library }).map((s) => ({ id: s.id, title: s.title, html: fillIn(s.body, values), place: s.place, initials: estimate && s.initials }));

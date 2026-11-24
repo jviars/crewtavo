@@ -173,6 +173,33 @@ describe("the PDF of an invoice", () => {
     expect(page!.words.filter((w) => w.str === "$4,730.00").every((w) => Math.abs(w.right - edge) < 1)).toBe(true);
   });
 
+  it("is on an A4 sheet for a business outside the US and Canada, with everything inside the same margins", async () => {
+    const onA4 = async (template: Partial<TemplateSettings>, data: DocumentData = invoice) =>
+      read(await documentPdf(env, { companyId: COMPANY_ID, template: { ...DEFAULT_TEMPLATE, ...template }, company: { ...company, paper: "a4" }, data, currency: "GBP" }));
+    const [page, ...more] = await onA4({});
+    expect(more).toEqual([]);
+    // 210 × 297 mm is 595.28 × 841.89 pt.
+    expect([page!.width, page!.height]).toEqual([expect.closeTo(595.28, 1), expect.closeTo(841.89, 1)]);
+    for (const words of ["Arrington Paving", "BILL TO", "Asphalt driveway", "£4,200.00", "Balance due £4,730.00", "Page 1 of 1"]) expect(has(page!, words), words).toBe(true);
+    // The amounts end where the words do: 0.4 in and 6 px in from the A4 paper's right edge.
+    const edge = page!.width - (0.4 * 72 + 6 * 0.75);
+    expect(page!.words.filter((w) => w.str === "£4,730.00").every((w) => Math.abs(w.right - edge) < 1)).toBe(true);
+    // More fits on a taller sheet, and each sheet after the first still has the running header.
+    const letter = await sheets({}, long);
+    const a4 = await onA4({}, long);
+    expect(a4.length).toBeLessThanOrEqual(letter.length);
+    a4.forEach((sheet, i) => {
+      expect(has(sheet, `Page ${i + 1} of ${a4.length}`)).toBe(true);
+      expect(has(sheet, "Arrington Paving · Invoice No. 1042 continued")).toBe(i > 0);
+    });
+    const all = a4.map((p) => p.text).join(" ");
+    expect(long.lines.every((l) => all.includes(`${l.name} `) || all.endsWith(l.name))).toBe(true);
+    // The business's own letterhead cut full width reaches the A4 paper's edges.
+    const [own] = await onA4(ownLetterhead(true));
+    const top = own!.pictures.find((p) => Math.abs(p.top - own!.height) < 0.5);
+    expect(top && [top.left, top.right]).toEqual([expect.closeTo(0, 1), expect.closeTo(own!.width, 1)]);
+  });
+
   it("goes on to more sheets, each after the first with the running header, and numbers them", async () => {
     const pages = await sheets({}, long);
     expect(pages.length).toBeGreaterThan(1);
@@ -209,8 +236,27 @@ describe("the PDF of an invoice", () => {
 
   it("shows money in the business's currency, and its payments and what's left", async () => {
     const paid = { ...invoice, payments: [{ label: "Paid November 5, 2026", amount: 500 }, { label: "Refunded November 6, 2026", amount: -50 }], balanceDue: 4280 };
-    const [page] = await sheets({ footer: "Thank you for your business" }, paid, "CAD");
-    for (const words of ["Paid November 5, 2026 −CA$500.00", "Refunded November 6, 2026 +CA$50.00", "Balance due CA$4,280.00", "Thank you for your business"]) expect(has(page!, words), words).toBe(true);
+    const [page] = await sheets({ footer: "Thank you for your business" }, paid, "GBP");
+    for (const words of ["Paid November 5, 2026 −£500.00", "Refunded November 6, 2026 +£50.00", "Balance due £4,280.00", "Thank you for your business"]) expect(has(page!, words), words).toBe(true);
+    // Canadian dollars show as "$", as Canadians write them, not "CA$".
+    const [canada] = await sheets({}, paid, "CAD");
+    expect(has(canada!, "Balance due $4,280.00")).toBe(true);
+    expect(canada!.text).not.toContain("CA$");
+  });
+
+  it("says the tax's name and rate, and the business's number for it with its details", async () => {
+    const taxed = { ...invoice, tax: 946, taxRate: 0.2, total: 5676, balanceDue: 5676 };
+    // A US business, as before but with the rate.
+    const [us] = await sheets({}, { ...taxed, taxRate: 0.08875 });
+    expect(has(us!, "Tax (8.875%) $946.00")).toBe(true);
+    expect(us!.text).not.toContain("number");
+    // A UK business: VAT, and its VAT number in each look.
+    const uk = { ...company, taxName: "VAT", taxNumber: "GB123456789" };
+    for (const header of ["classic", "banner", "centered"] as const) {
+      const [page] = await read(await documentPdf(env, { companyId: COMPANY_ID, template: { ...DEFAULT_TEMPLATE, header }, company: uk, data: taxed, currency: "GBP" }));
+      expect(has(page!, "VAT number GB123456789"), header).toBe(true);
+      expect(has(page!, "VAT (20%) £946.00"), header).toBe(true);
+    }
   });
 
   it("prints a contract section from the blocks the page read, bold words and numbered items included", async () => {
@@ -354,6 +400,19 @@ describe("POST /api/public/documents/<name>.pdf", () => {
 
   /** The page the tab shows instead of a PDF: its status, and whether it's the page that says so. */
   const sorry = async (res: Response) => [res.status, res.headers.get("content-type")?.startsWith("text/html") && (await res.text()).includes("Couldn't make the PDF")];
+
+  it("keeps what the page says the tax is called, the business's number for it, the rate and the paper", async () => {
+    const uk = JSON.stringify({ template: templateSettings({}), company: { ...company, taxName: "VAT", taxNumber: "GB123456789", paper: "a4" }, currency: "GBP", data: { ...invoice, tax: 946, taxRate: 0.2, total: 5676 } });
+    const res = await post(uk);
+    expect(res.status).toBe(200);
+    const [page] = await read(new Uint8Array(await res.arrayBuffer()));
+    expect(has(page!, "VAT number GB123456789") && has(page!, "VAT (20%)")).toBe(true);
+    expect([page!.width, page!.height]).toEqual([expect.closeTo(595.28, 1), expect.closeTo(841.89, 1)]);
+    // A paper it doesn't know isn't a document to print.
+    expect(await sorry(await post(JSON.stringify({ template: {}, company: { ...company, paper: "legal" }, currency: "USD", data: invoice })))).toEqual([400, true]);
+    // A page from before them sends none, and prints as it did.
+    expect((await post(sent({ ...invoice, tax: 946, total: 5676 }))).status).toBe(200);
+  });
 
   it("is only at a PDF's name", async () => {
     for (const file of ["Invoice%201042", "x.html", "%3Cscript%3E.pdf", `${"a".repeat(120)}.pdf`]) expect(await sorry(await post(sent(invoice), file)), file).toEqual([404, true]);

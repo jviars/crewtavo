@@ -20,6 +20,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, typ
 import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyLink } from "@/components/ui/PrivacyLink";
@@ -32,6 +33,7 @@ import {
   initialSection,
   licenseLine,
   stillInitialed,
+  taxLine,
   websiteLabel,
   withInitials,
   type InitialedSections,
@@ -45,7 +47,7 @@ import { inkOn } from "@/features/documents/words";
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
-import { dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
 import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import { CARD_REQUIRED } from "./HubAutopay";
@@ -1372,7 +1374,7 @@ function QuoteTotals({ token, data, lines, optionId, chosen, editable, totals, e
           <div className="grow">{q.promo?.code} needs an order of at least {formatMoneyCents(short)}. Remove the code, or change your choices.</div>
         </div>
       )}
-      {totals.tax > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(totals.tax)}</span></div>}
+      {totals.tax > 0 && <div className="line"><span>{taxLine(hubLetterhead(data.company), { taxRate: q.tax_rate })}</span><span>{formatMoneyCents(totals.tax)}</span></div>}
       {q.client?.tax_exempt && totals.tax === 0 && <div className="line"><span>Tax exempt{q.client.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
       <div className="line grand"><span>{q.recurrence_rule ? "Total per visit" : "Total"}</span><span>{formatMoneyCents(totals.total)}</span></div>
       {q.recurrence_rule && <div className="line"><span>How often</span><span>{scheduleText(q.recurrence_rule, q.active_months)}</span></div>}
@@ -1492,7 +1494,7 @@ function TipChoices({ percents, base, choice, onChoice, custom, onCustom }: {
       <div className="hub-tip-other">
         <button type="button" className="hub-link" aria-pressed={choice === "custom"} onClick={() => onChoice("custom")}>Other amount</button>
         {choice === "custom" && (
-          <span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
         )}
       </div>
     </>
@@ -1635,7 +1637,7 @@ function InvoiceHub({ token, data, onChanged, printing }: { token: string; data:
                 onChanged={onChanged}
               />
               {(doc.data.credits ?? []).map((c, i) => <div key={i} className="line"><span>{c.label}</span><span className="nowrap">−{formatMoneyCents(c.amount)}</span></div>)}
-              {Number(inv.tax_amount) > 0 && <div className="line"><span>Tax</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
+              {Number(inv.tax_amount) > 0 && <div className="line"><span>{taxLine(doc.company, { taxRate: inv.tax_rate })}</span><span>{formatMoneyCents(inv.tax_amount)}</span></div>}
               {inv.client?.tax_exempt && Number(inv.tax_amount) === 0 && <div className="line"><span>Tax exempt{inv.client.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}</span><span>{formatMoneyCents(0)}</span></div>}
               <div className="line"><span>Total</span><span>{formatMoneyCents(inv.total)}</span></div>
               {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage (billed later)</span><span>−{formatMoneyCents(inv.retainage_amount)}</span></div>}

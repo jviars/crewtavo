@@ -170,7 +170,7 @@ export function rangePill(price: number, range: { low: number; high: number }): 
 
 /** Whole dollars in the business's currency, as the server words its messages. */
 const wholeMoney = (amount: number, currency: string | null | undefined) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: 0 }).format(amount);
+  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }).format(amount);
 
 /**
  * The words a range goes out with unless the office writes their own: the server's own (core
@@ -187,7 +187,7 @@ export const rangeIntro = (range: { low: number; high: number }, optionCount = 0
  */
 export function optionsIntro(prices: ReadonlyArray<{ total: number }>, currency?: string | null): string {
   if (prices.length < 2) return "";
-  const from = new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices.map((p) => p.total)));
+  const from = new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Math.min(...prices.map((p) => p.total)));
   return optionsIntroText(prices.length, from);
 }
 

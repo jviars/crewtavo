@@ -6,7 +6,7 @@ import { CLOCK_MODE_HINTS, CLOCK_MODE_LABELS, clockMode, type ClockMode } from "
 import { FT_PER_M } from "@crewtavo/core/geo";
 import { GEOFENCE_MODE_HINTS, GEOFENCE_MODE_LABELS, GEOFENCE_NOTE, GEOFENCE_RADIUS, geofence, geofenceRadius, type GeofenceMode } from "@crewtavo/core/geofence";
 import { completesWhenVisitsDone } from "@crewtavo/core/jobBilling";
-import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { countryTaxName, TAX_NAME_MAX, TAX_NUMBER_MAX, taxNumberLabel, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { regionNeeded } from "@crewtavo/core/postcards";
 import { PRESETS } from "@crewtavo/core/presets";
 import { PRIVACY_URL_MAX, privacyUrlTyped } from "@crewtavo/core/privacyPolicy";
@@ -15,6 +15,7 @@ import { arrivalWindowMin } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Section } from "@/components/ui/Section";
 import { SectionSkeleton } from "@/components/ui/Skeleton";
@@ -42,6 +43,12 @@ const BRAND_COLORS = [
   { value: "#be123c", name: "Red" }, { value: "#6d28d9", name: "Purple" }, { value: "#0f766e", name: "Teal" }, { value: "#1f2937", name: "Charcoal" },
 ];
 
+/** The tax rate box: "Sales tax" for a tax that's just "Tax" (in the US, as it always was), else its name ("VAT", "GST/HST"). */
+const taxBoxLabel = (f: Record<string, string>) => {
+  const name = f.tax_name?.trim() || countryTaxName(f.country);
+  return name === "Tax" ? "Sales tax" : name;
+};
+
 export function CompanySettings() {
   const session = useSession();
   const { company } = session;
@@ -67,6 +74,7 @@ export function CompanySettings() {
       privacy_url: typeof s.privacy_url === "string" ? s.privacy_url : "",
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
       timezone: d.timezone, currency: d.currency, country: businessCountry(d), payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
+      tax_name: typeof s.tax_name === "string" ? s.tax_name : "", tax_number: typeof s.tax_number === "string" ? s.tax_number : "",
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
       workdays: workdays(s).join(","),
       arrival_window_min: String(arrivalWindowMin(s)),
@@ -92,7 +100,7 @@ export function CompanySettings() {
       const v = f!;
       // Kept to 0.0001%, as quotes and invoices keep it (8.875% stays 8.875%).
       const tax = taxRateFromPercent(v.default_tax_rate);
-      if (!(Number(v.default_tax_rate) >= 0 && tax < 1)) throw new Error("Sales tax must be between 0 and 100%.");
+      if (!(Number(v.default_tax_rate) >= 0 && tax < 1)) throw new Error(`${taxBoxLabel(v)} must be between 0 and 100%.`);
       if (v.hours_end <= v.hours_start) throw new Error("The workday has to end after it starts.");
       if (!v.workdays) throw new Error("Pick at least one workday.");
       if (v.website && !/^https?:\/\//.test(v.website)) v.website = `https://${v.website}`;
@@ -124,6 +132,9 @@ export function CompanySettings() {
       const settings = {
         payment_terms_days: Math.max(0, Math.round(Number(v.payment_terms_days) || 0)),
         default_tax_rate: tax,
+        // What quotes and invoices call the tax (empty: the country's name for it, core taxName) and the business's number for it.
+        tax_name: v.tax_name.trim().replace(/\s+/g, " ") || null,
+        tax_number: v.tax_number.trim().replace(/\s+/g, " ") || null,
         quote_valid_days: Math.max(1, Math.round(Number(v.quote_valid_days) || 30)),
         working_hours: { start: v.hours_start, end: v.hours_end, days: v.workdays.split(",").map(Number) },
         arrival_window_min: Number(v.arrival_window_min),
@@ -229,8 +240,14 @@ export function CompanySettings() {
               {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
             </Select>
           </Field>
-          <Field label={<>Sales tax<span className="sr-only"> (%)</span></>}>
-            <Suffix unit="%"><input className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+          <Field label={<>{taxBoxLabel(f)}<span className="sr-only"> (%)</span></>}>
+            <Suffix unit="%"><DecimalInput className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+          </Field>
+          <Field label="Tax name" optional hint={`What quotes and invoices call it, like VAT or GST/HST. Empty: ${countryTaxName(f.country)}.`}>
+            <input className="input" value={f.tax_name} onChange={set("tax_name")} maxLength={TAX_NAME_MAX} placeholder={countryTaxName(f.country)} />
+          </Field>
+          <Field label={taxNumberLabel(f.tax_name.trim() || countryTaxName(f.country))} optional hint="Your registration number for it, printed with your details on quotes and invoices.">
+            <input className="input" value={f.tax_number} onChange={set("tax_number")} maxLength={TAX_NUMBER_MAX} />
           </Field>
           <Field label={<>Invoice due after<span className="sr-only"> (days)</span></>} hint="0 means due on receipt. A client can have their own, on their page.">
             <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.payment_terms_days} onChange={set("payment_terms_days")} /></Suffix>
@@ -239,7 +256,7 @@ export function CompanySettings() {
             <Suffix unit="days"><NumberInput className="input" min={1} max={365} value={f.quote_valid_days} onChange={set("quote_valid_days")} /></Suffix>
           </Field>
           <Field label="Minimum charge" optional hint="An invoice under it gets a Minimum charge line that makes up the difference.">
-            <input className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
+            <DecimalInput className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
           </Field>
           <Field label="Late fee" className="set-full" hint={f.late_fee === "off" ? "Added once to an invoice still unpaid after its due date." : `Added once, if it's still unpaid that many days after it's due. Late fees aren't taxed. You can take one off an invoice, or turn them off for it, on the invoice. ${LATE_FEE_LAW_NOTE}`}>
             <Select className="select set-narrow" value={f.late_fee} onChange={set("late_fee")}>
@@ -251,7 +268,7 @@ export function CompanySettings() {
           {f.late_fee !== "off" && (
             <>
               <Field label={f.late_fee === "percent" ? "Late fee (%)" : "Late fee amount"}>
-                <input className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
+                <DecimalInput className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
               </Field>
               <Field label={<>Days after the due date<span className="sr-only"> (days)</span></>}>
                 <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.late_fee_days} onChange={set("late_fee_days")} /></Suffix>

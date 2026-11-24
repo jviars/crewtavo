@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { supabase, unwrap } from "@/lib/api";
+import { currencySymbol } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { bandsKey } from "./snowData";
 import styles from "./snow.module.css";
@@ -47,7 +48,7 @@ export function DepthRows({ rows, onChange, money, what, addLabel }: { rows: Dep
                 <span className="addon addon-right addon-unit">in</span>
               </div>
               <div className="input-group">
-                <span className="addon">{money ? "$" : "×"}</span>
+                <span className="addon">{money ? currencySymbol() : "×"}</span>
                 <NumberInput className="input" inputMode="decimal" min={0} step={0.01} value={r.value} onChange={(e) => set(i, { value: e.target.value })} aria-label={`${what} ${i + 1}: ${money ? "price" : "times the push price"}`} />
               </div>
               <Button size="sm" variant="ghost" icon="x" className={styles.depthRemove} aria-label={`Remove ${what.toLowerCase()} ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, n) => n !== i))} />

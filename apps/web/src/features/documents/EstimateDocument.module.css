@@ -1,6 +1,6 @@
 /*
- * The estimate or invoice as letter-size pages (816 × 1056 px is 8.5 × 11 in at 96 dpi), on screen
- * and in print. The sizes come from paper.ts (PAPER_VARS on .doc). It's paper in every theme and in
+ * The estimate or invoice as letter-size pages (816 × 1056 px is 8.5 × 11 in at 96 dpi), or A4
+ * outside the US and Canada, on screen and in print. The sizes come from paper.ts (paperVars on .doc). It's paper in every theme and in
  * print, so its colors are literal: white page, ink text, and the template's color (--doc-color)
  * for the rules, the name and the totals.
  *

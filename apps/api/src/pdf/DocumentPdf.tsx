@@ -4,7 +4,8 @@
  * width reaches the paper's edges, with no browser header or footer (Safari's can't be turned off).
  *
  * It draws what EstimateDocument draws, from the same data and helpers. Sizes are in the CSS px of
- * EstimateDocument's 816 × 1056 px page, turned into points by px(), so the two look the same.
+ * EstimateDocument's 816 × 1056 px page (793.7 × 1122.5 on A4, the paper outside the US and Canada),
+ * turned into points by px(), so the two look the same.
  * react-pdf decides the pages itself: the letterhead on the first, the running header on the rest,
  * the footer and "Page 2 of 3" on every one.
  *
@@ -18,9 +19,9 @@ import type { Style } from "@react-pdf/types";
 import type { ComponentProps, ReactNode } from "react";
 // The pages' own measurements, words and contract blocks (apps/web), so the PDF is drawn as they are.
 import { contractBlocks, type ContractBlock } from "../../../web/src/lib/html";
-import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, PAGE_WIDTH } from "../../../web/src/features/documents/paper";
+import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, sheetOf } from "../../../web/src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "../../../web/src/features/documents/types";
-import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "../../../web/src/features/documents/words";
+import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
 import { richText } from "./richText";
 
 /** A picture as it goes in the PDF (a PNG or JPEG's bytes), with its size in pixels. */
@@ -130,9 +131,9 @@ interface Geometry {
 /** react-pdf's own line spacing, 1.2 of the size: the running header's and the footer's. */
 const PLAIN_LINE = 1.2;
 
-function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string): Geometry {
+function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string, pageWidth: number): Geometry {
   const box = fullSheet ? 0 : PAGE_MARGIN;
-  const boxWidth = PAGE_WIDTH - 2 * box;
+  const boxWidth = pageWidth - 2 * box;
   const pad = fullSheet ? PAGE_MARGIN + BODY_INSET : BODY_INSET;
   const own = ownLetterhead(template);
   const line = 10.5 * PLAIN_LINE;
@@ -148,10 +149,10 @@ function geometryOf(template: TemplateSettings, fullSheet: boolean, words: strin
   return { fullSheet, box, boxWidth, pad, running, footer };
 }
 
-/** The business's currency, or US dollars when it isn't one. */
+/** The business's currency with the symbol people there write ("$" for Canadian dollars, "R" for rand), or US dollars when it isn't one. */
 function moneyIn(currency: string): Intl.NumberFormat {
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" });
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" });
   } catch {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
   }
@@ -165,7 +166,9 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
   const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone };
   const own = ownLetterhead(template);
   const words = template.footer.trim();
-  const g = geometryOf(template, printsFullSheet(own), words);
+  // The business's paper: letter, or A4 outside the US and Canada (core paperSize).
+  const sheet = sheetOf(company.paper);
+  const g = geometryOf(template, printsFullSheet(own), words, sheet.width);
   // The body starts under the running header on every page; the first page's letterhead is pulled up into that room.
   const top = g.box + g.running + BODY_PAD_TOP;
   const bottom = g.box + g.footer + BODY_PAD_BOTTOM;
@@ -178,7 +181,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
 
   return (
     <Document title={data.number ? `${kind} ${data.number}` : kind} author={company.name} creator="Crewtavo" producer="Crewtavo">
-      <Page size="LETTER" style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
+      <Page size={company.paper === "a4" ? "A4" : "LETTER"} style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
         <RunningHeader company={company} kind={kind} number={data.number} g={g} />
         <Footer template={template} own={own.footer} picture={pic(own.footer && letterheadSrc(own.footer.path))} words={words} g={g} look={look} />
 
@@ -196,7 +199,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
         )}
         {options.length > 0 && <Options options={options} pictures={pictures} look={look} />}
         <Lines lines={data.lines} look={look} />
-        <Totals data={data} look={look} />
+        <Totals data={data} company={company} look={look} />
 
         {paragraphs(data.notes).map((text, i) => (
           <View key={`n${i}`} style={{ marginTop: px(i ? NOTES_LINE : GAP) }} minPresenceAhead={i ? 0 : px(40)}>
@@ -295,12 +298,12 @@ function Lines({ lines, look }: { lines: DocumentLine[]; look: Look }) {
 }
 
 /** Subtotal down to the total, and on an invoice its payments and what's left. */
-function Totals({ data, look }: { data: DocumentData; look: Look }) {
+function Totals({ data, company, look }: { data: DocumentData; company: DocumentCompany; look: Look }) {
   const estimate = data.kind === "estimate";
   const rows: Array<{ label: string; value: string; grand?: boolean }> = [{ label: "Subtotal", value: money(data.subtotal, look) }];
   if (data.discount > 0) rows.push({ label: data.discountLabel || "Discount", value: `${look.minus}${money(data.discount, look)}` });
   for (const c of data.credits ?? []) rows.push({ label: c.label, value: `${look.minus}${money(c.amount, look)}` });
-  if (data.tax > 0) rows.push({ label: "Tax", value: money(data.tax, look) });
+  if (data.tax > 0) rows.push({ label: taxLine(company, data), value: money(data.tax, look) });
   if (data.taxExempt !== undefined) rows.push({ label: data.taxExempt ? `Tax exempt · ${data.taxExempt}` : "Tax exempt", value: money(0, look) });
   rows.push({ label: estimate && data.repeats ? "Total per visit" : "Total", value: money(data.total, look), grand: true });
   if (estimate && data.repeats) rows.push({ label: "How often", value: data.repeats });
@@ -521,6 +524,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
   const tagline = template.tagline.trim();
   const license = template.show_license && template.license.trim() ? licenseLine(template.license) : null;
   const insurer = template.show_insurer && template.insurer.trim() ? `Insured by ${template.insurer.trim()}` : null;
+  const taxId = taxNumberLine(company);
   const website = websiteLabel(company.website);
   const contact = [company.phone, company.email].filter(Boolean).join(" · ");
   const sheetTop = g.fullSheet ? px(PAGE_MARGIN) : 0;
@@ -533,11 +537,13 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
         <T size={24} lh={1.15} style={{ marginTop: px(6), fontWeight: 700, letterSpacing: px(0.24), color: look.textColor, textAlign: "center" }}>{company.name}</T>
         {!!tagline && <T size={12} style={{ marginTop: px(6), textTransform: "uppercase", letterSpacing: px(12 * 0.14), color: TEXT_2, textAlign: "center" }}>{tagline}</T>}
         {!!line && <T size={11.5} style={{ marginTop: px(6), paddingTop: px(4), color: TEXT_2, textAlign: "center" }}>{line}</T>}
-        {(license || insurer) && (
+        {(license || insurer || taxId) && (
           <T size={11.5} style={{ marginTop: px(6), color: TEXT_2, textAlign: "center" }}>
             {!!license && <Text style={{ color: INK, fontWeight: 600 }}>{license}</Text>}
-            {license && insurer && " · "}
+            {license && (insurer || taxId) && " · "}
             {insurer}
+            {insurer && taxId && " · "}
+            {taxId}
           </T>
         )}
         <View style={{ width: px(64), height: px(3), marginTop: px(14), borderRadius: px(2), backgroundColor: look.color }} />
@@ -554,6 +560,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
       ))}
       {!!license && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: banner ? look.onColor : INK, fontWeight: banner ? 700 : 600 }}>{license}</T>}
       {!!insurer && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{insurer}</T>}
+      {!!taxId && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{taxId}</T>}
     </View>
   );
   const name = (

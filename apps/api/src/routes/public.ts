@@ -232,8 +232,10 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
 // The range settings (company_private_settings' roofing), whether Roofing is installed, the autopay settings and the
 // trade are read here but never sent: the room on top is the business's own, Roofing only decides
 // whether a preview shows a roofing range, autopay's only say whether a card is required, and the
-// trade only picks the starter terms.
-const BRANDING = "name, phone, email, website, timezone, currency, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing_app, settings->paving_app, settings->autopay, settings->privacy_url";
+// trade only picks the starter terms. The country, the tax's name and the business's number for it
+// are sent: its quotes and invoices print them (core taxName).
+const BRANDING =
+  "name, phone, email, website, timezone, currency, country, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing_app, settings->paving_app, settings->autopay, settings->privacy_url, settings->tax_name, settings->tax_number";
 
 /** The company as its clients see it, with where its logo loads from (null without one). */
 const withLogo = <T extends { branding?: unknown }>(companyId: string, company: T) => ({ ...company, logo: logoImage("", companyId, { branding: company.branding })?.src ?? null });
@@ -628,7 +630,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     await admin
       .from("invoices")
       .select(
-        "id, number, kind, status, subject, notes, issued_on, due_on, late_fee_at, no_late_fee, subtotal, discount_amount, credit_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, job_id, billing_month, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at), custom_fields",
+        "id, number, kind, status, subject, notes, issued_on, due_on, late_fee_at, no_late_fee, subtotal, discount_amount, credit_amount, tax_rate, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, job_id, billing_month, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at), custom_fields",
       )
       .eq("company_id", l.c)
       .eq("id", l.id)
@@ -737,7 +739,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const [lineRows, options, business] = await Promise.all([
     admin.from("quote_line_items").select("id, option_id, quantity, unit_price, taxable, optional, selected, option_group").eq("company_id", l.c).eq("quote_id", l.id),
     loadOptions(admin, l.c, l.id),
-    admin.from("companies").select("name, phone, timezone, trade_preset").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, timezone, currency, trade_preset").eq("id", l.c).maybeSingle(),
   ]);
   const lines = must(lineRows);
 

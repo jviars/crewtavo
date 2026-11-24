@@ -16,9 +16,11 @@ import { toUnits } from "@crewtavo/core/money";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormError } from "@/components/ui/Field";
 import { api, supabase, unwrap } from "@/lib/api";
 import { Section } from "@/components/ui/Section";
+import { currencySymbol } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import p from "./Prefs.module.css";
 import { SwitchRow } from "./SettingsKit";
@@ -92,8 +94,8 @@ export function QuoteSettings() {
       <Section level={3} title="Quotes and payments">
         <Field label="Tell me about quotes over" optional hint="When a quote of at least this much is sent, approved, or the client asks for changes, owners, admins and its salesperson hear about it on the bell and their phone, except whoever did it. Empty is off.">
           <span className="input-group set-narrow">
-            <span className="addon">$</span>
-            <input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.alertOver} placeholder="Off" onChange={(e) => setF({ ...f, alertOver: e.target.value.replace(/[^0-9.]/g, "") })} />
+            <span className="addon">{currencySymbol()}</span>
+            <DecimalInput className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.alertOver} placeholder="Off" onChange={(e) => setF({ ...f, alertOver: e.target.value.replace(/[^0-9.]/g, "") })} />
           </span>
         </Field>
         <div className={`set-rows ${p.after}`}>

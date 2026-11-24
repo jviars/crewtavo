@@ -254,7 +254,7 @@ marketing.post("/campaigns/automated/:key/test", requireUser, requireCompany(OFF
   const vars = {
     number: 1042,
     ...(key === "reengage" ? {} : { title: "Spring cleanup" }),
-    total: new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(1250),
+    total: new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(1250),
     address: "12 Oak Street",
     status: key === "close_quotes" ? "Awaiting response" : key === "win_back" ? "Lost" : "Active",
     last_visit: new Date(`${lastVisit}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }),

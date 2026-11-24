@@ -125,7 +125,7 @@ type Quote = Awaited<ReturnType<typeof loadQuote>>;
 
 async function loadCompany(s: SigningScope) {
   // With the server's key: the browser's role doesn't read the settings (lib/companySettings.ts).
-  return must(await adminClient(s.env).from("companies").select("name, email, phone, timezone, address, settings, trade_preset").eq("id", s.companyId).maybeSingle(), "Company not found.");
+  return must(await adminClient(s.env).from("companies").select("name, email, phone, timezone, currency, address, settings, trade_preset").eq("id", s.companyId).maybeSingle(), "Company not found.");
 }
 
 type Company = Awaited<ReturnType<typeof loadCompany>>;

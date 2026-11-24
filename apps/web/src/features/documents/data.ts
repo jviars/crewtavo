@@ -74,7 +74,7 @@ export function useLetterhead() {
   return useQuery({
     queryKey: letterheadKey(company.id),
     queryFn: async (): Promise<DocumentCompany> => {
-      const [row, settings] = await Promise.all([supabase().from("companies").select("name, phone, email, website, address").eq("id", company.id).single(), loadSettings(company.id)]);
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, phone, email, website, address, country, timezone").eq("id", company.id).single(), loadSettings(company.id)]);
       return documentCompany({ ...unwrap(row), settings });
     },
     placeholderData: () => documentCompany(company),
@@ -140,18 +140,19 @@ function useLibrary(ids: readonly string[], enabled: boolean) {
   });
 }
 
-/** The business as a contract's fill-ins name it: its name and phone, and its time zone for {Date}. */
+/** The business as a contract's fill-ins name it: its name and phone, its time zone for {Date} and its currency for {Total} and {Deposit}. */
 export interface ContractCompany {
   name: string;
   phone: string | null;
   timezone: string | null;
+  currency?: string | null;
 }
 
 function useContractCompany() {
   const { company } = useSession();
   return useQuery({
     queryKey: ["contract-company", company.id],
-    queryFn: async (): Promise<ContractCompany> => unwrap(await supabase().from("companies").select("name, phone, timezone").eq("id", company.id).single()),
+    queryFn: async (): Promise<ContractCompany> => unwrap(await supabase().from("companies").select("name, phone, timezone, currency").eq("id", company.id).single()),
     staleTime: 5 * 60_000,
   });
 }

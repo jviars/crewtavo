@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { featureOn } from "@/components/shell/nav";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -304,7 +305,7 @@ export function MaterialDialog({ jobId, visitId, onClose, onSaved }: { jobId: st
         </Field>
         {!choice && <Field label={t("What was it")} requiredMessage={t("Say what material it was.")}><input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} placeholder={t("Surface mix, #57 stone, sealer…")} required /></Field>}
         <div className="form-grid">
-          <Field label={t("How much")} requiredMessage={t("Enter how much was used.")}><input className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></Field>
+          <Field label={t("How much")} requiredMessage={t("Enter how much was used.")}><DecimalInput className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></Field>
           <Field label={t("Unit")}>
             <Select className="select" value={unit} onChange={(e) => setUnit(e.target.value)}>
               {[...new Set([unit, ...UNITS])].map((u) => <option key={u}>{u}</option>)}

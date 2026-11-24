@@ -810,7 +810,7 @@ export const referralsReady = (settings: Settings) => {
 export function creditMoney(amount: Amount, currency = "USD"): string {
   const value = cents(amount);
   const digits = Number.isInteger(value) ? 0 : 2;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }
 
 /** "10%", "12.5%". */

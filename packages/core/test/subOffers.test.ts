@@ -42,6 +42,18 @@ describe("an offer in one line", () => {
     expect(moneyShort(null)).toBe("$0");
   });
 
+  it("says it in the business's currency, with the symbol people there write", () => {
+    expect(moneyShort(2040, "USD")).toBe("$2,040");
+    expect(moneyShort(2040, "CAD")).toBe("$2,040");
+    expect(moneyShort(2040.5, "GBP")).toBe("£2,040.50");
+    expect(moneyShort(2040, "eur")).toBe("€2,040");
+    expect(moneyShort(2040, "ZAR")).toBe("R 2,040");
+    expect(moneyShort(2040, null)).toBe("$2,040");
+    const roof = { title: "Smith roof", dates: ["2026-11-03"], lines: [{ basis: "per_unit", unit: "sq", quantity: 24, amount: 2040 }], total: 2040, currency: "GBP" };
+    expect(offerText(roof)).toBe("Smith roof, Tue Nov 3, 24 squares, £2,040. Open Crewtavo to accept or decline.");
+    expect(changeText({ title: "Smith roof", total: 2210, agreed: 2040, currency: "GBP" })).toBe("New price for Smith roof: £2,210 (was £2,040). Open Crewtavo to accept or decline.");
+  });
+
   it("says quantities as the database does", () => {
     expect(amountWords(24, "sq")).toBe("24 squares");
     expect(amountWords("24.000", "Squares")).toBe("24 squares");

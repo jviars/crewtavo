@@ -217,8 +217,9 @@ describe("where the range stands", () => {
       "Thanks for having us look at your roof. From our measurements, your new roof will cost between $18,300 and $21,050. You can see what's included and let us know when you'd like us to come out:",
     );
     expect(estimateSubject("Ridgeline Roofing")).toBe("Your roof estimate from Ridgeline Roofing");
-    // In the business's own currency, as the server words it.
-    expect(rangeIntro({ low: 18300, high: 21050 }, 0, "CAD")).toContain("between CA$18,300 and CA$21,050.");
+    // In the business's own currency, as the server words it, with the symbol people there write.
+    expect(rangeIntro({ low: 18300, high: 21050 }, 0, "CAD")).toContain("between $18,300 and $21,050.");
+    expect(rangeIntro({ low: 18300, high: 21050 }, 0, "GBP")).toContain("between £18,300 and £21,050.");
   });
 });
 

@@ -142,6 +142,13 @@ describe("contractValues", () => {
     expect(contractValues({ deposit: 5000 }).Deposit).toBe("$5,000.00");
     expect(contractValues({ total: 0.5 }).Total).toBe("$0.50");
     expect(contractValues({ total: -45 }).Total).toBe("-$45.00");
+    // In the business's currency, with the symbol people there write; US dollars without one.
+    expect(contractValues({ total: 18304.5, deposit: 500, currency: "GBP" })).toMatchObject({ Total: "£18,304.50", Deposit: "£500.00" });
+    expect(contractValues({ total: 18304.5, deposit: 500, currency: "CAD" })).toMatchObject({ Total: "$18,304.50", Deposit: "$500.00" });
+    expect(contractValues({ total: 1250, currency: "ZAR" }).Total).toBe("R 1,250.00");
+    expect(contractValues({ total: -45, currency: "EUR" }).Total).toBe("-€45.00");
+    expect(contractValues({ total: 0.5, currency: null }).Total).toBe("$0.50");
+    expect(contractValues({ currency: "GBP" }).Total).toBe("");
     const empty = contractValues({});
     expect(Object.keys(empty)).toEqual(FILL_INS.map((f) => f.label));
     expect(Object.values(empty).every((v) => v === "")).toBe(true);
@@ -162,6 +169,11 @@ describe("contractValues", () => {
     // {Deposit} follows the option picked: a cheaper one asks for less.
     expect(contractValues({ total: 800, deposit: 275, depositPercent: 25 }).Deposit).toBe("$200.00");
     expect(contractInput({ number: 7, sent_at: null, created_at: "2026-11-03", total: 1100, deposit_amount: 275, deposit_percent: 25 }, null, null, { name: "Pine", phone: null, timezone: null }, { license: "" }).depositPercent).toBe(25);
+    // The business's currency goes with the facts, except US dollars, which is what's assumed without it.
+    const quote = { number: 7, sent_at: null, created_at: "2026-11-03", total: 1100, deposit_amount: 275 };
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "GBP" }, { license: "" }).currency).toBe("GBP");
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "USD" }, { license: "" })).not.toHaveProperty("currency");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "EUR" }, { license: "" }))).toMatchObject({ Total: "€1,100.00", Deposit: "€275.00" });
   });
 
   it("fills a section the same way from the same facts", () => {
