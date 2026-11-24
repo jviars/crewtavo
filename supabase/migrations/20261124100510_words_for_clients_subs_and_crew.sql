@@ -8,8 +8,9 @@
 -- Each function below is its newest definition, copied as it is, with only these changes: a date
 -- or time that to_char wrote with a US pattern is written by private.date_text with the business's
 -- country, an amount private.money or to_char 'FM$999,999,990.00' wrote is in the business's
--- currency, and the country and currency are read with the company. A US business in dollars reads
--- every word as before.
+-- currency, and the country and currency are read with the company. A time that ends a sentence
+-- and ends in a full stop itself (5:00 p.m., in Canada) isn't given a second one. A US business in
+-- dollars reads every word as before.
 --
 -- The release before this one keeps working with it: no function's arguments change. Where a
 -- function had no business to read the country from (private.visit_when), there's a new one with a
@@ -540,6 +541,75 @@ language sql stable security definer set search_path = '' as $$
   select (private.date_text(p_at at time zone coalesce((select c.timezone from public.companies c where c.id = p_company), 'UTC'), 'Dy Mon FMDD', private.company_country(p_company)) || ', ' || private.date_text(p_at at time zone coalesce((select c.timezone from public.companies c where c.id = p_company), 'UTC'), 'FMHH12:MI AM', private.company_country(p_company)))
 $$;
 
+-- As in 20261124100300_money_in_the_business_currency.sql, with one full stop after the time to
+-- answer by when it ends in one (5:00 p.m.), as private.local_time_words now writes it the
+-- business's country's way (core answerByWords writes the same words).
+create or replace function private.sub_offer_told(p public.job_pay, p_event text, p_change boolean, p_offered numeric default null, p_was numeric default null) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_job text := (select j.title from public.jobs j where j.id = p.job_id);
+  v_sub text := (select s.name from public.subcontractors s where s.id = p.subcontractor_id);
+  v_offered numeric := coalesce(p_offered, p.total);
+  v_was numeric := case when p_change then coalesce(p_was, (p.accepted_snapshot ->> 'total')::numeric) end;
+  v_currency text := (select c.currency from public.companies c where c.id = p.company_id);
+  v_price text := private.money_short(v_offered, v_currency);
+  v_agreed text := private.money_short((p.accepted_snapshot ->> 'total')::numeric, v_currency);
+  v_mine text := '/field/jobs/' || p.id;
+  v_job_page text := '/jobs/' || p.job_id;
+  -- In the title too, as a text carries only the title.
+  v_by text := case when p.respond_by is not null then 'Answer by ' || rtrim(private.local_time_words(p.company_id, p.respond_by), '.') || '.' end;
+  v_data jsonb := jsonb_build_object('job_pay_id', p.id, 'subcontractor_id', p.subcontractor_id, 'sub_name', v_sub, 'total', v_offered,
+    'change', p_change, 'round', p.offer_round) || case when p_change then jsonb_build_object('was', v_was) else '{}'::jsonb end;
+begin
+  if p_event = 'sent' then
+    if p_change then
+      perform private.tell_sub(p.company_id, p.subcontractor_id,
+        concat_ws(' ', format('New price for %s: %s (was %s).', v_job, v_price, private.money_short(v_was, v_currency)), v_by, 'Open Crewtavo to accept or decline.'),
+        'If you don''t accept it, the price you agreed stands.', v_mine);
+      perform private.emit(p.company_id, 'sub_offer.sent', 'job', p.job_id, format('New price for %s sent to %s (%s, was %s)', v_job, v_sub, v_price, private.money_short(v_was, v_currency)),
+        v_data || jsonb_build_object('insurance_warning', p.insurance_warning is not null));
+    else
+      perform private.tell_sub(p.company_id, p.subcontractor_id, concat_ws(' ', private.sub_offer_line(p.id) || '.', v_by, 'Open Crewtavo to accept or decline.'),
+        'New job offer.', v_mine);
+      perform private.emit(p.company_id, 'sub_offer.sent', 'job', p.job_id, format('%s offered to %s (%s)', v_job, v_sub, v_price),
+        v_data || jsonb_build_object('insurance_warning', p.insurance_warning is not null));
+    end if;
+  elsif p_event = 'accepted' then
+    perform private.emit(p.company_id, 'sub_offer.accepted', 'job', p.job_id,
+      case when p_change then format('%s accepted the new price for %s (%s, was %s)', v_sub, v_job, v_price, private.money_short(v_was, v_currency)) else format('%s accepted %s (%s)', v_sub, v_job, v_price) end, v_data);
+    perform private.tell_subs_office(p.company_id,
+      case when p_change then format('%s accepted the new price for %s', v_sub, v_job) else format('%s accepted %s', v_sub, v_job) end,
+      case when p_change then format('Now %s.', v_price) else format('%s. They''re on its visits now.', v_price) end, v_job_page);
+  elsif p_event = 'declined' then
+    perform private.emit(p.company_id, 'sub_offer.declined', 'job', p.job_id,
+      case when p_change then format('%s declined the new price for %s (%s)', v_sub, v_job, v_price) else format('%s declined %s (%s)', v_sub, v_job, v_price) end
+        || coalesce(': ' || p.decline_reason, ''),
+      v_data || jsonb_build_object('reason', p.decline_reason));
+    perform private.tell_subs_office(p.company_id,
+      case when p_change then format('%s declined the new price for %s', v_sub, v_job) else format('%s declined %s', v_sub, v_job) end,
+      concat_ws(' ', '“' || p.decline_reason || '”',
+        case when p_change then format('The price they agreed (%s) stands.', v_agreed) else 'You can offer it to another sub from the job.' end), v_job_page);
+  elsif p_event = 'expired' then
+    perform private.emit(p.company_id, 'sub_offer.expired', 'job', p.job_id,
+      case when p_change then format('The new price for %s (%s) ran out before %s answered', v_job, v_price, v_sub) else format('%s didn''t answer the offer for %s in time', v_sub, v_job) end,
+      v_data);
+    perform private.tell_subs_office(p.company_id,
+      case when p_change then format('The new price for %s ran out', v_job) else format('%s didn''t answer in time: %s', v_sub, v_job) end,
+      case when p_change then format('%s didn''t answer. The price they agreed (%s) stands.', v_sub, v_agreed)
+        else 'The offer ran out. You can offer it again, or to another sub, from the job.' end, v_job_page);
+  elsif p_event = 'withdrawn' then
+    perform private.tell_sub(p.company_id, p.subcontractor_id,
+      case when p_change then format('The new price for %s was withdrawn', v_job) else format('The offer for %s was withdrawn', v_job) end,
+      case when p_change then format('The price you agreed (%s) stands.', v_agreed) else 'You don''t need to do anything.' end, v_mine);
+  elsif p_event = 'agreed' then
+    -- The office agreed an offer for them (they said yes on the phone): it's theirs at that price.
+    perform private.tell_sub(p.company_id, p.subcontractor_id,
+      case when p_change then format('Your price for %s is now %s (was %s)', v_job, v_price, private.money_short(v_was, v_currency))
+        else format('%s is yours at %s', v_job, v_price) end,
+      case when p_change then 'The office agreed the new price with you.' else 'The office agreed it with you. It''s on My day.' end, v_mine);
+  end if;
+end $$;
+
 -- As in 20261124100300_money_in_the_business_currency.sql, with the day a sub was paid in the
 -- business's country's way.
 create or replace function private.job_pay_sub_notices() returns trigger
@@ -716,7 +786,8 @@ begin
 end $$;
 
 -- As in 20261106000420_change_requests_tell_leads.sql, with the visit's day and time in the
--- business's country's way (private.visit_when).
+-- business's country's way (private.visit_when), and one full stop after a time that ends in one
+-- (5:00 p.m.).
 create or replace function private.visit_change_requested() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -729,9 +800,9 @@ begin
   select * into v from public.visits where id = new.visit_id;
   select timezone, country into v_tz, v_country from public.companies where id = new.company_id;
   v_title := format('%s asked to %s %s', private.client_name(new.client_id), case new.kind when 'cancel' then 'cancel' else 'move' end, v.title);
-  v_body := 'Booked ' || private.visit_when(v.starts_at, v.scheduled_on, v_tz, v_country) || '. ' || case
+  v_body := 'Booked ' || rtrim(private.visit_when(v.starts_at, v.scheduled_on, v_tz, v_country), '.') || '. ' || case
     when new.kind = 'cancel' then coalesce('Reason: ' || new.reason, 'No reason given.')
-    when new.scheduled_on is not null then 'Asked for ' || private.visit_when(new.starts_at, new.scheduled_on, v_tz, v_country) || '.'
+    when new.scheduled_on is not null then 'Asked for ' || rtrim(private.visit_when(new.starts_at, new.scheduled_on, v_tz, v_country), '.') || '.'
     else '"' || left(new.message, 200) || '"'
   end;
   perform private.emit(new.company_id, 'visit.' || new.kind || '_requested', 'visit', new.visit_id, v_title, jsonb_build_object('request_id', new.id));
@@ -926,7 +997,7 @@ begin
 end $$;
 
 -- As in 20261113001800_time_entry_changes.sql, with the times and the day in the business's
--- country's way.
+-- country's way, and one full stop after a time that ends in one (5:00 p.m.).
 create or replace function private.time_entry_changed() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare
@@ -1005,13 +1076,13 @@ begin
      and exists (select 1 from public.memberships m where m.company_id = v_row.company_id and m.user_id = v_row.user_id and m.active) then
     select coalesce(c.timezone, 'UTC'), c.country into v_tz, v_country from public.companies c where c.id = v_row.company_id;
     v_body := case
-      when old.ended_at is null then format('It was running since %s.', private.date_text(old.started_at at time zone v_tz, 'FMHH12:MI AM', v_country))
-      else format('It was %s to %s.', private.date_text(old.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), private.date_text(old.ended_at at time zone v_tz, 'FMHH12:MI AM', v_country))
+      when old.ended_at is null then format('It was running since %s.', rtrim(private.date_text(old.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), '.'))
+      else format('It was %s to %s.', private.date_text(old.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), rtrim(private.date_text(old.ended_at at time zone v_tz, 'FMHH12:MI AM', v_country), '.'))
     end;
     if tg_op = 'UPDATE' then
       v_body := v_body || E'\n' || case
-        when new.ended_at is null then format('It''s now running since %s.', private.date_text(new.started_at at time zone v_tz, 'FMHH12:MI AM', v_country))
-        else format('It''s now %s to %s.', private.date_text(new.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), private.date_text(new.ended_at at time zone v_tz, 'FMHH12:MI AM', v_country))
+        when new.ended_at is null then format('It''s now running since %s.', rtrim(private.date_text(new.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), '.'))
+        else format('It''s now %s to %s.', private.date_text(new.started_at at time zone v_tz, 'FMHH12:MI AM', v_country), rtrim(private.date_text(new.ended_at at time zone v_tz, 'FMHH12:MI AM', v_country), '.'))
       end;
       if new.category is distinct from old.category then
         v_body := v_body || E'\n' || format('It''s now marked as %s.', case new.category
