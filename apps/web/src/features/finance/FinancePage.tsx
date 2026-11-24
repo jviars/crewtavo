@@ -22,7 +22,7 @@ import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { decimalPoint } from "@/lib/decimal";
-import { currencySymbol, dateIn, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, dateLocale, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { addDays, localDate } from "@crewtavo/core/time";
@@ -58,14 +58,14 @@ const bankDay = (day: string, today: string) => {
   if (day === today) return "today";
   if (day === addDays(today, 1)) return "tomorrow";
   if (day === addDays(today, -1)) return "yesterday";
-  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: day.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric", timeZone: "UTC" });
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric", year: day.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric", timeZone: "UTC" });
 };
 /** Whole days from one date to a later one. */
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 /** How late reads, as Unpaid invoices colors its ages: amber up to 30 days, red past that. */
 const lateTone = (days: number) => (days > 30 ? "danger" : "warning");
 /** "Oct 16, 4:52 PM" in the company's zone. */
-const paidAt = (iso: string, timeZone: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
+const paidAt = (iso: string, timeZone: string) => new Date(iso).toLocaleString(dateLocale(), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
 
 export function FinancePage() {
   const session = useSession();

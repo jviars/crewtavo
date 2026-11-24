@@ -19,8 +19,7 @@ import { api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { BULK_CHUNK, inChunks, reportBulk, type BulkResult } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
-import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
-import { intlLocale } from "@/lib/i18n";
+import { addDaysIso, dateLocale, formatMoney, todayIn } from "@/lib/format";
 import { useStatusCounts } from "@/lib/listing";
 import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -154,7 +153,7 @@ export function lateWords(days: number): string {
 
 /** "Nov 12", with the year when it isn't this one. */
 const shortDate = (iso: string, today: string) =>
-  new Date(`${iso}T12:00:00`).toLocaleDateString(intlLocale(), iso.slice(0, 4) === today.slice(0, 4) ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+  new Date(`${iso}T12:00:00`).toLocaleDateString(dateLocale(), iso.slice(0, 4) === today.slice(0, 4) ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 
 /** The words a kind other than a plain invoice gets beside its number. */
 const KIND_TAGS: Record<string, string> = { deposit: "Deposit", progress: "Progress", retainage: "Retainage", visits: "Visits" };

@@ -24,7 +24,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { FilterTabs } from "@/components/ui/Toolbar";
 import { api } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { addDaysIso, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { addDaysIso, englishDateLocale, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { owedFor, PAY_COLUMNS, payRows, pieceJobs, waitingFor, type PayPerson } from "./payCsv";
 import { inEnglish } from "@/lib/i18n";
@@ -50,7 +50,7 @@ const METHODS = [
   ["other", "Other"],
 ] as const;
 const methodLabel = (m: string | null) => METHODS.find(([k]) => k === m)?.[1] ?? m ?? "";
-const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(englishDateLocale(), { month: "short", day: "numeric", timeZone: "UTC" });
 
 export function PayPeriods({ header }: { header: (actions: ReactNode) => ReactNode }) {
   const session = useSession();

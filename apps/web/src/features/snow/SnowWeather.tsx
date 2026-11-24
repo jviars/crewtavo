@@ -23,7 +23,7 @@ import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { addDaysIso, addressLine, formatDay } from "@/lib/format";
+import { addDaysIso, addressLine, dateLocale, formatDay } from "@/lib/format";
 import { shopPlace } from "@/lib/maps";
 import { useSession } from "@/lib/session";
 import { customer, inches, located, type Site } from "./snowData";
@@ -70,7 +70,7 @@ const deg = (n: number | null) => (n == null ? "—" : `${Math.round(n)}°`);
 const mph = (n: number | null) => (n == null ? "—" : `${Math.round(n)} mph`);
 const hourOf = (time: string) => Number(time.slice(11, 13));
 export const hourLabel = (time: string) => `${hourOf(time) % 12 || 12} ${hourOf(time) < 12 ? "AM" : "PM"}`;
-const dayLabel = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" });
+const dayLabel = (date: string) => new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString(dateLocale(), { weekday: "short" });
 export const when = (h: Hour) => `${dayLabel(h.time)} ${hourLabel(h.time)}`;
 const sum = (numbers: number[]) => numbers.reduce((total, n) => total + n, 0);
 /** The one with the most of something, or undefined for none. */

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { ApiError } from "@/lib/api";
-import { formatMoneyCents } from "@/lib/format";
+import { dateLocale, formatMoneyCents } from "@/lib/format";
 import type { ClientView, Fetch } from "./ClientPortal";
 import type { HubAutopay } from "./document";
 
@@ -39,7 +39,7 @@ export const ON_HOLD_TEXT = "Charges are on hold for now. Until they start again
 export const CARD_REQUIRED = "A card on file is required for service. You'll add it on Stripe's secure page.";
 
 /** "Oct 31", where the business is. */
-const shortDay = (at: string, timeZone: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
+const shortDay = (at: string, timeZone: string) => new Date(at).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone });
 
 export function AutopayView({ token, data, hubFetch, back, onChanged }: { token: string; data: ClientView; hubFetch: Fetch; back: () => void; onChanged: () => void }) {
   const autopay = data.autopay ?? null;
@@ -306,7 +306,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
           <h2 id="autopay-how" ref={heading} tabIndex={-1} className="hub-step-title">How it works</h2>
           <ul className="hub-autopay-points">
             <li><Icon name="card" size={18} /><span>We charge your card or bank account {autopay.timing}.{autopay.per_visit === null ? "" : autopay.per_visit_taxed ? ` It's ${formatMoneyCents(autopay.per_visit)} per visit, plus tax.` : ` Each visit is ${formatMoneyCents(autopay.per_visit)}.`}</span></li>
-            {nextVisit && <li><Icon name="calendar" size={18} /><span>Your next visit is {new Date(`${nextVisit}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}.</span></li>}
+            {nextVisit && <li><Icon name="calendar" size={18} /><span>Your next visit is {new Date(`${nextVisit}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}.</span></li>}
             <li><Icon name="receipt" size={18} /><span>Each charge is on its own invoice, which you can always see here.</span></li>
             <li><Icon name="x" size={18} /><span>Turn it off anytime on this page{data.company.phone ? `, or call us at ${data.company.phone}` : ", or by calling us"}.</span></li>
           </ul>

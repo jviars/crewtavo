@@ -79,6 +79,12 @@ export const dateLocale = () => {
   return dateTag(country, tag.startsWith("es") ? "es" : "en");
 };
 
+/**
+ * dateLocale() for words that are only in English, such as an office dialog that also opens on a
+ * screen in Spanish: the business's country's way, in English whatever the screen.
+ */
+export const englishDateLocale = () => dateTag(country);
+
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);
 export const formatMoneyCents = (n: number | null | undefined) => formats().moneyCents.format(n ?? 0);

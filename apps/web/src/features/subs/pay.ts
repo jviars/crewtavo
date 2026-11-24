@@ -9,7 +9,7 @@ import { isLivePay, isSquareUnit, jobPayMethodLabel, jobPayStatusLabel, payLineA
 import { toUnits } from "@crewtavo/core/money";
 import { paperworkRequirements } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { addDaysIso, companyCountry, dateIn, formatDate, formatMoneyCents, moneyCurrency } from "@/lib/format";
+import { addDaysIso, companyCountry, dateIn, dateLocale, formatDate, formatMoneyCents, moneyCurrency } from "@/lib/format";
 import type { PaperworkRow } from "./paperwork";
 
 // ---------------------------------------------------------------------------------------------
@@ -429,7 +429,7 @@ export function auditPresets(today: string) {
 export function workDays(dates: readonly string[]): string {
   if (!dates.length) return "";
   const oneYear = new Set(dates.map((d) => d.slice(0, 4))).size === 1;
-  const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: oneYear ? undefined : "numeric", timeZone: "UTC" });
+  const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: oneYear ? undefined : "numeric", timeZone: "UTC" });
   return dates.length > 6 ? `${fmt(dates[0]!)} to ${fmt(dates.at(-1)!)} (${dates.length} days)` : dates.map(fmt).join(", ");
 }
 

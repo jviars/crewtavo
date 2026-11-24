@@ -1,4 +1,4 @@
-import { formatMoneyCents } from "@/lib/format";
+import { dateLocale, formatMoneyCents } from "@/lib/format";
 
 interface StripeInvoiceRow {
   origin: string;
@@ -61,7 +61,7 @@ export function autopayBankNote(card: string, bank: { amount_due: number; proces
 
 /** " (started Oct 3)", the day where the company is, or nothing when it isn't known. */
 const started = (at: string | null | undefined, timeZone: string) =>
-  at ? ` (started ${new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone })})` : "";
+  at ? ` (started ${new Date(at).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone })})` : "";
 
 /**
  * How a payment's amount reads in the invoice's payments. One that's only a tip (the client's

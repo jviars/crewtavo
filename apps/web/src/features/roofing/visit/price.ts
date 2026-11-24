@@ -12,7 +12,7 @@
 import { isSiteAdjustment, lineChanges, SITE_ADJUSTMENT_NAME, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
 import { lineTotal, quoteTotals, toCents, type Amount } from "@crewtavo/core/money";
 import { decimalPoint, typedAmount } from "@/lib/decimal";
-import { formatNumber } from "@/lib/format";
+import { dateLocale, formatNumber } from "@/lib/format";
 import { counts, money } from "../estimate/rows";
 import type { EstimateLine, EstimateQuote } from "../estimate/types";
 
@@ -230,7 +230,7 @@ export const rangeWords = (low: number, high: number) => `${money(low)} to ${mon
 export function shortDay(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
   const year = (d: Date) => d.toLocaleDateString("en-US", { year: "numeric", timeZone });
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
+  return at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
 }
 
 /**
@@ -300,7 +300,7 @@ export function signedCopies(messages: readonly CopyMessage[], approvedAt: strin
 /** "at 2:14 PM" today, else "on Oct 22 at 2:14 PM", in the business's time zone. */
 export function signedWhen(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
-  const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  const time = at.toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit", timeZone });
   const day = (d: Date) => d.toLocaleDateString("en-CA", { timeZone });
   return day(at) === day(now) ? `at ${time}` : `on ${shortDay(iso, timeZone, now)} at ${time}`;
 }

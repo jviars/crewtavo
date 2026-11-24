@@ -12,7 +12,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
-import { setCountry } from "@/lib/format";
+import { dateLocale, setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "../public/ClientKit";
@@ -41,7 +41,7 @@ interface Week { from: string; to: string; first: string; last: string; slots: O
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const visitLength = (minutes: number) => (minutes < 60 ? `${minutes} minutes` : minutes % 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : minutes === 60 ? "an hour" : `${minutes / 60} hours`);
 /** A calendar date ("2026-11-27") in words, the same wherever the reader is. */
-const dateWords = (date: string, options: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { ...options, timeZone: "UTC" });
+const dateWords = (date: string, options: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale(), { ...options, timeZone: "UTC" });
 /** A week's dates as the picker heads them: "Nov 24 – 30", or "Nov 28 – Dec 4" across a month's end. */
 export const weekWords = (from: string, to: string) => `${dateWords(from, { month: "short", day: "numeric" })} – ${from.slice(0, 7) === to.slice(0, 7) ? Number(to.slice(8)) : dateWords(to, { month: "short", day: "numeric" })}`;
 
