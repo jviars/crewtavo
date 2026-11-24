@@ -11,6 +11,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "../public/ClientKit";
@@ -103,6 +104,8 @@ export function BookingFormPage() {
 
   useEffect(() => {
     if (view.data) document.title = `${view.data.form.name} · ${view.data.company.name}`;
+    // Phone boxes read numbers as the business's country writes them (lib/validate.ts); there's no session here to say it.
+    if (view.data) setCountry({ country: view.data.company.country });
   }, [view.data]);
 
   const submit = useMutation({

@@ -10,6 +10,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { linkToken } from "@/lib/linkToken";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "./ClientKit";
 
@@ -41,6 +42,8 @@ export function ReferralPage() {
   });
   useEffect(() => {
     if (view.data) document.title = `${view.data.referrer} recommends ${view.data.company.name}`;
+    // Phone boxes read numbers as the business's country writes them (lib/validate.ts); there's no session here to say it.
+    if (view.data) setCountry({ country: view.data.company.country });
   }, [view.data]);
   const missingContact = !f.email.trim() && !f.phone.trim();
   // The button stays on; trying it without a way to reach them says so on the email field.
