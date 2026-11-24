@@ -5256,6 +5256,14 @@ isOneToOne: false
               "discounted": number,"promo_code_id": string,"uses": number
             }[]
                            },
+"properties_to_find":
+{ Args: { "p_after"?: string,"p_limit"?: number }; Returns: {
+              "city": string,"company_id": string,"country": string,"id": string,"line1": string,"line2": string,"postal_code": string,"region": string
+            }[]
+                           },
+"property_found":
+{ Args: { "p_lat"?: number,"p_lng"?: number,"p_property": string,"p_source"?: string }; Returns: boolean
+                           },
 "put_quote_package":
 { Args: { "p_lines": Json,"p_package": string,"p_quote": string,"p_replace"?: boolean }; Returns: boolean
                            },

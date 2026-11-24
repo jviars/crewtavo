@@ -1,8 +1,9 @@
 /**
  * Finding an address on the map: only the free geocoders are asked (the US Census, then
  * OpenStreetMap for places abroad), and an answer of "no such address" is told apart from no answer.
- * And the pins task, which looks up again the spots saved before each one's source was kept. fetch is
- * stubbed; what the database does with a spot's source is tested in supabase/tests.
+ * And the pins task, which looks up again the spots saved before each one's source was kept, and the
+ * properties with no spot that moved to their business's country. fetch is stubbed; what the database
+ * does with a spot's source and a property's country is tested in supabase/tests.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
@@ -95,8 +96,11 @@ describe("the pins task", () => {
     path: string;
     body: any;
   }
-  /** PostgREST and the geocoders: `rows` are the properties with no source, `geocode` answers for an address. */
-  function world(options: { rows?: Array<ReturnType<typeof property>>; shops?: unknown[]; geocode?: (address: string, host: string) => unknown; saved?: (call: Call) => unknown[] }) {
+  /**
+   * PostgREST and the geocoders: `rows` are the properties with no source, `lost` the ones with no
+   * spot waiting to be found, `geocode` answers for an address.
+   */
+  function world(options: { rows?: Array<ReturnType<typeof property>>; lost?: Array<ReturnType<typeof property>>; shops?: unknown[]; geocode?: (address: string, host: string) => unknown; saved?: (call: Call) => unknown[] }) {
     const calls: Call[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -106,6 +110,8 @@ describe("the pins task", () => {
       const answer = (): unknown => {
         if (url.host === "geocoding.geo.census.gov") return options.geocode?.(url.searchParams.get("address")!, url.host) ?? census([]);
         if (url.host === "photon.komoot.io") return options.geocode?.(url.searchParams.get("q")!, url.host) ?? { features: [] };
+        if (call.path === "rpc/properties_to_find") return (options.lost ?? []).filter((r) => !call.body.p_after || r.id > call.body.p_after).slice(0, call.body.p_limit);
+        if (call.path === "rpc/property_found") return call.body.p_lat !== undefined;
         if (call.path === "rpc/depots_to_relocate") return options.shops ?? [];
         if (call.path === "rpc/relocate_depot") return true;
         if (call.path === "properties" && call.method === "GET") {
@@ -123,15 +129,46 @@ describe("the pins task", () => {
     return { calls, lookups, saves };
   }
   const run = (e: Env) => relocatePins(e, adminClient(e), { pauseMs: 0 });
-  const NOTHING = { shops: 0, looked_up: 0, moved: 0, same: 0, kept: 0, unanswered: 0 };
+  const NOTHING = { placed: 0, not_found: 0, shops: 0, looked_up: 0, moved: 0, same: 0, kept: 0, unanswered: 0 };
 
   beforeEach(() => resetRelocatePins());
 
-  it("does nothing on a server with no Google server key", async () => {
+  it("leaves the spots alone on a server with no Google server key", async () => {
     const { calls } = world({ rows: [property("p1", "418 Pell Ave")] });
     expect(await run(env)).toEqual(NOTHING);
     expect(await runTask("pins", env)).toEqual(NOTHING);
-    expect(calls).toHaveLength(0);
+    // Only the properties with no spot are asked about, and there are none.
+    expect(calls.map((c) => c.path)).toEqual(["rpc/properties_to_find", "rpc/properties_to_find"]);
+  });
+
+  it("finds the properties that never got a spot once they're in their business's country, on any server", async () => {
+    const lost = [
+      property("p1", "10 Downing Street", { city: "London", region: null, postal_code: "SW1A 2AA", country: "GB", lat: null, lng: null }),
+      property("p2", "1 Nowhere Lane", { city: "Leeds", region: null, postal_code: null, country: "GB", lat: null, lng: null }),
+    ];
+    const { calls, lookups } = world({
+      lost,
+      geocode: (address, host) => (host === "photon.komoot.io" && /Downing/.test(address) ? { features: [{ geometry: { coordinates: [-0.1276, 51.5034] }, properties: { housenumber: "10", street: "Downing Street", countrycode: "gb" } }] } : host === "photon.komoot.io" ? { features: [] } : census([])),
+    });
+    expect(await run(env)).toEqual({ ...NOTHING, placed: 1, not_found: 1 });
+    expect(calls.find((c) => c.path === "rpc/properties_to_find")!.body).toEqual({ p_limit: 12 });
+    expect(lookups().filter((c) => c.url.host === "photon.komoot.io").map((c) => c.url.searchParams.get("q"))).toEqual(["10 Downing Street, London, SW1A 2AA, GB", "1 Nowhere Lane, Leeds, GB"]);
+    // Each leaves the list: with its spot, or with none when the geocoder doesn't know it.
+    expect(calls.filter((c) => c.path === "rpc/property_found").map((c) => c.body)).toEqual([
+      { p_property: "p1", p_lat: 51.5034, p_lng: -0.1276, p_source: "openstreetmap" },
+      { p_property: "p2" },
+    ]);
+  });
+
+  it("carries on after a property whose lookup got no answer, and comes back to it", async () => {
+    const lost = ["p1", "p2"].map((id) => property(id, `${id} Bank St`, { city: "Leeds", country: "GB", lat: null, lng: null }));
+    const down = world({ lost: lost.slice(0, 1), geocode: () => new Response("busy", { status: 503 }) });
+    expect(await run(env)).toEqual({ ...NOTHING, unanswered: 1 });
+    expect(down.calls.some((c) => c.path === "rpc/property_found")).toBe(false);
+    const up = world({ lost, geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "gb" } }] } : census([])) });
+    expect(await run(env)).toMatchObject({ placed: 1 });
+    expect(up.calls.find((c) => c.path === "rpc/properties_to_find")!.body).toEqual({ p_after: "p1", p_limit: 12 });
+    expect(await run(env)).toMatchObject({ placed: 2 });
   });
 
   it("runs every few minutes, with the other tasks", () => {

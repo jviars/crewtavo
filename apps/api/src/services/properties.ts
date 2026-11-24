@@ -3,7 +3,8 @@
  * measuring tool: one at a time when someone saves a property, and in the background for the
  * ones an import brought in. Always with the person's own client, so it changes only properties
  * they could change themselves. Each spot is saved with the geocoder that found it
- * (properties.located_by), and the pins task looks up again the ones nobody said that for.
+ * (properties.located_by), and the pins task looks up again the ones nobody said that for, and the
+ * ones with no spot that moved to their business's country (20261124100200_property_country.sql).
  */
 import type { Env } from "../env";
 import type { Db } from "../lib/supabase";
@@ -70,6 +71,7 @@ const RELOCATE_GIVE_UP = 3;
 
 /** Where the last run got to, so a property whose lookup keeps failing doesn't hold up the ones after it. */
 let relocatedTo: string | null = null;
+let foundTo: string | null = null;
 
 /**
  * The pins task. On a server with a Google server key, map spots saved before each one's source was
@@ -79,11 +81,14 @@ let relocatedTo: string | null = null;
  * marked 'unknown' so it isn't asked about again: there's no way to put a pin back by hand, and a
  * stop with no spot drops out of routes, weather checks and the clock at the property. A lookup
  * that got no answer is tried again on a later run. The shop's spot (settings.depot) gets the same.
- * A server with no Google server key does nothing: its spots only ever came from the free geocoders.
+ * A server with no Google server key skips this: its spots only ever came from the free geocoders.
+ *
+ * Before that, on every server: the properties that never got a spot and were moved to their
+ * business's country (public.properties_to_find, which the database fills when a business's country
+ * changes), each looked up once in that country. One that isn't found stays "Not on the map yet".
  */
 export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: number; now?: () => number } = {}) {
-  const tally = { shops: 0, looked_up: 0, moved: 0, same: 0, kept: 0, unanswered: 0 };
-  if (!env.GOOGLE_MAPS_SERVER_KEY) return tally;
+  const tally = { placed: 0, not_found: 0, shops: 0, looked_up: 0, moved: 0, same: 0, kept: 0, unanswered: 0 };
   const now = options.now ?? Date.now;
   const until = now() + RELOCATE_MS;
   const pause = options.pauseMs ?? RELOCATE_PAUSE_MS;
@@ -97,6 +102,34 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
     silent = found === "failed" ? silent + 1 : 0;
     return found;
   };
+
+  const waiting = async (after: string | null) => {
+    const { data, error } = await admin.rpc("properties_to_find", { p_after: after ?? undefined, p_limit: RELOCATE_BATCH });
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  };
+  let lost = await waiting(foundTo);
+  // Past the last one: back to the top, for any whose lookup got no answer before.
+  if (!lost.length && foundTo) {
+    foundTo = null;
+    lost = await waiting(null);
+  }
+  for (const p of lost) {
+    const { address, abroad } = addressOf(p);
+    const found = await lookUp(address, abroad);
+    if (found === null) break;
+    foundTo = p.id;
+    if (found === "failed") {
+      tally.unanswered++;
+      continue;
+    }
+    const spot = found === "none" ? {} : { p_lat: found.lat, p_lng: found.lng, p_source: found.source };
+    const { data: saved, error } = await admin.rpc("property_found", { p_property: p.id, ...spot });
+    if (error) throw new Error(error.message);
+    if (saved) tally.placed++;
+    else if (found === "none") tally.not_found++;
+  }
+  if (!env.GOOGLE_MAPS_SERVER_KEY) return tally;
 
   const { data: shops, error: shopsError } = await admin.rpc("depots_to_relocate", { p_limit: 5 });
   if (shopsError) throw new Error(shopsError.message);
@@ -159,4 +192,5 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
 /** Tests start each run from the top. */
 export const resetRelocatePins = () => {
   relocatedTo = null;
+  foundTo = null;
 };
