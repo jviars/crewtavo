@@ -9,6 +9,7 @@ import { laborRates, localDate, workLines, workToBill } from "@crewtavo/core";
 import { hidesExactPrice, inRangeMode, optionsIntroText, rangeIntroText } from "@crewtavo/core/estimates";
 import { optionBaseTotal, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { clientRecipients, emailMatchKey, MAX_RECIPIENTS, phoneMatchKey, uniqueAddresses, type Recipient } from "@crewtavo/core/recipients";
+import { dateTag } from "@crewtavo/core/regional";
 import { z } from "zod";
 import type { Env } from "../env";
 import { stripeAccess, syncStripeInvoice } from "../integrations/stripe";
@@ -580,7 +581,7 @@ async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, ra
  * while autopay is charging it or will try the card again (its own notice already went).
  */
 export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[]) {
-  const company = must(await s.db.from("companies").select("name, currency, timezone").eq("id", s.companyId).maybeSingle());
+  const company = must(await s.db.from("companies").select("name, currency, timezone, country").eq("id", s.companyId).maybeSingle());
   const today = localDate(new Date(), company.timezone || "UTC");
   const invoices = must(
     await s.db
@@ -616,7 +617,7 @@ export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[
     const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(invoice.balance_due));
     // An early reminder says when it's due; once that day has passed, when it was.
     const due = invoice.due_on
-      ? `${invoice.due_on < today ? "was" : "is"} due ${new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}`
+      ? `${invoice.due_on < today ? "was" : "is"} due ${new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString(dateTag(company.country), { month: "long", day: "numeric", timeZone: "UTC" })}`
       : null;
     try {
       const result = await deliver(s, "invoice", invoice, {

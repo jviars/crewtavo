@@ -6,6 +6,7 @@
  * organize each crew's coming week once and never redo a day someone ordered by hand.
  */
 import { addDays, DISPATCH, driveBetween, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
+import { clockStyle, writtenDate } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import { dbError, HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
@@ -38,6 +39,8 @@ export interface DayVisit {
 export interface CompanyClock {
   tz: string;
   settings: Record<string, any>;
+  /** Where the business is (companies.country): its times are written that way. */
+  country?: string | null;
 }
 
 const STARTED = ["en_route", "in_progress", "completed"];
@@ -76,10 +79,11 @@ const toMinutes = (hhmm: string | undefined, fallback: number) => {
   return Number.isFinite(h) ? h! * 60 + (m || 0) : fallback;
 };
 const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(Math.round(minutes) % 60).padStart(2, "0")}`;
-/** "3:40 pm" */
-export const clockLabel = (minutes: number) => {
+/** "3:40 pm"; where the business's country keeps time another way, "3:40 p.m." (Canada) or "15:40" (the UK). */
+export const clockLabel = (minutes: number, country?: string | null) => {
   const m = Math.round(minutes) % (24 * 60);
   const h = Math.floor(m / 60);
+  if (clockStyle(country) !== "AM") return writtenDate(new Date(Date.UTC(2000, 0, 1, h, m % 60)), "FMHH12:MI AM", country);
   return `${h % 12 || 12}:${String(m % 60).padStart(2, "0")} ${h < 12 ? "am" : "pm"}`;
 };
 const lengthOf = (v: DayVisit) => (v.starts_at && v.ends_at ? Math.max(1, Math.round((Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60_000)) : (v.job?.visit_duration_min ?? 60));
@@ -176,11 +180,11 @@ export function planDay(visits: DayVisit[], company: CompanyClock, date: string,
   });
 
   const warnings: string[] = [];
-  for (const p of planned.filter((x) => x.planned.late)) warnings.push(`${p.visit.title} can't be reached by ${clockLabel(p.planned.start)}.`);
+  for (const p of planned.filter((x) => x.planned.late)) warnings.push(`${p.visit.title} can't be reached by ${clockLabel(p.planned.start, company.country)}.`);
   const nowhere = planned.filter((p) => !p.planned.located).length;
   if (nowhere) warnings.push(`${nowhere === 1 ? "1 stop has" : `${nowhere} stops have`} no map location, so ${nowhere === 1 ? "it goes" : "they go"} last. Check the address on the client.`);
   if (s.routeTimes && planned.some((p) => p.planned.end > 24 * 60)) warnings.push("The route runs past midnight. Move some stops to another day.");
-  else if (planned.length && plan.finish > workEnd) warnings.push(`Done around ${clockLabel(plan.finish)}, after the workday ends at ${clockLabel(workEnd)}.`);
+  else if (planned.length && plan.finish > workEnd) warnings.push(`Done around ${clockLabel(plan.finish, company.country)}, after the workday ends at ${clockLabel(workEnd, company.country)}.`);
   if (!shop) warnings.push("Add the shop address in Settings → Company so routes start and end there.");
 
   const sameTime = (a: string | null, b: string | null) => (a && b ? Date.parse(a) === Date.parse(b) : a === b);
@@ -267,13 +271,13 @@ export async function fitIntoRoute(db: Db, companyId: string, crewId: string | n
  */
 export async function autoRoutes(env: Env, now = new Date()) {
   const admin = adminClient(env);
-  const { data: companies, error } = await admin.from("companies").select("id, timezone, settings").eq("settings->schedule->>auto_routes", "true");
+  const { data: companies, error } = await admin.from("companies").select("id, timezone, settings, country").eq("settings->schedule->>auto_routes", "true");
   if (error) throw new Error(error.message);
   let organized = 0;
   let fitted = 0;
   const problems: string[] = [];
   for (const company of companies ?? []) {
-    const clock = { tz: company.timezone, settings: (company.settings ?? {}) as Record<string, any> };
+    const clock = { tz: company.timezone, settings: (company.settings ?? {}) as Record<string, any>, country: company.country };
     const today = localDate(now, clock.tz);
     const first = addDays(today, 1);
     const last = addDays(today, AUTO_DAYS);
@@ -313,8 +317,8 @@ export async function autoRoutes(env: Env, now = new Date()) {
 // ---- Organize route, for the schedule and AI assistants -----------------------------------------
 
 async function companyClock(s: Scope): Promise<CompanyClock> {
-  const [company, settings] = await Promise.all([s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle(), settingsAs(s.db, s.companyId)]);
-  return { tz: must(company).timezone, settings };
+  const [company, settings] = await Promise.all([s.db.from("companies").select("timezone, country").eq("id", s.companyId).maybeSingle(), settingsAs(s.db, s.companyId)]);
+  return { tz: must(company).timezone, settings, country: must(company).country };
 }
 
 /** With automatic routes on, anytime visits added to an organized day go into its route. Never fails the visit. */
@@ -381,7 +385,7 @@ export async function previewRoute(s: Scope, env: Env, body: RouteDay) {
     organized_at: route?.organized_at ?? null,
     miles_before: miles(day.milesBefore),
     miles_after: miles(day.milesAfter),
-    finish: day.stops.length ? clockLabel(day.finish) : null,
+    finish: day.stops.length ? clockLabel(day.finish, company.country) : null,
     late_finish: day.stops.length > 0 && day.finish > day.workEnd,
     changes: day.changes.length,
     warnings: day.warnings,

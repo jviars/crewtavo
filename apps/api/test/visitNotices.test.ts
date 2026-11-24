@@ -113,6 +113,13 @@ describe("a visit's day and time, as a client reads them", () => {
     // 11pm on the 29th in New York is already the 30th in UTC.
     expect(visitWhen("2026-10-30T03:00:00Z", "2026-10-29", NY).date).toBe("Thursday, October 29");
   });
+
+  it("is written the way the business's country writes it, a US business's as it always was", () => {
+    expect(visitWhen("2026-10-29T13:00:00Z", "2026-10-29", NY, 120, "US")).toEqual({ date: "Thursday, October 29", time: " between 9:00 AM and 11:00 AM" });
+    expect(visitWhen("2026-10-29T13:00:00Z", "2026-10-29", "America/Toronto", 0, "CA")).toEqual({ date: "Thursday, October 29", time: " at 9:00 a.m." });
+    expect(visitWhen("2026-10-29T14:00:00Z", "2026-10-29", "Europe/London", 120, "GB")).toEqual({ date: "Thursday 29 October", time: " between 14:00 and 16:00" });
+    expect(visitWhen(null, "2026-10-29", "Australia/Sydney", 0, "AU")).toEqual({ date: "Thursday 29 October", time: "" });
+  });
 });
 
 describe("what a rule on a visit knows", () => {

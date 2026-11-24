@@ -20,6 +20,7 @@
  */
 import type { Tables } from "@crewtavo/core";
 import { marketingOn } from "@crewtavo/core/marketing";
+import { dateTag } from "@crewtavo/core/regional";
 import { reviewsFreshSince } from "@crewtavo/core/reviews";
 import {
   brandColor,
@@ -885,7 +886,8 @@ export async function checkMetaAccess(env: Env, admin: Db): Promise<{ checked: n
         await admin.from("integrations").update({ settings: { ...settings, data_access_expires_at: expires } as never }).match({ company_id: row.company_id, provider: "meta" });
       }
       if (expires && expires * 1000 < Date.now() + 7 * 86_400_000) {
-        const by = new Date(expires * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        const { data: company } = await admin.from("companies").select("country").eq("id", row.company_id).maybeSingle();
+        const by = new Date(expires * 1000).toLocaleDateString(dateTag(company?.country), { month: "short", day: "numeric" });
         const told = await admin.rpc("note_meta_access", { p_company: row.company_id, p_kind: "expiring", p_title: `Reconnect Facebook & Instagram by ${by} so posts keep going`, p_body: "Meta asks for a new sign-in every few months. Reconnect it in Apps." });
         if (told.data) out.expiring++;
       }

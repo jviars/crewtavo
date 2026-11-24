@@ -49,6 +49,7 @@ import { daysSinceVisit, type AutomatedCampaign } from "@crewtavo/core/campaigns
 import { hidesExactPrice } from "@crewtavo/core/estimates";
 import { inTextQuietHours, marketingOn, REFERRAL_GAP_DAYS, REVIEW_GAP_DAYS, textQuietHoursEnd, textsOffReason } from "@crewtavo/core/marketing";
 import { clientRecipients, type Recipient } from "@crewtavo/core/recipients";
+import { dateTag } from "@crewtavo/core/regional";
 import { countsOn } from "@crewtavo/core/money";
 import type { Env } from "../env";
 import { companyAddress, companyFooter, firstName, isEmail, renderEmail } from "../lib/email";
@@ -141,22 +142,26 @@ export function money(amount: number | string | null | undefined, currency = "US
   return new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(Number(amount ?? 0));
 }
 
-/** A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between 9:00 AM and 11:00 AM". */
-export function visitTime(startsAt: string, timeZone: string, windowMin = 0) {
-  const at = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+/**
+ * A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between
+ * 9:00 AM and 11:00 AM"; the way the business's country keeps time (" at 14:00" in the UK).
+ */
+export function visitTime(startsAt: string, timeZone: string, windowMin = 0, country?: string | null) {
+  const at = (ms: number) => new Date(ms).toLocaleTimeString(dateTag(country), { hour: "numeric", minute: "2-digit", timeZone });
   const start = new Date(startsAt).getTime();
   return windowMin ? ` between ${at(start)} and ${at(start + windowMin * 60_000)}` : ` at ${at(start)}`;
 }
 
 /**
  * A visit's day and time as a client reads them: "Tuesday, November 17" and " at 9:00 AM" (or the
- * arrival window). The time is empty for an anytime visit, and both for one with no day.
+ * arrival window), the way the business's country writes them ("Tuesday 17 November" in the UK).
+ * The time is empty for an anytime visit, and both for one with no day.
  */
-export function visitWhen(startsAt: string | null | undefined, scheduledOn: string | null | undefined, timeZone: string, windowMin = 0): { date: string; time: string } {
+export function visitWhen(startsAt: string | null | undefined, scheduledOn: string | null | undefined, timeZone: string, windowMin = 0, country?: string | null): { date: string; time: string } {
   const at = startsAt ?? (scheduledOn ? `${scheduledOn}T12:00:00Z` : null);
   return {
-    date: at ? new Date(at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: startsAt ? timeZone : "UTC" }) : "",
-    time: startsAt ? visitTime(startsAt, timeZone, windowMin) : "",
+    date: at ? new Date(at).toLocaleDateString(dateTag(country), { weekday: "long", month: "long", day: "numeric", timeZone: startsAt ? timeZone : "UTC" }) : "",
+    time: startsAt ? visitTime(startsAt, timeZone, windowMin, country) : "",
   };
 }
 
@@ -363,7 +368,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       vars = {
         title: data.title,
         address: addressOf(rel.property),
-        ...visitWhen(data.starts_at, data.scheduled_on, co.timezone || "UTC", arrivalWindowMin(co.settings)),
+        ...visitWhen(data.starts_at, data.scheduled_on, co.timezone || "UTC", arrivalWindowMin(co.settings), co.country),
         eta: etaWords(data.eta_at),
       };
       visit = { status: data.status, scheduled_on: data.scheduled_on, starts_at: data.starts_at };
@@ -407,7 +412,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       const tz = co.timezone || "UTC";
       const last = await lastVisit(admin, companyId, client.id);
       facts = { status: client.status, days_since_visit: last ? daysSinceVisit(last, new Date(), tz) : null, autopay: await clientOnAutopay(admin, co, client.id) };
-      vars = { title: client.display_name, last_visit: last ? last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: tz }) : "" };
+      vars = { title: client.display_name, last_visit: last ? last.toLocaleDateString(dateTag(co.country), { month: "long", day: "numeric", year: "numeric", timeZone: tz }) : "" };
       label = client.display_name;
     }
   }
@@ -494,7 +499,7 @@ export async function withEvent(admin: Db, ctx: RunContext, trigger: string, act
   }
   if (trigger === "visit.rescheduled" || trigger === "visit.cancelled") {
     const was = { scheduled_on: event.was_scheduled_on ? text(event.was_scheduled_on) : null, starts_at: event.was_starts_at ? text(event.was_starts_at) : null };
-    const when = visitWhen(was.starts_at, was.scheduled_on, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings));
+    const when = visitWhen(was.starts_at, was.scheduled_on, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings), ctx.company.country);
     return { ...ctx, was, vars: trigger === "visit.cancelled" ? { ...ctx.vars, ...when } : { ...ctx.vars, old: when } };
   }
   return {

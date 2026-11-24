@@ -16,6 +16,7 @@
 import { autopayBankText, autopayCoversMonthly, autopaySettings, autopayTimingText, methodExpiry, methodLabel, tipsAllowed, type AutopaySettings } from "@crewtavo/core/autopay";
 import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { textsOff, textsOffReason } from "@crewtavo/core/marketing";
+import { dateTag } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import {
   autopayStripeCheck,
@@ -142,9 +143,9 @@ const appBase = (env: Env) => (env.APP_URL ?? "").replace(/\/$/, "");
 const money = (amount: number | string, currency: string | null | undefined) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(amount));
 
-/** "Oct 31" where the company is. */
-const monthDay = (at: string, timeZone: string | null | undefined) =>
-  new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: timeZone || "UTC" });
+/** "Oct 31" where the company is, the way its country writes it ("31 Oct" in the UK). */
+const monthDay = (at: string, company: { timezone: string | null; country?: string | null }) =>
+  new Date(at).toLocaleDateString(dateTag(company.country), { month: "short", day: "numeric", timeZone: company.timezone || "UTC" });
 
 /** Postgres raises its messages without a full stop; the Hub shows them as sentences. */
 const sentence = (message: string) => (/[.?]$/.test(message) ? message : `${message}.`);
@@ -186,8 +187,8 @@ const savedMethod = (m: Method): SavedMethod => ({
   id: m.id, stripe_payment_method_id: m.stripe_payment_method_id, stripe_customer_id: m.stripe_customer_id, livemode: m.livemode, stripe_account: m.stripe_account, type: m.type,
 });
 
-const COMPANY_FIELDS = "id, name, email, phone, address, currency, timezone, trade_preset, settings";
-type Company = { id: string; name: string; email: string | null; phone: string | null; address: unknown; currency: string; timezone: string; trade_preset: string; settings: unknown };
+const COMPANY_FIELDS = "id, name, email, phone, address, currency, timezone, country, trade_preset, settings";
+type Company = { id: string; name: string; email: string | null; phone: string | null; address: unknown; currency: string; timezone: string; country?: string | null; trade_preset: string; settings: unknown };
 
 async function companyOf(admin: Db, companyId: string): Promise<Company | null> {
   const { data, error } = await admin.from("companies").select(COMPANY_FIELDS).eq("id", companyId).maybeSingle();
@@ -615,7 +616,7 @@ export async function sendAutopayNotice(env: Env, admin: Db, chargeId: string, s
     lead = `We couldn't charge ${card} for invoice #${n} (${owed}) again, so autopay is paused until you update your card.${said}`;
     brief = `We couldn't charge ${card} for invoice #${n} (${owed}) again, so autopay is paused.`;
   } else if (status === "failed") {
-    const again = ` We'll try again on ${monthDay(charge.due_at, company.timezone)}.`;
+    const again = ` We'll try again on ${monthDay(charge.due_at, company)}.`;
     lead = `We couldn't charge ${card} for invoice #${n} (${owed}).${said}${again}`;
     brief = `We couldn't charge ${card} for invoice #${n} (${owed}).${again}`;
   } else {
@@ -683,7 +684,7 @@ export async function sendAutopayAgreed(env: Env, admin: Db, authorizationId: st
   const base = appBase(env);
   const timing = autopayTimingText(autopaySettings(company.settings, company.trade_preset));
   const card = method?.data ? `your ${methodLabel(method.data as Method)}` : "your saved card";
-  const intro = `You set up autopay with ${company.name} on ${monthDay(agreement.accepted_at, company.timezone)}. We'll charge ${card} ${timing}.`;
+  const intro = `You set up autopay with ${company.name} on ${monthDay(agreement.accepted_at, company)}. We'll charge ${card} ${timing}.`;
   const links = base ? await autopayLinks(env, base, company.id, who.id) : null;
   const subject = `Autopay is set up with ${company.name}`;
 

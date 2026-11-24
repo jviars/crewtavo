@@ -29,6 +29,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { backupNight, backupsToKeep, backupWarning, BACKUP_STALE_HOURS, BACKUP_WARN_AGAIN_HOURS, type BackupEntry, type BackupStatus } from "@crewtavo/core";
+import { dateTag } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import { HttpError } from "../lib/http";
 import { apiKey, stackServices } from "../lib/stack";
@@ -348,12 +349,15 @@ export async function tidyBackups(admin: Db, store: Pick<BackupStore, "list" | "
 // The "backups" task
 // ---------------------------------------------------------------------------------------------
 
-/** The instance's business: its time zone decides when the night is, and its owners hear what goes wrong. */
-async function theCompany(admin: Db): Promise<{ id: string; timezone: string } | null> {
-  const { data, error } = await admin.from("companies").select("id, timezone").order("created_at").limit(1);
+/**
+ * The instance's business: its time zone decides when the night is, and its owners hear what goes
+ * wrong, with dates as its country writes them.
+ */
+async function theCompany(admin: Db): Promise<{ id: string; timezone: string; country?: string | null } | null> {
+  const { data, error } = await admin.from("companies").select("id, timezone, country").order("created_at").limit(1);
   if (error) throw new Error(error.message);
   const company = data?.[0];
-  return company ? { id: company.id, timezone: company.timezone || "UTC" } : null;
+  return company ? { id: company.id, timezone: company.timezone || "UTC", country: company.country } : null;
 }
 
 /**
@@ -448,14 +452,16 @@ export async function backupStatus(env: Env, admin: Db, now = new Date()): Promi
   return { available: true, unavailable: null, ...status };
 }
 
-const dayOf = (iso: string, timeZone: string) => new Date(iso).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone });
+/** "October 6" where the business is, the way its country writes it ("6 October" in the UK). */
+const dayOf = (iso: string, company: { timezone: string; country?: string | null }) =>
+  new Date(iso).toLocaleDateString(dateTag(company.country), { month: "long", day: "numeric", timeZone: company.timezone });
 
 /**
  * Tells the owners, once, when the night's backup has failed every try, and when there's been no
  * good backup for BACKUP_STALE_HOURS (again after a week, while it lasts). What was told is marked
  * on the run it was about (warned_at), claimed in one update so two servers don't both tell.
  */
-async function warnOwners(admin: Db, company: { id: string; timezone: string }, now: Date): Promise<number> {
+async function warnOwners(admin: Db, company: { id: string; timezone: string; country?: string | null }, now: Date): Promise<number> {
   const list = await rows(admin, 100);
   const { lastGoodAt, lastRun, since } = summarize(list, now);
   const latest = list.find((r) => r.status !== "running");
@@ -467,12 +473,12 @@ async function warnOwners(admin: Db, company: { id: string; timezone: string }, 
   if (tonight.length >= TRIES && !tonight.some((r) => r.warned_at)) {
     warning = {
       title: "Last night's database backup didn't work",
-      body: `${latest.error ?? "It didn't finish."} Crewtavo tries again tomorrow night. ${lastGoodAt ? `Your last good backup is from ${dayOf(lastGoodAt, company.timezone)}.` : "There's no good backup yet."} Settings → Your data has Back up now.`,
+      body: `${latest.error ?? "It didn't finish."} Crewtavo tries again tomorrow night. ${lastGoodAt ? `Your last good backup is from ${dayOf(lastGoodAt, company)}.` : "There's no good backup yet."} Settings → Your data has Back up now.`,
     };
   } else if (stale && !list.some((r) => r.warned_at && now.getTime() - Date.parse(r.warned_at) < BACKUP_WARN_AGAIN_HOURS * HOUR_MS)) {
     warning = {
       title: "Crewtavo hasn't backed up its database for over two days",
-      body: `${lastGoodAt ? `The last good backup is from ${dayOf(lastGoodAt, company.timezone)}.` : "No backup has worked yet."} Open Settings → Your data to see why, and press Back up now.`,
+      body: `${lastGoodAt ? `The last good backup is from ${dayOf(lastGoodAt, company)}.` : "No backup has worked yet."} Open Settings → Your data to see why, and press Back up now.`,
     };
   }
   if (!warning) return 0;
