@@ -87,8 +87,8 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
           <Field label="Contact name" optional><input className="input" value={f.contact_name} onChange={set("contact_name")} maxLength={120} autoComplete="off" /></Field>
           <Field label="Mobile phone" optional hint={phoneNote?.text ?? SUB_PHONE_HINT}><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="off" /></Field>
           <Field label="Email" optional><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={254} autoComplete="off" /></Field>
-          {/* The W-9's box 3, which says whether they get a 1099: a US business's. */}
-          {(irs || f.tax_classification) && (
+          {/* The W-9's box 3, which says whether they get a 1099: a US business's (or one kept from before). */}
+          {(irs || sub?.tax_classification) && (
             <Field label="Tax classification" optional hint="Box 3 on their W-9.">
               <Select className="select" value={f.tax_classification} onChange={set("tax_classification")}>
                 <option value="">Not set</option>
