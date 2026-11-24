@@ -16,6 +16,7 @@
  */
 import { memberPermissions, OFFICE, taxName, taxNumber, taxNumberLabel, type Role } from "@crewtavo/core";
 import { methodExpiry, methodLabel, tipsAllowed } from "@crewtavo/core/autopay";
+import { dateTag } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import { asJson, HttpError } from "../lib/http";
 import type { Db } from "../lib/supabase";
@@ -1269,7 +1270,10 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
     noteOnClient(admin, { company_id: original.company_id, client_id: original.client_id, invoice_id: original.invoice_id, key: `${dispute.id}:${suffix}`, subject, body });
 
   if (type === "charge.dispute.created") {
-    const due = dispute.evidence_details?.due_by ? ` by ${new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : "";
+    const dueBy = dispute.evidence_details?.due_by;
+    // The day as the business's country writes it: "by November 3", "by 3 November" in the UK.
+    const country = dueBy ? (await admin.from("companies").select("country").eq("id", original.company_id).maybeSingle()).data?.country : null;
+    const due = dueBy ? ` by ${new Date(dueBy * 1000).toLocaleDateString(dateTag(country), { month: "long", day: "numeric" })}` : "";
     await note("opened", "Payment disputed", `The client disputed the ${amount} payment${on} with their bank (${dispute.reason.replace(/_/g, " ")}). Stripe holds the money until it's settled. Respond in Stripe${due} to keep it.`);
   } else if (dispute.status === "lost") {
     // Stripe's amount includes the tip, which the payment keeps apart: like a refund, what the bank

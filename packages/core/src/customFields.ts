@@ -5,6 +5,7 @@
  * may be for its type, how it reads, and which show where. Carrying values from a quote to its job
  * and invoice is the database's (20261103000700_custom_fields.sql), so every way they're made does it.
  */
+import { dateTag } from "./regional";
 
 export const CUSTOM_FIELD_RECORDS = ["client", "property", "job", "quote", "invoice"] as const;
 export type CustomFieldRecord = (typeof CUSTOM_FIELD_RECORDS)[number];
@@ -124,13 +125,17 @@ export function saveCustomDrafts(fields: readonly CustomFieldDef[], current: unk
   return mergeCustomValues(fields, current, Object.fromEntries(changed));
 }
 
-/** How a value reads: "Yes", "1,200", "Mar 4, 2026", or its text. A value from before its field's type changed reads as it was typed. */
-export function customValueText(field: Pick<CustomFieldDef, "type">, value: unknown): string {
+/**
+ * How a value reads: "Yes", "1,200", "Mar 4, 2026" (a date the way the business's `country` writes
+ * it, "4 Mar 2026" in the UK), or its text. A value from before its field's type changed reads as it
+ * was typed.
+ */
+export function customValueText(field: Pick<CustomFieldDef, "type">, value: unknown, country?: string | null): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return field.type === "number" ? value.toLocaleString("en-US", { maximumFractionDigits: 6 }) : String(value);
   if (typeof value !== "string") return "";
   const day = field.type === "date" ? isoDay(value) : null;
-  return day ? new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : value;
+  return day ? new Date(`${day}T00:00:00Z`).toLocaleDateString(dateTag(country), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : value;
 }
 
 /** A value as a form edits it: text for every type, with yes/no as "yes", "no" or "" (not set). */
@@ -148,11 +153,11 @@ export function customFieldsFor(fields: readonly CustomFieldDef[], where: Custom
     .map(({ field }) => field);
 }
 
-/** The fields with a value on a record, as they read there (customFieldsFor). Empty ones are left out. */
-export function shownCustomFields(fields: readonly CustomFieldDef[], raw: unknown, where: CustomFieldPlace = "record"): ShownField[] {
+/** The fields with a value on a record, as they read there (customFieldsFor), dates as the business's `country` writes them. Empty ones are left out. */
+export function shownCustomFields(fields: readonly CustomFieldDef[], raw: unknown, where: CustomFieldPlace = "record", country?: string | null): ShownField[] {
   const values = customValues(raw);
   return customFieldsFor(fields, where).flatMap((f) => {
-    const text = customValueText(f, values[f.key]).trim();
+    const text = customValueText(f, values[f.key], country).trim();
     return text ? [{ key: f.key, label: f.label, text }] : [];
   });
 }

@@ -19,7 +19,7 @@ import { EmptyState, ErrorState, PageError } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { addressLine, formatDate, formatMoney } from "@/lib/format";
+import { addressLine, companyCountry, formatDate, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { ClientShowcaseChip, ClientShowcaseNote } from "../marketing/ClientShowcases";
@@ -482,7 +482,7 @@ export function ClientPage() {
                 const codes = accessFor(p.id);
                 // A label that only repeats the street isn't a name: the address is the heading then.
                 const label = p.label?.trim() && p.label.trim().toLowerCase() !== p.line1.trim().toLowerCase() ? p.label.trim() : null;
-                const custom = shownCustomFields(propertyFields, p.custom_fields);
+                const custom = shownCustomFields(propertyFields, p.custom_fields, "record", companyCountry());
                 return (
                   <li key={p.id} className={styles.prop}>
                     <div className={styles.propMain}>

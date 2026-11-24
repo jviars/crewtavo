@@ -137,4 +137,14 @@ describe("how a picked time is said", () => {
     expect(plain(askedTimeLine({ status: "assessment_scheduled", asked_starts_at: start, asked_ends_at: end }, NY))).toBe("Booked online for Tue, Nov 3, 10:00 to 11:00 AM.");
     expect(askedTimeLine({ status: "new", asked_starts_at: null }, NY)).toBeNull();
   });
+
+  it("says it the way the business's country writes dates and keeps time", () => {
+    const start = new Date(at("2026-11-03", "10:00")).toISOString();
+    const end = new Date(at("2026-11-03", "11:00")).toISOString();
+    expect(bookingSpan(start, end, NY, "US")).toBe(bookingSpan(start, end, NY));
+    expect(plain(bookingSpan(start, end, "America/Toronto", "CA"))).toBe("Tue, Nov 3, 10:00 to 11:00 a.m.");
+    const london = (time: string) => zonedTimeToUtc("2026-11-03", time, "Europe/London").toISOString();
+    expect(plain(bookingSpan(london("10:00"), london("13:00"), "Europe/London", "GB"))).toBe("Tue 3 Nov, 10:00 to 13:00");
+    expect(plain(askedTimeLine({ status: "new", asked_starts_at: london("10:00"), asked_ends_at: london("11:00") }, "Europe/London", "GB")!)).toBe("Asked for Tue 3 Nov, 10:00 to 11:00. It waits for your OK.");
+  });
 });

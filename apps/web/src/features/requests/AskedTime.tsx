@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { api } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
 export interface AskedRequest { id: string; status: string; asked_starts_at?: string | null; asked_ends_at?: string | null }
@@ -16,7 +17,7 @@ type Booked = { booked: true; visit_id: string; emailed: boolean; texted: boolea
 
 /** The time asked for that still waits for an answer, as the office reads it; null when there's none. */
 export function askedFor(request: AskedRequest, timeZone: string): string | null {
-  return request.status === "new" && request.asked_starts_at ? bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone) : null;
+  return request.status === "new" && request.asked_starts_at ? bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone, companyCountry()) : null;
 }
 
 export function BookAskedTime({ request, size, className, onBooked }: { request: AskedRequest; size?: "sm"; className?: string; onBooked?: () => void }) {

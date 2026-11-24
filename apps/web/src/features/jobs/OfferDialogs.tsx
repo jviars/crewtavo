@@ -13,7 +13,7 @@ import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { currencySymbol, formatMoneyCents, moneyCurrency, todayIn } from "@/lib/format";
+import { companyCountry, currencySymbol, formatMoneyCents, moneyCurrency, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { otherWork, priceDrafts, priceLines, priceTotal, reachWords, REPLY_BY_CHOICES, replyByAt, replyByProblem, replyByWords, samePrice, type PickedTime, type PriceDraft, type ReplyBy } from "../subs/offers";
 import { draftAmount, quantityWords } from "../subs/pay";
@@ -70,7 +70,7 @@ function InsuranceCallout({ items, subId }: { items: readonly InsuranceWarningIt
       <Icon name="alert" size={16} />
       <div className="grow">
         <div>Check their insurance</div>
-        {items.map((i) => <div key={`${i.requirement}-${i.problem}`}>{insuranceWarningText(i, "office")}</div>)}
+        {items.map((i) => <div key={`${i.requirement}-${i.problem}`}>{insuranceWarningText(i, "office", companyCountry())}</div>)}
         <div>You can still send it. The offer notes this, and work given without current certificates may cost you at your workers' comp audit. <Link to={`/subs/${subId}`}>Their paperwork</Link></div>
       </div>
     </div>
@@ -99,7 +99,7 @@ export function SendOfferDialog({ pay, name, jobTitle, dates, warning, onClose }
     },
   });
   const nothing = Number(pay.total) <= 0;
-  const preview = offerText({ title: jobTitle, dates, lines: pay.lines, total: pay.total, currency: moneyCurrency() }, { respondBy: replyBy.at, timeZone: session.company.timezone });
+  const preview = offerText({ title: jobTitle, dates, lines: pay.lines, total: pay.total, currency: moneyCurrency(), country: companyCountry() }, { respondBy: replyBy.at, timeZone: session.company.timezone, country: companyCountry() });
   const noVisits = dates.length === 0;
 
   return (

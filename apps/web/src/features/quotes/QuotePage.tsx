@@ -44,7 +44,7 @@ import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { addressLine, currencySymbol, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
+import { addressLine, companyCountry, currencySymbol, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -1060,7 +1060,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
     () =>
       ready
         ? paperDocument({
-            quote: { ...q, pdf_fields: shownCustomFields(fields, q.custom_fields, "pdf") },
+            quote: { ...q, pdf_fields: shownCustomFields(fields, q.custom_fields, "pdf", companyCountry()) },
             lines: q.lines,
             options,
             viewed,

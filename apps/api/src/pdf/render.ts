@@ -43,6 +43,8 @@ export interface RenderJob {
   data: DocumentData;
   currency: string;
   timeZone?: string;
+  /** The business's country (companies.country), whose way the dates are written. */
+  country?: string | null;
   pictures: Array<[string, PdfPicture | null]>;
 }
 
@@ -90,7 +92,7 @@ export async function renderDocument(job: RenderJob, fontDir: string): Promise<U
     const data = picture && Buffer.from(picture.src.data.buffer, picture.src.data.byteOffset, picture.src.data.byteLength);
     pictures.set(url, picture && data && (picture.src.format !== "png" || pngUnpacksToItsSize(data)) ? { ...picture, src: { data, format: picture.src.format } } : null);
   }
-  const { template, company, data, currency, timeZone } = job;
-  const pdf = await renderToBuffer(createElement(DocumentPdf, { template, company, data, currency, timeZone, pictures, font: FONTS }) as Parameters<typeof renderToBuffer>[0]);
+  const { template, company, data, currency, timeZone, country } = job;
+  const pdf = await renderToBuffer(createElement(DocumentPdf, { template, company, data, currency, timeZone, country, pictures, font: FONTS }) as Parameters<typeof renderToBuffer>[0]);
   return new Uint8Array(pdf.buffer, pdf.byteOffset, pdf.byteLength);
 }

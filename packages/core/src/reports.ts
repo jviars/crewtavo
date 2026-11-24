@@ -7,6 +7,7 @@
 import { isUnpaidBreak, type BreakPay } from "./breaks";
 import { lineTotal } from "./money";
 import { lineParts } from "./paving";
+import { dateTag } from "./regional";
 import { addDays, zonedTimeToUtc } from "./time";
 
 export const REPORT_PRESETS = [
@@ -34,9 +35,10 @@ export interface ReportRange {
 }
 
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
-const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const shortDate = (d: string, country?: string | null) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateTag(country), { month: "short", day: "numeric", timeZone: "UTC" });
 
-export function resolveRange(key: ReportPreset, today: string, tz: string, custom?: { from?: string | null; to?: string | null }): ReportRange {
+/** A report's dates; a custom range's label ("Oct 3 – Oct 9") is written the way the business's `country` writes dates. */
+export function resolveRange(key: ReportPreset, today: string, tz: string, custom?: { from?: string | null; to?: string | null }, country?: string | null): ReportRange {
   const [y, m] = today.split("-").map(Number) as [number, number];
   let from: string;
   let to = today;
@@ -74,7 +76,7 @@ export function resolveRange(key: ReportPreset, today: string, tz: string, custo
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
   return {
     key,
-    label: key === "custom" ? `${shortDate(from)} – ${shortDate(to)}` : REPORT_PRESETS.find((p) => p.key === key)!.label,
+    label: key === "custom" ? `${shortDate(from, country)} – ${shortDate(to, country)}` : REPORT_PRESETS.find((p) => p.key === key)!.label,
     from,
     to,
     start: zonedTimeToUtc(from, "00:00", tz).toISOString(),

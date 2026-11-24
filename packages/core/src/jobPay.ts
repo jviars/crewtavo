@@ -5,6 +5,7 @@
  * these are its words, the rules the screens need to agree with it, and the downloads.
  */
 import { toUnits } from "./money";
+import { dateTag } from "./regional";
 import { isCorporation, taxClassificationLabel } from "./subs";
 
 export const JOB_PAY_STATUSES = [
@@ -221,7 +222,8 @@ export function wcAuditTotals(rows: readonly WcAuditRow[]) {
   };
 }
 
-const shortDate = (d: string | null) => (d ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(Date.parse(`${d}T12:00:00Z`)) : "");
+/** "Oct 12, 2026", the way the business's country writes it ("12 Oct 2026" in the UK). */
+const shortDate = (d: string | null, country?: string | null) => (d ? new Intl.DateTimeFormat(dateTag(country), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(Date.parse(`${d}T12:00:00Z`)) : "");
 
 /** What the audit assumed for a document missing a date (private.wc_doc_term), so the office adds it. */
 function assumedText(c: WcCertificate): string {
@@ -235,13 +237,14 @@ function assumedText(c: WcCertificate): string {
 }
 
 /**
- * "Workers' comp certificate, Acme Mutual WC-1, Jan 1, 2026 to Oct 12, 2026 (replaced)". A
- * document missing a date says what the audit assumed, so the office adds it.
+ * "Workers' comp certificate, Acme Mutual WC-1, Jan 1, 2026 to Oct 12, 2026 (replaced)", its dates
+ * written the way the business's `country` writes them. A document missing a date says what the
+ * audit assumed, so the office adds it.
  */
-export function certificateText(c: WcCertificate): string {
+export function certificateText(c: WcCertificate, country?: string | null): string {
   const kind = c.kind === "wc_exemption" ? "Workers' comp exemption" : "Workers' comp certificate";
   const policy = [c.carrier, c.policy_number].filter(Boolean).join(" ");
-  const dates = c.starts_on || c.expires_on ? `${c.starts_on ? shortDate(c.starts_on) : "no start date"} to ${c.expires_on ? shortDate(c.expires_on) : "no end date"}` : "";
+  const dates = c.starts_on || c.expires_on ? `${c.starts_on ? shortDate(c.starts_on, country) : "no start date"} to ${c.expires_on ? shortDate(c.expires_on, country) : "no end date"}` : "";
   return [kind, policy, dates, assumedText(c)].filter(Boolean).join(", ") + (c.replaced ? " (replaced)" : "");
 }
 
@@ -288,14 +291,15 @@ export function yearTotalsCsv(totals: ReturnType<typeof yearTotals>): string {
 
 /**
  * The workers' comp audit for the auditor: one row per sub's pay, with its status (paid, or agreed
- * and not paid yet), the days worked, its amount for those days and the certificates.
+ * and not paid yet), the days worked, its amount for those days and the certificates (their dates as
+ * the business's `country` writes them).
  */
-export function wcAuditCsv(rows: readonly WcAuditRow[]): string {
+export function wcAuditCsv(rows: readonly WcAuditRow[], country?: string | null): string {
   return csv(
     ["Subcontractor", "Job", "Status", "Days worked", "Amount (paid, or agreed if not paid yet)", "Workers' comp", "Covered", "Not covered", "Certificates", "Note"],
     rows.map((r) => [
       r.sub_name, `${r.job_number ? `#${r.job_number} ` : ""}${r.job_title}`, jobPayStatusLabel(r.status), r.work_dates.join("; "), money(r.amount), coverageLabel(r.coverage),
-      money(r.covered_amount), money(r.uncovered_amount), (Array.isArray(r.documents) ? (r.documents as WcCertificate[]) : []).map(certificateText).join("; "), wcPartNote(r) ?? "",
+      money(r.covered_amount), money(r.uncovered_amount), (Array.isArray(r.documents) ? (r.documents as WcCertificate[]) : []).map((c) => certificateText(c, country)).join("; "), wcPartNote(r) ?? "",
     ]),
   );
 }

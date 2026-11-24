@@ -21,7 +21,7 @@ import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { ApiError } from "@/lib/errors";
-import { dateIn, formatDate, formatDateTime, formatMoneyCents, formatTime, moneyCurrency } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, formatDateTime, formatMoneyCents, formatTime, moneyCurrency } from "@/lib/format";
 import { isSub, useSession, type SubLogin } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { quantityWords } from "../subs/pay";
@@ -177,7 +177,7 @@ function MyJobs({ sub }: { sub: SubLogin }) {
   );
 }
 
-const visitDays = (o: Pick<SubOffer, "visits">) => offerDays(o.visits.map((v) => v.scheduled_on));
+const visitDays = (o: Pick<SubOffer, "visits">) => offerDays(o.visits.map((v) => v.scheduled_on), companyCountry());
 
 /** An offer waiting for their answer: what it is, where (the town), when, the work, their price, and Accept or Decline. */
 function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean }) {
@@ -228,7 +228,7 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
           ) : (
             o.visits.map((v) => (
               <span key={v.id} className="offer-day">
-                {v.scheduled_on ? offerDate(v.scheduled_on) : t("Not scheduled yet")}
+                {v.scheduled_on ? offerDate(v.scheduled_on, companyCountry()) : t("Not scheduled yet")}
                 {v.starts_at && <>, {v.ends_at ? t("{start} to {end}", { start: formatTime(v.starts_at, tz), end: formatTime(v.ends_at, tz) }) : formatTime(v.starts_at, tz)}</>}
               </span>
             ))

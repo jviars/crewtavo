@@ -309,6 +309,16 @@ describe("the PDF of a signed estimate", () => {
     expect(has(london!, "Nov 6, 2026")).toBe(true);
   });
 
+  it("writes its dates the way the business's country does, as the pages do, a US business's as it always did", async () => {
+    world.db = memoryDb({ companies: [{ id: COMPANY_ID, country: "US" }] });
+    const [us] = await sheets({ company_signs: false }, signed, "USD", "America/New_York");
+    for (const words of ["November 5, 2026", "Good until December 5, 2026", "Nov 5, 2026"]) expect(has(us!, words), words).toBe(true);
+    world.db = memoryDb({ companies: [{ id: COMPANY_ID, country: "GB" }] });
+    const [uk] = await sheets({ company_signs: false }, signed, "GBP", "Europe/London");
+    for (const words of ["5 November 2026", "Good until 5 December 2026", "6 Nov 2026"]) expect(has(uk!, words), words).toBe(true);
+    expect(has(uk!, "November 5")).toBe(false);
+  });
+
   it("only takes a time zone there is", () => {
     expect([knownTimeZone("America/New_York"), knownTimeZone("Not/A_Zone"), knownTimeZone(undefined)]).toEqual(["America/New_York", undefined, undefined]);
   });

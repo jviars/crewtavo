@@ -8,7 +8,7 @@ import { decryptJson, encryptJson, signToken } from "../src/lib/crypto";
 import { KEPT_LINK, readClientLink } from "../src/lib/links";
 import type { Db } from "../src/lib/supabase";
 import { processAutomations, visitTime } from "../src/services/automations";
-import { arrivalTime, planDay } from "../src/services/routes";
+import { arrivalTime, clockLabel, planDay } from "../src/services/routes";
 import { updateVisit } from "../src/services/schedule";
 import { materializeJob, runTask } from "../src/tasks";
 
@@ -154,6 +154,8 @@ describe("a visit's time in a message", () => {
   it("is the start, or the business's arrival window when it gives one", () => {
     expect(visitTime("2026-10-20T14:00:00Z", "America/Chicago")).toBe(" at 9:00 AM");
     expect(visitTime("2026-10-20T14:00:00Z", "America/Chicago", 120)).toBe(" between 9:00 AM and 11:00 AM");
+    expect(visitTime("2026-10-20T14:00:00Z", "America/Chicago", 120, "US")).toBe(" between 9:00 AM and 11:00 AM");
+    expect(visitTime("2026-10-20T14:00:00Z", "Europe/London", 120, "GB")).toBe(" between 15:00 and 17:00");
   });
 });
 
@@ -1668,5 +1670,10 @@ describe("a day's route", () => {
     // Hours that were set are the hours.
     const set = planDay([visit], { tz: "America/New_York", settings: { working_hours: { start: "08:30", end: "16:00" } } }, "2026-10-19", { now });
     expect([set.stops[0]!.planned.start, set.workEnd]).toEqual([8 * 60 + 30, 16 * 60]);
+  });
+
+  it("says its times the way the business's country keeps time, a US business's as it always did", () => {
+    expect([clockLabel(15 * 60 + 40), clockLabel(15 * 60 + 40, "US"), clockLabel(9 * 60, "US"), clockLabel(0, null)]).toEqual(["3:40 pm", "3:40 pm", "9:00 am", "12:00 am"]);
+    expect([clockLabel(15 * 60 + 40, "CA"), clockLabel(15 * 60 + 40, "AU"), clockLabel(15 * 60 + 40, "GB"), clockLabel(9 * 60 + 5, "GB")]).toEqual(["3:40 p.m.", "3:40 pm", "15:40", "09:05"]);
   });
 });

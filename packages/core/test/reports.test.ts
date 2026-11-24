@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expenseCosts, jobProfit, materialUse, serviceFigures, type ServiceItem, type ServiceLineRow } from "../src";
+import { expenseCosts, jobProfit, materialUse, resolveRange, serviceFigures, type ServiceItem, type ServiceLineRow } from "../src";
 
 const items: ServiceItem[] = [
   { id: "s1", name: "Mowing", category: "Lawn", unit_cost: 20, labor_cost: 15 },
@@ -144,5 +144,15 @@ describe("job costs count labor and materials once", () => {
     const profit = jobProfit([byTon, paving], [], expenses, () => 0);
     expect(profit.jobs[0]).toMatchObject({ expenses: 120, expenses_in_line_costs: 3795, materials: 3680, cost: 3800, profit: 1920 });
     expect(profit.jobs[1]).toMatchObject({ expenses: 55, expenses_in_line_costs: 0 });
+  });
+});
+
+describe("a custom range's name", () => {
+  it("is its first and last day, written the way the business's country writes them", () => {
+    const custom = { from: "2026-10-03", to: "2026-10-09" };
+    expect(resolveRange("custom", "2026-11-21", "America/New_York", custom).label).toBe("Oct 3 – Oct 9");
+    expect(resolveRange("custom", "2026-11-21", "America/New_York", custom, "US").label).toBe("Oct 3 – Oct 9");
+    expect(resolveRange("custom", "2026-11-21", "Europe/London", custom, "GB").label).toBe("3 Oct – 9 Oct");
+    expect(resolveRange("month", "2026-11-21", "Europe/London", custom, "GB").label).toBe(resolveRange("month", "2026-11-21", "America/New_York").label);
   });
 });

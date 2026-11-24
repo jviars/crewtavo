@@ -22,6 +22,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { companyCountry } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { areaWords } from "../settings/salesAreas";
@@ -410,7 +411,7 @@ function NextOpenings({ formId, minutes, leadDays, mostADay, crewId }: { formId?
         <span className="muted small">Nothing is open in the next 60 days with these settings. Check your working days and hours in Settings → Company, and what's on the schedule.</span>
       ) : (
         <>
-          <div className={ui.chips}>{next.data.slots.map((slot) => <span key={slot.starts_at} className="chip">{slotLabel(slot, next.data.timezone, next.data.window_min)}</span>)}</div>
+          <div className={ui.chips}>{next.data.slots.map((slot) => <span key={slot.starts_at} className="chip">{slotLabel(slot, next.data.timezone, next.data.window_min, companyCountry())}</span>)}</div>
           <span className="muted small">In {next.data.timezone_label}, from your working hours and what's already on the schedule.</span>
         </>
       )}

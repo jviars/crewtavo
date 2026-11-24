@@ -32,6 +32,7 @@ import {
   socialSettings,
   timeZoneWords,
 } from "../src/social";
+import { localTime } from "../src/time";
 
 const NY = "America/New_York";
 
@@ -254,6 +255,32 @@ describe("automatic 5-star posts", () => {
     expect(autoPostWhen(at("2026-12-01T15:00:00Z"), NY, now)).toBe("Dec 1 at 10 AM");
     expect(clockWords(at("2026-11-05T18:30:00Z"), NY)).toBe("1:30 PM");
     expect(timeZoneWords(NY)).toBe("Eastern Time");
+  });
+
+  it("say it the way the business's country writes dates and keeps time, as the database will", () => {
+    const now = at("2026-11-02T18:00:00Z");
+    expect(autoPostWhen(at("2026-11-05T18:00:00Z"), NY, now, "US")).toBe("Nov 5 at 1 PM");
+    expect(autoPostWhen(at("2026-11-05T16:00:00Z"), "Europe/London", now, "GB")).toBe("5 Nov at 16:00");
+    expect(autoPostWhen(at("2026-11-03T10:30:00Z"), "Europe/London", now, "GB")).toBe("tomorrow at 10:30");
+    expect(autoPostWhen(at("2026-11-05T15:00:00Z"), "America/Toronto", now, "CA")).toBe("Nov 5 at 10 a.m.");
+    expect(clockWords(at("2026-11-05T02:30:00Z"), "Australia/Sydney", "AU")).toBe("1:30 pm");
+  });
+
+  it("are a US business's words exactly as they were, at every hour and minute", () => {
+    // What they said before a business had a country.
+    const before = (when: Date, timeZone: string) => {
+      const [h, m] = localTime(when, timeZone).split(":").map(Number) as [number, number];
+      return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+    };
+    for (let minutes = 0; minutes < 24 * 60; minutes += 5) {
+      const when = new Date(Date.UTC(2026, 10, 5, 0, minutes));
+      expect(clockWords(when, NY, "US")).toBe(before(when, NY));
+      expect(clockWords(when, "UTC")).toBe(before(when, "UTC"));
+    }
+    for (let d = 10; d < 400; d += 7) {
+      const when = new Date(Date.UTC(2026, 10, d, 15));
+      expect(autoPostWhen(when, NY, at("2026-11-02T18:00:00Z"), "US").split(" at ")[0]).toBe(when.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: NY }));
+    }
   });
 });
 

@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrapOne } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { placeText } from "@/lib/maps";
 import { hasRole, useSession } from "@/lib/session";
 import { PhotosCard } from "../files/PhotosCard";
@@ -36,7 +37,7 @@ export function SnowSiteDetails({ site, team, onEdit, onWeather, onClose }: { si
   const address = property ? placeText(property) : "";
   const members = new Map(team.map((m) => [m.user_id, m]));
   const people = site.people.map((p) => nameOf(members.get(p.user_id)));
-  const service = [site.clear_by && `Clear by ${clockText(site.clear_by)}`, site.priority === 1 && "First priority", site.priority === 3 && "After the others"].filter(Boolean).join(" · ");
+  const service = [site.clear_by && `Clear by ${clockText(site.clear_by, companyCountry())}`, site.priority === 1 && "First priority", site.priority === 3 && "After the others"].filter(Boolean).join(" · ");
   return (
     <Dialog open onClose={onClose} title={customer(site)} description={<>Job #{site.job.number} · {site.job.title}</>} size="lg" focusField={false} className="visit-sheet">
       <div className="dialog-body">

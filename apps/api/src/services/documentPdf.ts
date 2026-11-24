@@ -323,17 +323,18 @@ export function setPdfWorker(file: URL | null) {
 
 /**
  * The PDF of a document on the business's template, with its pictures from the business's storage
- * (`companyId`, the print ticket's). Throws Busy when too many are being made, and TookTooLong when
- * this one runs out of time (pdf/threads.ts).
+ * (`companyId`, the print ticket's), and its dates the way the business's country writes them.
+ * Throws Busy when too many are being made, and TookTooLong when this one runs out of time
+ * (pdf/threads.ts).
  */
 export async function documentPdf(env: Env, input: { companyId: string; template: TemplateSettings; company: DocumentCompany; data: DocumentData; currency: string; timeZone?: string }): Promise<Buffer> {
   const done = await turn();
   try {
     const admin = adminClient(env);
     const urls = documentPictures(input.template, input.company, input.data);
-    const loaded = await Promise.all(urls.map((url) => pictureFor(admin, url, input.companyId)));
+    const [loaded, business] = await Promise.all([Promise.all(urls.map((url) => pictureFor(admin, url, input.companyId))), admin.from("companies").select("country").eq("id", input.companyId).maybeSingle()]);
     const { template, company, data, currency } = input;
-    const job: RenderJob = { template, company, data, currency, timeZone: knownTimeZone(input.timeZone), pictures: urls.map((url, i): [string, PdfPicture | null] => [url, loaded[i] ?? null]) };
+    const job: RenderJob = { template, company, data, currency, timeZone: knownTimeZone(input.timeZone), country: business.data?.country ?? null, pictures: urls.map((url, i): [string, PdfPicture | null] => [url, loaded[i] ?? null]) };
     const fonts = assetDir().fonts;
     const file = pdfWorker();
     if (!file) return Buffer.from(await renderDocument(job, fonts));

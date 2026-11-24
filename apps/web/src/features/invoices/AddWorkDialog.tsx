@@ -17,7 +17,7 @@ import { FormChecks, FormError } from "@/components/ui/Field";
 import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate, formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatDate, formatMoneyCents } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { useSession } from "@/lib/session";
 import styles from "./invoices.module.css";
@@ -89,6 +89,7 @@ export function AddWorkDialog({ invoiceId, jobId, onClose, skipEmpty = false }: 
         materials: data.materials.filter((m) => shownPicked.includes(m.key)),
         prices: Object.fromEntries(data.materials.flatMap((m) => (priceOf(m) == null ? [] : [[m.key, priceOf(m)!]]))),
         timeZone: company.timezone,
+        country: companyCountry(),
       })
     : [];
   // What the draft comes to with them: its Minimum charge line shrinks as they go on.

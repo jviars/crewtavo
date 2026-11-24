@@ -6,6 +6,7 @@
  */
 import { greetingName } from "./automations";
 import { isCallingCode } from "./phone";
+import { dateTag } from "./regional";
 import { addDays } from "./time";
 import { msg } from "./i18n";
 
@@ -299,13 +300,13 @@ export type SubAccessState = "none" | "invited" | "active";
 /**
  * "Signed in Oct 12", "Hasn't signed in yet", "Can't sign in", for the sub's page; "Own sign-in" for
  * someone who signs in with an account of their own (`shared`), whose sign-ins aren't the office's
- * to see.
+ * to see. The day is written the way the business's `country` writes it ("Signed in 12 Oct" in the UK).
  */
-export function subAccessText(access: { state: SubAccessState; last_sign_in_at?: string | null; shared?: boolean }, timeZone = "UTC"): string {
+export function subAccessText(access: { state: SubAccessState; last_sign_in_at?: string | null; shared?: boolean }, timeZone = "UTC", country?: string | null): string {
   if (access.state === "none") return "Can't sign in";
   if (access.shared) return "Own sign-in";
   if (access.state === "invited" || !access.last_sign_in_at) return "Hasn't signed in yet";
-  const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone }).format(Date.parse(access.last_sign_in_at));
+  const day = new Intl.DateTimeFormat(dateTag(country), { month: "short", day: "numeric", timeZone }).format(Date.parse(access.last_sign_in_at));
   return `Signed in ${day}`;
 }
 

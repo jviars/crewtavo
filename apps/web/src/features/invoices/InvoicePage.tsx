@@ -28,7 +28,7 @@ import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { addDaysIso, currencySymbol, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
+import { addDaysIso, companyCountry, currencySymbol, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -561,7 +561,7 @@ function InvoicePageScreen() {
           {(charge?.status === "waiting" || onNewCard) && charge && (
             <div className="callout callout-info">
               <Icon name="card" size={16} />
-              <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone)}.`}</div>
+              <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone, undefined, companyCountry())}.`}</div>
             </div>
           )}
           {bankNote && <div className="callout callout-info"><Icon name="clock" size={16} /><div className="grow">{bankNote}</div></div>}
@@ -592,7 +592,7 @@ function InvoicePageScreen() {
               <Icon name="card" size={16} />
               <div className="grow">
                 {charge.status === "failed"
-                  ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone)}.`
+                  ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone, undefined, companyCountry())}.`
                   : `Autopay needs ${clientName}: ${needsClientReason(charge)}.`}
               </div>
               <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
@@ -782,7 +782,7 @@ function InvoicePaper({ invoice, lateFeeNote }: { invoice: DocumentInvoice & { c
           <DocumentSheet
             template={contractTemplate(template, contract)}
             company={letterhead.data ?? documentCompany(session.company)}
-            data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf") }, { timeZone: session.company.timezone, contract, lateFeeNote })}
+            data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf", companyCountry()) }, { timeZone: session.company.timezone, contract, lateFeeNote })}
           />
         </div>
       ) : (

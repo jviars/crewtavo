@@ -4,6 +4,7 @@
  * tomorrow for three weeks.
  * Pure: the caller reads the schedule and passes the busy times in.
  */
+import { dateTag } from "./regional";
 import { scheduleSettings } from "./routing";
 import { addDays, arrivalWindowMin, localDate, zonedTimeToUtc } from "./time";
 
@@ -126,21 +127,27 @@ export function slotStep(settings: unknown): number {
 export const changeableOnline = (visit: { status: string; scheduled_on: string | null }, today: string, leadDays = SLOT_LEAD_DAYS) =>
   visit.status === "scheduled" && Boolean(visit.scheduled_on) && visit.scheduled_on! >= addDays(today, leadDays);
 
-const clock = (ms: number, timeZone: string) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+// The times and days below are written the way the business's country writes them (core regional
+// dateTag): "Tue, Nov 10, 9:00–11:00 AM" in the US, "Tue 10 Nov, 9:00–11:00" in the UK. Without a
+// country, the US's way.
+const clock = (ms: number, timeZone: string, country?: string | null) => new Date(ms).toLocaleTimeString(dateTag(country), { hour: "numeric", minute: "2-digit", timeZone });
+
+/** The half of the day a time ends with, " AM", " p.m.", " pm", which two times can share; none on a 24-hour clock. */
+const HALF = /\s(?:[AP]M|[ap]\.m\.|[ap]m)$/;
 
 /** "9:00 AM", or with the business's arrival window "9:00–11:00 AM" (one AM or PM when both ends share it). */
-export function slotTime(startsAt: string, timeZone: string, windowMin = 0): string {
-  const start = clock(Date.parse(startsAt), timeZone);
+export function slotTime(startsAt: string, timeZone: string, windowMin = 0, country?: string | null): string {
+  const start = clock(Date.parse(startsAt), timeZone, country);
   if (!windowMin) return start;
-  const end = clock(Date.parse(startsAt) + windowMin * 60_000, timeZone);
-  const half = /\s[AP]M$/.exec(end)?.[0];
+  const end = clock(Date.parse(startsAt) + windowMin * 60_000, timeZone, country);
+  const half = HALF.exec(end)?.[0];
   return half && start.endsWith(half) ? `${start.slice(0, -half.length)}–${end}` : `${start}–${end}`;
 }
 
 /** "Tue, Nov 10, 9:00–11:00 AM", or "Tue, Nov 10" for a whole day. */
-export function slotLabel(slot: { date: string; starts_at: string | null }, timeZone: string, windowMin = 0): string {
-  const day = new Date(`${slot.date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
-  return slot.starts_at ? `${day}, ${slotTime(slot.starts_at, timeZone, windowMin)}` : day;
+export function slotLabel(slot: { date: string; starts_at: string | null }, timeZone: string, windowMin = 0, country?: string | null): string {
+  const day = new Date(`${slot.date}T12:00:00Z`).toLocaleDateString(dateTag(country), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  return slot.starts_at ? `${day}, ${slotTime(slot.starts_at, timeZone, windowMin, country)}` : day;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -241,12 +248,12 @@ export function timeZoneLabel(timeZone: string, at = new Date()): string {
 }
 
 /** "Tue, Jan 14, 10:00 to 11:00 AM": a time asked for or booked, start to end, as the office reads it. */
-export function bookingSpan(startsAt: string, endsAt: string | null, timeZone: string): string {
-  const day = new Date(startsAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone });
-  const start = clock(Date.parse(startsAt), timeZone);
+export function bookingSpan(startsAt: string, endsAt: string | null, timeZone: string, country?: string | null): string {
+  const day = new Date(startsAt).toLocaleDateString(dateTag(country), { weekday: "short", month: "short", day: "numeric", timeZone });
+  const start = clock(Date.parse(startsAt), timeZone, country);
   if (!endsAt) return `${day}, ${start}`;
-  const end = clock(Date.parse(endsAt), timeZone);
-  const half = /\s[AP]M$/.exec(end)?.[0];
+  const end = clock(Date.parse(endsAt), timeZone, country);
+  const half = HALF.exec(end)?.[0];
   return `${day}, ${half && start.endsWith(half) ? start.slice(0, -half.length) : start} to ${end}`;
 }
 
@@ -255,8 +262,8 @@ export function bookingSpan(startsAt: string, endsAt: string | null, timeZone: s
  * notification: asked for and waiting while the request is new, booked once it isn't. Null for a
  * request with no time.
  */
-export function askedTimeLine(request: { status: string; asked_starts_at?: string | null; asked_ends_at?: string | null }, timeZone: string): string | null {
+export function askedTimeLine(request: { status: string; asked_starts_at?: string | null; asked_ends_at?: string | null }, timeZone: string, country?: string | null): string | null {
   if (!request.asked_starts_at) return null;
-  const when = bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone);
+  const when = bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone, country);
   return request.status === "new" ? `Asked for ${when}. It waits for your OK.` : `Booked online for ${when}.`;
 }

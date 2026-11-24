@@ -183,6 +183,8 @@ export function contractFacts(input: ContractInput) {
     warranty: input.warranty ?? null,
     // {Total} and {Deposit} in the business's currency, when it isn't US dollars (contractInput).
     ...(input.currency ? { currency: input.currency } : {}),
+    // {Date} the way the business's country writes it, when it isn't the US (contractInput).
+    ...(input.country ? { country: input.country } : {}),
   };
 }
 
@@ -360,7 +362,7 @@ export interface ManualApproval {
 export async function manualApproval(db: Db, companyId: string, quoteId: string, input: { name: string; optionId: string | null }): Promise<ManualApproval> {
   const [quoteResult, companyResult, templates, options] = await Promise.all([
     db.from("quotes").select(MANUAL_FIELDS).eq("id", quoteId).eq("company_id", companyId).maybeSingle(),
-    db.from("companies").select("name, phone, timezone, currency, trade_preset").eq("id", companyId).maybeSingle(),
+    db.from("companies").select("name, phone, timezone, currency, country, trade_preset").eq("id", companyId).maybeSingle(),
     db.from("document_templates").select("id, is_default, settings").eq("company_id", companyId),
     loadOptions(db, companyId, quoteId),
   ]);

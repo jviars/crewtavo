@@ -13,6 +13,7 @@ import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { Spinner } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { errorMessage } from "@/lib/errors";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { useCustomFields } from "../../customFields/CustomFields";
 import { documentCompany, quoteDate, quoteDocument, readApproval, useLetterhead, useQuoteTemplate } from "../../documents/data";
@@ -96,7 +97,7 @@ function SignedScreen({ quote }: { quote: EstimateQuote }) {
       sent_at: details.data?.sent_at ?? null,
       created_at: details.data?.created_at ?? null,
       // The business's fields marked to print, as the quote's own PDF prints them.
-      pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
+      pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf", companyCountry()),
     },
     linesWithOptions(quote.lines, details.data?.lineOptions),
     {

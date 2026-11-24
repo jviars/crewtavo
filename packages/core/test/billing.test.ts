@@ -173,5 +173,8 @@ describe("time and materials", () => {
     ]);
     // The gasket kit has no price list item: it goes on once the office prices it.
     expect(workLines({ hours: [], rate: labor, materials, prices: { "name:gasket kit|ea": 12 }, timeZone: "UTC" }).at(-1)).toMatchObject({ name: "Gasket kit", unit_price: 12, material_ids: ["m3"] });
+    // The days are written the way the business's country writes them; a US business's as they were.
+    expect(workLines({ hours, rate: labor, materials, timeZone: "America/New_York", country: "US" })[0]!.description).toBe("Logged hours: Oct 5, Oct 6");
+    expect(workLines({ hours, rate: labor, materials, timeZone: "Europe/London", country: "GB" })[0]!.description).toBe("Logged hours: 5 Oct, 6 Oct");
   });
 });

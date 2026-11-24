@@ -425,7 +425,7 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
  * A quote's or invoice's custom fields the business marked to print (pdf_fields) and to show on the
  * Hub (portal_fields), as they read: the other fields, and the values behind them, are never sent.
  */
-async function hubFields(admin: ReturnType<typeof adminClient>, companyId: string, record: "quote" | "invoice", values: unknown) {
+async function hubFields(admin: ReturnType<typeof adminClient>, companyId: string, record: "quote" | "invoice", values: unknown, country?: string | null) {
   const { data } = await admin
     .from("custom_field_definitions")
     .select("key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at")
@@ -433,7 +433,7 @@ async function hubFields(admin: ReturnType<typeof adminClient>, companyId: strin
     .eq("record_type", record)
     .is("archived_at", null)
     .order("sort");
-  const shown = (where: "pdf" | "portal") => shownCustomFields(data ?? [], values, where).map(({ label, text }) => ({ label, text }));
+  const shown = (where: "pdf" | "portal") => shownCustomFields(data ?? [], values, where, country).map(({ label, text }) => ({ label, text }));
   return { pdf_fields: shown("pdf"), portal_fields: shown("portal") };
 }
 
@@ -467,7 +467,7 @@ publicRoutes.get("/hub/:token", async (c) => {
       hubTemplate(admin, l.c, quote.template_id, trade, signed ? quote.approval : null),
       quote.roof_package_id ? admin.from("roof_packages").select("name, warranty, roof_service_id").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
       l.pv ? null : homeLink(c, l.c, quote.client_id, l),
-      hubFields(admin, l.c, "quote", quote.custom_fields),
+      hubFields(admin, l.c, "quote", quote.custom_fields, company.country),
       // The business's Google rating and reviews, when it shows them on quotes.
       quoteReviewsFor(admin, l.c).catch((error) => {
         console.error("Couldn't read the reviews for a quote", error);
@@ -646,7 +646,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     hubPayment(c.env, admin, l.c, invoice.id),
     hubTemplate(admin, l.c, null, trade),
     hubDrawings(admin, l.c, "invoice_id", invoice.id),
-    hubFields(admin, l.c, "invoice", invoice.custom_fields),
+    hubFields(admin, l.c, "invoice", invoice.custom_fields, company.country),
     invoiceChecklists(admin, l.c, invoice),
     admin.from("companies").select("settings->late_fee").eq("id", l.c).maybeSingle(),
   ]);
@@ -739,7 +739,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const [lineRows, options, business] = await Promise.all([
     admin.from("quote_line_items").select("id, option_id, quantity, unit_price, taxable, optional, selected, option_group").eq("company_id", l.c).eq("quote_id", l.id),
     loadOptions(admin, l.c, l.id),
-    admin.from("companies").select("name, phone, timezone, currency, trade_preset").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, timezone, currency, country, trade_preset").eq("id", l.c).maybeSingle(),
   ]);
   const lines = must(lineRows);
 

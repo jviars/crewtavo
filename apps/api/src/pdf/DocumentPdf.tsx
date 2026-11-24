@@ -14,6 +14,7 @@
  * two look alike.
  */
 import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, printsFullSheet, type LetterheadPicture, type TemplateSettings } from "@crewtavo/core/documents";
+import { dateTag } from "@crewtavo/core/regional";
 import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import type { Style } from "@react-pdf/types";
 import type { ComponentProps, ReactNode } from "react";
@@ -21,7 +22,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { contractBlocks, type ContractBlock } from "../../../web/src/lib/html";
 import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, sheetOf } from "../../../web/src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "../../../web/src/features/documents/types";
-import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
+import { initials, inkOn, licenseLine, quantityLabel, readableOnWhite, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
 import { richText } from "./richText";
 
 /** A picture as it goes in the PDF (a PNG or JPEG's bytes), with its size in pixels. */
@@ -45,6 +46,8 @@ export interface DocumentPdfProps {
   currency: string;
   /** Where the person printing is ("America/New_York"): the day beside a signature is theirs, as on the page. */
   timeZone?: string;
+  /** Where the business is (companies.country): its dates are written that way, "22 October 2026" in the UK; the US's way without one. */
+  country?: string | null;
 }
 
 /** CSS px (96 an inch) in points (72). */
@@ -113,6 +116,30 @@ interface Look {
   /** Money in the business's currency, as the pages show it (lib/format formatMoneyCents). */
   money: Intl.NumberFormat;  /** The time zone the dates beside signatures are in. */
   timeZone?: string;
+  /** The Intl tag dates are written with: the business's country's (core regional dateTag). */
+  dateTag: string;
+}
+
+/**
+ * "2026-10-22" or a timestamp as "October 22, 2026", as the pages write a document's dates
+ * (documents/words.ts longDate, with the same options), the way the business's country writes them:
+ * "22 October 2026" in the UK.
+ */
+function longDate(value: string | null | undefined, look: Pick<Look, "dateTag">): string {
+  if (!value) return "";
+  const d = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(look.dateTag, { month: "long", day: "numeric", year: "numeric" });
+}
+
+/**
+ * "Oct 24, 2026" for the date beside a signature (documents/words.ts shortDate): a moment's day in
+ * the time zone of whoever is printing, a day ("2026-10-24") that day anywhere; "24 Oct 2026" in the UK.
+ */
+function shortDate(value: string | null | undefined, look: Pick<Look, "dateTag" | "timeZone">): string {
+  if (!value) return "";
+  const day = value.length === 10;
+  const d = new Date(day ? `${value}T12:00:00` : value);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(look.dateTag, { month: "short", day: "numeric", year: "numeric", ...(!day && look.timeZone && { timeZone: look.timeZone }) });
 }
 
 /** Where things sit on the sheet, in CSS px. */
@@ -158,12 +185,12 @@ function moneyIn(currency: string): Intl.NumberFormat {
   }
 }
 
-export function DocumentPdf({ template, company, data, pictures, font, currency, timeZone }: DocumentPdfProps) {
+export function DocumentPdf({ template, company, data, pictures, font, currency, timeZone, country }: DocumentPdfProps) {
   const estimate = data.kind === "estimate";
   const kind = estimate ? "Estimate" : "Invoice";
   const color = documentColor(template, company.settings);
   const classic = template.font === "classic";
-  const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone };
+  const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone, dateTag: dateTag(country) };
   const own = ownLetterhead(template);
   const words = template.footer.trim();
   // The business's paper: letter, or A4 outside the US and Canada (core paperSize).
@@ -213,12 +240,12 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
           </T>
         ))}
 
-        {sections.map((section, n) => (!estimate || section.place !== "terms" ? <Section key={`s${n}`} section={section} pictures={pictures} timeZone={timeZone} /> : null))}
+        {sections.map((section, n) => (!estimate || section.place !== "terms" ? <Section key={`s${n}`} section={section} pictures={pictures} look={look} /> : null))}
 
         {signs && (
           <View wrap={false} style={{ marginTop: px(GAP) }}>
             {terms.length > 0 && <T size={11.5} style={{ color: TEXT_2, marginBottom: px(4) }}>By signing, you agree to this estimate and the terms on the pages that follow.</T>}
-            <Signatures template={template} company={company} signatures={data.signatures} pictures={pictures} timeZone={timeZone} />
+            <Signatures template={template} company={company} signatures={data.signatures} pictures={pictures} look={look} />
           </View>
         )}
         {terms.length > 0 && (
@@ -226,7 +253,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
             <T break minPresenceAhead={px(60)} size={17} lh={1.3} style={{ paddingBottom: px(8), borderBottomWidth: px(2), borderBottomColor: look.color, fontWeight: 700, color: look.textColor }}>
               Terms and conditions
             </T>
-            {terms.map((section) => <Section key={section.id} section={section} pictures={pictures} timeZone={timeZone} />)}
+            {terms.map((section) => <Section key={section.id} section={section} pictures={pictures} look={look} />)}
           </>
         )}
       </Page>
@@ -240,7 +267,7 @@ const eyebrow = (more: Style = {}): Style => ({ fontWeight: 700, letterSpacing: 
 /** "Bill to" and the client; the document's name, number and dates. */
 function Parties({ data, look }: { data: DocumentData; look: Look }) {
   const estimate = data.kind === "estimate";
-  const meta = [data.number != null && `No. ${data.number}`, data.date && longDate(data.date), estimate && data.validUntil && `Good until ${longDate(data.validUntil)}`, !estimate && data.dueOn && `Due ${longDate(data.dueOn)}`].filter(Boolean);
+  const meta = [data.number != null && `No. ${data.number}`, data.date && longDate(data.date, look), estimate && data.validUntil && `Good until ${longDate(data.validUntil, look)}`, !estimate && data.dueOn && `Due ${longDate(data.dueOn, look)}`].filter(Boolean);
   return (
     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
       <View style={{ flexShrink: 1, marginRight: px(24) }}>
@@ -365,7 +392,7 @@ const STRONG: Style = { fontWeight: 700, color: INK };
 type ContractRowBlock = Extract<ContractBlock, { kind: "row" }>;
 
 /** A contract section: its title, its paragraphs, lists, quotes and tables, and the box for the customer's initials. */
-function Section({ section, pictures, timeZone }: { section: DocumentSection; pictures: PdfPictures; timeZone?: string }) {
+function Section({ section, pictures, look }: { section: DocumentSection; pictures: PdfPictures; look: Look }) {
   // Read from its HTML in the browser that sent it (a server has no HTML parser): else its words alone.
   const blocks = section.blocks ?? contractBlocks(section.html);
   const title = section.title.trim();
@@ -414,7 +441,7 @@ function Section({ section, pictures, timeZone }: { section: DocumentSection; pi
     <View style={{ marginTop: px(TITLE_GAP) }}>
       {!!title && <T minPresenceAhead={px(40)} lh={1.4} style={STRONG}>{title}</T>}
       {out}
-      {section.initials && <Initials section={section} pictures={pictures} timeZone={timeZone} />}
+      {section.initials && <Initials section={section} pictures={pictures} look={look} />}
     </View>
   );
 }
@@ -422,12 +449,12 @@ function Section({ section, pictures, timeZone }: { section: DocumentSection; pi
 const PNG = /^data:image\/png;base64,/;
 
 /** The customer's initials on a section, or the box they go in. */
-function Initials({ section, pictures, timeZone }: { section: DocumentSection; pictures: PdfPictures; timeZone?: string }) {
+function Initials({ section, pictures, look }: { section: DocumentSection; pictures: PdfPictures; look: Look }) {
   const done = section.initialed && PNG.test(section.initialed.image) ? section.initialed : null;
   const picture = done ? pictures.get(done.image) ?? null : null;
   return (
     <View wrap={false} style={{ marginTop: px(CLAUSE_GAP), flexDirection: "row", justifyContent: "flex-end", alignItems: "flex-end" }}>
-      <T size={11} style={{ marginRight: px(10), color: TEXT_2 }}>Initials{done?.date ? ` · ${shortDate(done.date, timeZone)}` : ""}</T>
+      <T size={11} style={{ marginRight: px(10), color: TEXT_2 }}>Initials{done?.date ? ` · ${shortDate(done.date, look)}` : ""}</T>
       <View style={{ position: "relative", width: px(96), height: px(34), borderBottomWidth: px(1), borderBottomColor: INK }}>
         {picture && <Image src={picture.src} style={{ position: "absolute", left: px(6), bottom: px(-6), height: px(40), width: px(Math.min(84, (40 * picture.width) / picture.height)), objectFit: "contain" }} />}
       </View>
@@ -440,27 +467,27 @@ const signsAnything = (template: TemplateSettings, signatures: DocumentData["sig
   template.customer_signs || template.company_signs || Boolean(signatures?.customer?.image) || Boolean(signatures?.company?.image);
 
 /** The signature lines the template asks for, and any line someone already signed. */
-function Signatures({ template, company, signatures, pictures, timeZone }: { template: TemplateSettings; company: DocumentCompany; signatures: DocumentData["signatures"]; pictures: PdfPictures; timeZone?: string }) {
+function Signatures({ template, company, signatures, pictures, look }: { template: TemplateSettings; company: DocumentCompany; signatures: DocumentData["signatures"]; pictures: PdfPictures; look: Look }) {
   const customer = signatures?.customer ?? null;
   const business = signatures?.company ?? null;
   const showCustomer = template.customer_signs || Boolean(customer?.image);
   const showCompany = template.company_signs || Boolean(business?.image);
   return (
     <View style={{ flexDirection: "row", paddingTop: px(18) }}>
-      {showCustomer && <SignatureLine label={template.customer_label.trim() || "Customer"} signature={customer} dates={template.sign_dates} pictures={pictures} timeZone={timeZone} />}
+      {showCustomer && <SignatureLine label={template.customer_label.trim() || "Customer"} signature={customer} dates={template.sign_dates} pictures={pictures} look={look} />}
       {showCustomer && showCompany && <View style={{ width: px(36) }} />}
-      {showCompany && <SignatureLine label={companySignatureLabel(template, company.name)} signature={business} dates={template.sign_dates} pictures={pictures} timeZone={timeZone} />}
+      {showCompany && <SignatureLine label={companySignatureLabel(template, company.name)} signature={business} dates={template.sign_dates} pictures={pictures} look={look} />}
     </View>
   );
 }
 
-function SignatureLine({ label, signature, dates, pictures, timeZone }: { label: string; signature: DocumentSignature | null; dates: boolean; pictures: PdfPictures; timeZone?: string }) {
+function SignatureLine({ label, signature, dates, pictures, look }: { label: string; signature: DocumentSignature | null; dates: boolean; pictures: PdfPictures; look: Look }) {
   const picture = signature?.image ? pictures.get(signature.image) ?? null : null;
   return (
     <View style={{ flex: 1 }}>
       <View style={{ position: "relative", height: px(56), borderBottomWidth: px(1), borderBottomColor: INK }}>
         {picture && <Image src={picture.src} style={{ position: "absolute", left: 0, bottom: px(-10), height: px(64), width: px(Math.min(260, (64 * picture.width) / picture.height)), objectFit: "contain" }} />}
-        {dates && picture && signature?.date && <T size={12} style={{ position: "absolute", right: 0, bottom: px(5) }}>{shortDate(signature.date, timeZone)}</T>}
+        {dates && picture && signature?.date && <T size={12} style={{ position: "absolute", right: 0, bottom: px(5) }}>{shortDate(signature.date, look)}</T>}
       </View>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: px(6) }}>
         <T size={11} style={{ color: TEXT_2 }}>{label}</T>

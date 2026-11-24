@@ -241,6 +241,7 @@ export function contractPreview(input: {
     optionName: null,
     warranty: null,
     currency: input.company.currency,
+    country: companyCountry(),
   });
   // Nobody initials an invoice (build.ts invoiceContract), so its sample has no box for it.
   const sections = resolveSections({ kind, template, library: input.library }).map((s) => ({ id: s.id, title: s.title, html: fillIn(s.body, values), place: s.place, initials: estimate && s.initials }));
