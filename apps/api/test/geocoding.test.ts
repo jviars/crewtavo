@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { cronMatches } from "../src/lib/cron";
 import { adminClient } from "../src/lib/supabase";
-import { geocodeAddress, lookUpAddress } from "../src/services/external";
+import { geocodeAddress, lookUpAddress, pinpoints } from "../src/services/external";
 import { geocodeLater, relocatePins, resetRelocatePins, saveLocation } from "../src/services/properties";
 import { CRON_TASKS, runTask, TASKS } from "../src/tasks";
 
@@ -93,6 +93,27 @@ describe("looking an address up", () => {
     expect(await lookUpAddress("2 Bank Street, Leeds", { country: "GB" })).toBe("none");
     serve((url) => (url.host === "photon.komoot.io" ? new Response("busy", { status: 503 }) : census([PELL])));
     expect(await lookUpAddress("2 Bank Street, Leeds", { country: "GB" })).toBe("failed");
+  });
+
+  it("keeps a spot from OpenStreetMap only when it pinpoints the address, not just its town", async () => {
+    const at = (properties: Record<string, string>) => ({ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "GB", ...properties } });
+    const town = at({ type: "city", name: "Leeds" });
+    const street = at({ type: "street", name: "Bank Street", city: "Leeds", postcode: "LS1 5AB" });
+    serve((url) => (url.host === "photon.komoot.io" ? { features: [town] } : census([])));
+    expect(await lookUpAddress("2 Bank Street, Leeds, LS1 5AB", { country: "GB" })).toBe("none");
+    // The measuring map only needs to go there: the town will do.
+    expect(await lookUpAddress("2 Bank Street, Leeds, LS1 5AB", { country: "GB", world: true })).toMatchObject({ lat: 53.79, country: "GB" });
+    serve((url) => (url.host === "photon.komoot.io" ? { features: [town, street] } : census([])));
+    expect(await lookUpAddress("2 Bank Street, Leeds, LS1 5AB", { country: "GB" })).toMatchObject({ lat: 53.79, source: "openstreetmap" });
+    expect(await lookUpAddress("2 Bank Street, Leeds", { country: "GB" })).toBe("none");
+
+    expect(pinpoints({ housenumber: "2", street: "Bank Street" }, "2 Bank Street, Leeds")).toBe(true);
+    expect(pinpoints({ type: "house" }, "Rose Cottage, Leeds")).toBe(true);
+    expect(pinpoints({ type: "street", postcode: "LS1 5AB" }, "2 Bank St, Leeds, ls15ab")).toBe(true);
+    expect(pinpoints({ osm_key: "highway", postcode: "M5V 1A1" }, "1 King St W, Toronto, ON M5V 1A1")).toBe(true);
+    expect(pinpoints({ type: "street", postcode: "LS2 7AB" }, "2 Bank St, Leeds, LS1 5AB")).toBe(false);
+    expect(pinpoints({ type: "district", postcode: "LS1 5AB" }, "2 Bank St, Leeds, LS1 5AB")).toBe(false);
+    expect(pinpoints({ type: "city" }, "Leeds")).toBe(false);
   });
 
   it("looks in the US as always for a business there", async () => {
@@ -207,7 +228,7 @@ describe("the pins task", () => {
     const down = world({ lost: lost.slice(0, 1), geocode: () => new Response("busy", { status: 503 }) });
     expect(await run(env)).toEqual({ ...NOTHING, unanswered: 1 });
     expect(down.calls.some((c) => c.path === "rpc/property_found")).toBe(false);
-    const up = world({ lost, geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "gb" } }] } : census([])) });
+    const up = world({ lost, geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { housenumber: "2", street: "Bank Street", countrycode: "gb" } }] } : census([])) });
     expect(await run(env)).toMatchObject({ placed: 1 });
     expect(up.calls.find((c) => c.path === "rpc/properties_to_find")!.body).toEqual({ p_after: "p1", p_limit: 12 });
     expect(await run(env)).toMatchObject({ placed: 2 });
@@ -255,7 +276,7 @@ describe("the pins task", () => {
   it("looks a spot up in the property's country", async () => {
     const { lookups, saves } = world({
       rows: [property("p1", "2 Bank Street", { city: "Leeds", region: null, postal_code: "LS1 5AB", country: "GB", lat: 53.8, lng: -1.5 })],
-      geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "GB" } }] } : census([PELL])),
+      geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { housenumber: "2", street: "Bank Street", countrycode: "GB" } }] } : census([PELL])),
     });
     expect(await run(withKey)).toEqual({ ...NOTHING, looked_up: 1, moved: 1 });
     expect(lookups().map((c) => [c.url.host, c.url.searchParams.get("q"), c.url.searchParams.get("countrycode")])).toEqual([["photon.komoot.io", "2 Bank Street, Leeds, LS1 5AB", "GB"]]);
@@ -305,7 +326,7 @@ describe("the pins task", () => {
     const { calls, lookups } = world({
       shops,
       companies,
-      geocode: (a, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "GB" } }] } : /Main/.test(a) ? census([PELL]) : census([])),
+      geocode: (a, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { housenumber: "2", street: "Bank Street", countrycode: "GB" } }] } : /Main/.test(a) ? census([PELL]) : census([])),
     });
     expect(await run(withKey)).toEqual({ ...NOTHING, shops: 4 });
     // Each in its business's country.

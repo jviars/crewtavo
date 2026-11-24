@@ -3,6 +3,7 @@
  * The scheduling itself is in services/schedule.ts, which AI assistants' tools use too.
  */
 import { arrivalWindowMin, DISPATCH, OFFICE, SALES, timeZoneLabel, WITH_SUBS } from "@crewtavo/core";
+import { countryCode } from "@crewtavo/core/countries";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -50,12 +51,13 @@ schedule.post("/jobs/:id/generate-visits", requireUser, requireCompany(DISPATCH,
 
 /**
  * Address -> coordinates (the shop address for route planning, and similar), in the business's
- * country. `world` also looks elsewhere, for the measuring map; the answer says which country it found.
+ * country, or the one Settings → Company is about to save with the address. `world` also looks
+ * elsewhere, for the measuring map; the answer says which country it found.
  */
 schedule.post("/geocode", requireUser, requireCompany(), async (c) => {
-  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional() }));
+  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional(), country: z.string().optional() }));
   const { data: company } = await c.var.db.from("companies").select("country").eq("id", c.var.companyId).maybeSingle();
-  const result = await geocodeAddress(body.address, { world: body.world, country: company?.country });
+  const result = await geocodeAddress(body.address, { world: body.world, country: countryCode(body.country) ?? company?.country });
   return c.json(result ? { found: true, ...result } : { found: false });
 });
 

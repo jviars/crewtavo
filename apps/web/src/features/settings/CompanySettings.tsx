@@ -121,8 +121,10 @@ export function CompanySettings() {
       const oldAddress = (details.data?.address ?? {}) as Record<string, string>;
       let depot = previous.depot ?? null;
       let located: boolean | null = null;
-      if (address.line1 && (address.line1 !== oldAddress.line1 || address.city !== oldAddress.city || !depot)) {
-        const hit = await api.post<{ found: boolean; lat?: number; lng?: number; source?: string }>("/geocode", { address: [address.line1, address.city, address.region, address.postal_code].filter(Boolean).join(", ") }).catch(() => ({ found: false }) as { found: boolean; lat?: number; lng?: number; source?: string });
+      // Looked up in the country being saved with it, again when only the country changed.
+      const movedCountry = Boolean(details.data) && v.country !== businessCountry(details.data!);
+      if (address.line1 && (address.line1 !== oldAddress.line1 || address.city !== oldAddress.city || !depot || movedCountry)) {
+        const hit = await api.post<{ found: boolean; lat?: number; lng?: number; source?: string }>("/geocode", { address: [address.line1, address.city, address.region, address.postal_code].filter(Boolean).join(", "), country: v.country }).catch(() => ({ found: false }) as { found: boolean; lat?: number; lng?: number; source?: string });
         located = hit.found;
         // With the geocoder that found it, as the server keeps for every spot on the map.
         depot = hit.found ? { lat: hit.lat, lng: hit.lng, source: hit.source } : null;

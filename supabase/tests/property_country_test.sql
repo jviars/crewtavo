@@ -139,6 +139,30 @@ insert into private.properties_to_find (property_id) values (:'france');
 delete from public.properties where id = :'france';
 select t1124p.check(t1124p.waiting() = '', 'a property deleted leaves it');
 
+\o
+\echo 'Billing countries, and spots found in the old country'
+\o /dev/null
+reset role;
+set local role authenticated;
+select t1124p.as_user(:'olive');
+-- A Stripe customer in Canada, of the business now in Ireland: no form says where a new property of
+-- theirs is, so it's in Ireland. Only a billing address in the US keeps one there.
+insert into public.clients (company_id, display_name, billing_address) values (:'co', 'Cal Stripe', '{"line1": "1 King St", "country": "CA"}') returning id as ca_client \gset
+insert into public.properties (company_id, client_id, line1) values (:'co', :'ca_client', '8 Bank St') returning id as ca_billed \gset
+select t1124p.check(t1124p.country(:'ca_billed') = 'IE', 'a billing address outside the US doesn''t keep a new property in the US');
+insert into public.properties (company_id, client_id, line1) values (:'co', :'client', '9 Bank St') returning id as osm \gset
+reset role;
+update public.properties set lat = 53.35, lng = -6.26, located_by = 'openstreetmap' where id = :'osm';
+update public.properties set lat = 53.36, lng = -6.25 where id = :'ca_billed';
+update public.companies set country = 'GB' where id = :'co';
+select t1124p.check(t1124p.country(:'osm') = 'GB' and (select lat is null and lng is null and located_by is null from public.properties where id = :'osm'),
+  'a spot OpenStreetMap found in the old country is cleared when the business moves');
+select t1124p.check(t1124p.waiting() like '%9 Bank St%', 'and looked up again in the new one');
+select t1124p.check(t1124p.country(:'ca_billed') = 'GB' and (select lat = 53.36 from public.properties where id = :'ca_billed'), 'a spot from anywhere else stays where it is');
+update public.clients set billing_address = '{"line1": "1 King St", "country": "GB"}' where id = :'ca_client';
+update public.companies set country = 'US' where id = :'co';
+select t1124p.check(t1124p.country(:'ca_billed') = 'GB' and t1124p.country(:'osm') = 'US', 'a property whose client is billed in the old country stays there');
+
 rollback;
 
 select last_value as passed from t1124p.passed \gset

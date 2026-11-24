@@ -110,13 +110,14 @@ let foundTo: string | null = null;
 export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: number; now?: () => number } = {}) {
   const tally = { placed: 0, not_found: 0, shops: 0, looked_up: 0, moved: 0, same: 0, kept: 0, unanswered: 0 };
   const now = options.now ?? Date.now;
-  const until = now() + RELOCATE_MS;
+  const started = now();
+  const until = started + RELOCATE_MS;
   const pause = options.pauseMs ?? RELOCATE_PAUSE_MS;
   let asked = 0;
   let silent = 0;
-  /** One lookup, after a pause if it isn't the run's first. Null when the run should stop here. */
-  const lookUp = async (address: string, where: LookupOptions) => {
-    if (silent >= RELOCATE_GIVE_UP || now() >= until) return null;
+  /** One lookup, after a pause if it isn't the run's first. Null when the run (or its part, `by`) should stop here. */
+  const lookUp = async (address: string, where: LookupOptions, by = until) => {
+    if (silent >= RELOCATE_GIVE_UP || now() >= by) return null;
     if (asked++ && pause) await new Promise((done) => setTimeout(done, pause));
     const found = address.replace(/\s+/g, " ").trim().length < 5 ? "none" : await lookUpAddress(address, where);
     silent = found === "failed" ? silent + 1 : 0;
@@ -128,26 +129,34 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
     if (error) throw new Error(error.message);
     return data ?? [];
   };
-  let lost = await waiting(foundTo);
-  // Past the last one: back to the top, for any whose lookup got no answer before.
-  if (!lost.length && foundTo) {
-    foundTo = null;
-    lost = await waiting(null);
-  }
-  for (const p of lost) {
-    const { address, options: where } = addressOf(p);
-    const found = await lookUp(address, where);
-    if (found === null) break;
-    foundTo = p.id;
-    if (found === "failed") {
-      tally.unanswered++;
-      continue;
+  // Where the old spots are checked too, the list gets half the run, so one business's long list
+  // doesn't hold up every business's shop and spots, and a problem with it doesn't stop them.
+  const listUntil = env.GOOGLE_MAPS_SERVER_KEY ? started + RELOCATE_MS / 2 : until;
+  try {
+    let lost = await waiting(foundTo);
+    // Past the last one: back to the top, for any whose lookup got no answer before.
+    if (!lost.length && foundTo) {
+      foundTo = null;
+      lost = await waiting(null);
     }
-    const spot = found === "none" ? {} : { p_lat: found.lat, p_lng: found.lng, p_source: found.source };
-    const { data: saved, error } = await admin.rpc("property_found", { p_property: p.id, ...spot });
-    if (error) throw new Error(error.message);
-    if (saved) tally.placed++;
-    else if (found === "none") tally.not_found++;
+    for (const p of lost) {
+      const { address, options: where } = addressOf(p);
+      const found = await lookUp(address, where, listUntil);
+      if (found === null) break;
+      foundTo = p.id;
+      if (found === "failed") {
+        tally.unanswered++;
+        continue;
+      }
+      const spot = found === "none" ? {} : { p_lat: found.lat, p_lng: found.lng, p_source: found.source };
+      const { data: saved, error } = await admin.rpc("property_found", { p_property: p.id, ...spot });
+      if (error) throw new Error(error.message);
+      if (saved) tally.placed++;
+      else if (found === "none") tally.not_found++;
+    }
+  } catch (error) {
+    if (!env.GOOGLE_MAPS_SERVER_KEY) throw error;
+    console.error("Couldn't look up the properties waiting for a spot", error instanceof Error ? error.message : error);
   }
   if (!env.GOOGLE_MAPS_SERVER_KEY) return tally;
 

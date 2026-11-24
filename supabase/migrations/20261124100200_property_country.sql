@@ -5,15 +5,18 @@
 --
 --   * A new property that comes in as the US takes its business's country when the business is
 --     elsewhere: the release before this one, still running while the update goes in, makes them
---     without a country. Unless its client's billing address names a country: only Stripe's
---     customers have one, and the Stripe import gives the property that country
---     (stripe_import_invoice), the US included. A property that names another country keeps it.
+--     without a country. Unless its client's billing address is in the US: only Stripe's customers
+--     have a billing country, and the Stripe import gives the property that country
+--     (stripe_import_invoice). A property that names another country keeps it.
 --   * Properties made before this get the same, once, as does a business's when its country
 --     changes (Settings → Company): those in the old country by default move to the new one. A
---     property the US Census found on the map is in the US and stays there.
+--     property the US Census found on the map is in the US and stays there, and so does one whose
+--     client's billing address is in the old country.
 --   * Those moved that never got a spot on the map wait in private.properties_to_find for the pins
 --     task (apps/api/src/services/properties.ts relocatePins), which looks them up again in their
---     country: properties_to_find and property_found are its part.
+--     country: properties_to_find and property_found are its part. So do those whose spot
+--     OpenStreetMap found: it was looked up in the old country, and a business set to the wrong
+--     country and back again would otherwise keep pins from a street of the same name there.
 --
 -- supabase/tests/property_country_test.sql covers it.
 
@@ -33,7 +36,7 @@ begin
   end if;
   select c.country into v_country from public.companies c where c.id = new.company_id;
   if new.country = 'US' and (coalesce(v_country, 'US') = 'US' or exists (
-    select 1 from public.clients cl where cl.id = new.client_id and nullif(trim(cl.billing_address ->> 'country'), '') is not null
+    select 1 from public.clients cl where cl.id = new.client_id and upper(trim(cl.billing_address ->> 'country')) = 'US'
   )) then
     return new;
   end if;
@@ -45,18 +48,22 @@ create trigger property_country before insert on public.properties
 
 -- A business's properties that are in p_from only by default move to its country as it is now: not
 -- one the Census found in the US (unless they're moving there), nor one whose client's billing
--- address names a country. The ones with no spot are put on the list to look up. How many moved.
+-- address is in p_from. A spot OpenStreetMap found was looked up in p_from: it's cleared. The ones
+-- with no spot then are put on the list to look up. How many moved.
 create function private.move_properties_to_business_country(p_company uuid, p_from text) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare
   v_moved integer;
 begin
   with moved as (
-    update public.properties p set country = c.country
+    update public.properties p set country = c.country,
+           lat = case when p.located_by = 'openstreetmap' then null else p.lat end,
+           lng = case when p.located_by = 'openstreetmap' then null else p.lng end,
+           located_by = case when p.located_by = 'openstreetmap' then null else p.located_by end
       from public.companies c
      where c.id = p_company and p.company_id = p_company and p.country = p_from and c.country <> p_from
        and (p.located_by is distinct from 'census' or c.country = 'US')
-       and not exists (select 1 from public.clients cl where cl.id = p.client_id and nullif(trim(cl.billing_address ->> 'country'), '') is not null)
+       and not exists (select 1 from public.clients cl where cl.id = p.client_id and upper(trim(cl.billing_address ->> 'country')) = p_from)
     returning p.id, p.lat, p.lng
   ), waiting as (
     insert into private.properties_to_find (property_id)

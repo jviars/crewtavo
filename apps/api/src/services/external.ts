@@ -88,7 +88,8 @@ export async function lookUpAddress(address: string, options: LookupOptions = {}
   if (query.length < 5) return "none";
   const country = countryCode(options.country);
   if (country && country !== "US") {
-    const there = await photon(query, country);
+    // A spot kept with a property has to pinpoint it; the measuring map only needs to go there.
+    const there = await photon(query, country, !options.world);
     if (there !== "none" || !options.world) return there;
   }
   const params = new URLSearchParams({ address: query, benchmark: "Public_AR_Current", format: "json" });
@@ -168,12 +169,27 @@ export async function suggestPlaces(text: string, near?: { lat: number; lng: num
   return places;
 }
 
+const squash = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * Whether an answer says where the address is, rather than only its town or district: a house (it
+ * has a number), or a street in the address's own postcode (a UK postcode is a few dozen doors).
+ * OpenStreetMap often lacks the house numbers of British and Canadian streets, and a spot in the
+ * middle of town would be kept as the property's for its routes, weather and the clock at the
+ * property.
+ */
+export function pinpoints(p: Record<string, string | undefined>, query: string): boolean {
+  if (p.housenumber || p.type === "house") return true;
+  const street = p.type === "street" || p.osm_key === "highway";
+  return street && Boolean(p.postcode) && squash(query).includes(squash(p.postcode!));
+}
+
 /**
  * OpenStreetMap search through komoot's public Photon server (fair use, no key). With a country,
  * Photon is asked about that country only (its countrycode filter), and an answer from anywhere else
- * is passed over all the same.
+ * is passed over all the same; `precise` passes over one that doesn't pinpoint the address too.
  */
-async function photon(query: string, country?: string): Promise<AddressLookup> {
+async function photon(query: string, country?: string, precise = false): Promise<AddressLookup> {
   const params = new URLSearchParams({ q: query, limit: country ? "3" : "1" });
   if (country) params.set("countrycode", country);
   const res = await fetch(`https://photon.komoot.io/api/?${params}`, {
@@ -185,7 +201,9 @@ async function photon(query: string, country?: string): Promise<AddressLookup> {
     features?: Array<{ geometry: { coordinates: [number, number] }; properties: Record<string, string | undefined> }>;
   } | null;
   if (!Array.isArray(body?.features)) return "failed";
-  const hit = country ? body.features.find((f) => f.properties?.countrycode?.toUpperCase() === country) : body.features[0];
+  const hit = country
+    ? body.features.find((f) => f.properties?.countrycode?.toUpperCase() === country && (!precise || pinpoints(f.properties, query)))
+    : body.features[0];
   if (!hit) return "none";
   const p = hit.properties;
   const street = [p.housenumber, p.street].filter(Boolean).join(" ");
