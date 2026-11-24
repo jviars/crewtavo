@@ -98,7 +98,7 @@ export interface DeliverDefaults {
  * (`optionCount`) the range runs across them.
  */
 export function rangeMessage(company: { name: string; currency: string | null }, low: number, high: number, optionCount = 0): Required<Pick<DeliverDefaults, "intro" | "subject">> {
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", maximumFractionDigits: 0 });
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 });
   return {
     intro: rangeIntroText(money.format(low), money.format(high), optionCount),
     subject: `Your roof estimate from ${company.name}`,
@@ -128,7 +128,7 @@ export function optionPrices(quote: {
  */
 export function optionsMessage(currency: string | null, prices: readonly number[]): DeliverDefaults | null {
   if (prices.length < 2) return null;
-  return { intro: optionsIntroText(prices.length, new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices))) };
+  return { intro: optionsIntroText(prices.length, new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Math.min(...prices))) };
 }
 
 /**
@@ -221,7 +221,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const company = must(await adminClient(s.env).from("companies").select("name, email, phone, address, currency, settings").eq("id", s.companyId).maybeSingle());
   const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: kind, id: record.id, ...(s.noMoney && { nm: 1 as const }) });
   const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
   const amount = record.recurrence_rule ? `${money} per visit` : money;
   const greeting = `Hi ${firstName(record.client?.display_name)},`;
   const intro =
@@ -613,7 +613,7 @@ export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[
       skipped.push({ number: invoice.number, reason: autopay.get(invoice.id) === "charging" ? "It's being charged automatically" : "Autopay will try the card again" });
       continue;
     }
-    const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(invoice.balance_due));
+    const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(invoice.balance_due));
     // An early reminder says when it's due; once that day has passed, when it was.
     const due = invoice.due_on
       ? `${invoice.due_on < today ? "was" : "is"} due ${new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}`

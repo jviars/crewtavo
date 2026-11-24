@@ -10,7 +10,8 @@ let currency = "USD";
 /**
  * Numbers, dates and money in the app's language: "en-US", or "es-US" for Spanish (US-style
  * numbers and money with Spanish words: "jue, 15 de oct", "9:20 a.m."). Money's formatters are
- * made once per currency and language.
+ * made once per currency and language. Money shows the symbol people there write: "$" for Canadian
+ * or Australian dollars too (not "CA$", "A$"), "R" for rand, "£", "€".
  */
 const moneyFormats = new Map<string, { money: Intl.NumberFormat; moneyCents: Intl.NumberFormat; compact: Intl.NumberFormat }>();
 function formats() {
@@ -18,9 +19,9 @@ function formats() {
   let found = moneyFormats.get(`${tag}|${currency}`);
   if (!found) {
     found = {
-      money: new Intl.NumberFormat(tag, { style: "currency", currency, maximumFractionDigits: 0 }),
-      moneyCents: new Intl.NumberFormat(tag, { style: "currency", currency }),
-      compact: new Intl.NumberFormat(tag, { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }),
+      money: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }),
+      moneyCents: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol" }),
+      compact: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 }),
     };
     moneyFormats.set(`${tag}|${currency}`, found);
   }

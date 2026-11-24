@@ -209,8 +209,12 @@ describe("the PDF of an invoice", () => {
 
   it("shows money in the business's currency, and its payments and what's left", async () => {
     const paid = { ...invoice, payments: [{ label: "Paid November 5, 2026", amount: 500 }, { label: "Refunded November 6, 2026", amount: -50 }], balanceDue: 4280 };
-    const [page] = await sheets({ footer: "Thank you for your business" }, paid, "CAD");
-    for (const words of ["Paid November 5, 2026 −CA$500.00", "Refunded November 6, 2026 +CA$50.00", "Balance due CA$4,280.00", "Thank you for your business"]) expect(has(page!, words), words).toBe(true);
+    const [page] = await sheets({ footer: "Thank you for your business" }, paid, "GBP");
+    for (const words of ["Paid November 5, 2026 −£500.00", "Refunded November 6, 2026 +£50.00", "Balance due £4,280.00", "Thank you for your business"]) expect(has(page!, words), words).toBe(true);
+    // Canadian dollars show as "$", as Canadians write them, not "CA$".
+    const [canada] = await sheets({}, paid, "CAD");
+    expect(has(canada!, "Balance due $4,280.00")).toBe(true);
+    expect(canada!.text).not.toContain("CA$");
   });
 
   it("prints a contract section from the blocks the page read, bold words and numbered items included", async () => {

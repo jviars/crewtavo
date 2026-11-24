@@ -140,7 +140,7 @@ const appBase = (env: Env) => (env.APP_URL ?? "").replace(/\/$/, "");
 
 /** "$45.00" in the company's currency. */
 const money = (amount: number | string, currency: string | null | undefined) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Number(amount));
+  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(amount));
 
 /** "Oct 31" where the company is. */
 const monthDay = (at: string, timeZone: string | null | undefined) =>

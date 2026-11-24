@@ -30,7 +30,12 @@ describe("money in the business's currency", () => {
     expect(formatMoneyCompact(711)).toBe("£711");
     setCurrency("cad");
     expect(moneyCurrency()).toBe("CAD");
-    expect(formatMoneyCents(20)).toBe("CA$20.00");
+    // The symbol people there write: "$" for Canadian and Australian dollars, "R" for rand.
+    expect(formatMoneyCents(20)).toBe("$20.00");
+    setCurrency("AUD");
+    expect(formatMoneyCompact(12_345)).toBe("$12.3K");
+    setCurrency("ZAR");
+    expect(formatMoneyCents(1234.5)).toBe("R\u00a01,234.50");
   });
 
   it("keeps the last currency for a code that isn't one", () => {

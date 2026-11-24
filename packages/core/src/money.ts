@@ -335,7 +335,7 @@ export const currencyOffered = (code: string | null | undefined) => CURRENCIES.s
  */
 export function paymentProblem(amount: number, balance: number, currency = "USD"): string | null {
   if (!(amount > 0)) return "Enter an amount greater than zero.";
-  if (amount > balance + 0.005) return `That's more than the ${new Intl.NumberFormat("en-US", { style: "currency", currency }).format(balance)} balance.`;
+  if (amount > balance + 0.005) return `That's more than the ${new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(balance)} balance.`;
   return null;
 }
 
@@ -439,7 +439,7 @@ export const DEPOSIT_LAW_NOTE =
  */
 export function scheduleProblem(rows: readonly ScheduleRow[], total: Amount, currency = "USD"): string | null {
   if (!rows.length) return null;
-  const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
+  const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(n);
   if (rows.length > SCHEDULE_MAX) return `A payment schedule has ${SCHEDULE_MAX} payments at most.`;
   for (const [i, row] of rows.entries()) {
     const which = `Payment ${i + 1}`;

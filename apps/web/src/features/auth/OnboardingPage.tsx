@@ -284,7 +284,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
               <span className={styles.docMeta}>Quote #1<br />{formatDate(new Date())}</span>
             </div>
             <div className={styles.bars}>{[70, 92, 55, 80].map((w) => <span key={w} style={{ width: `${w}%` }} />)}</div>
-            <div className={styles.total}><span>Total</span><span>{new Intl.NumberFormat("en-US", { style: "currency", currency }).format(0)}</span></div>
+            <div className={styles.total}><span>Total</span><span>{new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(0)}</span></div>
           </div>
         }
       >

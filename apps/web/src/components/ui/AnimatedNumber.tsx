@@ -5,10 +5,10 @@
 import NumberFlow, { type Format } from "@number-flow/react";
 import { moneyCurrency } from "@/lib/format";
 
-export const MONEY: Format = { style: "currency", currency: "USD", maximumFractionDigits: 0 };
+export const MONEY: Format = { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 };
 /** Dollars and cents, for totals on quotes, invoices and job costs. */
-export const MONEY_CENTS: Format = { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 };
-export const MONEY_COMPACT: Format = { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 1 };
+export const MONEY_CENTS: Format = { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", minimumFractionDigits: 2, maximumFractionDigits: 2 };
+export const MONEY_COMPACT: Format = { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 };
 /** Compact above $1,000 ("$9.9K"), whole dollars below ("$711", not "$710.8"). */
 export const moneyCompact = (value: number): Format => (Math.abs(value) < 1000 ? MONEY : MONEY_COMPACT);
 export const COUNT: Format = { maximumFractionDigits: 0 };
@@ -17,8 +17,8 @@ const MOVE = { duration: 250, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }; // --ea
 const FADE = { duration: 150, easing: "ease-out" };
 
 export function AnimatedNumber({ value, format: given = COUNT, className }: { value: number; format?: Format; className?: string }) {
-  // Money shows in the business's currency, whatever the format says.
-  const format = given.style === "currency" ? { ...given, currency: moneyCurrency() } : given;
+  // Money shows in the business's currency, whatever the format says, with the symbol people there write ("$", not "CA$").
+  const format = given.style === "currency" ? { ...given, currency: moneyCurrency(), currencyDisplay: "narrowSymbol" as const } : given;
   return (
     <span className={className}>
       {/* The digits live in a shadow root that assistive tech and find-in-page don't reliably read. */}

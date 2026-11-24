@@ -148,10 +148,10 @@ function geometryOf(template: TemplateSettings, fullSheet: boolean, words: strin
   return { fullSheet, box, boxWidth, pad, running, footer };
 }
 
-/** The business's currency, or US dollars when it isn't one. */
+/** The business's currency with the symbol people there write ("$" for Canadian dollars, "R" for rand), or US dollars when it isn't one. */
 function moneyIn(currency: string): Intl.NumberFormat {
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" });
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" });
   } catch {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
   }

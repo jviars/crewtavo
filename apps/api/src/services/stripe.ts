@@ -374,7 +374,7 @@ export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency
       const quantity = Number(line.quantity);
       const amount = cents(Math.round(quantity * Number(line.unit_price) * 100) / 100);
       if (!amount) continue;
-      const each = new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(line.unit_price));
+      const each = new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(Number(line.unit_price));
       items.push({ description: (quantity === 1 ? line.name : `${line.name} (${quantity.toLocaleString("en-US")} ${line.unit} × ${each})`).slice(0, 500), amount });
     }
   } else if (cents(invoice.subtotal)) {

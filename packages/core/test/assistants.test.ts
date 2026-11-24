@@ -364,7 +364,8 @@ describe("time and pay", () => {
     expect(paymentProblem(100.004, 100)).toBeNull();
     expect(paymentProblem(0, 100)).toBe("Enter an amount greater than zero.");
     expect(paymentProblem(150, 100)).toBe("That's more than the $100.00 balance.");
-    expect(paymentProblem(150, 100, "CAD")).toBe("That's more than the CA$100.00 balance.");
+    expect(paymentProblem(150, 100, "CAD")).toBe("That's more than the $100.00 balance.");
+    expect(paymentProblem(150, 100, "ZAR")).toBe("That's more than the R\u00a0100.00 balance.");
     expect(paymentProblem(150, 100, "EUR")).toBe("That's more than the €100.00 balance.");
   });
 });

@@ -137,7 +137,7 @@ export interface RunContext {
 const SUBJECTS: SubjectKind[] = ["client", "request", "quote", "job", "visit", "invoice"];
 
 export function money(amount: number | string | null | undefined, currency = "USD") {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(amount ?? 0));
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(Number(amount ?? 0));
 }
 
 /** A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between 9:00 AM and 11:00 AM". */
@@ -172,7 +172,7 @@ export interface GoneVisit {
 export function moneyRange(low: number | string | null | undefined, high: number | string | null | undefined, currency = "USD") {
   const ends = [Number(low ?? 0), Number(high ?? 0)];
   const digits = ends.every((n) => Number.isInteger(n)) ? 0 : 2;
-  const format = new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const format = new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits });
   return `${format.format(ends[0]!)} to ${format.format(ends[1]!)}`;
 }
 
