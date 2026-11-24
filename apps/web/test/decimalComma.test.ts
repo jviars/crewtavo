@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 import { DecimalInput, shownText } from "../src/components/ui/DecimalInput";
 import { readAmount } from "../src/components/ui/MoneyInput";
 import { heardText } from "../src/components/ui/NumberInput";
-import { decimalPoint } from "../src/lib/decimal";
+import { parsePrice, readQuantity } from "../src/features/roofing/visit/price";
+import { decimalPoint, typedAmount } from "../src/lib/decimal";
 
 describe("a decimal comma", () => {
   it("is read as a point with one or two digits after it", () => {
@@ -82,5 +83,35 @@ describe("a box for an amount or a percent", () => {
   it("is a text box with everything else it's given", () => {
     const html = renderToStaticMarkup(h(DecimalInput, { className: "input", inputMode: "decimal", value: "12.5", placeholder: "Off", "aria-label": "Amount", onChange: () => {} }));
     for (const attr of ['class="input"', 'inputMode="decimal"', 'value="12.5"', 'placeholder="Off"', 'aria-label="Amount"']) expect(html).toContain(attr);
+  });
+});
+
+describe("a decimal comma that can't be a thousands separator", () => {
+  it("is a decimal point after a lone 0, before other than three digits, or after dots between thousands", () => {
+    expect(["0,125", "0,0125", ",125", "1,2345", "1234,567", "1.250,500", "-0,5"].map(decimalPoint)).toEqual(["0.125", "0.0125", ".125", "1.2345", "1234.567", "1250.500", "-0.5"]);
+    // As in the US: a comma between one to three digits and three more.
+    expect(["1,250", "12,500", "123,456", "1,000,000"].map(decimalPoint)).toEqual(["1250", "12500", "123456", "1000000"]);
+  });
+
+  it("leaves out spaces between thousands, as Québec writes them", () => {
+    expect(["1 250,50", "1\u00A0250,50", "1\u202F250,5", "12 345 678", "1 250"].map(decimalPoint)).toEqual(["1250.50", "1250.50", "1250.5", "12345678", "1250"]);
+    expect(["12 5", "1 25", "2 x 4"].map(decimalPoint)).toEqual(["12 5", "1 25", "2 x 4"]);
+    expect(readAmount("1 250,50")).toBe(1250.5);
+  });
+});
+
+describe("an amount typed with its currency", () => {
+  it("is read without the currency, with a decimal comma", () => {
+    expect(["£45", "$19,500.50", "R 1 250,50", "R1250", "45 €", "€12,50", "19,500"].map(typedAmount)).toEqual(["45", "19500.50", "1250.50", "1250", "45", "12.50", "19500"]);
+  });
+
+  it("is a roof's price on site, as the homeowner signs it", () => {
+    expect(parsePrice("12,50")).toBe(12.5);
+    expect(parsePrice("£19,500")).toBe(19500);
+    expect(parsePrice("$19,500.50")).toBe(19500.5);
+    expect(parsePrice("R 19 500")).toBe(19500);
+    expect(parsePrice("Roof")).toBeNull();
+    expect(readQuantity("2,5")).toBe(2.5);
+    expect(readQuantity("1,200")).toBe(1200);
   });
 });

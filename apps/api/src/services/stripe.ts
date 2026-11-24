@@ -6,7 +6,7 @@
  * The rest of this file turns invoices into Stripe line items and back. It's pure, so it's tested
  * directly (apps/api/test/stripe.test.ts).
  */
-import { taxPercent } from "@crewtavo/core";
+import { taxLineLabel } from "@crewtavo/core";
 import { providerTimeout } from "../integrations/registry";
 import { hmacSha256Hex, safeEqual } from "../lib/crypto";
 
@@ -366,7 +366,7 @@ const MAX_LINES = 20;
  * the lines, then the discount, referral credits, tax, retainage held back and what was already
  * paid, so the client sees the same arithmetic in Stripe as in the Client Hub.
  */
-export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency = "USD"): Array<{ description: string; amount: number }> {
+export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency = "USD", taxName = "Tax"): Array<{ description: string; amount: number }> {
   const items: Array<{ description: string; amount: number }> = [];
   const lines = [...invoice.lines].sort((a, b) => a.sort - b.sort);
   if (lines.length <= MAX_LINES) {
@@ -390,7 +390,8 @@ export function stripeLineItems(invoice: BillableInvoice, tipCents = 0, currency
     items.push({ description: c.note.slice(0, 500), amount: -amount });
     credit -= amount;
   }
-  if (cents(invoice.tax_amount)) items.push({ description: `Tax (${taxPercent(invoice.tax_rate)}%)`, amount: cents(invoice.tax_amount) });
+  // Named as the business's documents name it (core taxName): "VAT (20%)" in the UK, "Tax (8.875%)" in the US.
+  if (cents(invoice.tax_amount)) items.push({ description: taxLineLabel(taxName, invoice.tax_rate), amount: cents(invoice.tax_amount) });
   if (cents(invoice.retainage_amount)) items.push({ description: `Retainage held (${Number(invoice.retainage_pct)}%), billed later`, amount: -cents(invoice.retainage_amount) });
   if (cents(invoice.amount_paid)) items.push({ description: "Already paid", amount: -cents(invoice.amount_paid) });
   if (tipCents > 0) items.push({ description: "Tip for the crew", amount: tipCents });

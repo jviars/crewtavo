@@ -14,7 +14,7 @@
  *     refunds from Crewtavo. Only with the company's own key.
  * Uses the admin client; every query filters by company.
  */
-import { memberPermissions, OFFICE, type Role } from "@crewtavo/core";
+import { memberPermissions, OFFICE, taxName, taxNumber, taxNumberLabel, type Role } from "@crewtavo/core";
 import { methodExpiry, methodLabel, tipsAllowed } from "@crewtavo/core/autopay";
 import type { Env } from "../env";
 import { asJson, HttpError } from "../lib/http";
@@ -111,12 +111,15 @@ interface Ctx {
   livemode: boolean;
   timezone: string;
   currency: string;
+  /** The tax as the business's documents name it ("VAT"), and its number there, for the invoices Stripe shows. */
+  taxName: string;
+  taxNumber: string | null;
 }
 
 async function context(env: Env, admin: Db, companyId: string, access?: StripeAccess | null): Promise<Ctx | null> {
   const found = access ?? (await stripeAccess(env, admin, companyId));
   if (!found) return null;
-  const { data: company } = await admin.from("companies").select("timezone, currency").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("timezone, currency, country, tax_name:settings->tax_name, tax_number:settings->tax_number").eq("id", companyId).maybeSingle();
   if (!company) return null;
   let account = found.account ?? null;
   if (found.own && !account) {
@@ -127,6 +130,7 @@ async function context(env: Env, admin: Db, companyId: string, access?: StripeAc
   return {
     admin, companyId, key: found.key, own: found.own, account, livemode: found.key.includes("_live_"),
     timezone: company.timezone || "UTC", currency: (company.currency || "USD").toLowerCase(),
+    taxName: taxName(company, company.country), taxNumber: taxNumber(company),
   };
 }
 
@@ -525,6 +529,8 @@ async function createStripeInvoice(
       currency: ctx.currency,
       auto_advance: false,
       pending_invoice_items_behavior: "exclude",
+      // A VAT or GST/HST number goes on the invoice Stripe shows the client, as on Crewtavo's own.
+      ...(ctx.taxNumber && { custom_fields: [{ name: taxNumberLabel(ctx.taxName), value: ctx.taxNumber }] }),
       // No coupon the business attached to the customer in Stripe: the items already have Crewtavo's
       // discounts, and Stripe taking another off would leave the invoice here partly paid.
       discounts: "",
@@ -555,7 +561,7 @@ async function createStripeInvoice(
     }
     stripeId = draft.id;
     fail((await ctx.admin.from("stripe_invoices").update({ stripe_id: draft.id, livemode: draft.livemode }).eq("id", row.id)).error);
-    for (const [i, item] of stripeLineItems(invoice, tipCents, ctx.currency.toUpperCase()).entries()) {
+    for (const [i, item] of stripeLineItems(invoice, tipCents, ctx.currency.toUpperCase(), ctx.taxName).entries()) {
       // Not discountable either, so a discount that reached the invoice some other way has nothing to come off.
       await stripeApi(ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: item.amount, description: item.description, discountable: false }, { idempotencyKey: `crewtavo-item-${row.id}-${i}` });
     }

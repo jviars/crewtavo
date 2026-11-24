@@ -225,12 +225,16 @@ export function templateSettings(raw: unknown, trade?: string | null): TemplateS
 /** The paper quotes and invoices are drawn and printed on. */
 export type PaperSize = "letter" | "a4";
 
-/** Where US Letter is the paper: the US, its territories, and Canada. */
-const LETTER_COUNTRIES = new Set(["US", "PR", "GU", "VI", "AS", "MP", "UM", "CA"]);
+/**
+ * Where US Letter is the paper: the US, its territories, and Canada; and Mexico, the Philippines and
+ * the countries of Central and South America that use it too.
+ */
+const LETTER_COUNTRIES = new Set(["US", "PR", "GU", "VI", "AS", "MP", "UM", "CA", "MX", "PH", "CL", "CO", "VE", "CR", "GT", "DO", "PA", "SV", "HN", "NI"]);
 
 /**
  * The paper a business's quotes and invoices are on, by the country it works in (core countries.ts
- * businessCountry): US Letter (8.5 × 11 in) in the US and Canada, A4 (210 × 297 mm) everywhere else.
+ * businessCountry): US Letter (8.5 × 11 in) in the US, Canada and the other LETTER_COUNTRIES, A4 (210 × 297 mm)
+ * everywhere else.
  * Letter when the country isn't known, as every document was before.
  */
 export const paperSize = (country: string | null | undefined): PaperSize => (!country || LETTER_COUNTRIES.has(country) ? "letter" : "a4");

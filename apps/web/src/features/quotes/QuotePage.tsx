@@ -11,13 +11,14 @@
  * as a signature on the Client Hub or the iPad does. The option math is core money.ts; options.ts has
  * the option records.
  */
+import { businessCountry } from "@crewtavo/core/countries";
 import { depositFor } from "@crewtavo/core/contracts";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import { usesDepth } from "@crewtavo/core/formulas";
 import type { Json, TablesUpdate } from "@crewtavo/core/database";
 import type { TemplateSettings } from "@crewtavo/core/documents";
 import { inRangeMode, sitePriceSet } from "@crewtavo/core/estimates";
-import { optionBaseTotal, optionTotals, taxPercent, taxRateFromPercent, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
+import { optionBaseTotal, optionTotals, taxName, taxPercent, taxRateFromPercent, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { isPackagePicturePath } from "@crewtavo/core/presets";
 import { quotePromoRule } from "@crewtavo/core/promos";
 import { parseRule } from "@crewtavo/core/recurrence";
@@ -381,6 +382,8 @@ export const quoteToSend = <Q extends object>(q: Q, options: readonly QuoteOptio
 export function QuotePage() {
   const { id = "" } = useParams();
   const session = useSession();
+  // What the business's documents call the tax ("VAT" in the UK), as they print it.
+  const tax = taxName(session.company.settings, businessCountry(session.company));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<null | "send" | "exact" | "lost" | "template">(null);
@@ -686,7 +689,7 @@ export function QuotePage() {
         )}
         {/* A tax-exempt client's quote is kept at 0% by the database, so there's no rate to type. */}
         <div className="line">
-          <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : editable ? "Tax" : `Tax (${formatTaxRate(q.tax_rate)})`}</span>
+          <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : editable ? tax : `${tax} (${formatTaxRate(q.tax_rate)})`}</span>
           {editable && !taxExempt ? (
             <span className={styles.taxCell}>
               <MoneyInput percent label="Tax rate" width={84} value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} />

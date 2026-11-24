@@ -10,6 +10,7 @@ import { readAmount } from "@/components/ui/MoneyInput";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { typedAmount } from "@/lib/decimal";
 import { currencySymbol } from "@/lib/format";
 import type { EstimateEditor, LinePatch } from "../estimate/data";
 import { countText, lineDetail, lineKind, money } from "../estimate/rows";
@@ -35,7 +36,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
   const [price, setPrice] = useState(priceInputText(Number(line.unit_price)));
   const [words, setWords] = useState(line.description ?? "");
   const q = counted ? readQuantity(quantity) : Number(line.quantity);
-  const p = readAmount(price.replace(/[\s$,]/g, ""), { max: 10_000_000 });
+  const p = readAmount(typedAmount(price), { max: 10_000_000 });
   const amount = q !== null && p !== null ? lineTotal(q, p) : null;
 
   const step = (by: number) => {

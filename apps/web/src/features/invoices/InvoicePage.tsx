@@ -1,8 +1,9 @@
+import { businessCountry } from "@crewtavo/core/countries";
 import { autopayDueText, autopaySettings, methodLabel } from "@crewtavo/core/autopay";
 import { lateFeeAmount, lateFeeCouldApply, lateFeeNotice, lateFeeOn, lateFeeSettings } from "@crewtavo/core/billing";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import type { TablesUpdate } from "@crewtavo/core/database";
-import { lineTotal, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { lineTotal, taxName, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { givenBackWords, goneInvoiceWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
@@ -68,6 +69,8 @@ export function InvoicePage() {
 function InvoicePageScreen() {
   const { id = "" } = useParams();
   const session = useSession();
+  // What the business's documents call the tax ("VAT" in the UK), as they print it.
+  const tax = taxName(session.company.settings, businessCountry(session.company));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<null | "send" | "payment" | "work" | "edit">(null);
@@ -480,11 +483,11 @@ function InvoicePageScreen() {
                 />
                 <ReferralCredits invoice={inv} onChanged={refresh} />
                 <div className="line">
-                  <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}`}</span>
+                  <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `${tax}${editable ? "" : ` (${formatTaxRate(inv.tax_rate)})`}`}</span>
                   {/* A tax-exempt client is never charged tax: the database keeps the rate at 0. */}
                   {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
                 </div>
-                {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
+                {editable && !taxExempt && <div className="line"><span>{tax} amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
                 <div className="line" data-total=""><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
                 {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
                 {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
