@@ -1,4 +1,5 @@
 /** Adding and editing a sub, filing their paperwork, and sending them the link to send it in themselves. */
+import { addressLabels, businessCountry, REGION_MAX } from "@crewtavo/core/countries";
 import { neededPaperwork, PAPERWORK_REQUIREMENTS, paperworkLinkIntro, paperworkLinkMessages, SUB_DOCUMENT_KINDS, subDocumentLabel, subSettings, TAX_CLASSIFICATIONS } from "@crewtavo/core/subs";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
@@ -23,6 +24,7 @@ import styles from "./Subs.module.css";
 
 export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose: () => void; onSaved: (id: string) => void }) {
   const session = useSession();
+  const words = addressLabels(businessCountry(session.company));
   const queryClient = useQueryClient();
   const a = sub?.address ?? {};
   const [f, setF] = useState({
@@ -97,8 +99,8 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
           <Field label="Suite or unit" optional><input className="input" value={f.line2} onChange={set("line2")} maxLength={200} /></Field>
           <div className="form-grid-3">
             <Field label="City" optional><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
-            <Field label="State / Province" optional><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
-            <Field label="ZIP / Postal code" optional><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+            <Field label={words.region} optional><input className="input" value={f.region} onChange={set("region")} maxLength={REGION_MAX} /></Field>
+            <Field label={words.postalCode} optional><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
           </div>
           <Field label="Notes" optional hint="Only the office sees these."><textarea className="textarea" value={f.notes} onChange={set("notes")} maxLength={4000} rows={3} /></Field>
         </details>

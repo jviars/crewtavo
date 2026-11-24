@@ -109,3 +109,30 @@ export function countryFor(timeZone: string | null | undefined): string {
 /** A business's country: the one it chose, or the guess from its time zone for a business the database hasn't said (a sub's basics). */
 export const businessCountry = (company: { country?: string | null; timezone?: string | null } | null | undefined): string =>
   countryCode(company?.country) ?? countryFor(company?.timezone);
+
+/** What an address's boxes are called in a country, as a label and inside a sentence. */
+export interface AddressLabels {
+  /** The region box: "State", "Province", "County". */
+  region: string;
+  /** "state", "province", "county". */
+  regionInText: string;
+  /** Whether addresses there usually leave the region out: the UK's county. */
+  regionOptional: boolean;
+  /** The postal code box: "ZIP code", "Postal code", "Postcode". */
+  postalCode: string;
+  /** "ZIP code", "postal code", "postcode". */
+  postalCodeInText: string;
+}
+
+/** The words an address form uses where the business is (core businessCountry); the US's when it isn't known. */
+export function addressLabels(country: string | null | undefined): AddressLabels {
+  switch (countryCode(country) ?? "US") {
+    case "US": return { region: "State", regionInText: "state", regionOptional: false, postalCode: "ZIP code", postalCodeInText: "ZIP code" };
+    case "CA": return { region: "Province", regionInText: "province", regionOptional: false, postalCode: "Postal code", postalCodeInText: "postal code" };
+    case "GB": return { region: "County", regionInText: "county", regionOptional: true, postalCode: "Postcode", postalCodeInText: "postcode" };
+    default: return { region: "State / Province / Region", regionInText: "state, province or region", regionOptional: false, postalCode: "Postal code", postalCodeInText: "postal code" };
+  }
+}
+
+/** How long a region may be: long enough for "Newfoundland and Labrador" and "Australian Capital Territory". */
+export const REGION_MAX = 100;

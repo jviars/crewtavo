@@ -1,3 +1,4 @@
+import { addressLabels, businessCountry, REGION_MAX } from "@crewtavo/core/countries";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
@@ -123,13 +124,14 @@ const blankAddress = { line1: "", city: "", region: "", postal_code: "" };
 
 function AddressFields({ value, onChange, required }: { value: typeof blankAddress; onChange: (v: typeof blankAddress) => void; required?: boolean }) {
   const set = (key: keyof typeof blankAddress) => (e: { target: { value: string } }) => onChange({ ...value, [key]: e.target.value });
+  const words = addressLabels(businessCountry(useSession().company));
   return (
     <>
       <Field label="Street address" optional={!required}><input className="input" value={value.line1} onChange={set("line1")} placeholder="123 Main St" maxLength={200} required={required} autoComplete="off" /></Field>
       <div className="form-grid-3">
         <Field label="City"><input className="input" value={value.city} onChange={set("city")} maxLength={100} /></Field>
-        <Field label="State / Province"><input className="input" value={value.region} onChange={set("region")} maxLength={20} /></Field>
-        <Field label="ZIP / Postal code"><input className="input" value={value.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+        <Field label={words.region} optional={words.regionOptional}><input className="input" value={value.region} onChange={set("region")} maxLength={REGION_MAX} /></Field>
+        <Field label={words.postalCode}><input className="input" value={value.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
       </div>
     </>
   );

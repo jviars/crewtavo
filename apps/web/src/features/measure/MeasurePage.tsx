@@ -10,6 +10,7 @@
  * it what Measure opens on (an admin can set that for the whole team in Settings > Maps). On a phone
  * or tablet the map can fill the screen (lib/extendMap).
  */
+import { addressLabels } from "@crewtavo/core/countries";
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { drawingSquares, edgeLengths, isPitch, isRoofEdge, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
 import { itemFits, PAVING_GROUPS, PAVING_ITEMS, pavingItem, pavingQuantities, stallsAlong, type PavingItem } from "@crewtavo/core/paving";
@@ -536,7 +537,10 @@ export function MeasurePage() {
     meta: { inline: true },
     mutationFn: async (address: string) => {
       const r = await api.post<Found>("/geocode", { address, world: true });
-      if (!r.found) throw new Error(`Couldn't find "${address}". Try adding the city and state, or the country.`);
+      if (!r.found) {
+        const words = addressLabels(companyCountry());
+        throw new Error(`Couldn't find "${address}". Try adding the city and ${words.regionOptional ? words.postalCodeInText : words.regionInText}, or the country.`);
+      }
       return r;
     },
     onSuccess: (r) => {

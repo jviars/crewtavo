@@ -1,4 +1,5 @@
 /** Public booking / request form: /book/:company/:form (?embed=1 inside an iframe; see embed.ts). No account needed. */
+import { addressLabels } from "@crewtavo/core/countries";
 import { textDisclosure } from "@crewtavo/core/marketing";
 import { slotLabel, slotTime, type OpenSlot } from "@crewtavo/core/slots";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
@@ -51,7 +52,7 @@ interface Question {
 }
 interface FormView {
   /** `texts`: the business can text, so the phone box says what giving a number agrees to. */
-  company: { name: string; phone: string | null; texts?: boolean; privacy_url?: string | null; logo?: string | null; color?: string | null };
+  company: { name: string; phone: string | null; country?: string | null; texts?: boolean; privacy_url?: string | null; logo?: string | null; color?: string | null };
   form: { name: string; kind: string; questions: Question[] };
   booking?: Booking;
 }
@@ -91,6 +92,8 @@ export function BookingFormPage() {
     (q) => q.required && (isFileQuestion(q) ? !files[q.key]?.length : q.type === "multi_choice" ? !(answers[q.key] as string[] | undefined)?.length : !String(answers[q.key] ?? "").trim()),
   );
   const noContact = !contact.email.trim() && !contact.phone.trim();
+  // The address boxes are called what they are where the business is.
+  const words = addressLabels(view.data?.company.country);
   // The time picked, on a form that offers times. With nothing open online it's sent as a plain request.
   const booking = view.data?.booking;
   const [time, setTime] = useState<OpenSlot | null>(null);
@@ -224,7 +227,7 @@ export function BookingFormPage() {
               <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
               <div className={cx(k.grid2, k.pair)}>
                 <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-                <Field label="ZIP / Postal code"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
+                <Field label={words.postalCode}><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
               </div>
             </Part>
             {questions.length > 0 && (
@@ -240,7 +243,7 @@ export function BookingFormPage() {
             )}
             {booking && (
               <div className={k.part}>
-                <TimePicker path={path} booking={booking} postalCode={contact.postal_code} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
+                <TimePicker path={path} booking={booking} postalCode={contact.postal_code} postalWord={words.postalCodeInText} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
               </div>
             )}
             {promo.offer ? (
@@ -320,7 +323,7 @@ function CalendarLink({ text }: { text: string }) {
  * postal code is in when the form has a service area, so nobody outside it is offered a time.
  * `refreshed` changes when a send was turned away, and brings the openings as they are now.
  */
-function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, invalid, refreshed }: { path: string; booking: Booking; postalCode: string; picked: OpenSlot | null; onPick: (slot: OpenSlot | null) => void; onNoneOpen: (none: boolean) => void; invalid: boolean; refreshed: number }) {
+function TimePicker({ path, booking, postalCode, postalWord, picked, onPick, onNoneOpen, invalid, refreshed }: { path: string; booking: Booking; postalCode: string; postalWord: string; picked: OpenSlot | null; onPick: (slot: OpenSlot | null) => void; onNoneOpen: (none: boolean) => void; invalid: boolean; refreshed: number }) {
   // Asked for once they stop typing, not at every letter.
   const [postal, setPostal] = useState(postalCode.trim());
   useEffect(() => {
@@ -361,7 +364,7 @@ function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, inv
       <legend className={k.legend}>{booking.needs_ok ? "Pick a time you'd like" : "Pick a time"}</legend>
       <p className={k.note}>{booking.window_min ? "We arrive within the window you pick." : `Set aside about ${visitLength(booking.minutes)}.`} Times are in {booking.timezone_label}.</p>
       {waiting ? (
-        <p className={k.note}>Enter your ZIP / postal code above to see the times we have open.</p>
+        <p className={k.note}>Enter your {postalWord} above to see the times we have open.</p>
       ) : week.isPending ? (
         <Skeleton height={140} radius={14} />
       ) : outside ? (
@@ -401,7 +404,7 @@ function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, inv
         </>
       )}
       {invalid && !waiting && !week.isError && <span className="field-error" role="alert">Pick a time for your visit.</span>}
-      {invalid && waiting && <span className="field-error" role="alert">Enter your ZIP / postal code, then pick a time.</span>}
+      {invalid && waiting && <span className="field-error" role="alert">Enter your {postalWord}, then pick a time.</span>}
     </fieldset>
   );
 }

@@ -86,7 +86,7 @@ describe("sending the form with something missing", () => {
 
   it("announces a missing time, and marks the times for the focus", () => {
     expect(page).toContain('<span className="field-error" role="alert">Pick a time for your visit.</span>');
-    expect(page).toContain('<span className="field-error" role="alert">Enter your ZIP / postal code, then pick a time.</span>');
+    expect(page).toContain('<span className="field-error" role="alert">Enter your {postalWord}, then pick a time.</span>');
     expect(page).toContain('<fieldset className="field" data-invalid={invalid || undefined} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 10 }}>');
   });
 });

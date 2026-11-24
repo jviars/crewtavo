@@ -1099,7 +1099,7 @@ publicRoutes.post("/hub/:token/tip", async (c) => {
 
 async function findForm(c: Parameters<typeof appUrl>[0]) {
   const admin = adminClient(c.env);
-  const company = must(await admin.from("companies").select("id, name, phone, timezone, settings").eq("slug", c.req.param("company") ?? "").maybeSingle(), "Form not found.");
+  const company = must(await admin.from("companies").select("id, name, phone, timezone, country, settings").eq("slug", c.req.param("company") ?? "").maybeSingle(), "Form not found.");
   const form = must(
     await admin
       .from("intake_forms")
@@ -1127,8 +1127,9 @@ publicRoutes.get("/public/forms/:company/:form", async (c) => {
   return c.json({
     // `texts`: the business can text, so the phone box says what giving a number agrees to.
     // `logo` and `color`: the page wears the business's own logo and brand color (null without them).
+    // `country`: the address boxes are called what they are there (core addressLabels).
     company: {
-      name: company.name, phone: company.phone, logo: logoImage("", company.id, company.settings)?.src ?? null, color: brandColor(company.settings),
+      name: company.name, phone: company.phone, country: company.country, logo: logoImage("", company.id, company.settings)?.src ?? null, color: brandColor(company.settings),
       texts: await smsReady(c.env, company.id), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null),
     },
     form: { name: form.name, kind: form.kind, questions: form.questions },
@@ -2135,13 +2136,13 @@ publicRoutes.get("/public/refer/:token", async (c) => {
   const l = await link(c, ["refer"]);
   const admin = adminClient(c.env);
   const [company, client] = await Promise.all([
-    admin.from("companies").select("name, phone, website, settings").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, website, country, settings").eq("id", l.c).maybeSingle(),
     admin.from("clients").select("display_name").eq("company_id", l.c).eq("id", l.id).maybeSingle(),
   ]);
   if (!company.data || !client.data) throw new HttpError(404, "This referral link isn't valid anymore.");
   const referrals = referralSettings(company.data.settings as Record<string, unknown> | null);
   return c.json({
-    company: { name: company.data.name, phone: company.data.phone, website: company.data.website, logo: logoImage("", l.c, company.data.settings)?.src ?? null, color: brandColor(company.data.settings), texts: await smsReady(c.env, l.c), privacy_url: privacyUrl(company.data.settings as Record<string, unknown> | null) },
+    company: { name: company.data.name, phone: company.data.phone, website: company.data.website, country: company.data.country, logo: logoImage("", l.c, company.data.settings)?.src ?? null, color: brandColor(company.data.settings), texts: await smsReady(c.env, l.c), privacy_url: privacyUrl(company.data.settings as Record<string, unknown> | null) },
     referrer: firstName(client.data.display_name),
     offer: referrals.offer,
     // That the person recommending gets a credit, for the friend to know (core referrerDisclosure). Null when none is set.
