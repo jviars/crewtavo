@@ -58,6 +58,8 @@ describe("what a number box says it holds", () => {
     expect(heardText(12, pasted("", 0, 0, "12,50"))).toBe("12.50");
     expect(heardText(12, pasted("12", 2, 2, ",5"))).toBe("12.5");
     expect(heardText(1, pasted("99", 0, 2, "1,250"))).toBe("1250");
+    // Words around a number: the number Base UI read, as before.
+    expect(heardText(12, pasted("", 0, 0, "12 ft"))).toBe("12");
   });
 
   it("says the number for the arrows and buttons", () => {

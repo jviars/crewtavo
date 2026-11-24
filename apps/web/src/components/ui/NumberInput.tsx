@@ -59,7 +59,8 @@ export function numberKeyboard(step: number | string | undefined): "numeric" | "
  * What onChange hears as a number is typed or pasted in: the text as typed ("2.", "0.50", like a
  * native number box's value while typing), with a decimal comma read as a point (decimalPoint), so
  * "2,5" is "2.5" and "1,250" is "1250"; the number itself for the arrows and buttons. `details` is
- * Base UI's: a paste's text is the box's with the pasted words where they go, as Base UI puts them.
+ * Base UI's: a paste's text is the box's with the pasted words where they go, as Base UI puts them,
+ * and the number Base UI read when that isn't a number on its own ("12 ft").
  */
 export function heardText(next: number | null, details: { reason: string; event: Event }): string {
   const box = details.event.target as HTMLInputElement | null;
@@ -68,7 +69,8 @@ export function heardText(next: number | null, details: { reason: string; event:
     const pasted = (details.event as ClipboardEvent).clipboardData?.getData("text/plain") ?? "";
     const from = box.selectionStart ?? box.value.length;
     const to = box.selectionEnd ?? from;
-    return decimalPoint(box.value.slice(0, from) + pasted + box.value.slice(to));
+    const text = decimalPoint(box.value.slice(0, from) + pasted + box.value.slice(to)).trim();
+    if (text !== "" && Number.isFinite(Number(text))) return text;
   }
   return next === null ? "" : String(next);
 }
