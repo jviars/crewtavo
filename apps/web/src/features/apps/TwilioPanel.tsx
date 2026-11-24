@@ -70,8 +70,8 @@ function ConnectForm({ app, changing, optional, onSaved, onCancel }: { app: AppR
   return (
     <Section className={kit.panel} id="app-setup" title={changing ? "Change your Twilio account" : optional ? "Use your own Twilio account" : "Connect your Twilio account"}>
       <p className={kit.note}>
-        About five minutes once you have a Twilio number. Twilio bills you directly for the texts you send, a fraction of a cent to a few cents each. In the US, Twilio also asks you to register
-        your business before a new number can text (A2P 10DLC), which can take a few days.
+        About five minutes once you have a Twilio number. Twilio bills you directly for the texts you send, a fraction of a cent to a few cents each. To text US numbers from a US number,
+        Twilio also asks you to register your business first (A2P 10DLC), which can take a few days; texting numbers in other countries doesn't need it.
       </p>
       <p className={kit.note}>{TEXT_CONSENT_HINT}</p>
       <Steps>
