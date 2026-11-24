@@ -1,6 +1,7 @@
 /** Dates and times on screens follow the business's country (core regional.ts); numbers and money don't. */
-import { afterEach, describe, expect, it } from "vitest";
-import { clockText, dateLocale, formatDate, formatDateTime, formatDay, formatMoneyCents, formatNumber, formatTime, setCountry, setCurrency } from "../src/lib/format";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clockText, dateLocale, formatDate, formatDateTime, formatDay, formatMoneyCents, formatNumber, formatTime, setCountry, setCurrency, weekStartOf } from "../src/lib/format";
+import { groupByDay } from "../src/features/drive/data";
 import { validityMessage } from "../src/components/ui/Field";
 import { weekWords } from "../src/features/booking/BookingFormPage";
 import { sameDaysLastMonth } from "../src/features/home/HomePage";
@@ -94,5 +95,30 @@ describe("times and spans built by hand", () => {
     expect([clock(7 * 60), clock(13 * 60 + 30)]).toEqual(["7 a.m.", "1:30 p.m."]);
     setCountry({ country: "AU" });
     expect([clock(7 * 60), hourLabel("2026-10-16T15:00")]).toEqual(["7 am", "3 pm"]);
+  });
+});
+
+describe("this week, in a list", () => {
+  it("starts on Sunday in the US and Canada, and on Monday in the UK", () => {
+    // Wednesday 25 November 2026, and the Sunday before it.
+    expect([weekStartOf("2026-11-25"), weekStartOf("2026-11-22")]).toEqual(["2026-11-22", "2026-11-22"]);
+    setCountry({ country: "CA" });
+    expect(weekStartOf("2026-11-25")).toBe("2026-11-22");
+    setCountry({ country: "GB" });
+    expect([weekStartOf("2026-11-25"), weekStartOf("2026-11-22"), weekStartOf("2026-11-23")]).toEqual(["2026-11-23", "2026-11-16", "2026-11-23"]);
+  });
+
+  it("holds Sunday's files on a Monday in the US, not in the UK", () => {
+    const files = [{ id: "sunday", created_at: "2026-11-22T15:00:00Z" }];
+    const keys = () => groupByDay(files, "UTC").map((g) => g.key);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-23T15:00:00Z"));
+    try {
+      expect(keys()).toEqual(["week"]);
+      setCountry({ country: "GB" });
+      expect(keys()).toEqual(["earlier"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
