@@ -14,6 +14,7 @@
     "./imagery": "./src/imagery.ts",
     "./money": "./src/money.ts",
     "./countries": "./src/countries.ts",
+    "./regional": "./src/regional.ts",
     "./materials": "./src/materials.ts",
     "./estimates": "./src/estimates.ts",
     "./documents": "./src/documents.ts",

@@ -1,4 +1,5 @@
 import { businessCountry } from "@crewtavo/core/countries";
+import { dateTag } from "@crewtavo/core/regional";
 import { taxPercent } from "@crewtavo/core/money";
 import { intlLocale, t } from "./i18n";
 
@@ -66,6 +67,18 @@ export function setCountry(company: { country?: string | null; timezone?: string
 /** Where the business works: "US", "CA", "GB" (core countries.ts). For code outside React; a screen can read the session's company. */
 export const companyCountry = () => country;
 
+/**
+ * The Intl tag dates and times are shown in: the business's country's way in the app's language
+ * (core regional.ts dateTag), "en-GB" for "16 Oct 2026, 14:05", "en-US" for "Oct 16, 2026, 2:05 PM".
+ * Numbers and money stay in intlLocale(), the language's own.
+ */
+export const dateLocale = () => {
+  // The screen's language as intlLocale() has it (Spanish only on the screens that are, English in a
+  // downloaded file), in the business's country's way.
+  const tag = intlLocale();
+  return dateTag(country, tag.startsWith("es") ? "es" : "en");
+};
+
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);
 export const formatMoneyCents = (n: number | null | undefined) => formats().moneyCents.format(n ?? 0);
@@ -74,11 +87,11 @@ export const formatMoneyCompact = (n: number | null | undefined) => (Math.abs(n 
 
 /** "Thu, Oct 15" */
 export const formatDay = (value: string | Date) =>
-  new Date(value).toLocaleDateString(intlLocale(), { weekday: "short", month: "short", day: "numeric" });
+  new Date(value).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
 
 /** "7:20 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatTime = (value: string | Date, timeZone?: string) =>
-  new Date(String(value).replace(" ", "T")).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit", timeZone });
+  new Date(String(value).replace(" ", "T")).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit", timeZone });
 
 export const formatNumber = (n: number, digits = 0) =>
   n.toLocaleString(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -89,11 +102,11 @@ export const formatTaxRate = (rate: number | string | null | undefined) =>
 
 /** "Oct 16, 2026" */
 export const formatDate = (value: string | Date | null | undefined) =>
-  value ? new Date(String(value).length === 10 ? `${value}T12:00:00` : value).toLocaleDateString(intlLocale(), { month: "short", day: "numeric", year: "numeric" }) : "—";
+  value ? new Date(String(value).length === 10 ? `${value}T12:00:00` : value).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" }) : "—";
 
 /** "Thu, Oct 16, 7:00 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatDateTime = (value: string | Date, timeZone?: string) =>
-  new Date(value).toLocaleString(intlLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
+  new Date(value).toLocaleString(dateLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
 
 /** "3 days ago", "in 2 hours" */
 export function timeAgo(value: string | Date): string {
@@ -106,7 +119,7 @@ export function timeAgo(value: string | Date): string {
 
 /** "Thursday", "jueves": a weekday's name in the app's language (0 is Sunday). */
 export const weekdayName = (day: number, width: "long" | "short" = "long") =>
-  new Date(Date.UTC(2026, 0, 4 + day, 12)).toLocaleDateString(intlLocale(), { weekday: width, timeZone: "UTC" });
+  new Date(Date.UTC(2026, 0, 4 + day, 12)).toLocaleDateString(dateLocale(), { weekday: width, timeZone: "UTC" });
 
 const US_ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"];
 // For browsers that can't list every zone.
