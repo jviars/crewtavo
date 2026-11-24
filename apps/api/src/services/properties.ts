@@ -56,16 +56,25 @@ export async function geocodeProperty(db: Db, env: Env, companyId: string, id: s
   return result as unknown as Located;
 }
 
+/** A breath between a big import's lookups outside the US: OpenStreetMap's public server is shared. */
+const ABROAD_PAUSE_MS = 1000;
+
 /**
  * Finds these properties on the map one after another, in the background: the free geocoder
  * answers about once a second, so a big import shouldn't wait for it. Any that aren't found stay
- * "Not on the map yet", as before.
+ * "Not on the map yet", as before. A business outside the US has its properties looked up in
+ * OpenStreetMap, which is asked about one a second.
  */
-export function geocodeLater(db: Db, env: Env, companyId: string, ids: readonly string[]): void {
-  if (!ids.length) return;
-  void (async () => {
-    for (const id of ids.slice(0, 2000)) await geocodeProperty(db, env, companyId, id).catch(() => null);
-  })();
+export function geocodeLater(db: Db, env: Env, companyId: string, ids: readonly string[], options: { pauseMs?: number } = {}): Promise<void> {
+  if (!ids.length) return Promise.resolve();
+  return (async () => {
+    const { data: company } = await db.from("companies").select("country").eq("id", companyId).maybeSingle();
+    const pause = (countryCode(company?.country) ?? "US") === "US" ? 0 : (options.pauseMs ?? ABROAD_PAUSE_MS);
+    for (const [i, id] of ids.slice(0, 2000).entries()) {
+      if (i && pause) await new Promise((done) => setTimeout(done, pause));
+      await geocodeProperty(db, env, companyId, id).catch(() => null);
+    }
+  })().catch(() => undefined);
 }
 
 // ---------------------------------------------------------------------------------------------

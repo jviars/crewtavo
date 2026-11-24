@@ -10,7 +10,7 @@ import type { Env } from "../src/env";
 import { cronMatches } from "../src/lib/cron";
 import { adminClient } from "../src/lib/supabase";
 import { geocodeAddress, lookUpAddress } from "../src/services/external";
-import { relocatePins, resetRelocatePins, saveLocation } from "../src/services/properties";
+import { geocodeLater, relocatePins, resetRelocatePins, saveLocation } from "../src/services/properties";
 import { CRON_TASKS, runTask, TASKS } from "../src/tasks";
 
 const env: Env = {
@@ -322,6 +322,41 @@ describe("the pins task", () => {
       { p_company: "co-3", p_address: {}, p_was: { lat: 41, lng: -76 }, p_depot: { lat: 41, lng: -76, source: "unknown" } },
       { p_company: "co-4", p_address: shops[3]!.address, p_was: { lat: 53.8, lng: -1.5 }, p_depot: { lat: 53.79, lng: -1.54, source: "openstreetmap" } },
     ]);
+  });
+});
+
+describe("an import's properties, found on the map in the background", () => {
+  /** The company in `country`, its properties at `postal` codes, and when each geocoder was asked. */
+  function imported(country: string) {
+    const asked: Array<{ host: string; at: number }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const path = url.pathname.replace(/^\/rest\/v1\//, "");
+      if (url.host !== "example.supabase.co") {
+        asked.push({ host: url.host, at: Date.now() });
+        return Response.json(url.host === "photon.komoot.io" ? { features: [] } : census([]));
+      }
+      if (path === "companies") return Response.json({ country });
+      if (path === "properties" && (init?.method ?? "GET") === "GET") return Response.json({ id: url.searchParams.get("id")!.slice(3), line1: "2 Bank Street", city: "Leeds", postal_code: "LS1 5AB", country });
+      throw new Error(`Unexpected ${url}`);
+    });
+    return asked;
+  }
+
+  it("asks the Census one after another for a business in the US, as before", async () => {
+    const asked = imported("US");
+    await geocodeLater(adminClient(env), env, "co-1", ["p1", "p2", "p3"], { pauseMs: 1000 });
+    expect(asked.map((a) => a.host)).toEqual(["geocoding.geo.census.gov", "geocoding.geo.census.gov", "geocoding.geo.census.gov"]);
+    // With no pause: the pause is only for OpenStreetMap.
+    expect(asked[2]!.at - asked[0]!.at).toBeLessThan(1000);
+  });
+
+  it("asks OpenStreetMap about one a second for a business elsewhere", async () => {
+    const asked = imported("GB");
+    await geocodeLater(adminClient(env), env, "co-1", ["p1", "p2", "p3"], { pauseMs: 100 });
+    expect(asked.map((a) => a.host)).toEqual(["photon.komoot.io", "photon.komoot.io", "photon.komoot.io"]);
+    expect(asked[1]!.at - asked[0]!.at).toBeGreaterThanOrEqual(95);
+    expect(asked[2]!.at - asked[1]!.at).toBeGreaterThanOrEqual(95);
   });
 });
 
