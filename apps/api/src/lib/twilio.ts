@@ -56,8 +56,13 @@ const cache = new Map<string, { at: number; value: TwilioAccount | null }>();
 let some: { at: number; value: boolean } | null = null;
 
 export const forgetTwilio = (companyId?: string) => {
-  if (companyId) cache.delete(companyId);
-  else cache.clear();
+  if (companyId) {
+    cache.delete(companyId);
+    countries.delete(companyId);
+  } else {
+    cache.clear();
+    countries.clear();
+  }
   some = null;
 };
 
@@ -88,6 +93,23 @@ export async function companyTwilio(env: Env, companyId: string): Promise<Twilio
     }
   }
   cache.set(companyId, { at: Date.now(), value });
+  return value;
+}
+
+/** Each company's country (companies.country), cached alongside its account. */
+const countries = new Map<string, { at: number; value: string | null }>();
+
+/**
+ * The country whose numbers a company's texts are completed for (companies.country, core
+ * internationalPhone), cached for a minute as its account is. Null when it can't be read.
+ */
+export async function textingCountry(env: Env, companyId: string): Promise<string | null> {
+  const hit = countries.get(companyId);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const { data, error } = await adminClient(env).from("companies").select("country").eq("id", companyId).maybeSingle();
+  if (error) return null;
+  const value = data?.country ?? null;
+  countries.set(companyId, { at: Date.now(), value });
   return value;
 }
 

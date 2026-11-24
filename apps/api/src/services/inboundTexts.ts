@@ -29,7 +29,7 @@
  */
 import { phoneMatchKey } from "@crewtavo/core/recipients";
 import type { Db } from "../lib/supabase";
-import { clearStop, noteStop, phoneKey, type StopDetails } from "./textsOff";
+import { clearStop, lastDigits, noteStop, phoneKey, type StopDetails } from "./textsOff";
 
 export interface InboundText {
   /** The number as Twilio gave it ("+15405550163"). */
@@ -72,8 +72,8 @@ export async function receiveText(admin: Db, text: InboundText, companies: reado
   const stopped: StopDetails = phrase ? { source: "phrase", how: "text", note: body } : { source: "keyword" };
   const theirWords = `“${body.trim().slice(0, 160)}”`;
   // Match the sender by phone number (last 10 digits), across the companies the text can be for.
-  let clientRows = admin.from("clients").select("id, company_id, phone, display_name").not("phone", "is", null).ilike("phone", `%${from.slice(-4)}%`);
-  let contactRows = admin.from("client_contacts").select("id, company_id, client_id, name, phone").not("phone", "is", null).ilike("phone", `%${from.slice(-4)}%`);
+  let clientRows = admin.from("clients").select("id, company_id, phone, display_name").not("phone", "is", null).filter("phone", "match", lastDigits(from));
+  let contactRows = admin.from("client_contacts").select("id, company_id, client_id, name, phone").not("phone", "is", null).filter("phone", "match", lastDigits(from));
   if (companies) {
     clientRows = clientRows.in("company_id", [...companies]);
     contactRows = contactRows.in("company_id", [...companies]);

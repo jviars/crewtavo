@@ -6,7 +6,9 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "../src/lib/supabase";
+import { phoneMatchKey } from "@crewtavo/core/recipients";
 import { receiveText, UNKNOWN_PER_NUMBER } from "../src/services/inboundTexts";
+import { lastDigits } from "../src/services/textsOff";
 
 interface State {
   companies: string[];
@@ -35,10 +37,13 @@ function fakeDb(state: State): Db {
     const eq: Record<string, unknown> = {};
     let since = "";
     let scope: string[] | null = null;
+    /** The phone numbers asked for (PostgREST's match, as Postgres reads the pattern). */
+    let phone: RegExp | null = null;
+    const found = <T extends { company_id: string; phone: string }>(rows: T[]) => rows.filter((c) => (!scope || scope.includes(c.company_id)) && (!phone || phone.test(c.phone)));
     const answer = () => {
-      if (table === "clients" && op === "select") return (state.scopes.push(scope), { data: state.clients.filter((c) => !scope || scope.includes(c.company_id)) });
+      if (table === "clients" && op === "select") return (state.scopes.push(scope), { data: found(state.clients) });
       if (table === "clients" && op === "update") return { data: [{ id: eq.id }] };
-      if (table === "client_contacts") return { data: state.contacts.filter((c) => !scope || scope.includes(c.company_id)) };
+      if (table === "client_contacts") return { data: found(state.contacts) };
       if (table === "companies") return { data: state.companies.slice(0, limit).map((id) => ({ id })) };
       if (table === "memberships") return { data: [{ user_id: "owner-1" }] };
       if (table === "messages") return (state.messages.push(row), { data: null });
@@ -79,9 +84,10 @@ function fakeDb(state: State): Db {
       in: (column: string, values: string[]) => (column === "company_id" && (scope = values), builder),
       gte: (_column: string, value: string) => ((since = value), builder),
       limit: (n: number) => ((limit = n), builder),
+      filter: (column: string, operator: string, value: string) => (column === "phone" && operator === "match" && (phone = new RegExp(value)), builder),
       then: (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve({ data: null, error: null, count: null, ...answer() }).then(resolve, reject),
     };
-    for (const name of ["not", "is", "ilike"]) builder[name] = () => builder;
+    for (const name of ["not", "is"]) builder[name] = () => builder;
     return builder;
   };
   return { from } as unknown as Db;
@@ -140,6 +146,51 @@ describe("a text from a contact's phone", () => {
     await receiveText(fakeDb(state), text("START"), null);
     expect([...state.stops]).toEqual([]);
     expect(state.notices.map((n) => n.title)).toEqual(["Mo Manager turned texts back on"]);
+  });
+});
+
+describe("a text from a number kept as it's written at home", () => {
+  it("is found however the number's last digits are spaced, and only by them", () => {
+    const ends = (key: string, phone: string) => new RegExp(lastDigits(key)).test(phone);
+    expect(ends("7700900123", "07700 900 123")).toBe(true);
+    expect(ends("7700900123", "07700 900123 ")).toBe(true);
+    expect(ends("1412345678", "+61 412 345 678")).toBe(true);
+    expect(ends("5405550163", "(540) 555-01 63")).toBe(true);
+    expect(ends("5405550163", "540-555-0163")).toBe(true);
+    // Those four digits somewhere else in the number aren't its last ones.
+    expect(ends("7700900123", "0123 456 789")).toBe(false);
+    expect(ends("7700900123", "07700 901234")).toBe(false);
+  });
+
+  it("goes to the UK client whose number was typed with its 0, as Twilio gives it with +44", async () => {
+    const state = fresh();
+    state.clients = [
+      { id: "client-1", company_id: "co-1", phone: "07700 900 123", display_name: "Pat Lee" },
+      // Ends in the same four digits, but isn't Pat's.
+      { id: "client-2", company_id: "co-1", phone: "07811 900123", display_name: "Sam Lee" },
+    ];
+    state.contacts = [{ id: "contact-1", company_id: "co-1", client_id: "client-3", name: "Mo", phone: "020 7946 0018" }];
+    expect(await receiveText(fakeDb(state), text("Running late", "+447700900123"), null)).toEqual(["co-1"]);
+    expect(await receiveText(fakeDb(state), text("Gate's open", "+442079460018"), null)).toEqual(["co-1"]);
+    expect(state.messages.map((m) => [m.client_id, m.body, m.from_phone])).toEqual([["client-1", "Running late", "+447700900123"], ["client-3", "Gate's open", "+442079460018"]]);
+    expect(state.unknown).toEqual([]);
+  });
+
+  it("stops the UK number on STOP, as the office's copy of it is matched when texting", async () => {
+    const state = fresh();
+    state.clients = [{ id: "client-1", company_id: "co-1", phone: "07700 900123", display_name: "Pat Lee" }];
+    await receiveText(fakeDb(state), text("STOP", "+447700900123"), null);
+    expect([...state.stops]).toEqual(["co-1:7700900123"]);
+    expect(state.notices.map((n) => n.title)).toEqual(["Pat Lee turned off texts"]);
+    // The stop list's key is the one the number on file has, however it was written.
+    for (const kept of ["07700 900123", "07700 900 123", "+44 7700 900123", "+44 (0)7700 900123", "0044 7700 900123"]) expect(phoneMatchKey(kept), kept).toBe("7700900123");
+  });
+
+  it("goes to the Canadian client as it does to a US one", async () => {
+    const state = fresh();
+    state.clients = [{ id: "client-1", company_id: "co-1", phone: "(416) 555-0199", display_name: "Pat Lee" }];
+    expect(await receiveText(fakeDb(state), text("See you then", "+14165550199"), null)).toEqual(["co-1"]);
+    expect(state.messages.map((m) => m.client_id)).toEqual(["client-1"]);
   });
 });
 

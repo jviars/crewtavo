@@ -66,6 +66,8 @@ function fakeDb() {
     ] as Array<Record<string, any>>,
     messages: [] as Array<Record<string, any>>,
     unknown: [] as Array<Record<string, any>>,
+    /** companies.country, by company. */
+    countries: { [ALDER]: "US", [BIRCH]: "US" } as Record<string, string>,
   };
   const queries: Query[] = [];
   const upsert = (rows: Array<Record<string, any>>, row: Record<string, any>) => {
@@ -96,7 +98,7 @@ function fakeDb() {
     if (q.table === "messages" && verb(q) === "insert") state.messages.push(call(q, "insert")![1]);
     if (q.table === "unknown_texts" && verb(q) === "insert") state.unknown.push(call(q, "insert")![1]);
     if (q.table === "unknown_texts" && verb(q) === "select") return { count: 0 };
-    if (q.table === "companies") return { data: one ? { settings: {} } : [{ id: ALDER }, { id: BIRCH }] };
+    if (q.table === "companies") return { data: one ? { settings: {}, country: state.countries[String(call(q, "eq")?.[2])] ?? null } : [{ id: ALDER }, { id: BIRCH }] };
     return { data: one ? null : [] };
   };
   const chain = (q: Query): unknown =>
@@ -272,6 +274,28 @@ describe("sending a text", () => {
     expect(t.requests.map((r) => [r.url.pathname, r.auth, r.form.From])).toEqual([
       [`/2010-04-01/Accounts/${SID_A}/Messages.json`, `${SID_A}:token-a-secret`, "+15405550100"],
       [`/2010-04-01/Accounts/${withServer.TWILIO_ACCOUNT_SID}/Messages.json`, `${withServer.TWILIO_ACCOUNT_SID}:server-token`, "+15405550000"],
+    ]);
+  });
+
+  it("goes to a number typed without its country code with the company's country's, and to a US company's numbers as typed", async () => {
+    const { state, connect } = fakeDb();
+    state.countries[BIRCH] = "GB";
+    await connect(ALDER, SID_A, "token-a-secret", "+15405550100");
+    await connect(BIRCH, SID_B, "token-b-secret", "+447700900100");
+    const t = twilio();
+    vi.stubGlobal("fetch", t.fetcher);
+    for (const to of ["07700 900123", "020 7946 0018", "+44 7700 900123", "0044 7700 900123", "+15405550163"]) await sendSms(env, { to, body: "Hi", company: BIRCH });
+    for (const to of ["(540) 555-0163", "540.555.0163", "011 44 7700 900123", "07700 900123"]) await sendSms(env, { to, body: "Hi" }, ALDER);
+    expect(t.requests.map((r) => [r.form.From, r.form.To])).toEqual([
+      ["+447700900100", "+447700900123"],
+      ["+447700900100", "+442079460018"],
+      ["+447700900100", "+447700900123"],
+      ["+447700900100", "+447700900123"],
+      ["+447700900100", "+15405550163"],
+      ["+15405550100", "(540) 555-0163"],
+      ["+15405550100", "540.555.0163"],
+      ["+15405550100", "011 44 7700 900123"],
+      ["+15405550100", "07700 900123"],
     ]);
   });
 

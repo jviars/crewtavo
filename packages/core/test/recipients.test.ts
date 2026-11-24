@@ -76,6 +76,13 @@ describe("comparing phone numbers", () => {
     expect(phoneMatchKey("+44 20 7946 0958")).toBe("2079460958");
   });
 
+  it("reads a UK number kept with its 0 as Twilio's +44 for it, so a STOP from it holds", () => {
+    for (const spelling of ["07700 900123", "07700 900 123", "+44 7700 900123", "0044 7700 900123", "+447700900123"]) expect(phoneMatchKey(spelling), spelling).toBe("7700900123");
+    expect(phoneMatchKey("020 7946 0958")).toBe(phoneMatchKey("+442079460958"));
+    const uk = { display_name: "Pat Lee", email: null, phone: "07700 900123", sms_opt_out_at: null };
+    expect(clientRecipients("sms", uk, [], { contactsOn: true, stopped: [phoneMatchKey("+447700900123")] })).toEqual([]);
+  });
+
   it("has nothing for what isn't a number", () => {
     for (const nothing of [null, undefined, "", "call the office", "555-01"]) expect(phoneMatchKey(nothing)).toBe("");
   });
