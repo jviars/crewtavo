@@ -10,7 +10,7 @@
  * data.ts loads the library for the staff app; the Client Hub gets it with its link.
  */
 import { addressLines, contractValues, depositFor, fillIn, resolveSections, sectionsHash, type ContractInput, type ContractOption, type LibrarySection } from "@crewtavo/core/contracts";
-import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import { paperSize, pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import type { ClientChecklist } from "@crewtavo/core/forms";
 import { promoRuleWords } from "@crewtavo/core/promos";
 import { businessCountry } from "@crewtavo/core/countries";
@@ -794,7 +794,8 @@ export const sampleDocument = (trade: string | null | undefined) => (trade && TR
 
 /**
  * A business as printed, from what the app already knows (session company, or a companies row):
- * with what its tax is called and its number for it (core taxName, from its settings and country).
+ * with what its tax is called and its number for it (core taxName, from its settings and country),
+ * and the paper its documents are on (core paperSize).
  */
 export function documentCompany(row: {
   name: string;
@@ -816,5 +817,6 @@ export function documentCompany(row: {
     settings: row.settings ?? {},
     taxName: taxName(row.settings, businessCountry(row)),
     taxNumber: taxNumber(row.settings),
+    paper: paperSize(businessCountry(row)),
   };
 }

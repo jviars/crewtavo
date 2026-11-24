@@ -3,14 +3,18 @@
  * browser facts the pages need. EstimateDocument.tsx draws the pages; paginate.ts decides what goes
  * on each.
  *
- * A letter page is 8.5 × 11 in: 816 × 1056 CSS px. Every page keeps a white margin of 0.4 in on each
- * side (the @page margin when it prints), and everything on it (the letterhead, the body and the
- * footer) is in the content box inside: 7.7 × 10.2 in. The body's words sit a little further in.
+ * A letter page is 8.5 × 11 in: 816 × 1056 CSS px; outside the US and Canada the paper is A4, 210 ×
+ * 297 mm: 793.7 × 1122.5 px (core paperSize, the business's own paper: DocumentCompany.paper). Every
+ * page keeps a white margin of 0.4 in on each side (the @page margin when it prints), and everything
+ * on it (the letterhead, the body and the footer) is in the content box inside: 7.7 × 10.2 in on
+ * letter. The body's words sit a little further in. Nothing on a page is laid out for one paper's
+ * width: A4 is 22 px narrower (its lines' descriptions get less room) and 66 px taller (more fits).
  *
  * The business's own letterhead cut full width (full_sheet, letterhead.ts) fills the sheet instead:
  * the content box is the whole page, so its pictures print where they sit on the stationery, and the
  * body's words keep the same inset from the paper's edge, so the same width (FULL_SHEET_PAPER_VARS).
  */
+import type { PaperSize } from "@crewtavo/core/documents";
 import type { CSSProperties } from "react";
 import type { PaperSpace } from "./paginate";
 
@@ -22,6 +26,18 @@ export const PAGE_MARGIN = 38.4;
 /** The content box: 7.7 × 10.2 in. */
 export const CONTENT_WIDTH = 739.2;
 export const CONTENT_HEIGHT = 979.2;
+
+/** A sheet of each paper, in CSS px: letter's above, and A4's, a hair under 210 × 297 mm (793.70 × 1122.52) so a page never spills onto another sheet. */
+export const SHEETS: Readonly<Record<PaperSize, { width: number; height: number }>> = {
+  letter: { width: PAGE_WIDTH, height: PAGE_HEIGHT },
+  a4: { width: 793.7, height: 1122.5 },
+};
+
+/** The sheet a document is on: its business's paper, letter unless it's said. */
+export const sheetOf = (paper: PaperSize | null | undefined) => SHEETS[paper === "a4" ? "a4" : "letter"];
+
+/** The page's size for @page and react-pdf: "letter" or "A4". */
+export const pageSizeName = (paper: PaperSize | null | undefined) => (paper === "a4" ? "A4" : "letter");
 /** How far in from the content box the words sit (44 px from the paper's edge, all told). */
 export const BODY_INSET = 6;
 /** Space at the top and bottom of the body, between the letterhead and the footer. */
@@ -51,33 +67,44 @@ export const WEBKIT_PAGE_MARGIN = "0.1in";
 /** Whether this browser prints through WebKit: Safari on a Mac, and every browser on an iPad or iPhone. */
 export const isWebKit = () => typeof navigator !== "undefined" && (navigator.vendor ?? "").startsWith("Apple");
 
-/** The measurements above, for EstimateDocument.module.css. */
-export const PAPER_VARS = {
-  "--page-w": `${PAGE_WIDTH}px`,
-  "--page-h": `${PAGE_HEIGHT}px`,
-  "--page-margin": `${PAGE_MARGIN}px`,
-  "--page-gap": `${PAGE_GAP}px`,
-  "--box-w": `${CONTENT_WIDTH}px`,
-  "--box-h": `${CONTENT_HEIGHT}px`,
-  "--doc-pad": `${BODY_INSET}px`,
-  "--pad-top": `${BODY_PAD_TOP}px`,
-  "--pad-bottom": `${BODY_PAD_BOTTOM}px`,
-} as CSSProperties;
+/**
+ * The measurements above, for EstimateDocument.module.css, on the business's paper. On the whole
+ * sheet the content box is the page, and the words keep their place.
+ */
+export function paperVars(paper: PaperSize | null | undefined, fullSheet = false): CSSProperties {
+  const sheet = sheetOf(paper);
+  const vars = {
+    "--page-w": `${sheet.width}px`,
+    "--page-h": `${sheet.height}px`,
+    "--page-margin": `${PAGE_MARGIN}px`,
+    "--page-gap": `${PAGE_GAP}px`,
+    "--box-w": `${Math.round((sheet.width - 2 * PAGE_MARGIN) * 10) / 10}px`,
+    "--box-h": `${Math.round((sheet.height - 2 * PAGE_MARGIN) * 10) / 10}px`,
+    "--doc-pad": `${BODY_INSET}px`,
+    "--pad-top": `${BODY_PAD_TOP}px`,
+    "--pad-bottom": `${BODY_PAD_BOTTOM}px`,
+  };
+  if (!fullSheet) return vars as CSSProperties;
+  return {
+    ...vars,
+    "--page-margin": "0px",
+    "--box-w": `${sheet.width}px`,
+    "--box-h": `${sheet.height}px`,
+    "--doc-pad": `${PAGE_MARGIN + BODY_INSET}px`,
+    // Crewtavo's own header and footer, and the running header, keep the margin they print with on a page that has one.
+    "--sheet-margin": `${PAGE_MARGIN}px`,
+  } as CSSProperties;
+}
 
-/** The measurements for a document on the whole sheet: the content box is the page, and the words keep their place. */
-export const FULL_SHEET_PAPER_VARS = {
-  ...PAPER_VARS,
-  "--page-margin": "0px",
-  "--box-w": `${PAGE_WIDTH}px`,
-  "--box-h": `${PAGE_HEIGHT}px`,
-  "--doc-pad": `${PAGE_MARGIN + BODY_INSET}px`,
-  // Crewtavo's own header and footer, and the running header, keep the margin they print with on a page that has one.
-  "--sheet-margin": `${PAGE_MARGIN}px`,
-} as CSSProperties;
+/** Letter's measurements (paperVars). */
+export const PAPER_VARS = paperVars("letter");
+/** Letter's measurements for a document on the whole sheet (paperVars). */
+export const FULL_SHEET_PAPER_VARS = paperVars("letter", true);
 
-/** The room for the body on each page, from the measured letterhead, running header and footer. */
-export function paperSpace(parts: { letterhead: number; running: number; footer: number }, fullSheet = false): PaperSpace {
-  const height = fullSheet ? PAGE_HEIGHT : CONTENT_HEIGHT;
+/** The room for the body on each page of the business's paper, from the measured letterhead, running header and footer. */
+export function paperSpace(parts: { letterhead: number; running: number; footer: number }, fullSheet = false, paper: PaperSize | null = null): PaperSpace {
+  const sheet = sheetOf(paper);
+  const height = fullSheet ? sheet.height : Math.round((sheet.height - 2 * PAGE_MARGIN) * 10) / 10;
   return {
     first: height - parts.letterhead - parts.footer,
     rest: height - parts.running - parts.footer,
@@ -88,7 +115,7 @@ export function paperSpace(parts: { letterhead: number; running: number; footer:
 }
 
 /** How tall a stack of `pages` pages is on screen. */
-export const stackHeight = (pages: number) => pages * PAGE_HEIGHT + Math.max(0, pages - 1) * PAGE_GAP;
+export const stackHeight = (pages: number, paper: PaperSize | null = null) => pages * sheetOf(paper).height + Math.max(0, pages - 1) * PAGE_GAP;
 
 // ---------------------------------------------------------------------------------------------
 // Cutting a block between its lines (in the hidden copy usePaper measures)

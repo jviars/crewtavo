@@ -4,7 +4,8 @@
  * width reaches the paper's edges, with no browser header or footer (Safari's can't be turned off).
  *
  * It draws what EstimateDocument draws, from the same data and helpers. Sizes are in the CSS px of
- * EstimateDocument's 816 × 1056 px page, turned into points by px(), so the two look the same.
+ * EstimateDocument's 816 × 1056 px page (793.7 × 1122.5 on A4, the paper outside the US and Canada),
+ * turned into points by px(), so the two look the same.
  * react-pdf decides the pages itself: the letterhead on the first, the running header on the rest,
  * the footer and "Page 2 of 3" on every one.
  *
@@ -18,7 +19,7 @@ import type { Style } from "@react-pdf/types";
 import type { ComponentProps, ReactNode } from "react";
 // The pages' own measurements, words and contract blocks (apps/web), so the PDF is drawn as they are.
 import { contractBlocks, type ContractBlock } from "../../../web/src/lib/html";
-import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, PAGE_WIDTH } from "../../../web/src/features/documents/paper";
+import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, sheetOf } from "../../../web/src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "../../../web/src/features/documents/types";
 import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
 import { richText } from "./richText";
@@ -130,9 +131,9 @@ interface Geometry {
 /** react-pdf's own line spacing, 1.2 of the size: the running header's and the footer's. */
 const PLAIN_LINE = 1.2;
 
-function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string): Geometry {
+function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string, pageWidth: number): Geometry {
   const box = fullSheet ? 0 : PAGE_MARGIN;
-  const boxWidth = PAGE_WIDTH - 2 * box;
+  const boxWidth = pageWidth - 2 * box;
   const pad = fullSheet ? PAGE_MARGIN + BODY_INSET : BODY_INSET;
   const own = ownLetterhead(template);
   const line = 10.5 * PLAIN_LINE;
@@ -165,7 +166,9 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
   const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone };
   const own = ownLetterhead(template);
   const words = template.footer.trim();
-  const g = geometryOf(template, printsFullSheet(own), words);
+  // The business's paper: letter, or A4 outside the US and Canada (core paperSize).
+  const sheet = sheetOf(company.paper);
+  const g = geometryOf(template, printsFullSheet(own), words, sheet.width);
   // The body starts under the running header on every page; the first page's letterhead is pulled up into that room.
   const top = g.box + g.running + BODY_PAD_TOP;
   const bottom = g.box + g.footer + BODY_PAD_BOTTOM;
@@ -178,7 +181,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
 
   return (
     <Document title={data.number ? `${kind} ${data.number}` : kind} author={company.name} creator="Crewtavo" producer="Crewtavo">
-      <Page size="LETTER" style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
+      <Page size={company.paper === "a4" ? "A4" : "LETTER"} style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
         <RunningHeader company={company} kind={kind} number={data.number} g={g} />
         <Footer template={template} own={own.footer} picture={pic(own.footer && letterheadSrc(own.footer.path))} words={words} g={g} look={look} />
 

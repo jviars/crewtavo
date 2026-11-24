@@ -3,7 +3,7 @@
  * their own data: the staff app from Supabase, the Client Hub from its link's payload, Settings from a
  * sample. The look comes separately, from the business's estimate template (core documents.ts).
  */
-import type { TemplateSettings } from "@crewtavo/core/documents";
+import type { PaperSize, TemplateSettings } from "@crewtavo/core/documents";
 import type { ContractBlock } from "../../lib/html";
 import type { PaperFragment, PaperPage } from "./paginate";
 import type { PaperWords } from "./paper";
@@ -23,6 +23,8 @@ export interface DocumentCompany {
   taxName?: string;
   /** Its number for that tax (Settings → Company), printed with its details; null or left out without one. */
   taxNumber?: string | null;
+  /** The paper its documents are on (core paperSize, by its country): letter unless it's said. */
+  paper?: PaperSize;
 }
 
 export interface DocumentLine {

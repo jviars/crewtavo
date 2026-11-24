@@ -148,12 +148,14 @@ describe("the Client Hub's documents", () => {
     expect(hubLetterhead(company)).toEqual({
       name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example",
       address: ["200 Main St", "Springfield, IL 62704"], logo: "/api/public/logo/c/l.png", settings: { branding: { color: "#1f4e79" } },
-      taxName: "Tax", taxNumber: null,
+      taxName: "Tax", taxNumber: null, paper: "letter",
     });
     expect(hubLetterhead({ ...company, address: undefined, logo: undefined }).address).toEqual([]);
     // What the business calls its tax and its number for it, or its country's name for it.
     expect(hubLetterhead({ ...company, country: "GB", tax_number: " GB123456789 " })).toMatchObject({ taxName: "VAT", taxNumber: "GB123456789" });
-    expect(hubLetterhead({ ...company, country: "CA" }).taxName).toBe("GST/HST");
+    expect(hubLetterhead({ ...company, country: "CA" })).toMatchObject({ taxName: "GST/HST", paper: "letter" });
+    // On A4 outside the US and Canada.
+    expect(hubLetterhead({ ...company, country: "GB" }).paper).toBe("a4");
     expect(hubLetterhead({ ...company, country: "CA", tax_name: "HST", tax_number: "123456789 RT0001" })).toMatchObject({ taxName: "HST", taxNumber: "123456789 RT0001" });
     expect(hubTemplate({ template: { header: "banner" } })).toEqual({ ...DEFAULT_TEMPLATE, header: "banner" });
     expect(hubTemplate({})).toEqual(DEFAULT_TEMPLATE);

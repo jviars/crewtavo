@@ -117,9 +117,10 @@ export const documentPdfInput = z.object({
     address: z.array(text(300)).max(10),
     logo: text(500).nullable(),
     settings: z.unknown().optional(),
-    // What its tax is called and its number for it (left out by pages from before they printed).
+    // What its tax is called and its number for it, and its paper (left out by pages from before they printed: letter).
     taxName: text(40).optional(),
     taxNumber: text(60).nullish(),
+    paper: z.enum(["letter", "a4"]).optional(),
   }),
   currency: text(3),
   timeZone: text(64).optional(),

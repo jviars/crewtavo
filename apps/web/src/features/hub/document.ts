@@ -10,7 +10,7 @@ import { AUTOPAY_YOURS_TO_PAY } from "@crewtavo/core/autopay";
 import { lateFeeNotice, type LateFee } from "@crewtavo/core/billing";
 import { depositFor, type ContractInput, type LibrarySection } from "@crewtavo/core/contracts";
 import { businessCountry } from "@crewtavo/core/countries";
-import { documentColor, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import { documentColor, paperSize, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import type { ClientChecklist } from "@crewtavo/core/forms";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { normalizePitch, pitchFactor } from "@crewtavo/core/geo";
@@ -348,9 +348,10 @@ export interface InvoiceView {
 /** The template a Hub page prints with: the business's, or the built-in look from an older server. */
 export const hubTemplate = (view: { template?: unknown }): TemplateSettings => templateSettings(view.template);
 
-/** The letterhead: the business as its clients see it, with what it calls its tax and its number for it. */
+/** The letterhead: the business as its clients see it, with what it calls its tax and its number for it, and the paper it prints on. */
 export function hubLetterhead(company: HubCompany): DocumentCompany {
   const tax = { tax_name: company.tax_name, tax_number: company.tax_number };
+  const country = businessCountry(company);
   return {
     name: company.name,
     phone: company.phone?.trim() || null,
@@ -359,8 +360,9 @@ export function hubLetterhead(company: HubCompany): DocumentCompany {
     address: company.address ?? [],
     logo: company.logo ?? null,
     settings: { branding: company.branding ?? null },
-    taxName: taxName(tax, businessCountry(company)),
+    taxName: taxName(tax, country),
     taxNumber: taxNumber(tax),
+    paper: paperSize(country),
   };
 }
 
