@@ -1,5 +1,5 @@
 import { TIPS_LAW_NOTE } from "@crewtavo/core/autopay";
-import { businessCountry, countryChoices } from "@crewtavo/core/countries";
+import { addressLabels, businessCountry, countryChoices, REGION_MAX } from "@crewtavo/core/countries";
 import { LATE_FEE_LAW_NOTE, lateFeeSettings, minimumCharge, type LateFee } from "@crewtavo/core/billing";
 import { BREAK_PAY_HINTS, BREAK_PAY_LABELS, breakPay, type BreakPay } from "@crewtavo/core/breaks";
 import { CLOCK_MODE_HINTS, CLOCK_MODE_LABELS, clockMode, type ClockMode } from "@crewtavo/core/clock";
@@ -7,6 +7,7 @@ import { FT_PER_M } from "@crewtavo/core/geo";
 import { GEOFENCE_MODE_HINTS, GEOFENCE_MODE_LABELS, GEOFENCE_NOTE, GEOFENCE_RADIUS, geofence, geofenceRadius, type GeofenceMode } from "@crewtavo/core/geofence";
 import { completesWhenVisitsDone } from "@crewtavo/core/jobBilling";
 import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { regionNeeded } from "@crewtavo/core/postcards";
 import { PRESETS } from "@crewtavo/core/presets";
 import { PRIVACY_URL_MAX, privacyUrlTyped } from "@crewtavo/core/privacyPolicy";
 import { workdays } from "@crewtavo/core/slots";
@@ -165,6 +166,8 @@ export function CompanySettings() {
   const logo = ((details.data?.settings ?? {}) as Record<string, any>).branding?.logo ?? null;
   const days = f.workdays ? f.workdays.split(",").map(Number) : [];
   const ownColor = !BRAND_COLORS.some((c) => c.value === f.color);
+  // The shop address in the words of the country picked below, as it changes.
+  const words = addressLabels(f.country);
 
   return (
     <>
@@ -198,13 +201,13 @@ export function CompanySettings() {
         </div>
       </Section>
       <Section level={3} title="Shop address">
-        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, state and ZIP.</p>
+        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city{regionNeeded(f.country) ? `, ${words.regionInText}` : ""} and {words.postalCodeInText}.</p>
         <div className="set-grid">
           <Field label="Street" className="set-full"><input className="input" value={f.line1} onChange={set("line1")} maxLength={200} /></Field>
           <div className="set-grid set-grid-3 set-full">
             <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
-            <Field label="State / Province"><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
-            <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+            <Field label={words.region} optional={words.regionOptional}><input className="input" value={f.region} onChange={set("region")} maxLength={REGION_MAX} /></Field>
+            <Field label={words.postalCode}><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
           </div>
         </div>
       </Section>

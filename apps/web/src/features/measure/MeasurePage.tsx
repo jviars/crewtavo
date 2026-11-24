@@ -10,6 +10,7 @@
  * it what Measure opens on (an admin can set that for the whole team in Settings > Maps). On a phone
  * or tablet the map can fill the screen (lib/extendMap).
  */
+import { addressLabels } from "@crewtavo/core/countries";
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { drawingSquares, edgeLengths, isPitch, isRoofEdge, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
 import { itemFits, PAVING_GROUPS, PAVING_ITEMS, pavingItem, pavingQuantities, stallsAlong, type PavingItem } from "@crewtavo/core/paving";
@@ -32,7 +33,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useExtendedMap } from "@/lib/extendMap";
-import { addressLine, formatNumber } from "@/lib/format";
+import { addressLine, companyCountry, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -536,7 +537,10 @@ export function MeasurePage() {
     meta: { inline: true },
     mutationFn: async (address: string) => {
       const r = await api.post<Found>("/geocode", { address, world: true });
-      if (!r.found) throw new Error(`Couldn't find "${address}". Try adding the city and state, or the country.`);
+      if (!r.found) {
+        const words = addressLabels(companyCountry());
+        throw new Error(`Couldn't find "${address}". Try adding the city and ${words.regionOptional ? words.postalCodeInText : words.regionInText}, or the country.`);
+      }
       return r;
     },
     onSuccess: (r) => {
@@ -575,7 +579,8 @@ export function MeasurePage() {
       setTitle((t) => (t === "Measurement" || t === picked?.label ? s.label : t));
     }
     if (!at) return toast.error(`Couldn't find ${s.label} on the map. Check the property's address on ${s.client ?? "the client"}'s page.`);
-    goTo({ ...at, zoom: 19, country: "US", place: s.label });
+    // In the property's country: its business's unless it says otherwise.
+    goTo({ ...at, zoom: 19, country: s.country ?? companyCountry(), place: s.label });
   };
   /** The drawing is no longer for the client picked earlier (and loses their address as its name). */
   const unpick = () => {

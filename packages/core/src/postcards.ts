@@ -6,6 +6,7 @@
  * it goes to the same way (public.postcard_audience, 20261113001400_postcards.sql).
  */
 import { renderTemplate, type TemplateVars } from "./automations";
+import { countryCode, countryInText } from "./countries";
 
 // ---------------------------------------------------------------------------------------------
 // Sizes
@@ -325,12 +326,31 @@ export function mailable(address: LooseAddress): MailingAddress | AddressProblem
  * return address is (mailable): a street or box, a city, a state and a ZIP code. Lob's own limits
  * (US only, two-letter states, 64 characters a line) are for cards alone, so an address that's all
  * there but that Lob wouldn't take still counts, and one outside the US needs no state.
+ *
+ * An address that doesn't say its country (the company's, from Settings → Company, never does) is
+ * in the business's `country` (companies.country): in the US as before, and in Canada, whose
+ * addresses always have their province; elsewhere the region can be left out, as the UK's county
+ * usually is. With no country given, the US.
  */
-export function hasPostalAddress(address: LooseAddress): boolean {
+export function hasPostalAddress(address: LooseAddress, country?: string | null): boolean {
   if (mailable(address) !== "no_address") return true;
-  const abroad = !US.has(text(address?.country).toLowerCase());
+  const named = text(address?.country);
+  const abroad = named ? !US.has(named.toLowerCase()) : !regionNeeded(country);
   return abroad && Boolean(text(address?.line1) && text(address?.city) && (text(address?.postal_code) || text(address?.zip)));
 }
+
+/** Whether a business's postal address needs its region in this country: the state in the US (and where it isn't known), the province in Canada. */
+export const regionNeeded = (country: string | null | undefined): boolean => ["US", "CA"].includes(countryCode(country) ?? "US");
+
+/**
+ * Lob mails these cards in the US only (apps/api/src/integrations/lob.ts sends every address as the
+ * US's), to clients' US addresses with the business's own as the return address. Whether postcards
+ * are for a business in this country, and what a business elsewhere is told where they're offered
+ * (Apps → Lob, Marketing → Campaigns) and when Send is refused.
+ */
+export const postcardsMailHere = (country: string | null | undefined): boolean => (countryCode(country) ?? "US") === "US";
+export const postcardsUsOnly = (country: string | null | undefined): string =>
+  `Postcards are mailed in the US only: Lob sends each card to a US address, and prints your company's address from Settings → Company as the return address, which has to be in the US too. Your business is in ${countryInText(countryCode(country) ?? "US")}.`;
 
 /** Why a marketing email can't go from a company with no complete postal address, and where to add it. */
 export const SENDER_ADDRESS_NEEDED = "Add your company's full postal address in Settings → Company first: every marketing email has to show it. A PO box is fine.";

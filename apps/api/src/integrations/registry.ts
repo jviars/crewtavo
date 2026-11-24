@@ -292,7 +292,7 @@ export const CATALOG: CatalogEntry[] = [
     id: "lob",
     name: "Lob",
     category: "Marketing",
-    description: "Postcards printed and mailed for your campaigns, through your own Lob account.",
+    description: "Postcards printed and mailed to US addresses for your campaigns, through your own Lob account.",
     auth: "api_key",
     docs: "https://docs.lob.com/",
     // Each business uses its own Lob account and key, so nothing to set up on the server.

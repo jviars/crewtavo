@@ -15,6 +15,7 @@ import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { PostcardsUsOnly } from "../apps/LobPanel";
 import styles from "./Marketing.module.css";
 
 /** A new postcard's message, to change. */
@@ -58,6 +59,7 @@ export function PostcardCampaigns() {
   };
   return (
     <Section title="Postcards" count={list.data?.length || undefined} flush action={<Button loading={create.isPending} onClick={() => create.mutate()}>New postcard</Button>}>
+      <PostcardsUsOnly />
       <FormError error={create.error} />
       {list.isPending ? (
         <InboxSkeleton rows={1} />

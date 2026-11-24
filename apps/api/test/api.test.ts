@@ -262,6 +262,7 @@ describe("setting up a business", () => {
     const make = (currency: string) =>
       request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Maple Lawn", timezone: "America/Toronto", currency, terms_version: TERMS_VERSION }) });
     expect((await make("cad")).status).toBe(201);
+    // With the country guessed from the time zone, as none was sent.
     expect(writes[0]).toEqual({ path: "/rest/v1/companies?id=eq.company-1", body: { currency: "CAD", country: "CA" } });
     const bad = await make("dollars");
     expect(bad.status).toBe(400);

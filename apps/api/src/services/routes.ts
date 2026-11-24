@@ -58,8 +58,8 @@ export async function loadDay(db: Db, companyId: string, crewId: string | null, 
 export async function locateMissing(db: Db, env: Env, visits: DayVisit[], limit = 8): Promise<void> {
   const missing = [...new Map(visits.filter((v) => v.status === "scheduled" && v.property && v.property.lat == null && v.property.line1).map((v) => [v.property!.id, v.property!])).values()].slice(0, limit);
   for (const p of missing) {
-    const { address, abroad } = addressOf(p);
-    const hit = await geocodeAddress(address, { world: abroad }).catch(() => null);
+    const { address, options } = addressOf(p);
+    const hit = await geocodeAddress(address, options).catch(() => null);
     if (!hit) continue;
     if (!(await saveLocation(db, p.id, hit).then(() => true, () => false))) continue;
     for (const v of visits) if (v.property?.id === p.id) Object.assign(v.property, { lat: hit.lat, lng: hit.lng });

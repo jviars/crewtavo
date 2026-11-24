@@ -35,7 +35,7 @@ export const bookingTools = {
       name: z.string().max(120),
       slug: z.string().max(50).optional().describe("The end of its link; made from the name when left out."),
       kind: z.enum(INTAKE_FORM_KINDS).default("request"),
-      service_area_zips: z.array(z.string().max(10)).max(500).default([]).describe("ZIP or postal codes it takes requests from (a code also takes the longer ones it starts, like M5V for M5V 2T6); empty takes any."),
+      service_area_zips: z.array(z.string().max(10)).max(500).default([]).describe("ZIP or postal codes it takes requests from (a code also takes the longer ones it starts, like M5V for M5V 2T6, though a UK district is whole: SW1 takes SW1A 1AA, not SW10 1AA); empty takes any."),
       questions: z.array(question).max(30),
       active: z.boolean().optional().describe("A form that's turned off stops taking requests."),
       ...companyArg,

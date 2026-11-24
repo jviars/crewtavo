@@ -39,6 +39,7 @@ describe("hints for the business", () => {
   });
 
   it("say by the shop address that marketing emails show it and can't go out without it", () => {
-    expect(source("../src/features/settings/CompanySettings.tsx")).toContain("It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, state and ZIP.");
+    // In the words of the business's country, with the region only where it's needed: "city, state and ZIP code" in the US, "city and postcode" in the UK.
+    expect(source("../src/features/settings/CompanySettings.tsx")).toContain("It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city{regionNeeded(f.country) ? `, ${words.regionInText}` : \"\"} and {words.postalCodeInText}.");
   });
 });

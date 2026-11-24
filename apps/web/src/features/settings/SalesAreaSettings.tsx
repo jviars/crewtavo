@@ -5,6 +5,7 @@
  * person; whoever gets it is told. Kept in sales_areas and matched by the database
  * (supabase/migrations/20261110000200_sales_areas.sql). A zip is one person's.
  */
+import { businessCountry } from "@crewtavo/core/countries";
 import { SALES } from "@crewtavo/core/roles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -16,7 +17,7 @@ import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { parseZips } from "./salesAreas";
+import { areaWords, parseZips, type AreaWords } from "./salesAreas";
 import styles from "./settings.module.css";
 import type { Member } from "./TeamSettings";
 import { Select } from "@/components/ui/Select";
@@ -67,15 +68,17 @@ export function SalesAreaSettings() {
     .filter((m) => (m.active && SALES.includes(m.role)) || areas.some((a) => a.user_id === m.user_id))
     .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
   const ownerOf = (zip: string) => team.find((m) => m.user_id === areas.find((a) => a.zip === zip)?.user_id);
+  const words = areaWords(businessCountry(company));
 
   return (
     <Section level={3} title="Who covers where" action={<SaveStatus status={saving.status} />}>
-      <p className="set-note">Put in whole zip codes, or the first digits for a wider area: 462 covers every zip that starts with 462, and 46201 still goes to whoever has it.</p>
+      <p className="set-note">{words.note}</p>
       <div className={styles.zips}>
         {people.map((m) => (
           <ZipField
             key={`${m.user_id}:${zipsOf(m.user_id).join()}`}
             person={m}
+            words={words}
             label={`${nameOf(m)}${m.active ? "" : " (no longer on the team)"}`}
             zips={zipsOf(m.user_id)}
             takenBy={(zip) => {
@@ -85,7 +88,7 @@ export function SalesAreaSettings() {
             onSave={(add, drop) => void saving.track(setZips.mutateAsync({ userId: m.user_id, add, drop }))}
           />
         ))}
-        <Field label="Everywhere else" hint="A request from a zip nobody covers, or with no address." className={styles.zip}>
+        <Field label="Everywhere else" hint={`A request from a ${words.code} nobody covers, or with no address.`} className={styles.zip}>
           <Select className="select" value={elseUser} onChange={(e) => void saving.track(setElse.mutateAsync(e.target.value))}>
             <option value="">Nobody: leave it unassigned</option>
             {people.map((m) => <option key={m.user_id} value={m.user_id}>{nameOf(m)}</option>)}
@@ -98,17 +101,17 @@ export function SalesAreaSettings() {
 }
 
 /** One salesperson's zips, saved when they leave the box. */
-function ZipField({ person, label, zips, takenBy, onSave }: { person: Member; label: string; zips: string[]; takenBy: (zip: string) => string | null; onSave: (add: string[], drop: string[]) => void }) {
+function ZipField({ person, words, label, zips, takenBy, onSave }: { person: Member; words: AreaWords; label: string; zips: string[]; takenBy: (zip: string) => string | null; onSave: (add: string[], drop: string[]) => void }) {
   const [problem, setProblem] = useState<string | null>(null);
   return (
     <Field label={<span className={styles.zipWho}><span className="avatar" aria-hidden="true" style={{ background: person.profile?.color || "var(--avatar)" }}><Face name={nameOf(person)} photo={person.profile?.avatar_url} /></span>{label}</span>} error={problem} className={styles.zip}>
       <input
         className="input"
         defaultValue={zips.join(", ")}
-        placeholder="Like 46201, 46202, 462"
+        placeholder={words.placeholder}
         onBlur={(e) => {
           const typed = parseZips(e.target.value);
-          if (typed.bad.length) return setProblem(`${typed.bad.join(", ")} ${typed.bad.length === 1 ? "isn't a zip code" : "aren't zip codes"}.`);
+          if (typed.bad.length) return setProblem(`${typed.bad.join(", ")} ${typed.bad.length === 1 ? `isn't a ${words.code}` : `aren't ${words.codes}`}.`);
           const taken = typed.zips.find((z) => takenBy(z));
           if (taken) return setProblem(`${taken} is ${takenBy(taken)}'s already. Take it off them first.`);
           setProblem(null);

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { businessCountry, COUNTRY_CODES, countryChoices, countryCode, countryFor, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode } from "../src/countries";
+import { addressLabels, businessCountry, COUNTRY_CODES, countryChoices, countryCode, countryFor, countryInText, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode, REGION_MAX } from "../src/countries";
 import { CURRENCIES } from "../src/money";
 
 describe("a business's country", () => {
@@ -61,5 +61,32 @@ describe("a business's country", () => {
     expect(businessCountry({ timezone: "America/Vancouver" })).toBe("CA");
     expect(businessCountry({ country: "xx", timezone: "Europe/London" })).toBe("GB");
     expect(businessCountry(null)).toBe("US");
+  });
+});
+
+describe("an address's boxes", () => {
+  it("are called what they are where the business is", () => {
+    expect(addressLabels("US")).toEqual({ region: "State", regionInText: "state", regionOptional: false, postalCode: "ZIP code", postalCodeInText: "ZIP code" });
+    expect(addressLabels("CA")).toEqual({ region: "Province", regionInText: "province", regionOptional: false, postalCode: "Postal code", postalCodeInText: "postal code" });
+    // A UK address usually leaves the county out.
+    expect(addressLabels("GB")).toEqual({ region: "County", regionInText: "county", regionOptional: true, postalCode: "Postcode", postalCodeInText: "postcode" });
+    expect(addressLabels("AU")).toMatchObject({ region: "State / Province / Region", regionOptional: false, postalCode: "Postal code" });
+  });
+
+  it("are the US's where the country isn't known", () => {
+    for (const country of [null, undefined, "", "xx"]) expect(addressLabels(country).postalCode).toBe("ZIP code");
+    expect(addressLabels(" gb ").postalCode).toBe("Postcode");
+  });
+
+  it("have room for the longest region names", () => {
+    for (const name of ["Newfoundland and Labrador", "Australian Capital Territory", "Dumfries and Galloway"]) expect(name.length).toBeLessThanOrEqual(REGION_MAX);
+  });
+});
+
+describe("a country's name in a sentence", () => {
+  it("has its article where it takes one", () => {
+    expect(["GB", "US", "NL", "PH", "DO", "KY", "AE", "CA", "IE", "AU"].map(countryInText)).toEqual([
+      "the United Kingdom", "the United States", "the Netherlands", "the Philippines", "the Dominican Republic", "the Cayman Islands", "the United Arab Emirates", "Canada", "Ireland", "Australia",
+    ]);
   });
 });

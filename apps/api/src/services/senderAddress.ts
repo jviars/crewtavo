@@ -13,9 +13,9 @@
 import { hasPostalAddress, SENDER_ADDRESS_NEEDED } from "@crewtavo/core/postcards";
 import type { Db } from "../lib/supabase";
 
-/** Why the company can't send marketing email yet, or null when its address is all there. */
-export const senderAddressProblem = (company: { address?: unknown } | null | undefined): string | null =>
-  hasPostalAddress(company?.address as Record<string, unknown> | null | undefined) ? null : SENDER_ADDRESS_NEEDED;
+/** Why the company can't send marketing email yet, or null when its address is all there, as addresses are written in its country. */
+export const senderAddressProblem = (company: { address?: unknown; country?: string | null } | null | undefined): string | null =>
+  hasPostalAddress(company?.address as Record<string, unknown> | null | undefined, company?.country) ? null : SENDER_ADDRESS_NEEDED;
 
 export const ADDRESS_NOTICE_TITLE = "Marketing emails are waiting for your company's address";
 const ADDRESS_NOTICE_BODY =
