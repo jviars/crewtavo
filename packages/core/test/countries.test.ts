@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addressLabels, businessCountry, countryChoices, countryCode, countryFor, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode, REGION_MAX } from "../src/countries";
+import { addressLabels, businessCountry, countryChoices, countryCode, countryFor, countryInText, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode, REGION_MAX } from "../src/countries";
 import { CURRENCIES } from "../src/money";
 
 describe("a business's country", () => {
@@ -73,5 +73,13 @@ describe("an address's boxes", () => {
 
   it("have room for the longest region names", () => {
     for (const name of ["Newfoundland and Labrador", "Australian Capital Territory", "Dumfries and Galloway"]) expect(name.length).toBeLessThanOrEqual(REGION_MAX);
+  });
+});
+
+describe("a country's name in a sentence", () => {
+  it("has its article where it takes one", () => {
+    expect(["GB", "US", "NL", "PH", "DO", "KY", "AE", "CA", "IE", "AU"].map(countryInText)).toEqual([
+      "the United Kingdom", "the United States", "the Netherlands", "the Philippines", "the Dominican Republic", "the Cayman Islands", "the United Arab Emirates", "Canada", "Ireland", "Australia",
+    ]);
   });
 });

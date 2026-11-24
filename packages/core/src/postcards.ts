@@ -6,7 +6,7 @@
  * it goes to the same way (public.postcard_audience, 20261113001400_postcards.sql).
  */
 import { renderTemplate, type TemplateVars } from "./automations";
-import { countryCode } from "./countries";
+import { countryCode, countryInText } from "./countries";
 
 // ---------------------------------------------------------------------------------------------
 // Sizes
@@ -341,6 +341,16 @@ export function hasPostalAddress(address: LooseAddress, country?: string | null)
 
 /** Whether a business's postal address needs its region in this country: the state in the US (and where it isn't known), the province in Canada. */
 export const regionNeeded = (country: string | null | undefined): boolean => ["US", "CA"].includes(countryCode(country) ?? "US");
+
+/**
+ * Lob mails these cards in the US only (apps/api/src/integrations/lob.ts sends every address as the
+ * US's), to clients' US addresses with the business's own as the return address. Whether postcards
+ * are for a business in this country, and what a business elsewhere is told where they're offered
+ * (Apps → Lob, Marketing → Campaigns) and when Send is refused.
+ */
+export const postcardsMailHere = (country: string | null | undefined): boolean => (countryCode(country) ?? "US") === "US";
+export const postcardsUsOnly = (country: string | null | undefined): string =>
+  `Postcards are mailed in the US only: Lob sends each card to a US address, and prints your company's address from Settings → Company as the return address, which has to be in the US too. Your business is in ${countryInText(countryCode(country) ?? "US")}.`;
 
 /** Why a marketing email can't go from a company with no complete postal address, and where to add it. */
 export const SENDER_ADDRESS_NEEDED = "Add your company's full postal address in Settings → Company first: every marketing email has to show it. A PO box is fine.";

@@ -43,6 +43,12 @@ export function countryName(code: string): string {
   }
 }
 
+/** The country's name as it reads in a sentence: "the United Kingdom", "the Netherlands", "Canada". */
+export function countryInText(code: string): string {
+  const name = countryName(code);
+  return /^United |Islands$|Republic$|^(Netherlands|Philippines|Bahamas|Gambia|Maldives)$/.test(name) ? `the ${name}` : name;
+}
+
 /** The countries the choice lists first: the ones most businesses on Crewtavo are in. */
 export const FIRST_COUNTRIES = ["US", "CA", "GB", "IE", "AU", "NZ", "ZA"] as const;
 

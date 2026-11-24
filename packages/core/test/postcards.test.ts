@@ -16,6 +16,8 @@ import {
   messageProblem,
   POSTCARD_SIZE_INFO,
   postcardMessage,
+  postcardsMailHere,
+  postcardsUsOnly,
   regionNeeded,
   usStateCode,
 } from "../src/postcards";
@@ -93,6 +95,14 @@ describe("a company's postal address under a marketing email", () => {
     expect(hasPostalAddress(leeds, "CA")).toBe(false);
     expect(hasPostalAddress(leeds)).toBe(false);
     expect(hasPostalAddress({ ...leeds, city: "" }, "GB")).toBe(false);
+  });
+});
+
+describe("where postcards are mailed", () => {
+  it("in the US only, which a business elsewhere is told", () => {
+    expect([postcardsMailHere("US"), postcardsMailHere(null), postcardsMailHere("CA"), postcardsMailHere("GB")]).toEqual([true, true, false, false]);
+    expect(postcardsUsOnly("CA")).toMatch(/^Postcards are mailed in the US only: .*Your business is in Canada\.$/);
+    expect(postcardsUsOnly("GB")).toMatch(/Your business is in the United Kingdom\.$/);
   });
 });
 
