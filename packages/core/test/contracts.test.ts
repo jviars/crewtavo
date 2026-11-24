@@ -310,6 +310,19 @@ describe("contractStarters", () => {
     expect(contractStarters("something_new").map((s) => s.title)).toEqual(common);
   });
 
+  it("has the FTC's right to cancel and its notice for a business in the US only, and the rest everywhere", () => {
+    const outside = common.filter((t) => t !== "Your right to cancel" && t !== "Notice of Cancellation");
+    for (const country of ["GB", "CA", "AU", "gb"]) expect(contractStarters("general", { country }).map((s) => s.title), country).toEqual(outside);
+    expect(contractStarters("general", { country: "US" }).map((s) => s.title)).toEqual(common);
+    expect(contractStarters("general", { country: null }).map((s) => s.title)).toEqual(common);
+    // The trade's own and the late fee come with them as anywhere.
+    const line = "An invoice still unpaid 7 days after its due date gets a late fee of £25.00, added once.";
+    const uk = contractStarters("roofing_exteriors", { country: "GB", lateFeeLine: line });
+    expect(uk.map((s) => s.title)).toContain("Hidden decking damage");
+    expect(uk.find((s) => s.title === "Payment")!.body).toContain(line);
+    expect(uk.filter((s) => s.initials || s.place === "signatures")).toEqual([]);
+  });
+
   it("adds a few for the trade", () => {
     const titles = (trade: string) => contractStarters(trade).map((s) => s.title).filter((t) => !common.includes(t));
     expect(titles("roofing_exteriors")).toEqual(["Hidden decking damage", "Insurance claims", "Weather"]);

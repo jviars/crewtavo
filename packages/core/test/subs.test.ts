@@ -7,14 +7,17 @@ import {
   paperworkLinkIntro,
   paperworkLinkMessages,
   paperworkAlert,
+  paperworkRequirements,
   paperworkStatus,
   paperworkSummary,
   paperworkSummaryText,
   paperworkTone,
+  subDocumentKinds,
   subDocumentLabel,
   subSettings,
   taxClassificationLabel,
   uninsured,
+  usesIrsForms,
   type PaperworkDocument,
 } from "../src/subs";
 
@@ -29,6 +32,27 @@ describe("subcontractor paperwork", () => {
   it("is missing until something is on file", () => {
     expect(states([])).toEqual({ w9: "missing", liability: "missing", workers_comp: "missing" });
     expect(paperworkStatus([], TODAY)[0]).toEqual({ requirement: "w9", state: "missing", document_id: null, kind: null, expires_on: null, days_left: null, verified: null, waiting: false });
+  });
+
+  it("asks for a W-9 in the US only, and the insurance everywhere", () => {
+    for (const country of ["US", "us", null, undefined]) expect(usesIrsForms(country), String(country)).toBe(true);
+    for (const country of ["GB", "CA", "AU", "IE"]) expect(usesIrsForms(country), country).toBe(false);
+    expect(paperworkRequirements("US").map((r) => r.key)).toEqual(["w9", "liability", "workers_comp"]);
+    expect(paperworkRequirements("GB").map((r) => r.key)).toEqual(["liability", "workers_comp"]);
+    expect(subDocumentKinds("US").map((k) => k.key)).toContain("w9");
+    expect(subDocumentKinds("CA").map((k) => k.key)).toEqual(["liability", "workers_comp", "wc_exemption", "license", "other"]);
+    expect(Object.fromEntries(paperworkStatus([], TODAY, "GB").map((s) => [s.requirement, s.state]))).toEqual({ liability: "missing", workers_comp: "missing" });
+    expect(states([])).toEqual({ w9: "missing", liability: "missing", workers_comp: "missing" });
+    // The database's view has a W-9 row for every business: outside the US it isn't asked for.
+    const rows = [
+      { requirement: "w9", state: "missing", expires_on: null, verified: null },
+      { requirement: "liability", state: "missing", expires_on: null, verified: null },
+      { requirement: "workers_comp", state: "ok", expires_on: null, verified: true },
+    ];
+    expect(neededPaperwork(rows, "CA").needed.map((n) => n.requirement)).toEqual(["liability"]);
+    expect(askingFor(neededPaperwork(rows, "GB").needed)).toBe("your liability insurance");
+    expect(askingFor(neededPaperwork(rows, "US").needed)).toBe("your W-9 and liability insurance");
+    expect(askingFor(neededPaperwork(rows).needed)).toBe("your W-9 and liability insurance");
   });
 
   it("goes by the company's today: OK, ending within 30 days (the day it ends too), then run out", () => {

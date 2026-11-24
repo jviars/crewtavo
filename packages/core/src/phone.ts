@@ -55,6 +55,102 @@ export function signInPhone(input: string | null | undefined, countries: readonl
   return e164 && textsCodesTo(e164, countries) ? e164 : null;
 }
 
+/**
+ * How a country's numbers are written at home, for completing one typed without its country code
+ * (internationalPhone): the calling code; the trunk prefix dialled before the area code at home and
+ * dropped after the calling code ("07700 900123" is +44 7700 900123), or "" where there's none
+ * (Spain's "612 345 678" is +34 612 345 678, and Italy keeps its 0: "06 1234 5678" is +39 06 1234
+ * 5678); the prefix dialled before another country's code besides 00; how many digits a
+ * number has after its calling code, fewest and most; and a mobile number written as it is there,
+ * for a phone box's example (phoneExample).
+ */
+interface Dialing {
+  code: string;
+  trunk: string;
+  exit?: string;
+  digits: [number, number];
+  example: string;
+}
+
+/**
+ * The countries whose numbers internationalPhone completes. The US and Canada aren't here: their
+ * numbers go to Twilio as typed, as they always have, and it reads them. Nor is a country whose
+ * rules aren't certain here: its numbers stay as typed too.
+ */
+const DIALING: Record<string, Dialing> = {
+  GB: { code: "44", trunk: "0", digits: [9, 10], example: "07700 900123" },
+  IE: { code: "353", trunk: "0", digits: [7, 9], example: "087 123 4567" },
+  AU: { code: "61", trunk: "0", exit: "0011", digits: [9, 9], example: "0412 345 678" },
+  NZ: { code: "64", trunk: "0", digits: [8, 10], example: "021 123 4567" },
+  ZA: { code: "27", trunk: "0", digits: [9, 9], example: "082 123 4567" },
+  AT: { code: "43", trunk: "0", digits: [4, 13], example: "0664 1234567" },
+  BE: { code: "32", trunk: "0", digits: [8, 9], example: "0470 12 34 56" },
+  BG: { code: "359", trunk: "0", digits: [7, 9], example: "087 123 4567" },
+  CY: { code: "357", trunk: "", digits: [8, 8], example: "96 123456" },
+  DE: { code: "49", trunk: "0", digits: [6, 13], example: "0151 23456789" },
+  EE: { code: "372", trunk: "", digits: [7, 8], example: "5123 4567" },
+  ES: { code: "34", trunk: "", digits: [9, 9], example: "612 34 56 78" },
+  FI: { code: "358", trunk: "0", digits: [5, 12], example: "040 1234567" },
+  FR: { code: "33", trunk: "0", digits: [9, 9], example: "06 12 34 56 78" },
+  GR: { code: "30", trunk: "", digits: [10, 10], example: "691 234 5678" },
+  HR: { code: "385", trunk: "0", digits: [8, 9], example: "091 234 5678" },
+  IT: { code: "39", trunk: "", digits: [6, 11], example: "347 123 4567" },
+  LU: { code: "352", trunk: "", digits: [4, 11], example: "621 123 456" },
+  LV: { code: "371", trunk: "", digits: [8, 8], example: "21 234 567" },
+  MT: { code: "356", trunk: "", digits: [8, 8], example: "9912 3456" },
+  NL: { code: "31", trunk: "0", digits: [9, 9], example: "06 12345678" },
+  PT: { code: "351", trunk: "", digits: [9, 9], example: "912 345 678" },
+  SI: { code: "386", trunk: "0", digits: [8, 8], example: "031 234 567" },
+  SK: { code: "421", trunk: "0", digits: [9, 9], example: "0912 123 456" },
+};
+
+/**
+ * The number to send a text to, for a business in `country` (core countries.ts): completed with the
+ * country's calling code when it was typed without one, in E.164, which Twilio wants. Client and
+ * contact numbers are kept as the office typed them, so a UK business's "07700 900123" is texted
+ * as +447700900123, and its "020 7946 0018" as +442079460018.
+ *
+ * - A US or Canadian business's numbers are returned as typed, as they were always sent; so is
+ *   every number for a country not in DIALING, and anything that isn't a phone number.
+ * - A number starting with + or 00 (Australia's 0011 too) already has its country code: it's
+ *   only spelled in E.164. "+44 (0)20 7946 0018" leaves out the (0).
+ * - One starting with the trunk prefix ("07700 900123") gets the calling code in its place.
+ * - One without either is the country's own number written without its trunk prefix ("7700
+ *   900123"), or one with the calling code but no + ("44 7700 900123"): told apart by how many
+ *   digits the country's numbers have. Where both fit, a country with a trunk prefix takes it as
+ *   having the calling code (its own numbers are written with the 0), one without takes it as its
+ *   own (Italy's 393 mobiles).
+ * - A number too long or short for the country is left as typed.
+ *
+ * Not phoneE164: that one reads every number as North American unless it says otherwise, as
+ * private.phone_e164 does for a sub's sign-in.
+ */
+export function internationalPhone(input: string, country: string | null | undefined): string {
+  const dialing = DIALING[(country ?? "").trim().toUpperCase()];
+  if (!dialing) return input;
+  const s = input.replace(/\(0\)/g, "").replace(/[^0-9+]/g, "");
+  if (!/^\+?[0-9]+$/.test(s)) return input;
+  if (s.startsWith("+")) return s;
+  const fits = (digits: string) => digits.length >= dialing.digits[0] && digits.length <= dialing.digits[1];
+  for (const exit of [dialing.exit, "00"]) {
+    if (exit && s.startsWith(exit)) return /^[1-9][0-9]{6,14}$/.test(s.slice(exit.length)) ? `+${s.slice(exit.length)}` : input;
+  }
+  if (dialing.trunk && s.startsWith(dialing.trunk)) {
+    const national = s.slice(dialing.trunk.length);
+    return fits(national) ? `+${dialing.code}${national}` : input;
+  }
+  const withCode = s.startsWith(dialing.code) && fits(s.slice(dialing.code.length));
+  if (withCode && (dialing.trunk !== "" || !fits(s))) return `+${s}`;
+  return fits(s) ? `+${dialing.code}${s}` : input;
+}
+
+/**
+ * A mobile number as people in `country` write it, for a phone box's example: "07700 900123" in
+ * the UK. Null in the US and Canada, and where Crewtavo doesn't know how the country's numbers are
+ * written: the box keeps its own US example there, "(555) 555-0123".
+ */
+export const phoneExample = (country: string | null | undefined): string | null => DIALING[(country ?? "").trim().toUpperCase()]?.example ?? null;
+
 /** "(540) 555-0101" for a US or Canadian number in E.164 ("We texted a code to ..."); other countries' as they are. */
 export function phoneDisplay(e164: string): string {
   const us = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(e164);

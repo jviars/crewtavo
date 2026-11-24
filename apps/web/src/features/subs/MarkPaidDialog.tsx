@@ -4,6 +4,7 @@
  * the total. A team member's piece pay is paid with their pay period instead (Timesheets → Pay).
  */
 import { jobPayMethodLabel, SUB_PAY_METHODS, type SubPayMethod } from "@crewtavo/core/jobPay";
+import { usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -11,7 +12,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { readAmount } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
-import { formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { markPaid, refreshPay } from "./payData";
 
@@ -64,7 +65,9 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
         <Field
           label="How you paid"
           hint={
-            method === "card_or_app" ? "Card and payment-app payments are left out of their 1099 total: the card company or app reports those."
+            // What a 1099 counts: a US business's (core usesIrsForms).
+            !usesIrsForms(companyCountry()) ? undefined
+            : method === "card_or_app" ? "Card and payment-app payments are left out of their 1099 total: the card company or app reports those."
               : method === "payroll" ? "Counted in their 1099 total. If your payroll service paid them, it may file their 1099 itself: check before you send one."
                 : undefined
           }

@@ -6,6 +6,7 @@
  */
 import {
   PAPERWORK_REQUIREMENTS,
+  paperworkRequirements,
   SUB_DOCUMENT_EXPIRES,
   subDocumentLabel,
   uninsured,
@@ -14,7 +15,7 @@ import {
   type SubDocumentKind,
 } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { formatDate } from "@/lib/format";
+import { companyCountry, formatDate } from "@/lib/format";
 import { msg, t } from "@/lib/i18n";
 
 /** One required piece of paperwork's status: a public.sub_paperwork row or a paperworkStatus() entry. */
@@ -51,21 +52,22 @@ export const needsAttention = (statuses: ReadonlyArray<Pick<PaperworkRow, "state
 
 /**
  * Each sub's three requirements, in the order they're shown (W-9, liability, workers' comp). A
- * requirement with no row counts as missing.
+ * requirement with no row counts as missing. Outside the US there's no W-9 (core usesIrsForms):
+ * `country` is the business's, lib/format.ts companyCountry().
  */
-export function paperworkBySub(rows: readonly PaperworkRow[]): Map<string, PaperworkRow[]> {
+export function paperworkBySub(rows: readonly PaperworkRow[], country = companyCountry()): Map<string, PaperworkRow[]> {
   const bySub = new Map<string, PaperworkRow[]>();
   for (const row of rows) {
     if (!row.subcontractor_id) continue;
     bySub.set(row.subcontractor_id, [...(bySub.get(row.subcontractor_id) ?? []), row]);
   }
-  for (const [id, list] of bySub) bySub.set(id, inOrder(list));
+  for (const [id, list] of bySub) bySub.set(id, inOrder(list, country));
   return bySub;
 }
 
-/** The three requirements in order, missing ones filled in. */
-export function inOrder(rows: readonly PaperworkRow[]): PaperworkRow[] {
-  return PAPERWORK_REQUIREMENTS.map(
+/** The requirements in order, missing ones filled in: the three, or the two without the W-9 outside the US. */
+export function inOrder(rows: readonly PaperworkRow[], country = companyCountry()): PaperworkRow[] {
+  return paperworkRequirements(country).map(
     (req) => rows.find((r) => r.requirement === req.key) ?? { requirement: req.key, state: "missing", expires_on: null, days_left: null, verified: null, waiting: false },
   );
 }
@@ -188,10 +190,10 @@ export interface MyPaperworkItem {
  * the one on file ran out. Otherwise the one that counts says: missing, run out or ending within 30
  * days is needed (so the new one comes in before it lapses), even when it's the one they sent and
  * the office hasn't checked it yet (the reminder that links here says the same); one that's fine
- * but not checked yet is waiting.
+ * but not checked yet is waiting. No W-9 for a business outside the US (inOrder).
  */
-export function myPaperwork(rows: readonly PaperworkRow[]): MyPaperworkItem[] {
-  return inOrder(rows).map((r) => {
+export function myPaperwork(rows: readonly PaperworkRow[], country = companyCountry()): MyPaperworkItem[] {
+  return inOrder(rows, country).map((r) => {
     const requirement = r.requirement ?? "";
     const label = PAPERWORK_REQUIREMENTS.find((p) => p.key === requirement)?.label ?? requirement;
     const base = { requirement, label };

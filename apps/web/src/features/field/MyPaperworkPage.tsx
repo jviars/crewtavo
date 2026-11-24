@@ -5,7 +5,7 @@
  * row to sub_documents, which the database marks as sent by them and not checked yet, and tells the
  * office about. A sub can't change or delete what they sent; the office does that.
  */
-import { PAPERWORK_REQUIREMENTS, subDocumentLabel } from "@crewtavo/core/subs";
+import { PAPERWORK_REQUIREMENTS, subDocumentLabel, usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -18,7 +18,7 @@ import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { MAX_BYTES } from "@/lib/files";
-import { formatDate, todayIn } from "@/lib/format";
+import { companyCountry, formatDate, todayIn } from "@/lib/format";
 import { isSub, useSession, type SubLogin } from "@/lib/session";
 import { ItemCard, type Item } from "../public/PaperworkPage";
 import { asksForEndDate, documentTitle, endDateProblem, kindsFor, myPaperwork, myPaperworkSummary, myUploadProblem, withType, type MyPaperworkItem, type MyPaperworkState } from "../subs/paperwork";
@@ -54,7 +54,11 @@ function MyPaperwork({ sub }: { sub: SubLogin }) {
   return (
     <div className="field-app m-grouped field-narrow">
       <FieldHeader kicker={sub.name} title={t("My paperwork")}>
-        <p className="page-lede">{t("What {company} needs on file from you: your W-9, and your liability and workers' comp insurance.", { company: company.name })}</p>
+        <p className="page-lede">
+          {usesIrsForms(companyCountry())
+            ? t("What {company} needs on file from you: your W-9, and your liability and workers' comp insurance.", { company: company.name })
+            : t("What {company} needs on file from you: your liability and workers' comp insurance.", { company: company.name })}
+        </p>
       </FieldHeader>
 
       {paperwork.isPending && <Loading label={t("Loading your paperwork")}><SectionSkeleton rows={3} /></Loading>}

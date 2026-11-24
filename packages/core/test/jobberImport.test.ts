@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  findJobberClient, fitJobberTotal, jobberDate, jobberFileKind, jobberImportRow, jobberLineItems, jobberRepeatRule, planJobberImport,
-  readJobberInvoices, readJobberJobs, readJobberQuotes, readJobberVisits, ruleFromVisits,
+  findJobberClient, fitJobberTotal, jobberDate, jobberDateOrder, jobberFileKind, jobberImportRow, jobberLineItems, jobberMoney, jobberNumber, jobberRepeatRule,
+  planJobberImport, readJobberInvoices, readJobberJobs, readJobberQuotes, readJobberVisits, ruleFromVisits,
 } from "../src/jobberImport";
 
 /** A CSV file as rows (quoted fields may hold commas and new lines), as the web's parseCsv reads it. */
@@ -82,10 +82,76 @@ describe("which Jobber export a file is", () => {
   });
 
   it("reads dates the ways Jobber writes them", () => {
-    expect(["2026-10-03", "Oct 3, 2026", "October 3 2026", "3 Oct 2026", "10/03/2026", "2026-10-03 14:30"].map(jobberDate)).toEqual(Array(6).fill("2026-10-03"));
+    expect(["2026-10-03", "Oct 3, 2026", "October 3 2026", "3 Oct 2026", "10/03/2026", "2026-10-03 14:30"].map((d) => jobberDate(d))).toEqual(Array(6).fill("2026-10-03"));
     expect(jobberDate("25/12/2026")).toBe("2026-12-25");
     expect(jobberDate("Feb 30, 2026")).toBeNull();
     expect(jobberDate("soon")).toBeNull();
+  });
+
+  it("reads a date in numbers the way the file writes them, day first or month first", () => {
+    expect(jobberDate("03/10/2026", "day_first")).toBe("2026-10-03");
+    expect(jobberDate("03/10/2026", "month_first")).toBe("2026-03-10");
+    expect(jobberDate("03.10.26", "day_first")).toBe("2026-10-03");
+    // A reading that can't be a date is the other one.
+    expect(jobberDate("25/12/2026", "month_first")).toBe("2026-12-25");
+    expect(jobberDate("12/25/2026", "day_first")).toBe("2026-12-25");
+    // Words and ISO dates say which is which.
+    expect(jobberDate("3 Oct 2026", "month_first")).toBe("2026-10-03");
+    expect(jobberDate("2026-10-03", "day_first")).toBe("2026-10-03");
+  });
+
+  it("decides the order for all the files at once: from their dates, else the business's country", () => {
+    const quotes = (...dates: string[]) => [["Quote #", "Client name", "Status", "Drafted date", "Sent date"], ...dates.map((d, i) => [String(i), "Ann", "Draft", d, ""])];
+    expect(jobberDateOrder([quotes("03/10/2026", "25/09/2026")], "US")).toBe("day_first");
+    expect(jobberDateOrder([quotes("03/10/2026", "09/25/2026")], "GB")).toBe("month_first");
+    // A file that can't tell goes by the country.
+    for (const [country, order] of [["US", "month_first"], ["CA", "month_first"], [null, "month_first"], ["GB", "day_first"], ["AU", "day_first"], ["IE", "day_first"]] as const) {
+      expect(jobberDateOrder([quotes("03/10/2026", "2026-11-30", "Oct 15, 2026")], country), String(country)).toBe(order);
+    }
+    // Both ways in one go: the country's way.
+    expect(jobberDateOrder([quotes("25/09/2026", "09/25/2026")], "GB")).toBe("day_first");
+    // Another file's dates count: here the visits report tells the quotes report's way.
+    const visits = [["Job #", "Date", "Visit completed"], ["J1", "28/10/2026", "No"]];
+    expect(jobberDateOrder([quotes("03/10/2026"), visits], "US")).toBe("day_first");
+    // Numbers outside the date columns don't.
+    expect(jobberDateOrder([[["Quote #", "Client name", "Title"], ["1", "Ann", "13/12/2026 job"]]], "US")).toBe("month_first");
+  });
+});
+
+describe("money in any currency", () => {
+  it("reads an amount with any currency's symbol or code around it", () => {
+    for (const cell of ["$1,250.00", "£1,250.00", "€1,250.00", "R1,250.00", "CA$1,250.00", "A$1,250.00", "GBP 1,250.00", "1,250.00 EUR", "1250", "1,250", " £ 1,250.00 "]) {
+      expect(jobberMoney(cell), cell).toBe(1250);
+    }
+    // A decimal comma, where the euro writes one.
+    for (const cell of ["€1.250,00", "1.250,00 €", "1 250,00 €", "1250,00", "1\u00a0250,00\u00a0€"]) expect(jobberMoney(cell), cell).toBe(1250);
+    expect(jobberMoney("12,5")).toBe(12.5);
+    expect(["-£5", "£-5", "(£12.00)", "-$5", "(12.00)"].map(jobberMoney)).toEqual([-5, -5, -12, -5, -12]);
+    expect(jobberNumber("8.875%")).toBe(8.875);
+    expect(jobberNumber(".5")).toBe(0.5);
+    for (const cell of ["", "N/A", "about 5", "1.2.3", "5 apples", "12/03/2026"]) expect(jobberNumber(cell), cell).toBeNull();
+  });
+
+  it("reads line items in pounds, rand or euros", () => {
+    expect(jobberLineItems("Mulch install (3, £180.00), Edging (1, R45.00)")?.map((l) => [l.name, l.quantity, l.unit_price])).toEqual([["Mulch install", 3, 60], ["Edging", 1, 45]]);
+    expect(jobberLineItems("Hedge trim (1, CA$80.00); Haul away (2, 40.00 €)")?.map((l) => [l.name, l.unit_price])).toEqual([["Hedge trim", 80], ["Haul away", 20]]);
+  });
+
+  it("brings a UK business's quotes in with their pounds and their dates day first", () => {
+    const files = { quotes: csv(`Quote #,Client name,Title,Status,Line items,Subtotal (£),Total (£),Required deposit (£),Drafted date,Sent date
+201,Ann,Patio,Awaiting response,"Patio slabs (1, £1,250.00)","£1,250.00","£1,500.00",£250.00,03/10/2026,05/10/2026
+202,Ann,Fence,Draft,,£400.00,£480.00,,15/10/2026,`) };
+    const here = { clients: [{ id: "c1", display_name: "Ann", email: null }], properties: [], imported: { quotes: new Set<string>(), invoices: new Set<string>(), jobs: new Set<string>() }, today: "2026-10-20" };
+    const [patio, fence] = planJobberImport(files, { ...here, country: "GB" }).quotes.ready.map((r) => r.record);
+    expect([patio!.created_on, patio!.sent_on, fence!.created_on]).toEqual(["2026-10-03", "2026-10-05", "2026-10-15"]);
+    expect(patio!.deposit_amount).toBe(250);
+    expect(patio!.tax_rate).toBe(0.2);
+    // No line items: one line of the subtotal, with the VAT the total implies.
+    expect([fence!.lines.map((l) => l.unit_price), fence!.tax_rate]).toEqual([[400], 0.2]);
+    // The same dates from a US business's file with nothing over 12 read month first, as before.
+    const us = csv(`Quote #,Client name,Status,Total ($),Drafted date\n301,Ann,Draft,$100.00,03/10/2026`);
+    expect(planJobberImport({ quotes: us }, { ...here, country: "US" }).quotes.ready[0]!.record.created_on).toBe("2026-03-10");
+    expect(planJobberImport({ quotes: us }, { ...here, country: "GB" }).quotes.ready[0]!.record.created_on).toBe("2026-10-03");
   });
 });
 

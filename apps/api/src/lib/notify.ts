@@ -11,12 +11,13 @@
  * and by push when its email or texts stop going out, and not only on Settings → Email.
  */
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
+import { internationalPhone } from "@crewtavo/core/phone";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
 import { smtpReach, smtpSend, SmtpError, type SmtpReach, type SmtpSettings } from "./smtp";
 import { adminClient } from "./supabase";
-import { companyTwilio, postMessage, twilioFor, type TwilioAccount } from "./twilio";
+import { companyTwilio, postMessage, textingCountry, twilioFor, type TwilioAccount } from "./twilio";
 
 export interface SendResult {
   sent: boolean;
@@ -414,10 +415,21 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
 export async function sendSms(env: Env, message: { to: string; body: string; company?: string | null }, companyId?: string | null): Promise<SendResult> {
   const whose = companyId ?? message.company ?? null;
   const account = await twilioFor(env, whose);
-  const result = await textOut(env, account, message);
+  const result = await textOut(env, account, { ...message, to: await numberToText(env, whose, message.to) });
   if (account?.own && whose) await noteTwilioHealth(env, whose, account, result);
   if (companyId) await noteSending(env, companyId, "sms", result, Boolean(account?.own));
   return result;
+}
+
+/**
+ * The number Twilio is given. Numbers are kept as the office typed them, which outside North
+ * America leaves out the country code Twilio needs ("07700 900123"): the company's country
+ * completes it (core internationalPhone). A US or Canadian company's go as typed, as they always
+ * have, and so does every number when the company's country can't be read.
+ */
+async function numberToText(env: Env, companyId: string | null, to: string): Promise<string> {
+  if (!companyId || /^\+[0-9]+$/.test(to)) return to;
+  return internationalPhone(to, await textingCountry(env, companyId).catch(() => null));
 }
 
 /**

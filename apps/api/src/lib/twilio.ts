@@ -11,7 +11,7 @@
  * the webhook first works out whose account a request names (inboundAccounts) and checks the
  * signature with that account's token (routes/messages.ts).
  */
-import { phoneE164 } from "@crewtavo/core/phone";
+import { internationalPhone, phoneE164, phoneExample } from "@crewtavo/core/phone";
 import { phoneMatchKey } from "@crewtavo/core/recipients";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
@@ -56,8 +56,13 @@ const cache = new Map<string, { at: number; value: TwilioAccount | null }>();
 let some: { at: number; value: boolean } | null = null;
 
 export const forgetTwilio = (companyId?: string) => {
-  if (companyId) cache.delete(companyId);
-  else cache.clear();
+  if (companyId) {
+    cache.delete(companyId);
+    countries.delete(companyId);
+  } else {
+    cache.clear();
+    countries.clear();
+  }
   some = null;
 };
 
@@ -88,6 +93,23 @@ export async function companyTwilio(env: Env, companyId: string): Promise<Twilio
     }
   }
   cache.set(companyId, { at: Date.now(), value });
+  return value;
+}
+
+/** Each company's country (companies.country), cached alongside its account. */
+const countries = new Map<string, { at: number; value: string | null }>();
+
+/**
+ * The country whose numbers a company's texts are completed for (companies.country, core
+ * internationalPhone), cached for a minute as its account is. Null when it can't be read.
+ */
+export async function textingCountry(env: Env, companyId: string): Promise<string | null> {
+  const hit = countries.get(companyId);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const { data, error } = await adminClient(env).from("companies").select("country").eq("id", companyId).maybeSingle();
+  if (error) return null;
+  const value = data?.country ?? null;
+  countries.set(companyId, { at: Date.now(), value });
   return value;
 }
 
@@ -145,14 +167,15 @@ const SID = /^AC[0-9a-fA-F]{32}$/;
 /**
  * Checks an Account SID, Auth Token and sending number with Twilio before they're saved: the
  * account is read (free, and it only answers the right token), then the number is looked up in it.
- * Throws a TwilioProblem that says what to fix.
+ * Throws a TwilioProblem that says what to fix. `country` is the company's (companies.country): a
+ * number typed as it's written there ("07700 900123" in the UK) is completed with its country code.
  */
-export async function checkTwilio(input: { account_sid: string; auth_token: string; from_number: string }, fetcher: FetchLike = fetch): Promise<TwilioCheck> {
+export async function checkTwilio(input: { account_sid: string; auth_token: string; from_number: string; country?: string | null }, fetcher: FetchLike = fetch): Promise<TwilioCheck> {
   const sid = input.account_sid.trim();
   const token = input.auth_token.trim();
   if (!SID.test(sid)) throw new TwilioProblem("That doesn't look like an Account SID. It starts with AC and is 34 characters long, on your Twilio console's first page.");
-  const from = phoneE164(input.from_number);
-  if (!from) throw new TwilioProblem("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
+  const from = phoneE164(internationalPhone(input.from_number, input.country));
+  if (!from) throw new TwilioProblem(`Enter your Twilio number in full, with its area code, like ${phoneExample(input.country) ?? "(540) 555-0100"}.`);
   const read = async (path: string) => {
     const res = await fetcher(`${API}/Accounts/${sid}${path}`, { headers: auth(sid, token), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
     if (!res) throw new TwilioProblem("Couldn't reach Twilio to check these. Try again in a minute.");

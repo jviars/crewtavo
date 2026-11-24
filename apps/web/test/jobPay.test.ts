@@ -238,6 +238,10 @@ describe("the paperwork warning on a job", () => {
     expect(payPaperworkWarning(ok.slice(1), "2026-11-10", "2026-10-25")).toBe("For this sub, there's no W-9 on file (you'll need it for their 1099). You can still give them the work.");
     expect(payPaperworkWarning([], null, "2026-10-25")).toMatch(/^For this sub, there's no W-9 on file \(you'll need it for their 1099\), liability insurance isn't on file and workers' comp isn't on file\./);
   });
+  it("doesn't ask for a W-9 for a business outside the US", () => {
+    expect(payPaperworkWarning(ok.slice(1), "2026-11-10", "2026-10-25", "GB")).toBeNull();
+    expect(payPaperworkWarning([], null, "2026-10-25", "CA")).toMatch(/^Their liability insurance isn't on file and workers' comp isn't on file\./);
+  });
 });
 
 describe("owed and paid", () => {

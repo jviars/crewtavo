@@ -20,10 +20,16 @@ export interface SubPaperwork {
   waiting: PaperworkRequirement[];
 }
 
-/** A sub's paperwork that's missing, running out or run out, and what's waiting to be checked. */
+/**
+ * A sub's paperwork that's missing, running out or run out, and what's waiting to be checked: a
+ * W-9 only for a business in the US (core usesIrsForms, by companies.country).
+ */
 export async function subPaperwork(db: Db, companyId: string, subId: string): Promise<SubPaperwork> {
-  const rows = must(await db.from("sub_paperwork").select("requirement, state, expires_on, verified, waiting").eq("company_id", companyId).eq("subcontractor_id", subId));
-  return neededPaperwork(rows);
+  const [rows, company] = await Promise.all([
+    db.from("sub_paperwork").select("requirement, state, expires_on, verified, waiting").eq("company_id", companyId).eq("subcontractor_id", subId),
+    db.from("companies").select("country").eq("id", companyId).maybeSingle(),
+  ]);
+  return neededPaperwork(must(rows), must(company)?.country);
 }
 
 /** The sub's own link to send in paperwork, good for 30 days. */

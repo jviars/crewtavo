@@ -15,7 +15,7 @@ import { renderEmail } from "../lib/email";
 import { endConnection, teamConnections } from "../lib/assistants";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { emailReady, sendEmail, sendingWorks } from "../lib/notify";
-import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, TwilioProblem, type TwilioSettings } from "../lib/twilio";
+import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, textingCountry, TwilioProblem, type TwilioSettings } from "../lib/twilio";
 import { adminClient, type Db } from "../lib/supabase";
 import { aiChoice, askerOf, complete, countAiAsk, teamPlans, type OpenAiSettings } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
@@ -644,7 +644,7 @@ apps.put("/apps/twilio/account", requireUser, requireCompany(ADMINS, "apps"), as
   );
   let checked;
   try {
-    checked = await checkTwilio(body);
+    checked = await checkTwilio({ ...body, country: await textingCountry(c.env, c.var.companyId).catch(() => null) });
   } catch (error) {
     if (error instanceof TwilioProblem) throw new HttpError(400, error.message);
     throw error;

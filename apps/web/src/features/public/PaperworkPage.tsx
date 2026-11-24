@@ -74,8 +74,11 @@ export function PaperworkPage() {
   };
 
   // Something else to send: a required document that isn't asked for (to send a newer one early), a license, anything.
+  // Only what the business takes: no W-9 outside the US (the kinds the server lists).
   const extras = [
-    ...Object.keys(REQUIREMENT_LABELS).map((key) => ({ key, label: REQUIREMENT_LABELS[key]!, kinds: kindsFor(key) })),
+    ...Object.keys(REQUIREMENT_LABELS)
+      .filter((key) => !data || kindsFor(key).some((kind) => data.kinds.some((k) => k.key === kind)))
+      .map((key) => ({ key, label: REQUIREMENT_LABELS[key]!, kinds: kindsFor(key) })),
     { key: "license", label: kindLabel("license"), kinds: ["license"] },
     { key: "other", label: t("Other document"), kinds: ["other"] },
   ].filter((e) => !list.some((i) => i.key === e.key));

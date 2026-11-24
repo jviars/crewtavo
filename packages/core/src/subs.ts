@@ -55,6 +55,21 @@ export const PAPERWORK_REQUIREMENTS = [
 ] as const satisfies ReadonlyArray<{ key: string; label: string; kinds: readonly SubDocumentKind[] }>;
 export type PaperworkRequirement = (typeof PAPERWORK_REQUIREMENTS)[number]["key"];
 
+/**
+ * Whether a business's subs fill in a W-9 and get a 1099: the IRS's forms, so a business in the US
+ * (companies.country, core countries.ts businessCountry). Anywhere else neither is asked for nor
+ * shown, and the rest of the paperwork, the insurance, is.
+ */
+export const usesIrsForms = (country: string | null | undefined) => !country || country.trim().toUpperCase() === "US";
+
+/** What a sub needs on file for a business in `country`: PAPERWORK_REQUIREMENTS, the W-9 only in the US. */
+export const paperworkRequirements = (country: string | null | undefined): ReadonlyArray<(typeof PAPERWORK_REQUIREMENTS)[number]> =>
+  usesIrsForms(country) ? PAPERWORK_REQUIREMENTS : PAPERWORK_REQUIREMENTS.filter((r) => r.key !== "w9");
+
+/** The kinds of document a sub sends in or the office files for a business in `country`: a W-9 only in the US. */
+export const subDocumentKinds = (country: string | null | undefined): ReadonlyArray<(typeof SUB_DOCUMENT_KINDS)[number]> =>
+  usesIrsForms(country) ? SUB_DOCUMENT_KINDS : SUB_DOCUMENT_KINDS.filter((k) => k.key !== "w9");
+
 /** A document "expiring" ends within this many days (the company's today included). */
 export const PAPERWORK_WARNING_DAYS = 30;
 
@@ -98,11 +113,12 @@ export function documentState(expiresOn: string | null, today: string): Exclude<
  * The state of each required piece of paperwork, from a sub's documents, on the company's `today`.
  * Replaced documents don't count. Of the rest, a checked one counts before one the sub sent that
  * the office hasn't checked (so an upload can't hide when the checked one ends), then the one that
- * runs longest (no end date first), then the newest. Mirrors public.sub_paperwork.
+ * runs longest (no end date first), then the newest. Mirrors public.sub_paperwork, which has a W-9
+ * row for every business: `country` leaves it out outside the US (paperworkRequirements).
  */
-export function paperworkStatus(documents: readonly PaperworkDocument[], today: string): PaperworkStatus[] {
+export function paperworkStatus(documents: readonly PaperworkDocument[], today: string, country?: string | null): PaperworkStatus[] {
   const current = documents.filter((d) => !d.superseded_at);
-  return PAPERWORK_REQUIREMENTS.map((req) => {
+  return paperworkRequirements(country).map((req) => {
     const mine = current.filter((d) => (req.kinds as readonly string[]).includes(d.kind));
     const best = [...mine].sort(
       (a, b) =>
@@ -164,14 +180,15 @@ export interface NeededPaperwork {
 /**
  * From a sub's paperwork status (public.sub_paperwork rows or paperworkStatus()): what's still
  * needed, and what the sub already sent that the office hasn't checked yet (and that hasn't run
- * out), which isn't asked for again.
+ * out), which isn't asked for again. Outside the US (`country`) the W-9 is neither.
  */
 export function neededPaperwork(
   statuses: ReadonlyArray<{ requirement: string | null; state: string | null; expires_on: string | null; verified: boolean | null; waiting?: boolean | null }>,
+  country?: string | null,
 ): { needed: NeededPaperwork[]; waiting: PaperworkRequirement[] } {
   const needed: NeededPaperwork[] = [];
   const waiting: PaperworkRequirement[] = [];
-  for (const req of PAPERWORK_REQUIREMENTS) {
+  for (const req of paperworkRequirements(country)) {
     const row = statuses.find((r) => r.requirement === req.key);
     const state = (row?.state ?? "missing") as PaperworkState;
     if (row?.waiting ?? (row?.verified === false && state !== "expired")) waiting.push(req.key);

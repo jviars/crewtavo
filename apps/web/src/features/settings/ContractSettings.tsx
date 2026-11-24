@@ -38,7 +38,7 @@ import { Loading, SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
-import { formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatMoneyCents } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -159,18 +159,20 @@ export function packagesInOrder(packages: ReadonlyArray<{ id: string; section_id
 /**
  * The example sections for the business's trade (core contractStarters), as rows to add after
  * `from`. `lateFeeLine`: what the Payment section says about the business's late fee, when it
- * charges one (lateFeeLineOf).
+ * charges one (lateFeeLineOf). `country`: the business's, whose examples include the FTC's right
+ * to cancel only in the US.
  */
-export const starterRows = (trade: string | null | undefined, companyId: string, from: number, lateFeeLine?: string | null) =>
-  contractStarters(trade, { lateFeeLine }).map((s, i) => ({ company_id: companyId, title: s.title, body: s.body, place: s.place, initials: s.initials, sort: from + i }));
+export const starterRows = (trade: string | null | undefined, companyId: string, from: number, lateFeeLine?: string | null, country = companyCountry()) =>
+  contractStarters(trade, { lateFeeLine, country }).map((s, i) => ({ company_id: companyId, title: s.title, body: s.body, place: s.place, initials: s.initials, sort: from + i }));
 
 /**
  * The example sections a library doesn't have yet, by title: offered one at a time once the library
  * has sections of its own, so an example added since (the Notice of Cancellation) can still be had.
+ * Outside the US that's never the FTC's two (starterRows).
  */
-export const missingStarters = (rows: ReadonlyArray<{ title: string }>, trade: string | null | undefined, lateFeeLine?: string | null) => {
+export const missingStarters = (rows: ReadonlyArray<{ title: string }>, trade: string | null | undefined, lateFeeLine?: string | null, country = companyCountry()) => {
   const have = new Set(rows.map((r) => r.title.trim().toLowerCase()));
-  return contractStarters(trade, { lateFeeLine }).filter((s) => !have.has(s.title.toLowerCase()));
+  return contractStarters(trade, { lateFeeLine, country }).filter((s) => !have.has(s.title.toLowerCase()));
 };
 
 /** The business's late fee as its Payment section says it, or null when it charges none (Settings → Company). */
