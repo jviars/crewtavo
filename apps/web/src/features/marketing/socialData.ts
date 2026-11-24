@@ -8,6 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@
 import { statusText } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
 export type Source = "photos" | "review" | "text";
@@ -229,7 +230,7 @@ const dateWords = (at: Date, timeZone: string) => at.toLocaleDateString("en-US",
 export function whenWords(post: Pick<SocialPost, "status" | "scheduled_for" | "finished_at" | "cancelled_at" | "created_at">, timeZone: string, now = new Date()): string {
   if (post.status === "draft") return "Not scheduled";
   if (post.status === "posting") return "Posting now";
-  if (post.status === "scheduled" && post.scheduled_for) return `Posts ${autoPostWhen(new Date(post.scheduled_for), timeZone, now)}`;
+  if (post.status === "scheduled" && post.scheduled_for) return `Posts ${autoPostWhen(new Date(post.scheduled_for), timeZone, now, companyCountry())}`;
   const at = new Date(post.cancelled_at ?? post.finished_at ?? post.scheduled_for ?? post.created_at);
   if (post.status === "cancelled") return `Cancelled ${dateWords(at, timeZone)}`;
   if (post.status === "posted" || post.status === "partly_posted") return `Posted ${dateWords(at, timeZone)}`;

@@ -18,7 +18,7 @@ export function offerCardLine(o: Pick<SubOffer, "job_title" | "visits" | "city" 
     .map((l, i) => ({ ...l, i }))
     .filter((l) => l.basis === "per_unit" && Number(l.quantity) > 0)
     .sort((a, b) => Number(b.amount) - Number(a.amount) || a.i - b.i)[0];
-  return [o.job_title, offerDays(o.visits.map((v) => v.scheduled_on)), o.city || o.region, perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total, moneyCurrency())]
+  return [o.job_title, offerDays(o.visits.map((v) => v.scheduled_on), companyCountry()), o.city || o.region, perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total, moneyCurrency())]
     .filter(Boolean)
     .join(" · ");
 }

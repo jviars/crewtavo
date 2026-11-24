@@ -32,7 +32,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { currencySymbol, dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, currencySymbol, dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "../subs/MarkPaidDialog";
@@ -586,7 +586,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
           </div>
         )}
         {pay.status === "offered" && recorded.length > 0 && (
-          <p className={styles.hint}>Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office")).join(" ")}</p>
+          <p className={styles.hint}>Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office", companyCountry())).join(" ")}</p>
         )}
 
         <div className={styles.group} role="group" aria-label="Lines">

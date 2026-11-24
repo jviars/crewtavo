@@ -102,6 +102,42 @@ describe("an offer in one line", () => {
     expect(changeText({ title: "Smith roof", total: 2210, agreed: 2040 }, { respondBy: "2026-11-02T22:00:00Z", timeZone: "America/New_York" }))
       .toBe("New price for Smith roof: $2,210 (was $2,040). Answer by Mon Nov 2, 5:00 PM. Open Crewtavo to accept or decline.");
   });
+
+  it("writes the days and the time to answer by the way the business's country does, as the database will", () => {
+    expect(offerDays(["2026-11-05", "2026-11-03"], "GB")).toBe("Tue 3 Nov to Thu 5 Nov");
+    expect(offerDate("2026-09-08", "AU")).toBe("Tue 8 Sep");
+    expect(offerDate("2026-11-03", "CA")).toBe("Tue Nov 3");
+    expect(offerTimeWords("2026-11-02T22:00:00Z", "Europe/London", "GB")).toBe("Mon 2 Nov, 22:00");
+    expect(offerTimeWords("2026-11-02T22:00:00Z", "America/Toronto", "CA")).toBe("Mon Nov 2, 5:00 p.m.");
+    const roof = { title: "Smith roof", dates: ["2026-11-03"], lines: [{ basis: "per_unit", unit: "sq", quantity: 24, amount: 2040 }], total: 2040, currency: "GBP", country: "GB" };
+    expect(offerText(roof, { respondBy: "2026-11-02T17:00:00Z", timeZone: "Europe/London", country: "GB" }))
+      .toBe("Smith roof, Tue 3 Nov, 24 squares, £2,040. Answer by Mon 2 Nov, 17:00. Open Crewtavo to accept or decline.");
+    const item: InsuranceWarningItem = { requirement: "workers_comp", problem: "ends_before_work", kind: "workers_comp", document_id: "d1", expires_on: "2026-11-01", work_until: "2026-11-05", waiting: false };
+    expect(insuranceWarningText(item, "office", "GB")).toBe("Their workers' comp certificate ends 1 Nov, before the last day of work (5 Nov).");
+    expect(insuranceWarningText(item, "office", "US")).toBe(insuranceWarningText(item, "office"));
+  });
+
+  it("are a US business's words exactly as they were, through the year and around the clock", () => {
+    // What these said before a business had a country: Intl's US English, day by day and minute by minute.
+    const day = (date: string) => {
+      const at = Date.parse(`${date}T12:00:00Z`);
+      return `${new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(at)} ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(at)}`;
+    };
+    const time = (at: Date, timeZone: string) => {
+      const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone }).formatToParts(at).map((x) => [x.type, x.value]));
+      return `${p.weekday} ${p.month} ${p.day}, ${p.hour}:${p.minute} ${String(p.dayPeriod).toUpperCase()}`;
+    };
+    // Every third day: each month and each weekday, both sides of the clocks changing.
+    for (let d = 0; d < 366; d += 3) {
+      const date = new Date(Date.UTC(2026, 0, 1 + d)).toISOString().slice(0, 10);
+      expect(offerDate(date, "US")).toBe(day(date));
+      expect(offerDate(date)).toBe(day(date));
+      for (const minutes of [0, 5, 59, 12 * 60, 13 * 60 + 30, 23 * 60 + 55]) {
+        const at = new Date(Date.parse(`${date}T00:00:00Z`) + minutes * 60_000);
+        for (const zone of ["America/New_York", "America/Los_Angeles", "Pacific/Honolulu"]) expect(offerTimeWords(at, zone, "US")).toBe(time(at, zone));
+      }
+    }
+  });
 });
 
 describe("the time to answer by", () => {
