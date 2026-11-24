@@ -10,6 +10,7 @@ import { readAmount } from "@/components/ui/MoneyInput";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { currencySymbol } from "@/lib/format";
 import type { EstimateEditor, LinePatch } from "../estimate/data";
 import { countText, lineDetail, lineKind, money } from "../estimate/rows";
 import type { EstimateLine } from "../estimate/types";
@@ -87,7 +88,7 @@ function LineForm({ line, editor, onClose }: { line: EstimateLine; editor: Estim
       <div className={styles.lineField}>
         <label htmlFor={`${id}-price`}>{counted ? "Price for one" : "Price"}</label>
         <span className={styles.moneyField}>
-          <span aria-hidden="true">$</span>
+          <span aria-hidden="true">{currencySymbol()}</span>
           <input
             id={`${id}-price`}
             className={`input ${styles.moneyInput}`}

@@ -150,6 +150,15 @@ describe("the facts a contract is filled in with", () => {
     });
   });
 
+  it("carry the business's currency when it isn't US dollars, so the Client Hub fills in {Total} as the server keeps it", () => {
+    const facts = contractInput(quote, null, property, { ...company, currency: "GBP" }, templateSettings({}), null);
+    expect(contractFacts(facts)).toMatchObject({ currency: "GBP" });
+    // The Hub adds the total it's signed for to the facts it was sent, as hubContract does.
+    expect(contractValues({ ...contractFacts(facts), total: 32693 })).toEqual(contractValues(facts));
+    expect(contractValues(facts)).toMatchObject({ Total: "£32,693.00", Deposit: "£1,000.00" });
+    expect(contractFacts(contractInput(quote, null, property, { ...company, currency: "USD" }, templateSettings({}), null))).not.toHaveProperty("currency");
+  });
+
   it("say a single-package estimate's package for {Option} and {Warranty}, the business's own only", async () => {
     const pkg = { id: A, company_id: COMPANY, name: "Architectural shingle", warranty: "10 years on our workmanship." };
     const { db } = fakeDb({ roof_packages: [pkg, { ...pkg, id: B, company_id: OTHER }] });

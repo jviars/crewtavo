@@ -45,7 +45,7 @@ import { inkOn } from "@/features/documents/words";
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
-import { dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
 import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import { CARD_REQUIRED } from "./HubAutopay";
@@ -1492,7 +1492,7 @@ function TipChoices({ percents, base, choice, onChoice, custom, onCustom }: {
       <div className="hub-tip-other">
         <button type="button" className="hub-link" aria-pressed={choice === "custom"} onClick={() => onChoice("custom")}>Other amount</button>
         {choice === "custom" && (
-          <span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
         )}
       </div>
     </>

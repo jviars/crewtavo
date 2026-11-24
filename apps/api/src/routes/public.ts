@@ -732,7 +732,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const [lineRows, options, business] = await Promise.all([
     admin.from("quote_line_items").select("id, option_id, quantity, unit_price, taxable, optional, selected, option_group").eq("company_id", l.c).eq("quote_id", l.id),
     loadOptions(admin, l.c, l.id),
-    admin.from("companies").select("name, phone, timezone, trade_preset").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, timezone, currency, trade_preset").eq("id", l.c).maybeSingle(),
   ]);
   const lines = must(lineRows);
 

@@ -43,6 +43,19 @@ export function setCurrency(code: string | null | undefined) {
 /** The currency money shows in: "USD", "CAD". */
 export const moneyCurrency = () => currency;
 
+/**
+ * The symbol before an amount typed in a money box, as money shows it: "$" (for Canadian and
+ * Australian dollars too), "£", "€", "R". The business's currency unless another is given.
+ */
+export function currencySymbol(code: string = currency): string {
+  try {
+    const parts = new Intl.NumberFormat("en-US", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value ?? "$";
+  } catch {
+    return "$";
+  }
+}
+
 let country = "US";
 
 /** The business's country (companies.country, or the guess from its time zone), which the session sets. */

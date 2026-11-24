@@ -33,7 +33,7 @@ import { Section } from "@/components/ui/Section";
 import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
-import { addDaysIso, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
+import { addDaysIso, currencySymbol, formatMoney, formatMoneyCents, formatNumber, todayIn } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, PropertySelect, type PickedClient } from "../clients/ClientForm";
 import { PropertyDialog } from "../clients/PropertyDialog";
@@ -594,7 +594,7 @@ function LineRow({ line, typed, onValue, onAmount, onPrice }: { line: CalcLine; 
       <div className={styles.lineCell}>
         {!noPrice && (
           <span className={styles.inline}>
-            <NumberBox label={`${item.name} price per ${line.unit}${choice ? `, ${choice.label}` : ""}`} value={line.price} onChange={onPrice} prefix="$" invalid={needsPrice} />
+            <NumberBox label={`${item.name} price per ${line.unit}${choice ? `, ${choice.label}` : ""}`} value={line.price} onChange={onPrice} prefix={currencySymbol()} invalid={needsPrice} />
             <span className={styles.unit}>/{line.unit}</span>
           </span>
         )}
@@ -621,7 +621,7 @@ function ProfitPicker({ input, calc, onChange }: { input: CalcInput; calc: Calc;
           <>
             <NumberBox label="Profit days" value={calc.profitDays} onChange={(v) => onChange({ ...input, profitDays: v })} width={72} />
             <span className={styles.unit}>days ×</span>
-            <NumberBox label="Profit per day" value={profit.amount} onChange={(v) => set({ amount: v })} prefix="$" width={120} />
+            <NumberBox label="Profit per day" value={profit.amount} onChange={(v) => set({ amount: v })} prefix={currencySymbol()} width={120} />
             <span className={cx(styles.unit, styles.grow)}>/day</span>
             {input.profitDays !== null && input.profitDays !== calc.crewDays && (
               <button type="button" className={styles.reset} onClick={() => onChange({ ...input, profitDays: null })}>Crew days: {formatNumber(calc.crewDays)}</button>
@@ -641,7 +641,7 @@ function ProfitPicker({ input, calc, onChange }: { input: CalcInput; calc: Calc;
       </div>
       <div className={styles.profitRow}>
         <span className={styles.fieldLabel}>Minimum charge</span>
-        <NumberBox label="Minimum charge" value={input.minimum} onChange={(minimum) => onChange({ ...input, minimum })} prefix="$" width={120} />
+        <NumberBox label="Minimum charge" value={input.minimum} onChange={(minimum) => onChange({ ...input, minimum })} prefix={currencySymbol()} width={120} />
         <span className={cx(styles.areaNote, styles.grow)}>{calc.toMinimum > 0 ? `This job comes up ${formatMoney(calc.toMinimum)} to reach it.` : "A smaller job is brought up to this."}</span>
       </div>
     </div>

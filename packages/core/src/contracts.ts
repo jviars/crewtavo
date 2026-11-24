@@ -12,7 +12,7 @@
  * documents.ts; the paper is the web app's features/documents.
  */
 import type { TemplateSettings } from "./documents";
-import { toCents, type Amount } from "./money";
+import { moneyPrefix, toCents, type Amount } from "./money";
 import { isIsoDate, isTimeZoneName, localDate } from "./time";
 
 /** Above the signatures, or on the terms pages after them. */
@@ -126,6 +126,8 @@ export interface ContractInput {
   /** The option's name as it's offered (quote_options.name). */
   optionName?: string | null;
   warranty?: string | null;
+  /** The business's currency (companies.currency), which {Total} and {Deposit} are written in; US dollars when it isn't given. */
+  currency?: string | null;
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -149,12 +151,12 @@ function dateWords(value: string | null | undefined, timeZone: string | null | u
   return `${MONTHS[month - 1]} ${date}, ${year}`;
 }
 
-/** An amount as "$1,234.56", to the cent; "" when there's none. */
-function dollars(amount: Amount): string {
+/** An amount as "$1,234.56" (or "£1,234.56", "R 1,234.56": core moneyPrefix), to the cent; "" when there's none. */
+function dollars(amount: Amount, currency?: string | null): string {
   if (amount === null || amount === undefined || String(amount).trim() === "") return "";
   const cents = toCents(amount);
   const whole = String(Math.floor(Math.abs(cents) / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${cents < 0 ? "-" : ""}$${whole}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
+  return `${cents < 0 ? "-" : ""}${moneyPrefix(currency)}${whole}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 }
 
 const blank = (amount: Amount) => amount === null || amount === undefined || String(amount).trim() === "";
@@ -194,8 +196,8 @@ export function contractValues(input: ContractInput): ContractValues {
     "License number": clean(input.license),
     "Estimate number": input.estimateNumber === null || input.estimateNumber === undefined ? "" : clean(String(input.estimateNumber)),
     Date: dateWords(input.date, input.timeZone),
-    Total: dollars(input.total),
-    Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent)),
+    Total: dollars(input.total, input.currency),
+    Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent), input.currency),
     Option: clean(input.optionName),
     Warranty: clean(input.warranty),
   };
@@ -545,14 +547,15 @@ export function addressLines(address: unknown): string[] {
  * The plain facts a quote's fill-ins come from (core contractValues), the same on the server and in
  * the browser: the customer and their address (the job's when there's no billing address), the job
  * address, the business, the template's license, the estimate's number and date on the business's
- * calendar, its total and deposit, and the option chosen. `quote.total` is the total being signed:
- * pass the chosen option's (the total the homeowner saw) when it isn't the quote's own.
+ * calendar, its total and deposit in the business's currency, and the option chosen. `quote.total`
+ * is the total being signed: pass the chosen option's (the total the homeowner saw) when it isn't
+ * the quote's own.
  */
 export function contractInput(
   quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount; deposit_percent?: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null },
   template: Pick<TemplateSettings, "license">,
   option?: { name: string; warranty: string | null } | null,
 ): ContractInput {
@@ -573,6 +576,8 @@ export function contractInput(
     ...(quote.deposit_percent === null || quote.deposit_percent === undefined ? {} : { depositPercent: quote.deposit_percent }),
     optionName: option?.name ?? null,
     warranty: option?.warranty ?? null,
+    // Only when it isn't US dollars, which is what's assumed without it: a US business's facts stay as they were.
+    ...(company.currency && company.currency.toUpperCase() !== "USD" ? { currency: company.currency } : {}),
   };
 }
 
@@ -586,7 +591,7 @@ export function invoiceInput(
   invoice: { number: number | null; issued_on: string; total: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null },
   template: Pick<TemplateSettings, "license">,
   option: { name: string; warranty: string | null } | null = null,
 ): ContractInput {

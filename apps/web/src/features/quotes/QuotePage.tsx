@@ -42,7 +42,7 @@ import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { addressLine, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
+import { addressLine, currencySymbol, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -710,7 +710,7 @@ export function QuotePage() {
             <span className={styles.deposit}>
               {/* A percent follows the total as lines change, and the option and add-ons the client picks. */}
               <span className="segmented" role="group" aria-label="Deposit as">
-                <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>$</button>
+                <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>{currencySymbol()}</button>
                 <button type="button" aria-pressed={percentDeposit} title="A percent of the total" onClick={() => !percentDeposit && void saveField({ deposit_percent: depositAsPercent(q.deposit_amount, q.total) })}>%</button>
               </span>
               {percentDeposit ? (

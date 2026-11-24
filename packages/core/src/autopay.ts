@@ -7,6 +7,7 @@
  * starter terms filled in, a saved card's name ("Visa ending 4242"), when a charge goes, and the
  * one rule for tips.
  */
+import { moneyPrefix } from "./money";
 import { localDate, localTime, addDays } from "./time";
 
 export type AutopayTiming = "now" | "end_of_day" | "days";
@@ -204,8 +205,9 @@ export function autopayTimingText(s: Pick<AutopaySettings, "timing" | "days">): 
   return "at the end of the day of each visit";
 }
 
-/** An amount as private.money writes it: "$500.00", "$1,250.50". */
-const dollars = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** An amount as private.autopay_bank_text writes it: "$500.00", "$1,250.50", "£500.00" (core moneyPrefix). */
+const dollars = (amount: number, currency?: string | null) =>
+  `${moneyPrefix(currency)}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** How the bank account paragraph starts, in every version of it. */
 const BANK_PARAGRAPH = "If you pay from a bank account:";
@@ -216,11 +218,12 @@ const BANK_PARAGRAPH = "If you pay from a bank account:";
  * (Most to charge without asking) is the most ever taken from a bank account: an invoice for more
  * isn't taken, by the automatic run or by the office's OK, and goes to the client to pay
  * (20261116000100_bank_charges_over_the_limit_go_to_the_client.sql). With no limit every charge is
- * taken, and the words say so.
+ * taken, and the words say so. The limit is in the business's currency (companies.currency); US
+ * dollars, as before there was one, when it isn't given.
  */
-export function autopayBankText(s: Pick<AutopaySettings, "max_amount">): string {
+export function autopayBankText(s: Pick<AutopaySettings, "max_amount">, currency?: string | null): string {
   if (s.max_amount == null) return `${BANK_PARAGRAPH} each charge is for the invoice it pays, and is taken automatically whatever its amount.`;
-  const cap = dollars(s.max_amount);
+  const cap = dollars(s.max_amount, currency);
   return `${BANK_PARAGRAPH} charges of ${cap} or less are taken automatically. An invoice for more than ${cap} is not taken from your bank account: we send it to you to pay.`;
 }
 
@@ -232,12 +235,13 @@ export const isBankAccount = (type: string | null | undefined) => type === "us_b
 
 /**
  * The limit named in the words a client agreed to (private.autopay_agreed_cap): the amount in the
- * bank account paragraph, as it's written now and as it was before ("more than $500.00"). Null when
- * the words name none: agreed with no limit set, or before the terms had the paragraph.
+ * bank account paragraph, as it's written now and as it was before ("more than $500.00"), after any
+ * currency's symbol ("more than £500.00", "more than R 500.00"). Null when the words name none:
+ * agreed with no limit set, or before the terms had the paragraph.
  */
 export function autopayAgreedCap(terms: string | null | undefined): number | null {
   const at = (terms ?? "").lastIndexOf(BANK_PARAGRAPH);
-  const found = at < 0 ? null : /more than \$([0-9][0-9,]*(?:\.[0-9]+)?)/.exec((terms ?? "").slice(at));
+  const found = at < 0 ? null : /more than (?:\$|£|€|R )([0-9][0-9,]*(?:\.[0-9]+)?)/.exec((terms ?? "").slice(at));
   const amount = found ? Number(found[1]!.replace(/,/g, "")) : NaN;
   return Number.isFinite(amount) ? amount : null;
 }
@@ -259,8 +263,8 @@ export const AUTOPAY_BANK_LIMIT_REASON = "Over the limit for a bank account. The
 export const AUTOPAY_YOURS_TO_PAY = "This invoice is above the amount you agreed to have taken automatically, so it's yours to pay.";
 
 /** Everything a client agrees to, as the agreement keeps it (private.autopay_terms_shown): the terms, when charges go, and the bank account paragraph. */
-export const autopayTermsShown = (s: Pick<AutopaySettings, "terms" | "timing" | "days" | "max_amount">): string =>
-  `${s.terms.trim()}\n\nWe charge ${autopayTimingText(s)}.\n\n${autopayBankText(s)}`;
+export const autopayTermsShown = (s: Pick<AutopaySettings, "terms" | "timing" | "days" | "max_amount">, currency?: string | null): string =>
+  `${s.terms.trim()}\n\nWe charge ${autopayTimingText(s)}.\n\n${autopayBankText(s, currency)}`;
 
 /** Said under the limit in Settings → Payments: what it means for a client paying from a bank account. */
 export const AUTOPAY_BANK_NOTE =

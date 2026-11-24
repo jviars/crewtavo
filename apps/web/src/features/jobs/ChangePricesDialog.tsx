@@ -25,7 +25,7 @@ import { RelatedList, RelatedRow } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
-import { formatDateTime, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, formatDateTime, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { useClientTags } from "../clients/ClientForm";
@@ -202,7 +202,7 @@ export function ChangePricesDialog({ picked, onClose, onChanged }: { picked: rea
             </div>
             {/* "$" before the figure, "%" after it (the field makes room on the side the sign is on). */}
             <span className={cx("input-group", styles.amountField)}>
-              {kind === "amount" && <span className="addon">$</span>}
+              {kind === "amount" && <span className="addon">{currencySymbol()}</span>}
               <input className="input" style={kind === "amount" ? { paddingLeft: 22 } : undefined} inputMode="decimal" autoFocus aria-label={kind === "percent" ? "Percent" : "Amount added to or taken off each line's price"} value={amount} onChange={(e) => edit(setAmount)(e.target.value.replace(/[^0-9.]/g, ""))} />
               {kind === "percent" && <span className="addon addon-right">%</span>}
             </span>

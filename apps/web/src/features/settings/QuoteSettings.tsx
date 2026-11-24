@@ -19,6 +19,7 @@ import { Button, useJustDone } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { api, supabase, unwrap } from "@/lib/api";
 import { Section } from "@/components/ui/Section";
+import { currencySymbol } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import p from "./Prefs.module.css";
 import { SwitchRow } from "./SettingsKit";
@@ -92,7 +93,7 @@ export function QuoteSettings() {
       <Section level={3} title="Quotes and payments">
         <Field label="Tell me about quotes over" optional hint="When a quote of at least this much is sent, approved, or the client asks for changes, owners, admins and its salesperson hear about it on the bell and their phone, except whoever did it. Empty is off.">
           <span className="input-group set-narrow">
-            <span className="addon">$</span>
+            <span className="addon">{currencySymbol()}</span>
             <input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.alertOver} placeholder="Off" onChange={(e) => setF({ ...f, alertOver: e.target.value.replace(/[^0-9.]/g, "") })} />
           </span>
         </Field>

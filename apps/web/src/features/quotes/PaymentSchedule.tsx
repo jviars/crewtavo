@@ -18,7 +18,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./QuotePage.module.css";
 import { Select } from "@/components/ui/Select";
@@ -121,7 +121,7 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
               <div className={styles.paymentLine}>
                 <Select className={`select input-sm ${styles.paymentKind}`} aria-label={`Payment ${i + 1} as`} value={d.kind} onChange={(e) => set(i, { kind: e.target.value as DraftRow["kind"] })}>
                   <option value="percent">%</option>
-                  <option value="amount">$</option>
+                  <option value="amount">{currencySymbol()}</option>
                   {last && <option value="rest">The rest</option>}
                 </Select>
                 {d.kind !== "rest" && (

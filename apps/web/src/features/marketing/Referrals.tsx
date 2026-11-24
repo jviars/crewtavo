@@ -40,7 +40,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { formatDate, formatMoneyCents, timeAgo } from "@/lib/format";
+import { currencySymbol, formatDate, formatMoneyCents, timeAgo } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
@@ -260,11 +260,11 @@ function CreditAndOffer() {
         >
           <div className="row wrap" style={{ gap: 8 }}>
             <div className="segmented" role="group" aria-label="Kind of credit">
-              <button type="button" aria-pressed={!percent} disabled={!canSave} onClick={() => set({ kind: "amount" })}>$ amount</button>
+              <button type="button" aria-pressed={!percent} disabled={!canSave} onClick={() => set({ kind: "amount" })}>{currencySymbol()} amount</button>
               <button type="button" aria-pressed={percent} disabled={!canSave} onClick={() => set({ kind: "percent" })}>% of their first job</button>
             </div>
             <span className="input-group" style={{ width: 130 }}>
-              {!percent && <span className="addon">$</span>}
+              {!percent && <span className="addon">{currencySymbol()}</span>}
               <input className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
                 placeholder={percent ? "10" : "50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
               {percent && <span className="addon addon-right">%</span>}

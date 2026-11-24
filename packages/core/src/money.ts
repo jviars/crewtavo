@@ -329,6 +329,17 @@ export const CURRENCIES = [
 /** Whether a currency code is one a business can pick, in either case: "cad" is, "JPY" isn't. */
 export const currencyOffered = (code: string | null | undefined) => CURRENCIES.some((c) => c.code === String(code ?? "").toUpperCase());
 
+/** The symbols that aren't "$", by currency (a space after a letter, as "R 1,250.00" is written). */
+const PREFIXES: Readonly<Record<string, string>> = { GBP: "£", EUR: "€", ZAR: "R " };
+
+/**
+ * What goes before an amount in words written out the same wherever they're made: what a client
+ * signs ({Total}, {Deposit}), agrees to (autopay's bank account paragraph) and what a sub is offered.
+ * The symbol people there write, as a screen shows it: "$" for every dollar (US, Canadian, Australian,
+ * New Zealand), "£", "€", "R " for rand. The database's private.money_prefix says the same.
+ */
+export const moneyPrefix = (currency?: string | null) => PREFIXES[String(currency ?? "").trim().toUpperCase()] ?? "$";
+
 /**
  * Why a payment can't be recorded against an invoice's balance, or null: it has to be more than
  * zero and not more than what's owed (a refund is a payment of its own, recorded in Crewtavo).

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
-import { formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, formatMoneyCents, moneyCurrency, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { otherWork, priceDrafts, priceLines, priceTotal, reachWords, REPLY_BY_CHOICES, replyByAt, replyByProblem, replyByWords, samePrice, type PickedTime, type PriceDraft, type ReplyBy } from "../subs/offers";
 import { draftAmount, quantityWords } from "../subs/pay";
@@ -98,7 +98,7 @@ export function SendOfferDialog({ pay, name, jobTitle, dates, warning, onClose }
     },
   });
   const nothing = Number(pay.total) <= 0;
-  const preview = offerText({ title: jobTitle, dates, lines: pay.lines, total: pay.total }, { respondBy: replyBy.at, timeZone: session.company.timezone });
+  const preview = offerText({ title: jobTitle, dates, lines: pay.lines, total: pay.total, currency: moneyCurrency() }, { respondBy: replyBy.at, timeZone: session.company.timezone });
   const noVisits = dates.length === 0;
 
   return (
@@ -170,7 +170,7 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
       onClose={onClose}
       title="Change price"
       size="lg"
-      description={`${name} will be asked to accept the new price. If they say no or don't answer in time, the price they agreed (${moneyShort(pay.total)}) stays, and they stay on the job.`}
+      description={`${name} will be asked to accept the new price. If they say no or don't answer in time, the price they agreed (${moneyShort(pay.total, moneyCurrency())}) stays, and they stay on the job.`}
     >
       <form
         className="dialog-body"
@@ -192,7 +192,7 @@ export function ChangePriceDialog({ pay, name, warning, onClose }: { pay: JobPay
                   <input className="input input-sm tabular" style={{ flex: "1 1 64px", maxWidth: 96, minWidth: 0, textAlign: "right" }} inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${d.description}`} disabled={send.isPending} onChange={(e) => update(d.key, { quantity: e.target.value.replace(/[^0-9.]/g, "") })} />
                   <span className="muted small">{quantityWords(Number(d.quantity) || 0, unit).replace(/^[\d.,]+ /, "")} ×</span>
                   <span className="input-group" style={{ flex: "1 1 88px", maxWidth: 120, minWidth: 0 }}>
-                    <span className="addon">$</span>
+                    <span className="addon">{currencySymbol()}</span>
                     <input className="input input-sm tabular" style={{ textAlign: "right", paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${d.description}`} disabled={send.isPending} onChange={(e) => update(d.key, { rate: e.target.value.replace(/[^0-9.]/g, "") })} />
                   </span>
                   <span className="row" style={{ gap: 6, marginLeft: "auto" }}>

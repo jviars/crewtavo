@@ -11,7 +11,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { readAmount } from "@/components/ui/MoneyInput";
 import { Select } from "@/components/ui/Select";
-import { formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { markPaid, refreshPay } from "./payData";
 
@@ -51,7 +51,7 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
           {one ? (
             <Field label="Amount" requiredMessage="Enter the amount you paid." hint={Number(amount) !== total ? `Their pay comes to ${formatMoneyCents(total)}.` : undefined}>
               <span className="input-group">
-                <span className="addon">$</span>
+                <span className="addon">{currencySymbol()}</span>
                 <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
               </span>
             </Field>

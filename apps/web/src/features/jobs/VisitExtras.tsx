@@ -19,7 +19,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
-import { formatDate, formatDateTime, formatMoneyCents } from "@/lib/format";
+import { currencySymbol, formatDate, formatDateTime, formatMoneyCents } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { priceListColumns } from "../quotes/LineItems";
@@ -216,7 +216,7 @@ export function VisitExtrasEditor({ visitId, jobId, onChanged, titled = true }: 
             <input className="input input-sm grow" style={{ minWidth: 140 }} placeholder="What was done" aria-label="Extra work" value={draft.name} maxLength={200} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             <input className="input input-sm" style={{ width: 70 }} inputMode="decimal" aria-label="Quantity" title="Quantity" value={draft.quantity} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, quantity: e.target.value.replace(/[^0-9.]/g, "") })} />
             <span className="input-group" style={{ width: 110 }}>
-              <span className="addon">$</span>
+              <span className="addon">{currencySymbol()}</span>
               <input className="input input-sm" style={{ paddingLeft: 22 }} inputMode="decimal" placeholder="Price" aria-label={`Price for each ${draft.unit || "one"}`} title="Price for each" value={draft.price} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, price: e.target.value.replace(/[^0-9.-]/g, "") })} />
             </span>
             <label className="row small" style={{ gap: 6 }}>

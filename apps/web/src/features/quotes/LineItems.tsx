@@ -27,7 +27,7 @@ import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { formatMoneyCents, formatNumber } from "@/lib/format";
+import { currencySymbol, formatMoneyCents, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast, type ToastTone } from "@/lib/toast";
@@ -640,7 +640,7 @@ function LineRow({ table, line, withOptions, showCosts, place, viewing, saveStat
         <input className="input" aria-label="Unit" value={draft.unit} maxLength={20} onChange={(e) => { setDraft({ ...draft, unit: e.target.value }); edited(); }} onBlur={commitText("unit")} onKeyDown={blurOnEnter} />
       </div>
       <div className="num" role="cell"><span className="cell-label" aria-hidden="true">Price</span>
-        <NumberField label="Unit price" step="0.01" prefix="$" value={Number(draft.unit_price)} disabled={promo} describedBy={promo ? promoHint : undefined} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_price: v })} />
+        <NumberField label="Unit price" step="0.01" prefix={currencySymbol()} value={Number(draft.unit_price)} disabled={promo} describedBy={promo ? promoHint : undefined} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_price: v })} />
       </div>
       <div className="total" role="cell"><span className="cell-label">Total</span>{excluded ? <span className="line-out">Not included</span> : formatMoneyCents(amount)}</div>
       <div role="cell" className="line-edit-actions">{actions}</div>
@@ -691,7 +691,7 @@ function LineRow({ table, line, withOptions, showCosts, place, viewing, saveStat
           {showCosts && (
             <label style={{ gap: 6 }}>
               Unit cost
-              <span style={{ width: 96 }}><NumberField label="Unit cost" step="0.01" prefix="$" value={Number(draft.unit_cost ?? 0)} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_cost: v })} /></span>
+              <span style={{ width: 96 }}><NumberField label="Unit cost" step="0.01" prefix={currencySymbol()} value={Number(draft.unit_cost ?? 0)} onEdit={edited} onUnchanged={unchanged} onCommit={(v) => set({ unit_cost: v })} /></span>
             </label>
           )}
           {rule && !promo ? (

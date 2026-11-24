@@ -20,7 +20,7 @@ import { statusText } from "@/components/ui/StatusPill";
 import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { dateIn, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
 import { addDays, localDate } from "@crewtavo/core/time";
@@ -502,7 +502,7 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
     <Dialog open onClose={onClose} title="Goals" size="sm">
       <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="Yearly revenue goal" hint="Collected from January 1, against an even pace through the year.">
-          <div className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="500,000" autoFocus /></div>
+          <div className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="500,000" autoFocus /></div>
         </Field>
         <Field label="Target job margin" optional hint="Jobs under it are counted on Profit.">
           <div className="input-group"><input className="input" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="30" style={{ paddingLeft: 12, paddingRight: 32 }} /><span className="addon addon-right">%</span></div>

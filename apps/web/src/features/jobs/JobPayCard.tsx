@@ -31,7 +31,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "../subs/MarkPaidDialog";
@@ -743,7 +743,7 @@ function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onUncha
         <span>{quantityWords(Number(d.quantity) || 0, unit).replace(/^[\d.,]+ /, "")}</span>
       </span>
       <span className={cx("input-group", styles.rate)}>
-        <span className="addon">$</span>
+        <span className="addon">{currencySymbol()}</span>
         <input className="input input-sm tabular" style={{ paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${line.description}`} aria-invalid={problem?.includes("rate") || undefined} onChange={(e) => onDraft({ ...d, rate: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
       </span>
       <span className={styles.amount}>{saving ? <Skeleton width={60} style={{ marginLeft: "auto" }} /> : amount === null ? null : formatMoneyCents(amount)}</span>

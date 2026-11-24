@@ -17,7 +17,7 @@ import { Fact, Facts, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { formatMoneyCents } from "@/lib/format";
+import { currencySymbol, formatMoneyCents } from "@/lib/format";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -230,7 +230,7 @@ function CashOrCheckDialog({ invoice, onClose, onSaved }: { invoice: { id: strin
           <button type="button" aria-pressed={method === "check"} onClick={() => setMethod("check")}>{t("Check")}</button>
         </div>
         <Field label={t("Amount")} requiredMessage={t("Enter the amount you received.")}>
-          <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required /></span>
         </Field>
         {method === "check" && (
           <Field label={t("Check number")} requiredMessage={t("Enter the check number.")}>

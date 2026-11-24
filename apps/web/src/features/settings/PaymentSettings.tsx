@@ -19,6 +19,7 @@ import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
+import { currencySymbol } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import p from "./Prefs.module.css";
 import { SaveBar, Suffix, SwitchRow, unsavedCount } from "./SettingsKit";
@@ -206,7 +207,7 @@ export function PaymentSettings() {
             )}
             {/* The last paragraph of what clients agree to: written from the limit below, not typed. */}
             <p className="set-note">
-              After your terms and when you charge, clients also read: "{autopayBankText({ max_amount: bankLimit(f.max) })}" A client who saves a bank account agrees to that. Changing the limit changes it, for clients who agree from then on.
+              After your terms and when you charge, clients also read: "{autopayBankText({ max_amount: bankLimit(f.max) }, company.currency)}" A client who saves a bank account agrees to that. Changing the limit changes it, for clients who agree from then on.
             </p>
           </div>
         </Section>
@@ -225,7 +226,7 @@ export function PaymentSettings() {
             )}
             <Field label="Most to charge without asking" optional className={f.timing === "days" ? "set-full" : undefined} hint={`Over this, a card's charge waits for your OK. Leave it blank for no limit. ${f.max.trim() ? AUTOPAY_BANK_NOTE : AUTOPAY_NO_LIMIT_NOTE}`}>
               <span className="input-group">
-                <span className="addon">$</span>
+                <span className="addon">{currencySymbol()}</span>
                 <input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={f.max} onChange={(e) => set("max", e.target.value.replace(/[^0-9.]/g, ""))} placeholder="No limit" />
               </span>
             </Field>

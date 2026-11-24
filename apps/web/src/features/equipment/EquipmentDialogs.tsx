@@ -25,7 +25,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { supabase, unwrap } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
-import { formatDate, todayIn } from "@/lib/format";
+import { currencySymbol, formatDate, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { refreshEquipment, seesEquipmentCosts, type DueRow, type Equipment, type PaperRow } from "./equipmentData";
 import styles from "./Equipment.module.css";
@@ -234,7 +234,7 @@ export function EquipmentDialog({ equipment, onClose, onSaved }: { equipment: Eq
             <Field label="Bought on" optional><input className="input" type="date" value={f.purchased_on} onChange={set("purchased_on")} /></Field>
             {showCosts && (
               <Field label="Price paid" optional hint="Only people who see job costs see this.">
-                <span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={priceValue} onChange={(e) => setF({ ...f, purchase_price: decimal(e.target.value) })} /></span>
+                <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={priceValue} onChange={(e) => setF({ ...f, purchase_price: decimal(e.target.value) })} /></span>
               </Field>
             )}
           </div>
@@ -383,7 +383,7 @@ function CostFields({ cost, onChange }: { cost: Cost; onChange: (cost: Cost) => 
     <details className="more-options">
       <summary>{t("Add what it cost")}</summary>
       <div className="form-grid">
-        <Field label={t("Cost")} error={amount == null || amount > 0 ? null : t("Enter an amount like 86.40.")}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={cost.amount} onChange={(e) => onChange({ ...cost, amount: decimal(e.target.value) })} /></span></Field>
+        <Field label={t("Cost")} error={amount == null || amount > 0 ? null : t("Enter an amount like 86.40.")}><span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={cost.amount} onChange={(e) => onChange({ ...cost, amount: decimal(e.target.value) })} /></span></Field>
         <Field label={t("Where")} optional><input className="input" value={cost.vendor} onChange={(e) => onChange({ ...cost, vendor: e.target.value })} maxLength={120} placeholder={t("Dealer, parts store")} /></Field>
       </div>
       <label className="dropzone" style={{ padding: 12 }}>

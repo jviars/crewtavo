@@ -8,7 +8,7 @@
  */
 import { necThreshold } from "@crewtavo/core/jobPay";
 import { amountWords, moneyShort, offerDays, type SubOffer } from "@crewtavo/core/subOffers";
-import { formatMoneyCents } from "@/lib/format";
+import { formatMoneyCents, moneyCurrency } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 /** "Smith roof · Tue Nov 3 · Springfield · 24 squares · $2,040": the job, its days, its town, the biggest per-unit line and the total. */
@@ -17,7 +17,7 @@ export function offerCardLine(o: Pick<SubOffer, "job_title" | "visits" | "city" 
     .map((l, i) => ({ ...l, i }))
     .filter((l) => l.basis === "per_unit" && Number(l.quantity) > 0)
     .sort((a, b) => Number(b.amount) - Number(a.amount) || a.i - b.i)[0];
-  return [o.job_title, offerDays(o.visits.map((v) => v.scheduled_on)), o.city || o.region, perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total)]
+  return [o.job_title, offerDays(o.visits.map((v) => v.scheduled_on)), o.city || o.region, perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total, moneyCurrency())]
     .filter(Boolean)
     .join(" · ");
 }
@@ -128,7 +128,7 @@ export function answerState(online: boolean, offer: Pick<SubOffer, "can_answer">
 
 /** After an answer: what they're told (a toast: no closing period). */
 export function answeredToast(accept: boolean, o: Pick<SubOffer, "is_change" | "job_title" | "agreed_total">): string {
-  if (o.is_change) return accept ? t("New price accepted for {job}", { job: o.job_title }) : t("New price declined, {job} stays at {price}", { job: o.job_title, price: moneyShort(o.agreed_total) });
+  if (o.is_change) return accept ? t("New price accepted for {job}", { job: o.job_title }) : t("New price declined, {job} stays at {price}", { job: o.job_title, price: moneyShort(o.agreed_total, moneyCurrency()) });
   return accept ? t("{job} accepted, it's on My day", { job: o.job_title }) : t("Job declined, the office knows");
 }
 

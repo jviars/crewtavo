@@ -879,14 +879,14 @@ export async function hubAutopay(env: Env, admin: Db, companyId: string, clientI
   const available = await autopayAvailable(env, admin, companyId);
   if (!available && !(await agreementOf(admin, companyId, clientId))) return null;
   const [company, agreements, methods, charges, jobs, client] = await Promise.all([
-    admin.from("companies").select("trade_preset, settings->autopay, settings->default_tax_rate").eq("id", companyId).maybeSingle(),
+    admin.from("companies").select("trade_preset, currency, settings->autopay, settings->default_tax_rate").eq("id", companyId).maybeSingle(),
     admin.from("autopay_authorizations").select("id, payment_method_id, terms, accepted_at, paused_at, revoked_at, revoked_via").eq("company_id", companyId).eq("client_id", clientId),
     admin.from("client_payment_methods").select(METHOD_FIELDS).eq("company_id", companyId).eq("client_id", clientId),
     admin.from("autopay_charges").select("due_at").eq("company_id", companyId).eq("client_id", clientId).eq("status", "waiting"),
     admin.from("jobs").select("id, autopay, quote_id").eq("company_id", companyId).eq("client_id", clientId).eq("kind", "recurring").eq("billing_mode", "per_visit").eq("status", "active"),
     admin.from("clients").select("tax_exempt").eq("company_id", companyId).eq("id", clientId).maybeSingle(),
   ]);
-  const row = company.data as { trade_preset?: string; autopay?: unknown; default_tax_rate?: unknown } | null;
+  const row = company.data as { trade_preset?: string; currency?: string | null; autopay?: unknown; default_tax_rate?: unknown } | null;
   const settings = autopaySettings({ autopay: row?.autopay }, row?.trade_preset);
   const all = (methods.data ?? []) as Method[];
   const usable = newest(all.filter((m) => m.status === "active" || m.status === "pending"), "created_at");
@@ -943,7 +943,7 @@ export async function hubAutopay(env: Env, admin: Db, companyId: string, clientI
     terms: settings.terms,
     terms_version: settings.terms_version,
     timing: autopayTimingText(settings),
-    bank_terms: autopayBankText(settings),
+    bank_terms: autopayBankText(settings, row?.currency),
     next_charge: due,
     per_visit: perVisit,
     per_visit_taxed: perVisit !== null && taxed,

@@ -1,5 +1,6 @@
 import { toUnits } from "@crewtavo/core/money";
 import { useEffect, useState } from "react";
+import { currencySymbol } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { NumberInput } from "./NumberInput";
 
@@ -38,7 +39,7 @@ export function MoneyInput({ value, onSave, onEdit, onUnchanged, percent, max, w
   };
   return (
     <span className="input-group" style={{ width }}>
-      <span className={percent ? "addon addon-right" : "addon"}>{percent ? "%" : "$"}</span>
+      <span className={percent ? "addon addon-right" : "addon"}>{percent ? "%" : currencySymbol()}</span>
       <NumberInput
         className="input-sm"
         style={{ textAlign: "right", paddingLeft: percent ? 10 : 22, paddingRight: percent ? 24 : 10 }}

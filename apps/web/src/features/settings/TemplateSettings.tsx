@@ -212,8 +212,8 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const counted = (ids: string[]) => (library.data ? inLibraryOrder(ids, library.data).length : ids.length);
   // The sample with the contract this template prints, filled in like a real estimate's (or invoice's).
   const preview = useMemo(
-    () => contractPreview({ kind: previewing, sample, template: t, library: sections, company: { name: doc.name, phone: doc.phone, timezone: company.timezone } }),
-    [previewing, sample, t, sections, doc.name, doc.phone, company.timezone],
+    () => contractPreview({ kind: previewing, sample, template: t, library: sections, company: { name: doc.name, phone: doc.phone, timezone: company.timezone, currency: company.currency } }),
+    [previewing, sample, t, sections, doc.name, doc.phone, company.timezone, company.currency],
   );
 
   const summary: Record<SectionId, string> = {
