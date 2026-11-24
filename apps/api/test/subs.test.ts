@@ -55,6 +55,8 @@ interface World {
   emailDown?: boolean;
   /** The business has taken its day's worth of strangers' files (lib/publicUploads.ts). */
   dayUsed?: boolean;
+  /** companies.country (the US unless a test says). */
+  country?: string;
 }
 
 const apex = { id: SUB, company_id: CO, name: "Apex Roofing LLC", contact_name: "Al Apex", email: "al@apex.test", phone: "+15405550101", active: true };
@@ -103,7 +105,7 @@ function serve(world: World = {}) {
         return sub && wanted && (!eq("company_id") || eq("company_id") === sub.company_id) ? [sub] : [];
       }
       case "companies":
-        return [company];
+        return [{ ...company, country: world.country ?? "US" }];
       case "sub_paperwork":
         return world.paperwork ?? [
           { requirement: "w9", state: "missing", expires_on: null, verified: null },
@@ -155,6 +157,14 @@ describe("a sub's paperwork page", () => {
     const status = db.calls.find((c) => c.path === "sub_paperwork")!.url.searchParams;
     expect([status.get("company_id"), status.get("subcontractor_id")]).toEqual([`eq.${CO}`, `eq.${SUB}`]);
     expect(db.limits()).toEqual([["paperwork-page:ip:203.0.113.9", 60, 3600], [`paperwork-page:sub:${SUB}`, 60, 3600]]);
+  });
+
+  it("asks a sub of a business outside the US for no W-9, and doesn't offer one to send", async () => {
+    serve({ country: "GB" });
+    const body = await (await page(await tokenFor({ t: "sub", id: SUB }))).json();
+    expect(body.needed).toEqual([{ requirement: "liability", label: "Liability insurance", state: "expiring", expires_on: "2026-11-10" }]);
+    expect(body.waiting).toEqual(["workers_comp"]);
+    expect(body.kinds.map((k: { key: string }) => k.key)).toEqual(["liability", "workers_comp", "wc_exemption", "license", "other"]);
   });
 
   it("only opens with a sub's link that hasn't run out, for a sub still on the books", async () => {
@@ -374,6 +384,11 @@ describe("the office's link for a sub", () => {
     expect(email.text).toContain(body.link);
     expect(db.texts()).toEqual([expect.objectContaining({ To: "+15405550101", From: "+15405550000" })]);
     expect(db.texts()[0]!.Body).toBe(`Uniform Roofing: Please send us your W-9 and liability insurance. You can upload them from your phone or computer here: ${body.link}`);
+    // Outside the US, the same link asks for the insurance alone.
+    const canada = serve({ country: "CA" });
+    const link = (await (await officeRequest(`/subs/${SUB}/send-upload-link`, { channels: ["email"] })).json()) as { link: string };
+    expect(canada.emails()[0].text).toContain(`Please send us your liability insurance. You can upload it from your phone or computer here:`);
+    expect(canada.emails()[0].text).toContain(link.link);
   });
 
   it("sends the office's own words when it writes them", async () => {

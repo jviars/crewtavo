@@ -4672,7 +4672,7 @@ isOneToOne: false
                            },
 "company_basics":
 { Args: { "p_company": string }; Returns: {
-              "currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
+              "country": string,"currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
             }[]
                            },
 "company_settings":

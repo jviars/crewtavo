@@ -9,9 +9,9 @@
 import { isLivePay } from "@crewtavo/core/jobPay";
 import { isChangeOffer, moneyShort, respondByProblem } from "@crewtavo/core/subOffers";
 import { addDays, localDate, parseZonedTime, zonedTimeToUtc } from "@crewtavo/core/time";
-import { PAPERWORK_REQUIREMENTS } from "@crewtavo/core/subs";
+import { paperworkRequirements } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { dateIn, formatDate, formatDateTime } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, formatDateTime } from "@/lib/format";
 import { paperworkChip, type PaperworkRow } from "./paperwork";
 import { draftAmount, draftOf, payStatusLabel, payTone, readQuantity, readRate, type LineDraft, type PayAction, type Payee, type PayLine } from "./pay";
 
@@ -237,10 +237,10 @@ export const visitsForElsewhere = (covered: readonly string[], visits: ReadonlyA
 
 /**
  * A sub's paperwork in a few words for picking who gets a job: "Workers' comp expired, W-9
- * missing", or null when it's all in order. Only ever a warning.
+ * missing", or null when it's all in order. Only ever a warning. No W-9 outside the US.
  */
-export function paperworkWords(statuses: readonly PaperworkRow[]): string | null {
-  const words = PAPERWORK_REQUIREMENTS.flatMap((req) => {
+export function paperworkWords(statuses: readonly PaperworkRow[], country = companyCountry()): string | null {
+  const words = paperworkRequirements(country).flatMap((req) => {
     const s = statuses.find((x) => x.requirement === req.key) ?? { requirement: req.key, state: "missing", expires_on: null, days_left: null, verified: null };
     const chip = paperworkChip(s);
     return chip.tone === "good" ? [] : [`${req.label} ${chip.label.charAt(0).toLowerCase()}${chip.label.slice(1)}`];

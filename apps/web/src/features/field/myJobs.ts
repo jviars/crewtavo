@@ -8,7 +8,8 @@
  */
 import { necThreshold } from "@crewtavo/core/jobPay";
 import { amountWords, moneyShort, offerDays, type SubOffer } from "@crewtavo/core/subOffers";
-import { formatMoneyCents } from "@/lib/format";
+import { usesIrsForms } from "@crewtavo/core/subs";
+import { companyCountry, formatMoneyCents } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 /** "Smith roof · Tue Nov 3 · Springfield · 24 squares · $2,040": the job, its days, its town, the biggest per-unit line and the total. */
@@ -84,11 +85,12 @@ export interface PayTotals { year: number; paid: number; payments: number; owed:
 /**
  * Under Paid: how this year's total is counted, how much of it counts toward their 1099 when that's
  * less (card and payment-app payments), and to ask for the 1099 once it reaches the amount that needs
- * one (necThreshold, as the office's 1099 totals go by).
+ * one (necThreshold, as the office's 1099 totals go by). Nothing about a 1099 for a business outside
+ * the US (`country`, core usesIrsForms).
  */
-export function paidTotalNote(totals: PayTotals | undefined, companyName: string): string {
+export function paidTotalNote(totals: PayTotals | undefined, companyName: string, country = companyCountry()): string {
   const base = t("This year's total goes by the day you were paid, and counts every payment, not only the latest ones here.");
-  if (!totals) return base;
+  if (!totals || !usesIrsForms(country)) return base;
   const counted = totals.counted ?? totals.paid;
   const part = counted < totals.paid
     ? ` ${t("{amount} of it counts toward your 1099: card and payment-app payments are reported on a 1099-K instead.", { amount: formatMoneyCents(counted) })}`

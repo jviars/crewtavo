@@ -1,5 +1,5 @@
 /** Adding and editing a sub, filing their paperwork, and sending them the link to send it in themselves. */
-import { neededPaperwork, PAPERWORK_REQUIREMENTS, paperworkLinkIntro, paperworkLinkMessages, SUB_DOCUMENT_KINDS, subDocumentLabel, subSettings, TAX_CLASSIFICATIONS } from "@crewtavo/core/subs";
+import { neededPaperwork, PAPERWORK_REQUIREMENTS, paperworkLinkIntro, paperworkLinkMessages, subDocumentKinds, subDocumentLabel, subSettings, TAX_CLASSIFICATIONS, usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize } from "../plans/plans";
@@ -24,6 +25,8 @@ import styles from "./Subs.module.css";
 export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose: () => void; onSaved: (id: string) => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
+  // A W-9 and its tax classification are a US business's (core usesIrsForms).
+  const irs = usesIrsForms(companyCountry());
   const a = sub?.address ?? {};
   const [f, setF] = useState({
     name: sub?.name ?? "",
@@ -76,20 +79,23 @@ export function SubDialog({ sub, onClose, onSaved }: { sub: Sub | null; onClose:
   });
 
   return (
-    <Dialog open onClose={onClose} title={sub ? "Edit sub" : "Add a sub"} description={sub ? undefined : "A business you hire for jobs. You can send them a link to upload their W-9 and insurance next."} size="lg">
+    <Dialog open onClose={onClose} title={sub ? "Edit sub" : "Add a sub"} description={sub ? undefined : `A business you hire for jobs. You can send them a link to upload their ${irs ? "W-9 and insurance" : "insurance"} next.`} size="lg">
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
-          <Field label="Business name" hint="As it's written on their W-9." requiredMessage="Enter the business's name."><input className="input" value={f.name} onChange={set("name")} required maxLength={120} placeholder="Apex Roofing LLC" autoFocus /></Field>
+          <Field label="Business name" hint={irs ? "As it's written on their W-9." : "Their business's legal name."} requiredMessage="Enter the business's name."><input className="input" value={f.name} onChange={set("name")} required maxLength={120} placeholder="Apex Roofing LLC" autoFocus /></Field>
           <Field label="Trade" optional><input className="input" value={f.trade} onChange={set("trade")} maxLength={80} placeholder="Roofing, gutters, concrete" /></Field>
           <Field label="Contact name" optional><input className="input" value={f.contact_name} onChange={set("contact_name")} maxLength={120} autoComplete="off" /></Field>
           <Field label="Mobile phone" optional hint={phoneNote?.text ?? SUB_PHONE_HINT}><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="off" /></Field>
           <Field label="Email" optional><input className="input" type="email" value={f.email} onChange={set("email")} maxLength={254} autoComplete="off" /></Field>
-          <Field label="Tax classification" optional hint="Box 3 on their W-9.">
-            <Select className="select" value={f.tax_classification} onChange={set("tax_classification")}>
-              <option value="">Not set</option>
-              {TAX_CLASSIFICATIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-            </Select>
-          </Field>
+          {/* The W-9's box 3, which says whether they get a 1099: a US business's. */}
+          {(irs || f.tax_classification) && (
+            <Field label="Tax classification" optional hint="Box 3 on their W-9.">
+              <Select className="select" value={f.tax_classification} onChange={set("tax_classification")}>
+                <option value="">Not set</option>
+                {TAX_CLASSIFICATIONS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </Select>
+            </Field>
+          )}
         </div>
         <details className="more-options" open={Boolean(sub && (a.line1 || a.city || sub.notes)) || undefined}>
           <summary>Mailing address and notes</summary>
@@ -149,7 +155,9 @@ export function DocumentDialog({
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
-  const choices = kinds?.length ? kinds : SUB_DOCUMENT_KINDS.map((k) => k.key);
+  // Any kind the business keeps (a W-9 only in the US), and the one a document already is.
+  const offered = subDocumentKinds(companyCountry()).map((k) => k.key as string);
+  const choices = kinds?.length ? kinds : doc && !offered.includes(doc.kind) ? [doc.kind, ...offered] : offered;
   const [f, setF] = useState({
     kind: doc?.kind ?? (replacing && choices.includes(replacing.kind) ? replacing.kind : choices[0]!),
     title: doc?.title ?? "",
@@ -261,7 +269,7 @@ interface LinkSent {
 /** Text or email the sub their link to send in paperwork, or copy it to send another way. */
 export function SendLinkDialog({ sub, paperwork, onClose }: { sub: Sub; paperwork: readonly PaperworkRow[]; onClose: () => void }) {
   const { company, config } = useSession();
-  const { needed } = neededPaperwork(paperwork);
+  const { needed } = neededPaperwork(paperwork, companyCountry());
   const intro = paperworkLinkIntro(needed);
   const canText = config.features.sms && Boolean(sub.phone);
   const canEmail = config.features.email && Boolean(sub.email);
