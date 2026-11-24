@@ -109,11 +109,11 @@ export function customColumns(headers: readonly string[], mapping: ImportMapping
 }
 
 /** A row's values for one kind of record's custom fields; a cell that doesn't fit its field is left out. */
-function customCells(row: readonly string[], columns: readonly ImportCustomColumn[], record: ImportCustomColumn["record"]): Record<string, CustomValue> {
+function customCells(row: readonly string[], columns: readonly ImportCustomColumn[], record: ImportCustomColumn["record"], dayFirst: boolean): Record<string, CustomValue> {
   const values: Record<string, CustomValue> = {};
   for (const c of columns) {
     if (c.record !== record) continue;
-    const checked = checkCustomValue(c.field, row[c.column] ?? "");
+    const checked = checkCustomValue(c.field, row[c.column] ?? "", { dayFirst });
     if ("value" in checked && checked.value !== null) values[c.field.key] = checked.value;
   }
   return values;
@@ -153,8 +153,12 @@ function billingAsProperty(clients: Iterable<ImportClient>) {
   for (const c of clients) if (!c.properties.length && c.billing) c.properties.push({ label: null, line2: null, ...c.billing });
 }
 
-/** Spreadsheet rows (without the header) as clients, with the columns mapped, and `custom` columns filling custom fields. */
-export function toClients(rows: string[][], mapping: ImportMapping, custom: readonly ImportCustomColumn[] = []): ImportClient[] {
+/**
+ * Spreadsheet rows (without the header) as clients, with the columns mapped, and `custom` columns
+ * filling custom fields; `dayFirst` reads a date like "3/4/2026" as 3 April, for a business where the
+ * day comes first.
+ */
+export function toClients(rows: string[][], mapping: ImportMapping, custom: readonly ImportCustomColumn[] = [], { dayFirst = false }: { dayFirst?: boolean } = {}): ImportClient[] {
   const get = (row: string[], key: ImportTargetKey) => (mapping[key] === undefined ? "" : (row[mapping[key]!] ?? "").trim());
   const clients = new Map<string, ImportClient>();
   for (const row of rows) {
@@ -184,8 +188,8 @@ export function toClients(rows: string[][], mapping: ImportMapping, custom: read
       clients.set(key, client);
     }
     // The first row with a value for a field gives it.
-    client.custom_fields = { ...customCells(row, custom, "client"), ...client.custom_fields };
-    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null, custom_fields: customCells(row, custom, "property") });
+    client.custom_fields = { ...customCells(row, custom, "client", dayFirst), ...client.custom_fields };
+    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null, custom_fields: customCells(row, custom, "property", dayFirst) });
   }
   billingAsProperty(clients.values());
   return [...clients.values()];

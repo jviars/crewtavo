@@ -21,7 +21,7 @@ import { Section } from "@/components/ui/Section";
 import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
-import { CURRENCIES, timeZoneChoices } from "@/lib/format";
+import { clockText, CURRENCIES, timeZoneChoices } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { CompanyLogo } from "./CompanyLogo";
@@ -306,7 +306,7 @@ export function CompanySettings() {
             </div>
             <span className="hint">Find a time and clients moving a visit online only get these days.</span>
           </div>
-          <Field label="Arrival window" className="set-full" hint="What clients are told in their portal and reminders, like “between 9:00 AM and 11:00 AM”.">
+          <Field label="Arrival window" className="set-full" hint={`What clients are told in their portal and reminders, like “between ${clockText(9, 0, { minutes: true })} and ${clockText(11, 0, { minutes: true })}”.`}>
             <Select className="select set-narrow" value={f.arrival_window_min} onChange={set("arrival_window_min")}>
               <option value="0">None: the start time</option>
               {[30, 60, 120, 180, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`}</option>)}

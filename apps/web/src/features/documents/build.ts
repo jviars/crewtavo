@@ -19,7 +19,7 @@ import { notIncludedText, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates"
 import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets";
 import { isIsoDate } from "@crewtavo/core/time";
 import { logoUrl } from "@/lib/files";
-import { dateIn, formatDate, todayIn } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, todayIn } from "@/lib/format";
 import { escapeHtml } from "@/lib/html";
 import { scheduleText } from "../jobs/repeatText";
 import type { DocumentCompany, DocumentContract, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "./types";
@@ -251,7 +251,7 @@ export function quoteSchedule(quote: Pick<DocumentQuote, "payment_schedule" | "a
   const kept = signed && quote.approval && typeof quote.approval === "object" ? scheduleRows((quote.approval as { payment_schedule?: unknown }).payment_schedule) : [];
   const rows = signed ? kept.map((r) => ({ ...r, amount: Number((r as { amount?: Amount }).amount ?? 0) })) : scheduleAmounts(scheduleRows(quote.payment_schedule), quote.total).rows;
   if (!rows.length) return null;
-  return rows.map((r, i) => ({ name: `Payment ${i + 1}`, due: scheduleDueText(r, shortDate), amount: r.amount }));
+  return rows.map((r, i) => ({ name: `Payment ${i + 1}`, due: scheduleDueText(r, (iso) => shortDate(iso, undefined, companyCountry())), amount: r.amount }));
 }
 
 /** The rate the tax was worked out at, when it's known: "VAT (20%)" in the totals. */

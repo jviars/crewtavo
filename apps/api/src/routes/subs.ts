@@ -130,7 +130,8 @@ subs.get("/public/paperwork/:token", async (c) => {
   const company = must(await admin.from("companies").select("name, settings, country").eq("id", companyId).maybeSingle(), EXPIRED);
   const paperwork = await subPaperwork(admin, companyId, sub.id);
   return c.json({
-    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings) },
+    // Its country: the page writes dates its way.
+    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings), country: company.country },
     sub: { name: sub.name },
     ...paperwork,
     // What they can send: a W-9 only to a business in the US.

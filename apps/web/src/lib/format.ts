@@ -1,5 +1,5 @@
 import { businessCountry } from "@crewtavo/core/countries";
-import { dateTag } from "@crewtavo/core/regional";
+import { clockStyle, dateTag, weekStartsSunday, type ClockStyle } from "@crewtavo/core/regional";
 import { taxPercent } from "@crewtavo/core/money";
 import { intlLocale, t } from "./i18n";
 
@@ -79,6 +79,26 @@ export const dateLocale = () => {
   return dateTag(country, tag.startsWith("es") ? "es" : "en");
 };
 
+/**
+ * dateLocale() for words that are only in English, such as an office dialog that also opens on a
+ * screen in Spanish: the business's country's way, in English whatever the screen.
+ */
+export const englishDateLocale = () => dateTag(country);
+
+/**
+ * A time of day from its hour and minute, as the business's country keeps time (core regional.ts
+ * clockStyle), for labels built from a time rather than a moment: "7 AM" and "1:30 PM" in the US
+ * ("7:00 AM" with `minutes`), "7 a.m." in Canada and on a screen in Spanish, "7 am" in Australia,
+ * "07:00" and "13:30" on a 24-hour clock.
+ */
+export function clockText(hour: number, minute = 0, { minutes = false, style }: { minutes?: boolean; style?: ClockStyle } = {}): string {
+  const clock = style ?? (dateLocale().startsWith("es") ? "a.m." : clockStyle(country));
+  const mm = String(minute).padStart(2, "0");
+  if (clock === "24") return `${String(hour % 24).padStart(2, "0")}:${mm}`;
+  const [am, pm] = clock === "AM" ? ["AM", "PM"] : clock === "a.m." ? ["a.m.", "p.m."] : ["am", "pm"];
+  return `${hour % 12 || 12}${minute || minutes ? `:${mm}` : ""} ${hour % 24 < 12 ? am : pm}`;
+}
+
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);
 export const formatMoneyCents = (n: number | null | undefined) => formats().moneyCents.format(n ?? 0);
@@ -146,6 +166,13 @@ export const addDaysIso = (date: string, days: number) => {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+/**
+ * The first day (YYYY-MM-DD) of the week `date` (YYYY-MM-DD) is in, as the business's country hangs
+ * its calendar (core regional.ts weekStartsSunday): its Sunday in the US and Canada, its Monday in
+ * the UK. For "this week" in a list; the schedule's and pay's weeks start Monday everywhere.
+ */
+export const weekStartOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + (weekStartsSunday(country) ? 0 : 6)) % 7));
 
 /** One-line address from a property row. */
 export const addressLine = (p: { line1?: string | null; city?: string | null; region?: string | null; postal_code?: string | null } | null | undefined) =>

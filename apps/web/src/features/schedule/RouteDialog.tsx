@@ -14,7 +14,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { statusText } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
-import { formatTime } from "@/lib/format";
+import { englishDateLocale, formatTime } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 
@@ -55,7 +55,7 @@ interface RoutePreview {
 }
 type Previous = Array<{ id: string; route_order: number | null; starts_at: string | null; ends_at: string | null }>;
 
-const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(englishDateLocale(), { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
 
 export function RouteDialog({ date, crewId, crewName, onClose }: { date: string; crewId: string; crewName: string; onClose: () => void }) {
   const session = useSession();

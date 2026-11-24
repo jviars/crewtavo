@@ -47,7 +47,7 @@ import { inkOn } from "@/features/documents/words";
 import { nextFrames, paperSettled } from "@/features/documents/paper";
 import type { DocumentSection } from "@/features/documents/types";
 import { ApiError } from "@/lib/api";
-import { currencySymbol, dateIn, formatDate, formatMoney, formatMoneyCents, setCurrency, todayIn } from "@/lib/format";
+import { currencySymbol, dateIn, formatDate, formatMoney, formatMoneyCents, setCountry, setCurrency, todayIn } from "@/lib/format";
 import { sanitizeContractHtml } from "@/lib/html";
 import { ClientPortal, hubZone, MessageDialog, type ClientView, type PortalVisit } from "./ClientPortal";
 import { CARD_REQUIRED } from "./HubAutopay";
@@ -220,8 +220,12 @@ export function HubPage() {
   }, [view.data, printing, printHere]);
 
   const d = view.data;
-  // The Hub has no session: its money shows in the business's currency from the page itself.
-  if (d) setCurrency((d.company as { currency?: string | null }).currency);
+  // The Hub has no session: its money shows in the business's currency, and its dates the way its
+  // country writes them, from the page itself.
+  if (d) {
+    setCurrency((d.company as { currency?: string | null }).currency);
+    setCountry(d.company);
+  }
   // The business's brand color, else the navy its paper prints in without one (Settings → Document
   // style says the brand color is also the Client Hub's): never Crewtavo's own green.
   const brand = documentColor({ color: null }, { branding: d?.company.branding ?? null });

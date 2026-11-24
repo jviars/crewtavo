@@ -25,11 +25,10 @@ import { DetailSkeleton, SectionSkeleton, Skeleton } from "@/components/ui/Skele
 import { EmptyState, PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatMoney, formatTime, todayIn } from "@/lib/format";
+import { addressLine, dateLocale, formatDate, formatMoney, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
-import { intlLocale } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { AddWorkDialog } from "../invoices/AddWorkDialog";
 import { LineItems } from "../quotes/LineItems";
@@ -717,8 +716,8 @@ export function JobPage() {
 function visitDay(date: string, today: string) {
   const at = new Date(`${date}T12:00:00`);
   return {
-    weekday: date === today ? "Today" : at.toLocaleDateString(intlLocale(), { weekday: "short" }),
-    date: at.toLocaleDateString(intlLocale(), { month: "short", day: "numeric", year: date.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric" }),
+    weekday: date === today ? "Today" : at.toLocaleDateString(dateLocale(), { weekday: "short" }),
+    date: at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: date.slice(0, 4) === today.slice(0, 4) ? undefined : "numeric" }),
   };
 }
 

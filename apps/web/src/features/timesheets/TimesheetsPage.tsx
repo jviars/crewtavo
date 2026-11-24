@@ -20,7 +20,7 @@ import { Face } from "@/components/ui/Avatar";
 import { Select } from "@/components/ui/Select";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { addDaysIso, formatMoney, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, dateLocale, formatMoney, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
@@ -36,14 +36,14 @@ import { DeleteTimeDialog, TimeHistoryDialog } from "./TimeHistory";
 import { editNote, sortEdits, spanLabel, type TimeChange } from "./timeChanges";
 import { loadWeek, type Entry, type TeamMember, type WeekData } from "./weekData";
 import { memberName } from "../subs/memberName";
-import { inEnglish, intlLocale, t } from "@/lib/i18n";
+import { inEnglish, t } from "@/lib/i18n";
 import styles from "./Timesheets.module.css";
 
 const hours = (start: string, end: string | null) => ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 3_600_000;
 const mondayOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
 /** A week as short as a phone's header needs it: "Nov 17 – 23", "Nov 30 – Dec 6" (each language's own way). */
 const shortRange = (monday: string) =>
-  new Intl.DateTimeFormat(intlLocale(), { month: "short", day: "numeric", timeZone: "UTC" }).formatRange(new Date(`${monday}T12:00:00Z`), new Date(`${addDaysIso(monday, 6)}T12:00:00Z`));
+  new Intl.DateTimeFormat(dateLocale(), { month: "short", day: "numeric", timeZone: "UTC" }).formatRange(new Date(`${monday}T12:00:00Z`), new Date(`${addDaysIso(monday, 6)}T12:00:00Z`));
 
 export function TimesheetsPage() {
   const session = useSession();
@@ -127,7 +127,7 @@ export function TimesheetsPage() {
   const people = [...new Set([...rows.map((r) => r.user_id), ...edits.deleted.map((c) => c.user_id)])].sort((a, b) => name(a).localeCompare(name(b)));
   const dayOf = (iso: string) => localDate(new Date(iso), tz);
   const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
-  const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(intlLocale(), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
   /** Which entry a history is of: "Mon, Nov 9 · 8:00 AM – 12:00 PM · Ray Crew". */
   const whatOf = (userId: string, start: string, end: string | null) => `${dayLabel(dayOf(start))} · ${spanLabel(start, end, tz)} · ${name(userId)}`;
   const pendingAll = rows.filter((r) => r.ended_at && !r.approved_at && approvable(r.user_id)).length;
@@ -175,7 +175,7 @@ export function TimesheetsPage() {
   }
 
   const today = todayIn(tz);
-  const weekday = (d: string) => dayLabel(d).split(",")[0];
+  const weekday = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "short", timeZone: "UTC" });
   return (
     <>
       <PageHeader
@@ -325,7 +325,7 @@ function DeletedRow({ change, what, note, onHistory }: { change: TimeChange; wha
   return (
     <div className={cx(styles.entry, styles.gone)}>
       <span className={styles.when}>
-        <span className={styles.entryDay} title={day}>{day.split(",")[0]}</span>
+        <span className={styles.entryDay} title={day}>{new Date(change.old_started_at!).toLocaleDateString(dateLocale(), { weekday: "short", timeZone: tz })}</span>
         <s className={styles.time}>{spanLabel(change.old_started_at!, change.old_ended_at, tz)}</s>
       </span>
       <span className={styles.what}>

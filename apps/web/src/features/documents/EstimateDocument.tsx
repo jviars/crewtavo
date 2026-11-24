@@ -24,7 +24,7 @@ import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, pri
 import { fitReviews, PDF_REVIEW_CHARS } from "@crewtavo/core/reviews";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatMoneyCents } from "@/lib/format";
 import { contractBlocks, type ContractBlock } from "@/lib/html";
 import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "./build";
 import styles from "./EstimateDocument.module.css";
@@ -410,7 +410,7 @@ function Initials({ section }: { section: DocumentSection }) {
     <div className={styles.initials}>
       <span>
         Initials
-        {done?.date ? ` · ${shortDate(done.date)}` : ""}
+        {done?.date ? ` · ${shortDate(done.date, undefined, companyCountry())}` : ""}
       </span>
       <span className={styles.initialsBox}>{done && <img className={styles.initialsImage} src={done.image} alt="Initials" />}</span>
     </div>
@@ -430,9 +430,9 @@ function Parties({ data, level }: { data: DocumentData; level: number }) {
         <div className={styles.kind} role="heading" aria-level={level}>{estimate ? "Estimate" : "Invoice"}</div>
         <div className={styles.meta}>
           {data.number != null && <div>No. {data.number}</div>}
-          {data.date && <div>{longDate(data.date)}</div>}
-          {estimate && data.validUntil && <div>Good until {longDate(data.validUntil)}</div>}
-          {!estimate && data.dueOn && <div>Due {longDate(data.dueOn)}</div>}
+          {data.date && <div>{longDate(data.date, companyCountry())}</div>}
+          {estimate && data.validUntil && <div>Good until {longDate(data.validUntil, companyCountry())}</div>}
+          {!estimate && data.dueOn && <div>Due {longDate(data.dueOn, companyCountry())}</div>}
         </div>
       </div>
     </div>
@@ -855,7 +855,7 @@ function Reviews({ reviews }: { reviews: NonNullable<DocumentData["reviews"]> })
             {r.cut && link && <> <a href={link}>Read it on Google</a></>}
           </blockquote>
           <figcaption>
-            <span aria-label={`${r.rating} out of 5 stars`}>{"★".repeat(r.rating)}</span> {r.name} · {shortDate(r.date)} · Google review
+            <span aria-label={`${r.rating} out of 5 stars`}>{"★".repeat(r.rating)}</span> {r.name} · {shortDate(r.date, undefined, companyCountry())} · Google review
           </figcaption>
         </figure>
       ))}
@@ -899,7 +899,7 @@ function SignatureLine({ label, signature, dates }: { label: string; signature: 
     <div className={styles.sign}>
       <div className={styles.signLine}>
         {signature?.image && <img className={styles.signImage} src={signature.image} alt={signature.name ? `Signature of ${signature.name}` : "Signature"} />}
-        {dates && signature?.image && signature.date && <span className={styles.signDate}>{shortDate(signature.date)}</span>}
+        {dates && signature?.image && signature.date && <span className={styles.signDate}>{shortDate(signature.date, undefined, companyCountry())}</span>}
       </div>
       <div className={styles.signUnder}>
         <span>{label}</span>

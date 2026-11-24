@@ -19,12 +19,13 @@ import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { GuideContents, useCurrentSection } from "@/features/kb/GuideContents";
 import { brandStyle, ClientHeader } from "@/features/public/ClientKit";
-import { formatDate } from "@/lib/format";
+import { formatDate, setCountry } from "@/lib/format";
 import { hasContent, isAppPath, sanitizeHtml, withSections } from "@/lib/html";
 import { publicFetch } from "@/lib/publicApi";
 import s from "@/features/kb/kb.module.css";
 
-interface Brand { name: string; phone: string | null; website: string | null; logo: string | null; color: string | null; privacy_url?: string | null }
+/** `country`: where the business works, for its dates (left out by servers from before). */
+interface Brand { name: string; phone: string | null; website: string | null; logo: string | null; color: string | null; privacy_url?: string | null; country?: string | null }
 interface Locked { locked: true; company: Brand }
 interface Open {
   locked: false;
@@ -115,6 +116,8 @@ export function SharedGuidePage() {
   const d = view.error ? undefined : view.data;
   const gone = !real || (view.error as { status?: number } | null)?.status === 404;
   const guide = d && !d.locked ? d : null;
+  // No session here: the guide's date is written the business's way from the page itself.
+  if (d) setCountry({ country: d.company.country });
   useEffect(() => {
     document.title = guide ? `${guide.title} · ${guide.company.name}` : d ? d.company.name : "Guide";
   }, [d, guide]);

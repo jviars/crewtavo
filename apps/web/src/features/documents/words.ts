@@ -5,6 +5,7 @@
  * as the pages do; build.ts passes them on.
  */
 import { taxLineLabel, taxNumberLabel, type Amount } from "@crewtavo/core/money";
+import { dateTag } from "@crewtavo/core/regional";
 
 /** "Ridgeline Roofing Co." -> "RR", for a business with no logo. */
 export function initials(name: string): string {
@@ -93,20 +94,24 @@ export function quantityLabel(quantity: Amount, unit: string | null | undefined)
   return `${number} ${plural(short)}`;
 }
 
-/** "2026-10-22" or a timestamp -> "October 22, 2026". */
-export function longDate(value: string | null | undefined): string {
+/**
+ * "2026-10-22" or a timestamp -> "October 22, 2026", or "22 October 2026" for a business in a country
+ * that writes the day first (`country`, core regional.ts dateTag); the US's way without one.
+ */
+export function longDate(value: string | null | undefined, country?: string | null): string {
   if (!value) return "";
   const d = new Date(value.length === 10 ? `${value}T12:00:00` : value);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(dateTag(country), { month: "long", day: "numeric", year: "numeric" });
 }
 
 /**
- * "2026-10-24T18:14:00Z" -> "Oct 24, 2026", for the date beside a signature: a moment's day where
- * it's read, or in `timeZone` (the server's PDF says whose). A day ("2026-10-24") is that day anywhere.
+ * "2026-10-24T18:14:00Z" -> "Oct 24, 2026" ("24 Oct 2026" where the day comes first: `country`), for
+ * the date beside a signature: a moment's day where it's read, or in `timeZone` (the server's PDF says
+ * whose). A day ("2026-10-24") is that day anywhere.
  */
-export function shortDate(value: string | null | undefined, timeZone?: string): string {
+export function shortDate(value: string | null | undefined, timeZone?: string, country?: string | null): string {
   if (!value) return "";
   const day = value.length === 10;
   const d = new Date(day ? `${value}T12:00:00` : value);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", ...(!day && timeZone && { timeZone }) });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(dateTag(country), { month: "short", day: "numeric", year: "numeric", ...(!day && timeZone && { timeZone }) });
 }

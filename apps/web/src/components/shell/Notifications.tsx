@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase, unwrap } from "@/lib/api";
-import { dateIn, formatDateTime, todayIn } from "@/lib/format";
+import { dateIn, dateLocale, formatDateTime, todayIn } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { Icon, type IconName } from "../ui/Icon";
@@ -42,8 +42,8 @@ export function shortWhen(value: string, now = Date.now()): string {
   if (seconds < 60) return t("just now");
   if (seconds < 3600) return unit(Math.floor(seconds / 60), "minute");
   if (seconds < 86400) return unit(Math.floor(seconds / 3600), "hour");
-  if (seconds < 6 * 86400) return new Date(value).toLocaleDateString(intlLocale(), { weekday: "short" });
-  return new Date(value).toLocaleDateString(intlLocale(), { month: "short", day: "numeric" });
+  if (seconds < 6 * 86400) return new Date(value).toLocaleDateString(dateLocale(), { weekday: "short" });
+  return new Date(value).toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
 }
 
 const subjectPath = (type: string, id: string | null) =>

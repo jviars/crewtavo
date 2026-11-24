@@ -16,7 +16,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
+import { dateIn, dateLocale, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { needsNewCard, waitingInvoices, yoursToPayNote, type HubAutopay, type HubInvoiceAutopay } from "./document";
 import { AutopayView, CARD_REQUIRED, ON_HOLD_TEXT } from "./HubAutopay";
@@ -140,7 +140,7 @@ function dayWords(date: string, tz: string): string {
   const today = dateIn(new Date().toISOString(), tz);
   if (date === today) return "Today";
   if (date === new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) return "Tomorrow";
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 /** Where a visit is on its day, as delivery apps show it: a bar for each step, filled up to this one. */

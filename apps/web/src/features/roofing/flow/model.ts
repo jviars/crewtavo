@@ -9,7 +9,7 @@ import { optionsIntroText, optionsRange, priceRange, rangeIntroText, type RangeS
 import { optionBaseTotal, optionTierLabels, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { SALES, type Role } from "@crewtavo/core/roles";
 import { statusText } from "@/components/ui/StatusPill";
-import { formatMoney } from "@/lib/format";
+import { dateLocale, formatMoney } from "@/lib/format";
 import type { QuoteApproval } from "../../documents/build";
 import { firstName, money, rangePosition, whenText } from "../estimate/rows";
 
@@ -238,7 +238,7 @@ export function sendWords(q: RangeEstimate, mode: "range" | "exact", settings: R
 export function dayText(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
   const year = (d: Date) => d.toLocaleDateString("en-US", { year: "numeric", timeZone });
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
+  return at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
 }
 
 /** "on Oct 24 at 2:14 PM", "today at 9:12 AM". */

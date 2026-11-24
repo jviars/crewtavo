@@ -15,7 +15,7 @@ import type { ClientChecklist } from "@crewtavo/core/forms";
 import { SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { normalizePitch, pitchFactor } from "@crewtavo/core/geo";
 import { chosenTotals, lineTotal, optionLabels, taxName, taxNumber, toCents, type Amount } from "@crewtavo/core/money";
-import { dateIn, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
+import { dateIn, dateLocale, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { linkToken } from "@/lib/linkToken";
 import {
   hasContract,
@@ -611,7 +611,7 @@ export function hubTip({ tips, base, choice, custom }: { tips: boolean; base: nu
 }
 
 /** "Oct 27": a day where the business is. */
-const shortDay = (at: string, timeZone: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
+const shortDay = (at: string, timeZone: string) => new Date(at).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone });
 
 /**
  * The line under an invoice's heading about its automatic charge: paid ("Paid automatically with
@@ -748,7 +748,7 @@ export function hubAccent(view: { template?: unknown; company: Pick<HubCompany, 
 export function dayText(date: string, withYear = true): string {
   const d = new Date(`${date.slice(0, 10)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", withYear ? { month: "long", day: "numeric", year: "numeric" } : { month: "long", day: "numeric" });
+  return d.toLocaleDateString(dateLocale(), withYear ? { month: "long", day: "numeric", year: "numeric" } : { month: "long", day: "numeric" });
 }
 
 /**

@@ -4,6 +4,7 @@
  * the side column. A business's first visit, before there's any work (Setup-Flow.dc.html, Home, first
  * visit), is the setup checklist instead.
  */
+import { monthFirst } from "@crewtavo/core/regional";
 import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link } from "react-router-dom";
@@ -19,7 +20,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusLabel, statusText, visitTone } from "@/components/ui/StatusPill";
 import { openHelp } from "@/components/shell/Help";
 import { api, supabase, unwrap } from "@/lib/api";
-import { formatMoney, formatMoneyCompact, todayIn } from "@/lib/format";
+import { companyCountry, dateLocale, formatMoney, formatMoneyCompact, formatTime, todayIn } from "@/lib/format";
 import { installApp, useInstallHint } from "@/lib/install";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -111,7 +112,7 @@ export function HomePage() {
     return [...asks, ...(data?.attention ?? []), ...items];
   }, [data?.attention, gear.data, gearPapers.data, changes.data, tz, session.company.settings]);
   const firstName = session.profile.full_name.split(" ")[0] || "there";
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: tz });
+  const today = new Date().toLocaleDateString(dateLocale(), { weekday: "long", month: "long", day: "numeric", timeZone: tz });
 
   // A first visit: setup is still to do and there's nothing else to show yet. While setup's own read
   // is under way on such a quiet Home, the page waits for it rather than changing under the person.
@@ -236,7 +237,7 @@ function AttentionSection({ items }: { items: Attention[] }) {
 /** Today's visits: the time and crew, the visit and where, its status. */
 function TodaySection({ today, office }: { today: Dashboard["today"]; office: boolean }) {
   const { company } = useSession();
-  const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: company.timezone });
+  const time = (iso: string) => formatTime(iso, company.timezone);
   const done = today.by_status.completed ?? 0;
   const going = today.by_status.in_progress ?? 0;
   const count = today.total > 0 ? `${done} of ${today.total} done${going ? ` · ${going} ${statusText("visit", "in_progress").toLowerCase()}` : ""}` : undefined;
@@ -338,14 +339,15 @@ function CollectedSection({ month, history }: { month: Dashboard["month"]; histo
   );
 }
 
-/** The days of last month this month so far is compared with: "Oct 1–21", "Feb 1–28" on the 31st, "Oct 1" on the 1st. */
+/** The days of last month this month so far is compared with: "Oct 1–21", "Feb 1–28" on the 31st, "Oct 1" on the 1st ("1–21 Oct" where the day comes first). */
 export function sameDaysLastMonth(today: string): string {
   const [y, m, d] = today.split("-").map(Number) as [number, number, number];
   const last = new Date(Date.UTC(y, m - 2, 1));
   const days = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
-  const name = last.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const name = last.toLocaleDateString(dateLocale(), { month: "short", timeZone: "UTC" });
   const end = Math.min(d, days);
-  return end === 1 ? `${name} 1` : `${name} 1–${end}`;
+  const span = end === 1 ? "1" : `1–${end}`;
+  return monthFirst(companyCountry()) ? `${name} ${span}` : `${span} ${name}`;
 }
 
 /** Who owes money, most first, and how much in all. */

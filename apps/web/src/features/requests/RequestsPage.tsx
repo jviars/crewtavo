@@ -10,7 +10,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { FilterTabs, SearchField, SortMenu, Toolbar } from "@/components/ui/Toolbar";
 import { api, searchTerm, supabase } from "@/lib/api";
-import { addDaysIso, dateIn } from "@/lib/format";
+import { dateIn, weekStartOf } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
 import { firstRows } from "@/lib/paging";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
@@ -86,7 +86,7 @@ const waiting = (r: RequestRow, now: number) => r.status === "new" && now - Date
  */
 export function groupRequests(rows: RequestRow[], timeZone: string, now = Date.now()): Group[] {
   const today = dateIn(new Date(now), timeZone);
-  const weekStart = addDaysIso(today, -new Date(`${today}T12:00:00Z`).getUTCDay());
+  const weekStart = weekStartOf(today);
   const groups = new Map<string, Group>([["waiting", { key: "waiting", label: "Waiting over 2 days", tone: "warning", icon: "clock", rows: [] }]]);
   for (const r of rows) {
     const day = dateIn(r.created_at, timeZone);
