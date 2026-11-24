@@ -100,7 +100,7 @@ export interface OfferLineInput {
   total: number | string;
   /** The business's currency (companies.currency); US dollars when it isn't given. */
   currency?: string | null;
-  /** The business's country (companies.country), which its days are written the way of; the US when it isn't given. */
+  /** The business's country (companies.country): the days are written its way; the US's when it isn't given. */
   country?: string | null;
 }
 

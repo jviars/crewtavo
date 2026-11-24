@@ -563,9 +563,8 @@ export function addressLines(address: unknown): string[] {
  * the browser: the customer and their address (the job's when there's no billing address), the job
  * address, the business, the template's license, the estimate's number and date on the business's
  * calendar (written its country's way), its total and deposit in the business's currency, and the
- * option chosen. `quote.total`
- * is the total being signed: pass the chosen option's (the total the homeowner saw) when it isn't
- * the quote's own.
+ * option chosen. `quote.total` is the total being signed: pass the chosen option's (the total the
+ * homeowner saw) when it isn't the quote's own.
  */
 export function contractInput(
   quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount; deposit_percent?: Amount },
