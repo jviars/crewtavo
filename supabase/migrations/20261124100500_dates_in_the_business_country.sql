@@ -77,6 +77,24 @@ language sql stable parallel safe set search_path = '' as $$
   select to_char(p_value, private.date_pattern(p_pattern, p_country))
 $$;
 
+-- A time of day ("Clear by 6:00 AM"), as to_char writes one.
+create function private.date_text(p_value time, p_pattern text, p_country text) returns text
+language sql immutable parallel safe set search_path = '' as $$
+  select to_char(p_value, private.date_pattern(p_pattern, p_country))
+$$;
+
+-- The country and currency of a business, for a function that writes words about one row of it.
+-- A query over many rows joins companies instead.
+create function private.company_country(p_company uuid) returns text
+language sql stable parallel safe set search_path = '' as $$
+  select c.country from public.companies c where c.id = p_company
+$$;
+
+create function private.company_currency(p_company uuid) returns text
+language sql stable parallel safe set search_path = '' as $$
+  select c.currency from public.companies c where c.id = p_company
+$$;
+
 -- The to_char pattern of an amount to the cent in the business's currency: 'FM$999,999,990.00', as
 -- the functions wrote "$" amounts, for every dollar; '£', '€' and 'R ' before the number otherwise
 -- (private.money_prefix). Nothing for no amount, as before.
@@ -87,10 +105,12 @@ language sql immutable parallel safe set search_path = '' as $$
 $$;
 
 -- Some of the functions that write these words run as the person signed in (the dashboard, making
--- an invoice, a payment schedule's problems), as private.money, which they wrote amounts with, did.
+-- an invoice, a payment schedule's problems), as private.money, which they wrote amounts with, did;
+-- they read the business's country and currency as that person, who can see them.
 revoke all on function private.month_first(text), private.clock_style(text), private.date_pattern(text, text),
   private.date_text(timestamp, text, text), private.date_text(date, text, text), private.date_text(timestamptz, text, text),
-  private.money_pattern(text) from public;
+  private.date_text(time, text, text), private.company_country(uuid), private.company_currency(uuid), private.money_pattern(text) from public;
 grant execute on function private.month_first(text), private.clock_style(text), private.date_pattern(text, text),
   private.date_text(timestamp, text, text), private.date_text(date, text, text), private.date_text(timestamptz, text, text),
-  private.money_pattern(text), private.money_prefix(text), private.money_in(numeric, text) to authenticated, service_role;
+  private.date_text(time, text, text), private.company_country(uuid), private.company_currency(uuid), private.money_pattern(text),
+  private.money_prefix(text), private.money_in(numeric, text) to authenticated, service_role;

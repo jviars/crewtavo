@@ -85,6 +85,13 @@ select t1124d.check(private.date_text('2026-03-09'::date, 'Mon DD, YYYY', 'GB') 
 select t1124d.check(private.date_text(null::date, 'Mon FMDD', 'GB') is null and private.date_text(null::timestamp, 'FMHH12:MI AM', 'US') is null,
   'no date is no words, as to_char has it');
 
+select t1124d.check(not exists (
+  select 1 from generate_series(0, 1439) m cross join (values ('US'), ('PR'), (null)) c (country)
+  where private.date_text(time '00:00' + make_interval(mins => m), 'FMHH12:MI AM', c.country) is distinct from to_char(time '00:00' + make_interval(mins => m), 'FMHH12:MI AM')
+), 'a time of day in the US is written as to_char writes it, every minute of the day');
+select t1124d.check(private.date_text(time '06:00', 'FMHH12:MI AM', 'GB') = '06:00' and private.date_text(time '17:30', 'FMHH12:MI AM', 'CA') = '5:30 p.m.'
+  and private.date_text(time '00:15', 'FMHH12:MI AM', 'AU') = '12:15 am', 'and elsewhere the country''s way');
+
 -- ===== The countries ============================================================================
 select t1124d.check(private.month_first('US') and private.month_first('CA') and private.month_first('PR') and private.month_first(null)
   and not private.month_first('GB') and not private.month_first('AU') and not private.month_first('DE') and not private.month_first('ZA'),
