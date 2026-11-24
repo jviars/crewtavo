@@ -20,7 +20,7 @@ import { TermsPage } from "@/features/legal/License";
 import { RailwaySetupPage } from "@/features/setup/RailwaySetupPage";
 import { api, ApiError, companyFeatures, loadConfig, setActiveCompany, supabase, type AppConfig } from "./api";
 import { readEmailLink, readHashSignIn, redeemEmailLink, type Redeemed, type SwitchQuestion } from "./emailLink";
-import { setCurrency } from "./format";
+import { setCountry, setCurrency } from "./format";
 import { followProfile, forgetLanguageAtSignOut } from "./i18n";
 import { forgetOfflineCache, keepQueuedFieldActions, keepsDayOffline, pendingFieldActions, signOutWarning, startOfflineCache } from "./offline";
 import { photosNotSent } from "./offlinePhotos";
@@ -42,6 +42,11 @@ export interface Company {
   trade_preset?: string;
   timezone: string;
   currency: string;
+  /**
+   * Where the business works, "US", "CA", "GB" (Settings → Company). A sub's basics don't have it:
+   * businessCountry() (core countries.ts) guesses it from the time zone then.
+   */
+  country?: string | null;
   /** The shop's address (Settings → Company). */
   address?: { line1?: string; city?: string; region?: string; postal_code?: string } | null;
   phone?: string | null;
@@ -289,6 +294,7 @@ export function SessionProvider({ children, requireCompany = true }: { children:
   setActiveCompany(membership?.company.id ?? null);
   setRecentsPerson(auth?.user.id ?? null);
   setCurrency(membership?.company.currency);
+  setCountry(membership?.company);
 
   // Their own language, once known: the app reloads into it when this device was in another, and a
   // language picked on the sign-in page is saved with them, so their notifications come in it too

@@ -1,4 +1,5 @@
 import { TIPS_LAW_NOTE } from "@crewtavo/core/autopay";
+import { businessCountry, countryChoices } from "@crewtavo/core/countries";
 import { LATE_FEE_LAW_NOTE, lateFeeSettings, minimumCharge, type LateFee } from "@crewtavo/core/billing";
 import { BREAK_PAY_HINTS, BREAK_PAY_LABELS, breakPay, type BreakPay } from "@crewtavo/core/breaks";
 import { CLOCK_MODE_HINTS, CLOCK_MODE_LABELS, clockMode, type ClockMode } from "@crewtavo/core/clock";
@@ -47,7 +48,7 @@ export function CompanySettings() {
   const details = useQuery({
     queryKey: ["company", company.id],
     queryFn: async () => {
-      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, country, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
       return { ...unwrap(row), settings };
     },
   });
@@ -64,7 +65,7 @@ export function CompanySettings() {
       name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "", trade: d.trade_preset,
       privacy_url: typeof s.privacy_url === "string" ? s.privacy_url : "",
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
-      timezone: d.timezone, currency: d.currency, payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
+      timezone: d.timezone, currency: d.currency, country: businessCountry(d), payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
       workdays: workdays(s).join(","),
       arrival_window_min: String(arrivalWindowMin(s)),
@@ -143,7 +144,7 @@ export function CompanySettings() {
       unwrap(
         await supabase()
           .from("companies")
-          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, currency: v.currency, address, ...(v.trade in PRESETS ? { trade_preset: v.trade } : {}) })
+          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, currency: v.currency, country: v.country, address, ...(v.trade in PRESETS ? { trade_preset: v.trade } : {}) })
           .eq("id", company.id),
       );
       unwrap(await supabase().rpc("merge_company_settings", { p_company: company.id, p_settings: settings as never }));
@@ -209,6 +210,11 @@ export function CompanySettings() {
       </Section>
       <Section level={3} title="Defaults">
         <div className="set-grid">
+          <Field label="Country" hint="Where you work. It decides how addresses are found on the map and how phone numbers are read.">
+            <Select className="select" value={f.country} onChange={set("country")}>
+              {countryChoices().map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Time zone">
             <Select className="select" value={f.timezone} onChange={set("timezone")}>
               {timeZoneChoices(f.timezone).map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}

@@ -1,9 +1,10 @@
 /**
- * First run, one question at a time (Setup-Flow, Setup-Phone): the business's name, with the time
- * zone and currency it starts with; its trade, whose preset sets up services, forms and SOP
+ * First run, one question at a time (Setup-Flow, Setup-Phone): the business's name, with the country,
+ * time zone and currency it starts with; its trade, whose preset sets up services, forms and SOP
  * categories; then the Crewtavo Terms (features/legal/License.tsx). Creating it ticks off each part
  * once it's really there, then Home.
  */
+import { countryChoices, countryFor, countryName, currencyForCountry } from "@crewtavo/core/countries";
 import type { TradePreset } from "@crewtavo/core/presets";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -41,18 +42,8 @@ export function searchTrades<T extends { name: string; description: string }>(tr
   return best ? trades.filter((_, i) => scores[i] === best) : [];
 }
 
-const EURO_ZONES = /^Europe\/(Amsterdam|Andorra|Athens|Berlin|Bratislava|Brussels|Busingen|Dublin|Helsinki|Lisbon|Ljubljana|Luxembourg|Madrid|Malta|Monaco|Paris|Podgorica|Riga|Rome|San_Marino|Tallinn|Vatican|Vienna|Vilnius|Zagreb)$/;
-
 /** The currency a business in this time zone most likely charges in, of the ones Crewtavo offers; US dollars otherwise. */
-export function currencyFor(timeZone: string): string {
-  if (/^America\/(Toronto|Montreal|Vancouver|Edmonton|Calgary|Winnipeg|Regina|Swift_Current|Halifax|Glace_Bay|Moncton|Goose_Bay|St_Johns|Whitehorse|Dawson|Dawson_Creek|Fort_Nelson|Creston|Yellowknife|Inuvik|Iqaluit|Rankin_Inlet|Cambridge_Bay|Resolute|Atikokan|Nipigon|Thunder_Bay|Rainy_River)$/.test(timeZone)) return "CAD";
-  if (timeZone.startsWith("Australia/")) return "AUD";
-  if (timeZone === "Pacific/Auckland" || timeZone === "Pacific/Chatham") return "NZD";
-  if (/^Europe\/(London|Belfast|Guernsey|Jersey|Isle_of_Man)$/.test(timeZone)) return "GBP";
-  if (timeZone === "Africa/Johannesburg") return "ZAR";
-  if (EURO_ZONES.test(timeZone)) return "EUR";
-  return "USD";
-}
+export const currencyFor = (timeZone: string): string => currencyForCountry(countryFor(timeZone));
 
 /** "Eastern time (New York)": what the zone's called, and the city it's named for. */
 export function zoneLabel(zone: string): string {
@@ -176,7 +167,19 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
   // The trade the pointer is on: the picture beside the list shows it until the pointer leaves.
   const [pointed, setPointed] = useState<string | null>(null);
   const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York");
+  const [country, setCountry] = useState(() => countryFor(timezone));
   const [currency, setCurrency] = useState(() => currencyFor(timezone));
+  const countries = useMemo(() => countryChoices(), []);
+  // A country picked brings its currency, unless the currency was changed by hand; a time zone
+  // picked brings its country the same way.
+  const pickCountry = (next: string) => {
+    if (currency === currencyForCountry(country)) setCurrency(currencyForCountry(next));
+    setCountry(next);
+  };
+  const pickZone = (next: string) => {
+    if (country === countryFor(timezone)) pickCountry(countryFor(next));
+    setTimezone(next);
+  };
   const [changing, setChanging] = useState(false);
   const [named, setNamed] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -195,7 +198,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
     meta: { inline: true, success: "Your business is ready" },
     mutationFn: () => {
       if (name.trim().length < 2) throw new Error("Enter your business name.");
-      return api.post<{ id: string }>("/companies", { name: name.trim(), trade_preset: preset, timezone, currency, terms_version: TERMS_VERSION });
+      return api.post<{ id: string }>("/companies", { name: name.trim(), trade_preset: preset, timezone, currency, country, terms_version: TERMS_VERSION });
     },
     onSuccess: () => setMade(true),
   });
@@ -303,16 +306,24 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
           {!changing && (
             <div className={styles.prefLine}>
               <Icon name="clock" size={15} />
-              <span>{zoneLabel(timezone)} · {currencyLabel(currency)}</span>
-              <button type="button" className="link-btn" onClick={() => setChanging(true)} aria-label="Change the time zone or currency">Change</button>
+              <span>{countryName(country)} · {zoneLabel(timezone)} · {currencyLabel(currency)}</span>
+              <button type="button" className="link-btn" onClick={() => setChanging(true)} aria-label="Change the country, time zone or currency">Change</button>
             </div>
           )}
           <div className={styles.prefs} data-open={changing || undefined}>
             <label className={styles.pref}>
+              <span>Country</span>
+              <span className={styles.prefValue} aria-hidden="true">{countryName(country)}</span>
+              <span className={styles.prefChevron} aria-hidden="true"><Icon name="chevronRight" size={16} /></span>
+              <select className="select" aria-label="Country" value={country} onChange={(e) => pickCountry(e.target.value)}>
+                {countries.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className={styles.pref}>
               <span>Time zone</span>
               <span className={styles.prefValue} aria-hidden="true">{zoneLabel(timezone)}</span>
               <span className={styles.prefChevron} aria-hidden="true"><Icon name="chevronRight" size={16} /></span>
-              <select ref={zonePicker} className="select" aria-label="Time zone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+              <select ref={zonePicker} className="select" aria-label="Time zone" value={timezone} onChange={(e) => pickZone(e.target.value)}>
                 {zones.map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
               </select>
             </label>
@@ -397,6 +408,7 @@ export function OnboardingPage({ onCreated, onSignOut }: { onCreated: () => void
           </div>
           <dl style={{ margin: 0 }}>
             {trade && <div className={styles.sumRow}><dt>Trade</dt><dd>{trade.name}</dd></div>}
+            <div className={styles.sumRow}><dt>Country</dt><dd>{countryName(country)}</dd></div>
             <div className={styles.sumRow}><dt>Time zone</dt><dd>{zoneLabel(timezone)}</dd></div>
             <div className={styles.sumRow}><dt>Currency</dt><dd>{currencyLabel(currency)}</dd></div>
             {full && <div className={styles.sumRow}><dt>Starts with</dt><dd>{startsWith(full).join(", ")}</dd></div>}

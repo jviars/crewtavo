@@ -1,3 +1,4 @@
+import { businessCountry } from "@crewtavo/core/countries";
 import { taxPercent } from "@crewtavo/core/money";
 import { intlLocale, t } from "./i18n";
 
@@ -40,6 +41,16 @@ export function setCurrency(code: string | null | undefined) {
 
 /** The currency money shows in: "USD", "CAD". */
 export const moneyCurrency = () => currency;
+
+let country = "US";
+
+/** The business's country (companies.country, or the guess from its time zone), which the session sets. */
+export function setCountry(company: { country?: string | null; timezone?: string | null } | null | undefined) {
+  country = company ? businessCountry(company) : "US";
+}
+
+/** Where the business works: "US", "CA", "GB" (core countries.ts). For code outside React; a screen can read the session's company. */
+export const companyCountry = () => country;
 
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);
