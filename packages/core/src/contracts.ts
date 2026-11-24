@@ -468,8 +468,12 @@ const TRADE_STARTERS: Record<string, ContractStarter[]> = {
  *
  * `lateFeeLine`: for a business that charges late fees, the sentence saying so (core billing
  * lateFeeTerm), which goes in the Payment section so the fee is agreed to before one is charged.
+ *
+ * `country`: the business's (companies.country). The FTC's rule is a US one, so the right to cancel
+ * and its notice are examples for a business in the US only; without a country they're included.
  */
-export function contractStarters(trade: string | null | undefined, { lateFeeLine }: { lateFeeLine?: string | null } = {}): ContractStarter[] {
+export function contractStarters(trade: string | null | undefined, { lateFeeLine, country }: { lateFeeLine?: string | null; country?: string | null } = {}): ContractStarter[] {
+  const us = !country || country.trim().toUpperCase() === "US";
   const cleanup =
     "<p>We keep the work area tidy as we go and haul away our debris when the job is done.</p>" +
     (trade === "roofing_exteriors" ? "<p>We run a magnet over the yard and driveway for stray nails. Keep an eye out for any we missed for a few days.</p>" : "");
@@ -511,8 +515,12 @@ export function contractStarters(trade: string | null | undefined, { lateFeeLine
     ),
     // The FTC's cooling-off rule for a sale made at the buyer's home (16 CFR 429.1): the statement
     // above the signature in the rule's own words, and the Notice of Cancellation it refers to.
-    { title: "Your right to cancel", body: `<p><strong>${FTC_CANCEL_STATEMENT}</strong></p>`, place: "signatures", initials: true },
-    terms(NOTICE_OF_CANCELLATION_TITLE, NOTICE_OF_CANCELLATION.map((text) => `<p><strong>${text}</strong></p>`).join("")),
+    ...(us
+      ? [
+          { title: "Your right to cancel", body: `<p><strong>${FTC_CANCEL_STATEMENT}</strong></p>`, place: "signatures" as const, initials: true },
+          terms(NOTICE_OF_CANCELLATION_TITLE, NOTICE_OF_CANCELLATION.map((text) => `<p><strong>${text}</strong></p>`).join("")),
+        ]
+      : []),
   ];
 }
 
