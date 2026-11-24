@@ -503,7 +503,7 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
   return (
     <Dialog open onClose={onClose} title="Goals" size="sm">
       <form className="stack" onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
-        <Field label="Yearly revenue goal" hint="Collected from January 1, against an even pace through the year.">
+        <Field label="Yearly revenue goal" hint={`Collected from ${new Date("2026-01-01T12:00:00Z").toLocaleDateString(dateLocale(), { month: "long", day: "numeric", timeZone: "UTC" })}, against an even pace through the year.`}>
           <div className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="500,000" autoFocus /></div>
         </Field>
         <Field label="Target job margin" optional hint="Jobs under it are counted on Profit.">

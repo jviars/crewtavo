@@ -1,5 +1,5 @@
 import { businessCountry } from "@crewtavo/core/countries";
-import { dateTag } from "@crewtavo/core/regional";
+import { clockStyle, dateTag, type ClockStyle } from "@crewtavo/core/regional";
 import { taxPercent } from "@crewtavo/core/money";
 import { intlLocale, t } from "./i18n";
 
@@ -84,6 +84,20 @@ export const dateLocale = () => {
  * screen in Spanish: the business's country's way, in English whatever the screen.
  */
 export const englishDateLocale = () => dateTag(country);
+
+/**
+ * A time of day from its hour and minute, as the business's country keeps time (core regional.ts
+ * clockStyle), for labels built from a time rather than a moment: "7 AM" and "1:30 PM" in the US
+ * ("7:00 AM" with `minutes`), "7 a.m." in Canada and on a screen in Spanish, "7 am" in Australia,
+ * "07:00" and "13:30" on a 24-hour clock.
+ */
+export function clockText(hour: number, minute = 0, { minutes = false, style }: { minutes?: boolean; style?: ClockStyle } = {}): string {
+  const clock = style ?? (dateLocale().startsWith("es") ? "a.m." : clockStyle(country));
+  const mm = String(minute).padStart(2, "0");
+  if (clock === "24") return `${String(hour % 24).padStart(2, "0")}:${mm}`;
+  const [am, pm] = clock === "AM" ? ["AM", "PM"] : clock === "a.m." ? ["a.m.", "p.m."] : ["am", "pm"];
+  return `${hour % 12 || 12}${minute || minutes ? `:${mm}` : ""} ${hour % 24 < 12 ? am : pm}`;
+}
 
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);

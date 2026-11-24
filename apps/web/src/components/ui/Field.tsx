@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "@/lib/errors";
+import { formatDate } from "@/lib/format";
 import { northAmericanPhones, phoneDigits } from "@/lib/validate";
 import { Icon } from "./Icon";
 import { msg, t } from "@/lib/i18n";
@@ -14,9 +15,9 @@ const isContact = (control: Checkable) => control instanceof HTMLInputElement &&
 const NOT_RIGHT = msg("This doesn't look right.");
 const DATE_TYPES = new Set(["date", "datetime-local", "month", "week"]);
 
-/** A min or max as people read it: "1,000", or "Oct 28, 2026" for a date. */
+/** A min or max as people read it: "1,000", or "Oct 28, 2026" for a date ("28 Oct 2026" where the day comes first). */
 function readLimit(control: Checkable, limit: string): string {
-  if (control.type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(limit)) return new Date(`${limit}T00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  if (control.type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(limit)) return formatDate(limit);
   return control.type === "number" && limit !== "" && Number.isFinite(Number(limit)) ? Number(limit).toLocaleString("en-US") : limit;
 }
 
