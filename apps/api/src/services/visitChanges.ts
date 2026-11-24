@@ -96,7 +96,7 @@ export async function answerVisitChange(s: Scope, env: Env, id: string, answer: 
 async function tellClient(env: Env, s: Scope, requestId: string, note: string | null, baseUrl: string | null): Promise<boolean> {
   const admin = adminClient(env);
   const [company, row] = await Promise.all([
-    admin.from("companies").select("id, name, email, phone, timezone, settings, address").eq("id", s.companyId).maybeSingle(),
+    admin.from("companies").select("id, name, email, phone, timezone, country, settings, address").eq("id", s.companyId).maybeSingle(),
     admin.from("visit_change_requests").select("kind, visit:visits(id, title, scheduled_on, starts_at), client:clients(id, display_name, email, phone)").eq("company_id", s.companyId).eq("id", requestId).maybeSingle(),
   ]);
   const co = company.data;
@@ -107,7 +107,7 @@ async function tellClient(env: Env, s: Scope, requestId: string, note: string | 
   const people = await recipientsFor(admin, co.id, client, "email", co.settings);
   if (!people.length) return false;
   // The visit as it is now: moved, for an approved reschedule.
-  const when = visit.scheduled_on ? slotLabel({ date: visit.scheduled_on, starts_at: visit.starts_at }, co.timezone || "UTC", arrivalWindowMin(co.settings)) : "a day still to be set";
+  const when = visit.scheduled_on ? slotLabel({ date: visit.scheduled_on, starts_at: visit.starts_at }, co.timezone || "UTC", arrivalWindowMin(co.settings), co.country) : "a day still to be set";
   const cancel = row.data!.kind === "cancel";
   const [subject, line] =
     note === null

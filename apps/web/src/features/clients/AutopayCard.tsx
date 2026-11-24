@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { formatDate, formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatDate, formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import styles from "./clients.module.css";
@@ -257,7 +257,7 @@ export function AutopayCard({ client }: { client: { id: string; display_name: st
               const what = c.invoice?.number != null ? `Invoice #${c.invoice.number}` : "Next charge";
               // Over the limit for their bank account: not charged, and the invoice is theirs to pay.
               const overLimit = c.status === "called_off" && c.last_error === AUTOPAY_BANK_LIMIT_REASON;
-              const status = c.status === "waiting" ? `Charges ${autopayDueText(c.due_at, session.company.timezone)}` : fromCredit ? "Paid from Stripe credit" : overLimit ? "Theirs to pay" : AUTOPAY_STATUS_TEXT[c.status] ?? c.status;
+              const status = c.status === "waiting" ? `Charges ${autopayDueText(c.due_at, session.company.timezone, undefined, companyCountry())}` : fromCredit ? "Paid from Stripe credit" : overLimit ? "Theirs to pay" : AUTOPAY_STATUS_TEXT[c.status] ?? c.status;
               return (
                 <RelatedRow
                   key={c.id}

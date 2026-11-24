@@ -195,8 +195,8 @@ mcp.post("/mcp", async (c) => {
 async function toolContext(env: Env, db: Db, userId: string, origin: string, access: AssistantAccess | null, companyId?: string): Promise<ToolContext> {
   // Many-to-one embeds come back as a single object at runtime.
   const all = (await rows(
-    db.from("memberships").select("company_id, role, role_id, company:companies(timezone)").eq("user_id", userId).eq("active", true),
-  )) as unknown as Array<{ company_id: string; role: string; role_id: string | null; company: { timezone: string } | null }>;
+    db.from("memberships").select("company_id, role, role_id, company:companies(timezone, country)").eq("user_id", userId).eq("active", true),
+  )) as unknown as Array<{ company_id: string; role: string; role_id: string | null; company: { timezone: string; country?: string | null } | null }>;
   // A sub's sign-in is never an assistant's to use (the database gives an assistant none of it too).
   const memberships = all.filter((m) => isStaff(m.role));
   if (!memberships.length) throw new Error(all.length ? NO_ASSISTANTS_FOR_SUBS : "You aren't a member of any company in Crewtavo yet.");
@@ -215,6 +215,7 @@ async function toolContext(env: Env, db: Db, userId: string, origin: string, acc
     userId,
     companyId: chosen.company_id,
     timezone: chosen.company?.timezone ?? "UTC",
+    country: chosen.company?.country ?? null,
     role: chosen.role,
     permissions: memberPermissions(chosen.role, custom),
     access,

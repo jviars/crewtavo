@@ -11,6 +11,7 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Fact, Facts, Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { t } from "@/lib/i18n";
 import styles from "./CustomFields.module.css";
@@ -57,7 +58,7 @@ export function customFieldsToSave(fields: readonly CustomFieldRow[], current: u
 /** How a value reads on a page: core's words (customValueText), with yes and no in the reader's language. */
 function valueText(field: CustomFieldDef, value: unknown): string {
   if (typeof value === "boolean") return value ? t("Yes") : t("No");
-  return customValueText(field, value).trim();
+  return customValueText(field, value, companyCountry()).trim();
 }
 
 /**
@@ -111,7 +112,7 @@ export function CustomFieldInputs({ fields, current, draft, onChange }: { fields
 export function CustomFieldList({ fields, values }: { fields: readonly CustomFieldRow[]; values: unknown }) {
   return (
     <>
-      {shownCustomFields(fields, values).map((f) => (
+      {shownCustomFields(fields, values, "record", companyCountry()).map((f) => (
         <Fragment key={f.key}>
           <dt>{f.label}</dt>
           <dd className="pre-wrap">{f.text}</dd>

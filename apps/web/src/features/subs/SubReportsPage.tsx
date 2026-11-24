@@ -219,7 +219,7 @@ function WorkersComp() {
                           <StatusPill label={coverageLabel(r.coverage)} tone={coverageTone(r.coverage)} />
                           {r.coverage === "partly" && <div className="muted small tabular">{formatMoneyCents(Number(r.uncovered_amount))} not covered</div>}
                         </td>
-                        <td className="small" style={{ minWidth: 200 }}>{docs.length ? docs.map((c) => <div key={c.id}>{certificateText(c)}</div>) : <span className="muted">None for these days</span>}</td>
+                        <td className="small" style={{ minWidth: 200 }}>{docs.length ? docs.map((c) => <div key={c.id}>{certificateText(c, companyCountry())}</div>) : <span className="muted">None for these days</span>}</td>
                       </tr>
                     );
                   })}

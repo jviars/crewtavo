@@ -12,7 +12,7 @@ import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
-import { setCountry } from "@/lib/format";
+import { companyCountry, setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "../public/ClientKit";
@@ -302,7 +302,7 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
 
 /** When a booked visit is, as the form offered it, in the business's time zone. */
 function bookedWhen(sent: Booked, booking: Booking) {
-  return slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min);
+  return slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min, companyCountry());
 }
 
 /** After a time was picked: whether it's booked or waiting on the business, and how they'll hear. */
@@ -362,7 +362,7 @@ function TimePicker({ path, booking, postalCode, postalWord, picked, onPick, onN
   useEffect(() => {
     if (picked && week.isSuccess && !week.isPlaceholderData && week.data.from <= picked.date && picked.date <= week.data.to && !slots.some((s) => s.starts_at === picked.starts_at)) onPick(null);
   }, [week.data]);
-  const dayName = (date: string) => slotLabel({ date, starts_at: null }, booking.timezone);
+  const dayName = (date: string) => slotLabel({ date, starts_at: null }, booking.timezone, 0, companyCountry());
   return (
     <fieldset className="field" data-invalid={invalid || undefined} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 10 }}>
       <legend className={k.legend}>{booking.needs_ok ? "Pick a time you'd like" : "Pick a time"}</legend>
@@ -398,13 +398,13 @@ function TimePicker({ path, booking, postalCode, postalWord, picked, onPick, onN
               <div className={k.slots} role="group" aria-label={booking.window_min ? "Arrival window" : "Time"}>
                 {slots.filter((s) => s.date === shownDay).map((s) => (
                   <button key={s.starts_at!} type="button" className={k.slot} aria-pressed={picked?.starts_at === s.starts_at} onClick={() => onPick(picked?.starts_at === s.starts_at ? null : s)}>
-                    {slotTime(s.starts_at!, booking.timezone, booking.window_min)}
+                    {slotTime(s.starts_at!, booking.timezone, booking.window_min, companyCountry())}
                   </button>
                 ))}
               </div>
             </>
           )}
-          {picked && <p className={k.picked} role="status">{booking.needs_ok ? "You're asking for" : "You picked"} <b>{slotLabel(picked, booking.timezone, booking.window_min)}</b>.</p>}
+          {picked && <p className={k.picked} role="status">{booking.needs_ok ? "You're asking for" : "You picked"} <b>{slotLabel(picked, booking.timezone, booking.window_min, companyCountry())}</b>.</p>}
         </>
       )}
       {invalid && !waiting && !week.isError && <span className="field-error" role="alert">Pick a time for your visit.</span>}

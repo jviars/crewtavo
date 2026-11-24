@@ -494,7 +494,7 @@ export async function withEvent(admin: Db, ctx: RunContext, trigger: string, act
   }
   if (trigger === "visit.reschedule_requested" || trigger === "visit.cancel_requested") {
     const { data: ask } = await admin.from("visit_change_requests").select("starts_at, scheduled_on, message, reason").eq("company_id", ctx.company.id).eq("id", text(event.request_id)).maybeSingle();
-    const when = ask?.scheduled_on ? slotLabel({ date: ask.scheduled_on, starts_at: ask.starts_at }, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings)) : "";
+    const when = ask?.scheduled_on ? slotLabel({ date: ask.scheduled_on, starts_at: ask.starts_at }, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings), ctx.company.country) : "";
     return { ...ctx, vars: { ...ctx.vars, change: { when, message: text(ask?.message), reason: text(ask?.reason) } } };
   }
   if (trigger === "visit.rescheduled" || trigger === "visit.cancelled") {
@@ -746,7 +746,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       const title = render(action.title, office) || ruleName;
       // A new request whose client picked a time online says so, whatever the rule's own words are:
       // "Booked online for Tue, Jan 14, 10:00 to 11:00 AM." or "Asked for ... It waits for your OK."
-      const picked = ctx.trigger === "request.created" && ctx.asked ? askedTimeLine(ctx.asked, ctx.company.timezone || "UTC") : null;
+      const picked = ctx.trigger === "request.created" && ctx.asked ? askedTimeLine(ctx.asked, ctx.company.timezone || "UTC", ctx.company.country) : null;
       const body = [render(action.body, office), picked].filter(Boolean).join("\n") || null;
       const { error: insertError } = await admin.from("notifications").insert(
         people.map((p) => ({ company_id: ctx.company.id, user_id: p.user_id, kind: ctx.subject, title: title.slice(0, 300), body, link: ctx.appPath })),

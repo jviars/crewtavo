@@ -13,6 +13,7 @@
  */
 import type { TemplateSettings } from "./documents";
 import { moneyPrefix, toCents, type Amount } from "./money";
+import { monthFirst, writtenDate } from "./regional";
 import { isIsoDate, isTimeZoneName, localDate } from "./time";
 
 /** Above the signatures, or on the terms pages after them. */
@@ -128,6 +129,8 @@ export interface ContractInput {
   warranty?: string | null;
   /** The business's currency (companies.currency), which {Total} and {Deposit} are written in; US dollars when it isn't given. */
   currency?: string | null;
+  /** The business's country (companies.country): {Date} is written as it writes dates, "25 October 2026" in the UK; the US's way when it isn't given. */
+  country?: string | null;
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -138,8 +141,11 @@ const clean = (value: string | null | undefined) => (value ?? "").trim().replace
 const oneLine = (value: readonly string[] | string | null | undefined) =>
   (typeof value === "string" ? value.split(/\r?\n/) : value ?? []).map(clean).filter(Boolean).join(", ");
 
-/** "2026-10-25" (or a timestamp) as "October 25, 2026"; the same words wherever it runs. */
-function dateWords(value: string | null | undefined, timeZone: string | null | undefined): string {
+/**
+ * "2026-10-25" (or a timestamp) as "October 25, 2026", or as a country that puts the day first
+ * writes it, "25 October 2026" (core regional); the same words wherever it runs.
+ */
+function dateWords(value: string | null | undefined, timeZone: string | null | undefined, country?: string | null): string {
   if (!value) return "";
   let day = isIsoDate(value) ? value : null;
   if (!day) {
@@ -147,6 +153,7 @@ function dateWords(value: string | null | undefined, timeZone: string | null | u
     if (Number.isNaN(instant.getTime())) return "";
     day = timeZone && isTimeZoneName(timeZone) ? localDate(instant, timeZone) : instant.toISOString().slice(0, 10);
   }
+  if (!monthFirst(country)) return writtenDate(day, "FMMonth FMDD, YYYY", country);
   const [year, month, date] = day.split("-").map(Number);
   return `${MONTHS[month - 1]} ${date}, ${year}`;
 }
@@ -195,7 +202,7 @@ export function contractValues(input: ContractInput): ContractValues {
     "Business phone": clean(input.businessPhone),
     "License number": clean(input.license),
     "Estimate number": input.estimateNumber === null || input.estimateNumber === undefined ? "" : clean(String(input.estimateNumber)),
-    Date: dateWords(input.date, input.timeZone),
+    Date: dateWords(input.date, input.timeZone, input.country),
     Total: dollars(input.total, input.currency),
     Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent), input.currency),
     Option: clean(input.optionName),
@@ -555,7 +562,8 @@ export function addressLines(address: unknown): string[] {
  * The plain facts a quote's fill-ins come from (core contractValues), the same on the server and in
  * the browser: the customer and their address (the job's when there's no billing address), the job
  * address, the business, the template's license, the estimate's number and date on the business's
- * calendar, its total and deposit in the business's currency, and the option chosen. `quote.total`
+ * calendar (written its country's way), its total and deposit in the business's currency, and the
+ * option chosen. `quote.total`
  * is the total being signed: pass the chosen option's (the total the homeowner saw) when it isn't
  * the quote's own.
  */
@@ -563,7 +571,7 @@ export function contractInput(
   quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount; deposit_percent?: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null; country?: string | null },
   template: Pick<TemplateSettings, "license">,
   option?: { name: string; warranty: string | null } | null,
 ): ContractInput {
@@ -586,6 +594,8 @@ export function contractInput(
     warranty: option?.warranty ?? null,
     // Only when it isn't US dollars, which is what's assumed without it: a US business's facts stay as they were.
     ...(company.currency && company.currency.toUpperCase() !== "USD" ? { currency: company.currency } : {}),
+    // Only outside the US, as with the currency.
+    ...(company.country && company.country.toUpperCase() !== "US" ? { country: company.country } : {}),
   };
 }
 
@@ -599,7 +609,7 @@ export function invoiceInput(
   invoice: { number: number | null; issued_on: string; total: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null; country?: string | null },
   template: Pick<TemplateSettings, "license">,
   option: { name: string; warranty: string | null } | null = null,
 ): ContractInput {

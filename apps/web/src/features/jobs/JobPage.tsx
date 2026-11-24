@@ -25,7 +25,7 @@ import { DetailSkeleton, SectionSkeleton, Skeleton } from "@/components/ui/Skele
 import { EmptyState, PageError } from "@/components/ui/States";
 import { EntityStatus, StatusPill, statusText, visitTone } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, formatMoney, formatTime, todayIn } from "@/lib/format";
+import { addressLine, companyCountry, formatDate, formatMoney, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -462,7 +462,7 @@ export function JobPage() {
         </div>
       ))}
       {charging && j.status !== "archived" && (
-        <div className={styles.note}><Icon name="card" size={14} /><span>Charged automatically {autopayDueText(charging.due_at, session.company.timezone)}.</span></div>
+        <div className={styles.note}><Icon name="card" size={14} /><span>Charged automatically {autopayDueText(charging.due_at, session.company.timezone, undefined, companyCountry())}.</span></div>
       )}
       {extras.data && extras.data.length > 0 && <ExtrasToReview jobId={j.id} extras={extras.data} visits={visits} />}
 

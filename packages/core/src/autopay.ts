@@ -8,6 +8,7 @@
  * one rule for tips.
  */
 import { moneyPrefix } from "./money";
+import { dateTag } from "./regional";
 import { localDate, localTime, addDays } from "./time";
 
 export type AutopayTiming = "now" | "end_of_day" | "days";
@@ -273,12 +274,13 @@ export const AUTOPAY_NO_LIMIT_NOTE =
   "With no limit, a client's bank account is charged for every invoice, whatever its amount, and the terms say so. Set a limit if you take bank payments.";
 
 const MONTH_DAY = new Map<string, Intl.DateTimeFormat>();
-/** "Nov 3" in a time zone. */
-function monthDay(at: Date, timeZone: string): string {
-  let f = MONTH_DAY.get(timeZone);
+/** "Nov 3" in a time zone, the way the business's country writes it ("3 Nov" in the UK). */
+function monthDay(at: Date, timeZone: string, country?: string | null): string {
+  const tag = dateTag(country);
+  let f = MONTH_DAY.get(`${tag} ${timeZone}`);
   if (!f) {
-    f = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone });
-    MONTH_DAY.set(timeZone, f);
+    f = new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", timeZone });
+    MONTH_DAY.set(`${tag} ${timeZone}`, f);
   }
   return f.format(at);
 }
@@ -286,9 +288,10 @@ function monthDay(at: Date, timeZone: string): string {
 /**
  * When a waiting charge goes: "right away", "tonight", "tomorrow night", "on Nov 3", in the company's
  * time zone. A charge due at local midnight (the end of the day, private.autopay_due) goes on the
- * night before it; one due at another time (a retry 3 days on) is "today", "tomorrow" or its date.
+ * night before it; one due at another time (a retry 3 days on) is "today", "tomorrow" or its date,
+ * written the way the business's country writes it.
  */
-export function autopayDueText(dueAt: string, timeZone: string, now: Date = new Date()): string {
+export function autopayDueText(dueAt: string, timeZone: string, now: Date = new Date(), country?: string | null): string {
   const due = new Date(dueAt);
   if (Number.isNaN(due.getTime()) || due.getTime() <= now.getTime()) return "right away";
   const today = localDate(now, timeZone);
@@ -301,7 +304,7 @@ export function autopayDueText(dueAt: string, timeZone: string, now: Date = new 
     if (day === today) return "today";
     if (day === addDays(today, 1)) return "tomorrow";
   }
-  return `on ${monthDay(due, timeZone)}`;
+  return `on ${monthDay(due, timeZone, country)}`;
 }
 
 // ---------------------------------------------------------------------------------------------

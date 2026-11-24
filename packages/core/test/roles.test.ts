@@ -72,6 +72,8 @@ describe("a sub's sign-in", () => {
     expect(subAccessText({ state: "none" })).toBe("Can't sign in");
     expect(subAccessText({ state: "invited", last_sign_in_at: null })).toBe("Hasn't signed in yet");
     expect(subAccessText({ state: "active", last_sign_in_at: "2026-10-12T15:00:00Z" }, "America/New_York")).toBe("Signed in Oct 12");
+    expect(subAccessText({ state: "active", last_sign_in_at: "2026-10-12T15:00:00Z" }, "America/New_York", "US")).toBe("Signed in Oct 12");
+    expect(subAccessText({ state: "active", last_sign_in_at: "2026-10-12T15:00:00Z" }, "Europe/London", "GB")).toBe("Signed in 12 Oct");
     expect(subAccessText({ state: "active", last_sign_in_at: null, shared: true })).toBe("Own sign-in");
     expect(subAccessText({ state: "none", shared: true })).toBe("Can't sign in");
   });

@@ -498,7 +498,8 @@ export const TOO_MANY_JOBS = `Invoice at most ${BATCH_JOBS} jobs at a time: send
 export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send: boolean, work?: { rateId?: string }) {
   const jobs = must(await s.db.from("jobs").select("id, number, title, kind, billing_mode, pricing").eq("company_id", s.companyId).in("id", [...jobIds]));
   const ids = jobs.map((j) => j.id);
-  const timeZone = work ? must(await s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle()).timezone || "UTC" : "UTC";
+  const clock = work ? must(await s.db.from("companies").select("timezone, country").eq("id", s.companyId).maybeSingle()) : null;
+  const timeZone = clock?.timezone || "UTC";
   const [{ data: waiting }, { data: due }] = await Promise.all([
     s.db.from("autopay_charges").select("job_id").eq("company_id", s.companyId).eq("status", "waiting").in("job_id", ids),
     s.db.from("due_invoices").select("job_id, month").eq("company_id", s.companyId).in("job_id", ids).order("month"),
@@ -521,7 +522,7 @@ export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send
       const invoiceId = created.data as string;
       if (work) {
         try {
-          await addLoggedWork(s, invoiceId, job.id, work.rateId, timeZone);
+          await addLoggedWork(s, invoiceId, job.id, work.rateId, timeZone, clock?.country);
         } catch (e) {
           // Not sent without it: the draft is there to finish by hand.
           results.push({ job_id: job.id, number: job.number, ...(month && { month }), ok: false, invoice_id: invoiceId, error: `Its logged work couldn't be added (${e instanceof Error ? e.message : "try again"}). The invoice is in Drafts.` });
@@ -567,10 +568,10 @@ export async function loggedWork(db: Db, companyId: string, jobId: string) {
  * logged work starts out ticked (core workLines): the hours at `rateId` (else the first item sold by
  * the hour; none without one), and the materials that have a price.
  */
-async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, rateId: string | undefined, timeZone: string) {
+async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, rateId: string | undefined, timeZone: string, country?: string | null) {
   const work = await loggedWork(s.db, s.companyId, jobId);
   const rate = work.rates.find((r) => r.id === rateId) ?? work.rates[0] ?? null;
-  const lines = workLines({ hours: rate ? work.hours : [], rate, materials: work.materials.filter((m) => m.unit_price !== null), timeZone });
+  const lines = workLines({ hours: rate ? work.hours : [], rate, materials: work.materials.filter((m) => m.unit_price !== null), timeZone, country });
   if (!lines.length) return;
   const sort = Math.max(0, ...must(await s.db.from("invoice_line_items").select("sort").eq("invoice_id", invoiceId)).map((l) => l.sort));
   must(await s.db.from("invoice_line_items").insert(lines.map((l, i) => ({ ...l, company_id: s.companyId, invoice_id: invoiceId, sort: sort + i + 1 }))).select("id"));

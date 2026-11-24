@@ -82,6 +82,12 @@ describe("showing values", () => {
     expect(customValueText(pets, false)).toBe("No");
     expect(customValueText(volume, "9 gal")).toBe("9 gal");
   });
+  it("writes a date the way the business's country does, a US business's as it always was; numbers stay as they are", () => {
+    expect(customValueText(permit, "2026-03-04", "US")).toBe("Mar 4, 2026");
+    expect(customValueText(permit, "2026-03-04", "GB")).toBe("4 Mar 2026");
+    expect(customValueText(volume, 12500.25, "GB")).toBe("12,500.25");
+    expect(shownCustomFields(fields, values, "portal", "AU").map((f) => f.text)).toEqual(["4 Mar 2026", "Furnace"]);
+  });
   it("on the record: every field in use with a value, in order, never source_id or an archived one", () => {
     expect(shownCustomFields(fields, values).map((f) => `${f.label}: ${f.text}`)).toEqual(["Gate code: 4821", "Permit date: Mar 4, 2026", "Pool volume: 12,500", "Unit: Furnace", "Pets on site: No"]);
   });

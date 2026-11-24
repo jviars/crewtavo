@@ -20,7 +20,7 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, PageError } from "@/components/ui/States";
 import { EntityStatus, statusLabel } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDateTime, formatDate, formatMoney } from "@/lib/format";
+import { addressLine, companyCountry, formatDateTime, formatDate, formatMoney } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { PropertySelect } from "../clients/ClientForm";
@@ -149,7 +149,7 @@ export function RequestPage() {
   const salesperson = memberName(team.data?.find((m) => m.user_id === r.assigned_to));
   // The request's salesperson goes out, unless someone picks another.
   const assessment = (): VisitInput => ({ request_id: r.id, property_id: r.property?.id ?? null, title: `Assessment: ${r.title}`, kind: "assessment", assignee_ids: r.assigned_to ? [r.assigned_to] : [], context: { label: `Request #${r.number} · ${r.client?.display_name ?? ""}`, to: `/requests/${r.id}` } });
-  const visitWhen = (v: (typeof r.visits)[number]) => (v.starts_at ? bookingSpan(v.starts_at, v.ends_at, timeZone) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled");
+  const visitWhen = (v: (typeof r.visits)[number]) => (v.starts_at ? bookingSpan(v.starts_at, v.ends_at, timeZone, companyCountry()) : v.scheduled_on ? `${formatDate(v.scheduled_on)} · anytime` : "Not scheduled");
   const visitPeople = (v: (typeof r.visits)[number]) => v.assignees.map((a) => memberName(team.data?.find((m) => m.user_id === a.user_id))).filter(Boolean).join(", ");
 
   // Whoever can sell, and whoever has it now (even off the team since), with a face and their role.

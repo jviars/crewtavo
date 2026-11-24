@@ -16,7 +16,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, formatMoney, formatMoneyCents, formatTime } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { needsNewCard, waitingInvoices, yoursToPayNote, type HubAutopay, type HubInvoiceAutopay } from "./document";
 import { AutopayView, CARD_REQUIRED, ON_HOLD_TEXT } from "./HubAutopay";
@@ -368,7 +368,7 @@ function AutopayCard({ autopay, timeZone, go }: { autopay: HubAutopay; timeZone:
     return (
       <article className="hub-card hub-todo hub-autopay" aria-label="Autopay">
         <span className="hub-autopay-head"><Icon name="card" size={18} /><strong className="hub-title">Paid automatically · {label}</strong></span>
-        <span className="hub-sub">{autopay.next_charge ? `Next charge ${autopayDueText(autopay.next_charge, timeZone)}` : `Charged ${autopay.timing}`}</span>
+        <span className="hub-sub">{autopay.next_charge ? `Next charge ${autopayDueText(autopay.next_charge, timeZone, undefined, companyCountry())}` : `Charged ${autopay.timing}`}</span>
         <div className="hub-acts">
           <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={open}><Icon name="card" size={16} />Change card</button>
           <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={open}><Icon name="x" size={16} />Turn off</button>
@@ -597,12 +597,12 @@ function ChangeVisitDialog({ token, data, visit, kind, hubFetch, onClose, onDone
           <>
             <div className="hub-pick">
               <strong>Day</strong>
-              <div className="hub-choices hub-days" role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay && (!open.data!.anytime || picked?.date === d), slotLabel({ date: d, starts_at: null }, tz), () => { setDay(d); setPicked(open.data!.anytime ? slots.find((s) => s.date === d)! : null); }))}</div>
+              <div className="hub-choices hub-days" role="group" aria-label="Day">{days.map((d) => choice(d, d === shownDay && (!open.data!.anytime || picked?.date === d), slotLabel({ date: d, starts_at: null }, tz, 0, companyCountry()), () => { setDay(d); setPicked(open.data!.anytime ? slots.find((s) => s.date === d)! : null); }))}</div>
             </div>
             {!open.data!.anytime && (
               <div className="hub-pick">
                 <strong>{open.data!.window_min ? "Arrival window" : "Time"}</strong>
-                <div className="hub-slots" role="group" aria-label="Time">{slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, tz, open.data!.window_min), () => setPicked(s), "hub-slot"))}</div>
+                <div className="hub-slots" role="group" aria-label="Time">{slots.filter((s) => s.date === shownDay).map((s) => choice(s.starts_at!, picked?.starts_at === s.starts_at, slotTime(s.starts_at!, tz, open.data!.window_min, companyCountry()), () => setPicked(s), "hub-slot"))}</div>
               </div>
             )}
             <button type="button" className="hub-link hub-link-start" onClick={() => setOwnWords(true)}>None of these work? Tell us what suits you</button>

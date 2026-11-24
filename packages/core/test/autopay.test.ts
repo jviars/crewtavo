@@ -306,6 +306,14 @@ describe("when a charge goes", () => {
     expect(autopayDueText("not a date", tz, now)).toBe("right away");
   });
 
+  it("writes the date as the business's country does, a US business's as it always was", () => {
+    const now = new Date("2026-10-31T14:00:00Z");
+    expect(autopayDueText("2026-11-04T05:00:00Z", "America/New_York", now, "US")).toBe("on Nov 4");
+    expect(autopayDueText("2026-11-04T05:00:00Z", "America/Toronto", now, "CA")).toBe("on Nov 4");
+    expect(autopayDueText("2026-11-04T00:00:00Z", "Europe/London", now, "GB")).toBe("on 4 Nov");
+    expect(autopayDueText("2026-11-01T00:00:00Z", "Europe/London", now, "GB")).toBe("tonight");
+  });
+
   it("has two words at most for each status, for the office", () => {
     expect(Object.keys(AUTOPAY_STATUS_TEXT).sort()).toEqual(["called_off", "charging", "failed", "needs_approval", "needs_client", "paid", "processing", "waiting"]);
     expect(AUTOPAY_STATUS_TEXT.needs_approval).toBe("Needs your OK");

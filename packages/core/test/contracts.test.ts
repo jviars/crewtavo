@@ -134,6 +134,18 @@ describe("contractValues", () => {
     expect(contractValues({ date: "someday" }).Date).toBe("");
   });
 
+  it("writes the date as the business's country does, a US business's as it always was", () => {
+    expect(contractValues({ date: "2026-10-06", country: "US" }).Date).toBe("October 6, 2026");
+    expect(contractValues({ date: "2026-10-06", country: "CA" }).Date).toBe("October 6, 2026");
+    expect(contractValues({ date: "2026-10-06", country: "GB" }).Date).toBe("6 October 2026");
+    expect(contractValues({ date: "2026-09-26T01:00:00Z", timeZone: "Australia/Sydney", country: "AU" }).Date).toBe("26 September 2026");
+    // The country goes with the facts only outside the US, as the currency does: a US business's facts are as they were.
+    const quote = { number: 7, sent_at: "2026-10-25T15:00:00Z", created_at: "2026-10-20", total: 1100, deposit_amount: 275 };
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "America/New_York", country: "US" }, { license: "" })).not.toHaveProperty("country");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "America/New_York", country: "US" }, { license: "" })).Date).toBe("October 25, 2026");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "Europe/London", country: "GB", currency: "GBP" }, { license: "" })).Date).toBe("25 October 2026");
+  });
+
   it("writes money to the cent and leaves out what isn't there", () => {
     expect(contractValues({ total: 1234567.891, deposit: 0 })).toMatchObject({ Total: "$1,234,567.89", Deposit: "$0.00" });
     // The deposit asked for is never more than the total being signed.

@@ -119,4 +119,18 @@ describe("a slot's time", () => {
     expect(plain(slotTime(nine, NY, 120))).toBe("9:00–11:00 AM");
     expect(plain(slotTime(nine, NY, 240))).toBe("9:00 AM–1:00 PM");
   });
+
+  it("is written the way the business's country keeps time, a US business's as it always was", () => {
+    const nine = new Date(at("2026-11-03", "09:00")).toISOString();
+    expect(slotTime(nine, NY, 120, "US")).toBe(slotTime(nine, NY, 120));
+    expect(plain(slotTime(nine, NY, 120, "US"))).toBe("9:00–11:00 AM");
+    expect(plain(slotTime(nine, NY, 120, "CA"))).toBe("9:00–11:00 a.m.");
+    expect(plain(slotTime(nine, NY, 240, "CA"))).toBe("9:00 a.m.–1:00 p.m.");
+    expect(plain(slotTime(nine, NY, 120, "AU"))).toBe("9:00–11:00 am");
+    expect(plain(slotTime(nine, NY, 240, "GB"))).toBe("9:00–13:00");
+    const london = new Date(at("2026-11-03", "14:00", "Europe/London")).toISOString();
+    expect(plain(slotLabel({ date: "2026-11-03", starts_at: london }, "Europe/London", 120, "GB"))).toBe("Tue 3 Nov, 14:00–16:00");
+    expect(slotLabel({ date: "2026-11-03", starts_at: null }, "Europe/London", 0, "GB")).toBe("Tue 3 Nov");
+    expect(slotLabel({ date: "2026-11-03", starts_at: null }, NY, 0, "US")).toBe("Tue, Nov 3");
+  });
 });

@@ -197,14 +197,14 @@ export async function confirmBooking(
   const result: Confirmation = { emailed: false, texted: false };
   try {
     const [company, found] = await Promise.all([
-      admin.from("companies").select("id, name, email, phone, timezone, settings, address").eq("id", booking.companyId).maybeSingle(),
+      admin.from("companies").select("id, name, email, phone, timezone, country, settings, address").eq("id", booking.companyId).maybeSingle(),
       admin.from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("company_id", booking.companyId).eq("id", booking.clientId).maybeSingle(),
     ]);
     const co = company.data;
     const client = found.data;
     if (!co || !client) return result;
     const tz = co.timezone || "UTC";
-    const when = slotLabel({ date: localDate(new Date(booking.startsAt), tz), starts_at: booking.startsAt }, tz, arrivalWindowMin(co.settings));
+    const when = slotLabel({ date: localDate(new Date(booking.startsAt), tz), starts_at: booking.startsAt }, tz, arrivalWindowMin(co.settings), co.country);
     const about = booking.visitId ? { related_type: "visit", related_id: booking.visitId } : { related_type: "request", related_id: booking.requestId };
     const [subject, line] = booking.booked
       ? [`You're booked for ${when}`, `You're booked: ${booking.title} on ${when}.`]

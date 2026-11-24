@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api, supabase, unwrap } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 
@@ -55,7 +56,7 @@ export const changeLink = (r: ChangeRequest) => `/schedule?date=${r.visit?.sched
 /** "to move it to Tue, Nov 10, 9:00–11:00 AM", "to move it", or "to cancel it". */
 export function askedFor(r: ChangeRequest, timeZone: string, settings: unknown) {
   if (r.kind === "cancel") return "to cancel it";
-  return r.scheduled_on ? `to move it to ${slotLabel({ date: r.scheduled_on, starts_at: r.starts_at }, timeZone, arrivalWindowMin(settings))}` : "to move it";
+  return r.scheduled_on ? `to move it to ${slotLabel({ date: r.scheduled_on, starts_at: r.starts_at }, timeZone, arrivalWindowMin(settings), companyCountry())}` : "to move it";
 }
 
 /** Answering a request from the office's own screens, then everything that shows the visit is read again. */

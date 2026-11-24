@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { ApiError } from "@/lib/api";
-import { formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatMoneyCents } from "@/lib/format";
 import type { ClientView, Fetch } from "./ClientPortal";
 import type { HubAutopay } from "./document";
 
@@ -216,7 +216,7 @@ export function AutopayView({ token, data, hubFetch, back, onChanged }: { token:
       ? ON_HOLD_TEXT
       : autopay.status === "active"
         ? autopay.next_charge
-          ? `Next charge ${autopayDueText(autopay.next_charge, tz)}.`
+          ? `Next charge ${autopayDueText(autopay.next_charge, tz, undefined, companyCountry())}.`
           : `We charge it ${autopay.timing}.`
         : autopay.status === "paused"
           ? "Autopay is paused. Contact us to turn it back on."
