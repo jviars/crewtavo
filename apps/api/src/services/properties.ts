@@ -8,16 +8,27 @@
  */
 import type { Env } from "../env";
 import type { Db } from "../lib/supabase";
-import { geocodeAddress, lookUpAddress, type GeocodeResult } from "./external";
+import { countryCode } from "@crewtavo/core/countries";
+import { geocodeAddress, lookUpAddress, type GeocodeResult, type LookupOptions } from "./external";
 
 const FIELDS = "id, line1, line2, city, region, postal_code, country";
 type Located = { lat: number; lng: number } & Record<string, unknown>;
 type Addressed = { line1: string | null; line2?: string | null; city: string | null; region?: string | null; postal_code: string | null; country?: string | null };
 
-/** A property's address as the geocoders are asked for it, and whether it's outside the US (OpenStreetMap is asked about those too). */
-export function addressOf(p: Addressed): { address: string; abroad: boolean } {
+/**
+ * A property's address as the geocoders are asked for it, and where to look. A property in the US
+ * goes to the Census, as always. One in another country (its business's unless it says otherwise,
+ * 20261124100200_property_country.sql) is looked up in that country only. A country written out some
+ * other way ("United Kingdom") is added to the words, and OpenStreetMap is asked anywhere after the
+ * Census.
+ */
+export function addressOf(p: Addressed): { address: string; options: LookupOptions } {
   const abroad = Boolean(p.country && !/^(us|usa|united states( of america)?)$/i.test(p.country.trim()));
-  return { address: [p.line1, p.line2, p.city, p.region, p.postal_code, abroad ? p.country : null].filter(Boolean).join(", "), abroad };
+  const country = abroad ? countryCode(p.country) : null;
+  return {
+    address: [p.line1, p.line2, p.city, p.region, p.postal_code, abroad && !country ? p.country : null].filter(Boolean).join(", "),
+    options: country ? { country } : { world: abroad },
+  };
 }
 
 /**
@@ -38,8 +49,8 @@ export async function saveLocation(db: Db, id: string, hit: Pick<GeocodeResult, 
 export async function geocodeProperty(db: Db, env: Env, companyId: string, id: string): Promise<Located | null> {
   const { data: property } = await db.from("properties").select(FIELDS).eq("id", id).eq("company_id", companyId).maybeSingle();
   if (!property) return null;
-  const { address, abroad } = addressOf(property);
-  const result = await geocodeAddress(address, { world: abroad });
+  const { address, options } = addressOf(property);
+  const result = await geocodeAddress(address, options);
   if (!result) return null;
   await saveLocation(db, id, result);
   return result as unknown as Located;
@@ -95,10 +106,10 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
   let asked = 0;
   let silent = 0;
   /** One lookup, after a pause if it isn't the run's first. Null when the run should stop here. */
-  const lookUp = async (address: string, world: boolean) => {
+  const lookUp = async (address: string, where: LookupOptions) => {
     if (silent >= RELOCATE_GIVE_UP || now() >= until) return null;
     if (asked++ && pause) await new Promise((done) => setTimeout(done, pause));
-    const found = address.replace(/\s+/g, " ").trim().length < 5 ? "none" : await lookUpAddress(address, { world });
+    const found = address.replace(/\s+/g, " ").trim().length < 5 ? "none" : await lookUpAddress(address, where);
     silent = found === "failed" ? silent + 1 : 0;
     return found;
   };
@@ -115,8 +126,8 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
     lost = await waiting(null);
   }
   for (const p of lost) {
-    const { address, abroad } = addressOf(p);
-    const found = await lookUp(address, abroad);
+    const { address, options: where } = addressOf(p);
+    const found = await lookUp(address, where);
     if (found === null) break;
     foundTo = p.id;
     if (found === "failed") {
@@ -133,10 +144,17 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
 
   const { data: shops, error: shopsError } = await admin.rpc("depots_to_relocate", { p_limit: 5 });
   if (shopsError) throw new Error(shopsError.message);
+  // Each shop is looked up in its business's country.
+  const countries = new Map<string, string>();
+  if (shops?.length) {
+    const { data: companies, error } = await admin.from("companies").select("id, country").in("id", shops.map((shop) => shop.company_id));
+    if (error) throw new Error(error.message);
+    for (const company of companies ?? []) countries.set(company.id, company.country);
+  }
   for (const shop of shops ?? []) {
     const a = (shop.address ?? {}) as Record<string, string | undefined>;
     const was = shop.depot as { lat: number; lng: number };
-    const found = await lookUp([a.line1, a.city, a.region, a.postal_code].filter(Boolean).join(", "), false);
+    const found = await lookUp([a.line1, a.city, a.region, a.postal_code].filter(Boolean).join(", "), { country: countries.get(shop.company_id) });
     if (found === null) break;
     if (found === "failed") {
       tally.unanswered++;
@@ -161,8 +179,8 @@ export async function relocatePins(env: Env, admin: Db, options: { pauseMs?: num
     if (error) throw new Error(error.message);
   }
   for (const p of rows ?? []) {
-    const { address, abroad } = addressOf(p);
-    const found = await lookUp(address, abroad);
+    const { address, options: where } = addressOf(p);
+    const found = await lookUp(address, where);
     if (found === null) break;
     relocatedTo = p.id;
     tally.looked_up++;

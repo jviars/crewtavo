@@ -18,7 +18,7 @@ import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { googlePlace, googlePlacesKey, googleSuggest } from "./googlePlaces";
 
-export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null }
+export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; country?: string | null; lat: number | null; lng: number | null }
 export interface PlaceSuggestion {
   label: string;
   detail: string | null;

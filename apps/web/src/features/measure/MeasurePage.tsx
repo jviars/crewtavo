@@ -32,7 +32,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useExtendedMap } from "@/lib/extendMap";
-import { addressLine, formatNumber } from "@/lib/format";
+import { addressLine, companyCountry, formatNumber } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -575,7 +575,8 @@ export function MeasurePage() {
       setTitle((t) => (t === "Measurement" || t === picked?.label ? s.label : t));
     }
     if (!at) return toast.error(`Couldn't find ${s.label} on the map. Check the property's address on ${s.client ?? "the client"}'s page.`);
-    goTo({ ...at, zoom: 19, country: "US", place: s.label });
+    // In the property's country: its business's unless it says otherwise.
+    goTo({ ...at, zoom: 19, country: s.country ?? companyCountry(), place: s.label });
   };
   /** The drawing is no longer for the client picked earlier (and loses their address as its name). */
   const unpick = () => {

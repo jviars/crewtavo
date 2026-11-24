@@ -80,6 +80,41 @@ describe("looking an address up", () => {
     expect(await lookUpAddress("10 Downing Street, London", { world: true })).toBe("failed");
   });
 
+  it("looks in the business's country only, outside the US", async () => {
+    const leeds = (countrycode: string, x = -1.54) => ({ geometry: { coordinates: [x, 53.79] }, properties: { housenumber: "2", street: "Bank Street", city: "Leeds", country: countrycode === "GB" ? "United Kingdom" : "Elsewhere", countrycode } });
+    const asked = serve((url) => (url.host === "photon.komoot.io" ? { features: [leeds("US", -80), leeds("GB")] } : census([PELL])));
+    expect(await lookUpAddress("2 Bank Street, Leeds, LS1 5AB", { country: "gb" })).toEqual({ lat: 53.79, lng: -1.54, formatted: "2 Bank Street, Leeds, United Kingdom", country: "GB", source: "openstreetmap" });
+    // The Census, which only knows the US, isn't asked; OpenStreetMap is asked about that country.
+    expect(asked.map((u) => u.host)).toEqual(["photon.komoot.io"]);
+    expect([asked[0]!.searchParams.get("q"), asked[0]!.searchParams.get("countrycode"), asked[0]!.searchParams.get("limit")]).toEqual(["2 Bank Street, Leeds, LS1 5AB", "GB", "3"]);
+
+    // An answer from anywhere else is passed over, whatever the server sends.
+    serve((url) => (url.host === "photon.komoot.io" ? { features: [leeds("US"), { geometry: { coordinates: [1, 2] }, properties: {} }] } : census([PELL])));
+    expect(await lookUpAddress("2 Bank Street, Leeds", { country: "GB" })).toBe("none");
+    serve((url) => (url.host === "photon.komoot.io" ? new Response("busy", { status: 503 }) : census([PELL])));
+    expect(await lookUpAddress("2 Bank Street, Leeds", { country: "GB" })).toBe("failed");
+  });
+
+  it("looks in the US as always for a business there", async () => {
+    for (const country of ["US", undefined, null, "", "Narnia"]) {
+      const asked = serve(() => census([PELL]));
+      expect(await lookUpAddress("418 Pell Ave, Rocky Mount, VA", { country })).toMatchObject({ source: "census" });
+      expect(asked.map((u) => u.host)).toEqual(["geocoding.geo.census.gov"]);
+    }
+  });
+
+  it("on the measuring map, looks in the business's country first, then anywhere", async () => {
+    const buffalo = census([{ matchedAddress: "1 MAIN ST, BUFFALO, NY, 14202", coordinates: { x: -78.87, y: 42.88 } }]);
+    let asked = serve((url) => (url.host === "photon.komoot.io" ? { features: [] } : buffalo));
+    expect(await lookUpAddress("1 Main St, Buffalo, NY", { country: "CA", world: true })).toMatchObject({ lat: 42.88, source: "census" });
+    expect(asked.map((u) => [u.host, u.searchParams.get("countrycode")])).toEqual([["photon.komoot.io", "CA"], ["geocoding.geo.census.gov", null]]);
+
+    const toronto = { features: [{ geometry: { coordinates: [-79.38, 43.65] }, properties: { street: "King Street West", countrycode: "CA" } }] };
+    asked = serve((url) => (url.host === "photon.komoot.io" ? toronto : buffalo));
+    expect(await lookUpAddress("1 King St W, Toronto", { country: "CA", world: true })).toMatchObject({ lat: 43.65, country: "CA" });
+    expect(asked).toHaveLength(1);
+  });
+
   it("doesn't ask about a few letters", async () => {
     const asked = serve(() => census([PELL]));
     expect(await lookUpAddress(" 418 ")).toBe("none");
@@ -100,7 +135,7 @@ describe("the pins task", () => {
    * PostgREST and the geocoders: `rows` are the properties with no source, `lost` the ones with no
    * spot waiting to be found, `geocode` answers for an address.
    */
-  function world(options: { rows?: Array<ReturnType<typeof property>>; lost?: Array<ReturnType<typeof property>>; shops?: unknown[]; geocode?: (address: string, host: string) => unknown; saved?: (call: Call) => unknown[] }) {
+  function world(options: { rows?: Array<ReturnType<typeof property>>; lost?: Array<ReturnType<typeof property>>; shops?: unknown[]; companies?: unknown[]; geocode?: (address: string, host: string) => unknown; saved?: (call: Call) => unknown[] }) {
     const calls: Call[] = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -113,6 +148,7 @@ describe("the pins task", () => {
         if (call.path === "rpc/properties_to_find") return (options.lost ?? []).filter((r) => !call.body.p_after || r.id > call.body.p_after).slice(0, call.body.p_limit);
         if (call.path === "rpc/property_found") return call.body.p_lat !== undefined;
         if (call.path === "rpc/depots_to_relocate") return options.shops ?? [];
+        if (call.path === "companies" && call.method === "GET") return options.companies ?? [];
         if (call.path === "rpc/relocate_depot") return true;
         if (call.path === "properties" && call.method === "GET") {
           const after = url.searchParams.get("id")?.replace("gt.", "");
@@ -145,18 +181,24 @@ describe("the pins task", () => {
     const lost = [
       property("p1", "10 Downing Street", { city: "London", region: null, postal_code: "SW1A 2AA", country: "GB", lat: null, lng: null }),
       property("p2", "1 Nowhere Lane", { city: "Leeds", region: null, postal_code: null, country: "GB", lat: null, lng: null }),
+      property("p3", "9", { city: null, region: null, postal_code: null, country: "GB", lat: null, lng: null }),
     ];
     const { calls, lookups } = world({
       lost,
       geocode: (address, host) => (host === "photon.komoot.io" && /Downing/.test(address) ? { features: [{ geometry: { coordinates: [-0.1276, 51.5034] }, properties: { housenumber: "10", street: "Downing Street", countrycode: "gb" } }] } : host === "photon.komoot.io" ? { features: [] } : census([])),
     });
-    expect(await run(env)).toEqual({ ...NOTHING, placed: 1, not_found: 1 });
+    expect(await run(env)).toEqual({ ...NOTHING, placed: 1, not_found: 2 });
     expect(calls.find((c) => c.path === "rpc/properties_to_find")!.body).toEqual({ p_limit: 12 });
-    expect(lookups().filter((c) => c.url.host === "photon.komoot.io").map((c) => c.url.searchParams.get("q"))).toEqual(["10 Downing Street, London, SW1A 2AA, GB", "1 Nowhere Lane, Leeds, GB"]);
-    // Each leaves the list: with its spot, or with none when the geocoder doesn't know it.
+    // In their country only, so not the Census.
+    expect(lookups().map((c) => [c.url.host, c.url.searchParams.get("q"), c.url.searchParams.get("countrycode")])).toEqual([
+      ["photon.komoot.io", "10 Downing Street, London, SW1A 2AA", "GB"],
+      ["photon.komoot.io", "1 Nowhere Lane, Leeds", "GB"],
+    ]);
+    // Each leaves the list: with its spot, or with none when the geocoder doesn't know it (or it's too short to ask about).
     expect(calls.filter((c) => c.path === "rpc/property_found").map((c) => c.body)).toEqual([
       { p_property: "p1", p_lat: 51.5034, p_lng: -0.1276, p_source: "openstreetmap" },
       { p_property: "p2" },
+      { p_property: "p3" },
     ]);
   });
 
@@ -210,6 +252,16 @@ describe("the pins task", () => {
     expect([write.get("id"), write.get("lat"), write.get("lng"), write.get("located_by")]).toEqual(["eq.p1", "eq.36.9", "eq.-79.8", "is.null"]);
   });
 
+  it("looks a spot up in the property's country", async () => {
+    const { lookups, saves } = world({
+      rows: [property("p1", "2 Bank Street", { city: "Leeds", region: null, postal_code: "LS1 5AB", country: "GB", lat: 53.8, lng: -1.5 })],
+      geocode: (_address, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "GB" } }] } : census([PELL])),
+    });
+    expect(await run(withKey)).toEqual({ ...NOTHING, looked_up: 1, moved: 1 });
+    expect(lookups().map((c) => [c.url.host, c.url.searchParams.get("q"), c.url.searchParams.get("countrycode")])).toEqual([["photon.komoot.io", "2 Bank Street, Leeds, LS1 5AB", "GB"]]);
+    expect(saves()).toEqual([{ id: "p1", lat: 53.79, lng: -1.54, located_by: "openstreetmap" }]);
+  });
+
   it("leaves a spot alone when the geocoder doesn't answer, and stops asking after three in a row", async () => {
     const rows = ["p1", "p2", "p3", "p4", "p5"].map((id) => property(id, `${id} Pell Ave`));
     const down = world({ rows, geocode: () => new Response("busy", { status: 503 }) });
@@ -247,15 +299,28 @@ describe("the pins task", () => {
       { company_id: "co-1", address, depot: { lat: 36.9, lng: -79.8 } },
       { company_id: "co-2", address: { line1: "1 Nowhere Lane", city: "Rocky Mount" }, depot: { lat: 40, lng: -75 } },
       { company_id: "co-3", address: {}, depot: { lat: 41, lng: -76 } },
+      { company_id: "co-4", address: { line1: "2 Bank Street", city: "Leeds", postal_code: "LS1 5AB" }, depot: { lat: 53.8, lng: -1.5 } },
     ];
-    const { calls, lookups } = world({ shops, geocode: (a) => (/Main/.test(a) ? census([PELL]) : census([])) });
-    expect(await run(withKey)).toEqual({ ...NOTHING, shops: 3 });
-    expect(lookups().map((c) => c.url.searchParams.get("address"))).toEqual(["1 Main St, Rocky Mount, VA, 24151", "1 Nowhere Lane, Rocky Mount"]);
+    const companies = [{ id: "co-1", country: "US" }, { id: "co-2", country: "US" }, { id: "co-3", country: "US" }, { id: "co-4", country: "GB" }];
+    const { calls, lookups } = world({
+      shops,
+      companies,
+      geocode: (a, host) => (host === "photon.komoot.io" ? { features: [{ geometry: { coordinates: [-1.54, 53.79] }, properties: { countrycode: "GB" } }] } : /Main/.test(a) ? census([PELL]) : census([])),
+    });
+    expect(await run(withKey)).toEqual({ ...NOTHING, shops: 4 });
+    // Each in its business's country.
+    expect(calls.find((c) => c.path === "companies")!.url.searchParams.get("id")).toBe("in.(co-1,co-2,co-3,co-4)");
+    expect(lookups().map((c) => [c.url.host, c.url.searchParams.get("address") ?? c.url.searchParams.get("q")])).toEqual([
+      ["geocoding.geo.census.gov", "1 Main St, Rocky Mount, VA, 24151"],
+      ["geocoding.geo.census.gov", "1 Nowhere Lane, Rocky Mount"],
+      ["photon.komoot.io", "2 Bank Street, Leeds, LS1 5AB"],
+    ]);
     expect(calls.filter((c) => c.path === "rpc/relocate_depot").map((c) => c.body)).toEqual([
       { p_company: "co-1", p_address: address, p_was: { lat: 36.9, lng: -79.8 }, p_depot: { lat: 36.99, lng: -79.88, source: "census" } },
       { p_company: "co-2", p_address: shops[1]!.address, p_was: { lat: 40, lng: -75 }, p_depot: { lat: 40, lng: -75, source: "unknown" } },
       // No address to ask about.
       { p_company: "co-3", p_address: {}, p_was: { lat: 41, lng: -76 }, p_depot: { lat: 41, lng: -76, source: "unknown" } },
+      { p_company: "co-4", p_address: shops[3]!.address, p_was: { lat: 53.8, lng: -1.5 }, p_depot: { lat: 53.79, lng: -1.54, source: "openstreetmap" } },
     ]);
   });
 });

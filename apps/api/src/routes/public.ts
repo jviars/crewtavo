@@ -192,13 +192,18 @@ async function chargingNow(admin: ReturnType<typeof adminClient>, companyId: str
 }
 const CHARGING_NOW = "This invoice is being charged to your saved card right now.";
 
-/** Locate a new property in the background so routing and weather checks work for it. */
+/**
+ * Locate a new property in the background so routing and weather checks work for it, in the
+ * country it was saved in (its business's, 20261124100200_property_country.sql).
+ */
 export function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, address: { line1: string; city?: string; postal_code?: string }) {
   runInBackground(
     c,
     (async () => {
-      const hit = await geocodeAddress([address.line1, address.city, address.postal_code].filter(Boolean).join(", "));
-      if (hit) await saveLocation(adminClient(c.env), propertyId, hit);
+      const admin = adminClient(c.env);
+      const { data: property } = await admin.from("properties").select("country").eq("id", propertyId).maybeSingle();
+      const hit = await geocodeAddress([address.line1, address.city, address.postal_code].filter(Boolean).join(", "), { country: property?.country });
+      if (hit) await saveLocation(admin, propertyId, hit);
     })(),
   );
 }
