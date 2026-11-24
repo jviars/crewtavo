@@ -183,6 +183,8 @@ export function contractFacts(input: ContractInput) {
     warranty: input.warranty ?? null,
     // {Total} and {Deposit} in the business's currency, when it isn't US dollars (contractInput).
     ...(input.currency ? { currency: input.currency } : {}),
+    // {Date} the way the business's country writes it, when it isn't the US (contractInput).
+    ...(input.country ? { country: input.country } : {}),
   };
 }
 

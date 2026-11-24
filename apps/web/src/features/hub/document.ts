@@ -144,7 +144,7 @@ export interface HubOption {
  * The fill-in facts that don't depend on the option, as the server will fill in the signed copy.
  * Without options, {Option} and {Warranty} say the package it was priced from (optionName, warranty).
  */
-export type HubContractFacts = Pick<ContractInput, "customerName" | "businessName" | "businessPhone" | "license" | "estimateNumber" | "date" | "timeZone" | "deposit" | "depositPercent" | "optionName" | "warranty" | "currency"> & {
+export type HubContractFacts = Pick<ContractInput, "customerName" | "businessName" | "businessPhone" | "license" | "estimateNumber" | "date" | "timeZone" | "deposit" | "depositPercent" | "optionName" | "warranty" | "currency" | "country"> & {
   customerAddress: string[];
   jobAddress: string[];
 };
