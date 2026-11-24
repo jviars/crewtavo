@@ -21,6 +21,7 @@ import { featureOn } from "@/components/shell/nav";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHeader } from "@/components/ui/DetailPage";
 import { Field, FormError } from "@/components/ui/Field";
@@ -1106,7 +1107,7 @@ export function MeasurePage() {
         <PitchPicker value={pitch} onChange={setPitch} />
         <MeasurePitch near={near} onPick={setPitch} roofs={roofOutlines} onPickSection={setShapePitch} />
         <Field label="Waste %" hint="About 10% for a plain gable roof, 15% or more with hips and valleys.">
-          <input className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 120 }} />
+          <DecimalInput className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 120 }} />
         </Field>
         {squares !== null && roofSections.length > 1 && (
           <div className="measure-breakdown">
@@ -1147,7 +1148,7 @@ export function MeasurePage() {
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
-        <Field label="Depth (in)"><input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
+        <Field label="Depth (in)"><DecimalInput className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
       </div>
     </details>
   );

@@ -28,6 +28,7 @@ import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { ClientPreview } from "@/components/ui/ClientPreview";
 import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
@@ -1629,7 +1630,7 @@ function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }
             <p className="muted" style={{ margin: 0 }}>These lines work out their amount from a depth. Each starts with its price list item's own depth, or the drawing's. Check them, then fill the quantities.</p>
             {asking.lines.map((line, i) => (
               <Field key={line.id} label={`${line.name} (inches deep)`}>
-                <input
+                <DecimalInput
                   className="input"
                   inputMode="decimal"
                   value={line.depth}

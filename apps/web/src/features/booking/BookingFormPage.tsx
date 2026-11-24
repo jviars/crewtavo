@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
@@ -491,7 +492,7 @@ export function QuestionField({ q, value, invalid, onChange }: { q: Question; va
     case "long_text":
       return <Field label={label} error={error}><textarea className="textarea" value={String(value ?? "")} maxLength={4000} onChange={(e) => onChange(e.target.value)} aria-invalid={invalid} /></Field>;
     case "number":
-      return <Field label={label} error={error}><input className="input" inputMode="decimal" value={String(value ?? "")} onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={invalid} /></Field>;
+      return <Field label={label} error={error}><DecimalInput className="input" inputMode="decimal" value={String(value ?? "")} onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={invalid} /></Field>;
     case "yes_no":
     case "choice":
     case "multi_choice": {

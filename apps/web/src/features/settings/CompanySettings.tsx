@@ -14,6 +14,7 @@ import { arrivalWindowMin } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Section } from "@/components/ui/Section";
 import { SectionSkeleton } from "@/components/ui/Skeleton";
@@ -237,7 +238,7 @@ export function CompanySettings() {
             </Select>
           </Field>
           <Field label={<>{taxBoxLabel(f)}<span className="sr-only"> (%)</span></>}>
-            <Suffix unit="%"><input className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+            <Suffix unit="%"><DecimalInput className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
           </Field>
           <Field label="Tax name" optional hint={`What quotes and invoices call it, like VAT or GST/HST. Empty: ${countryTaxName(f.country)}.`}>
             <input className="input" value={f.tax_name} onChange={set("tax_name")} maxLength={TAX_NAME_MAX} placeholder={countryTaxName(f.country)} />
@@ -252,7 +253,7 @@ export function CompanySettings() {
             <Suffix unit="days"><NumberInput className="input" min={1} max={365} value={f.quote_valid_days} onChange={set("quote_valid_days")} /></Suffix>
           </Field>
           <Field label="Minimum charge" optional hint="An invoice under it gets a Minimum charge line that makes up the difference.">
-            <input className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
+            <DecimalInput className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
           </Field>
           <Field label="Late fee" className="set-full" hint={f.late_fee === "off" ? "Added once to an invoice still unpaid after its due date." : `Added once, if it's still unpaid that many days after it's due. Late fees aren't taxed. You can take one off an invoice, or turn them off for it, on the invoice. ${LATE_FEE_LAW_NOTE}`}>
             <Select className="select set-narrow" value={f.late_fee} onChange={set("late_fee")}>
@@ -264,7 +265,7 @@ export function CompanySettings() {
           {f.late_fee !== "off" && (
             <>
               <Field label={f.late_fee === "percent" ? "Late fee (%)" : "Late fee amount"}>
-                <input className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
+                <DecimalInput className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
               </Field>
               <Field label={<>Days after the due date<span className="sr-only"> (days)</span></>}>
                 <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.late_fee_days} onChange={set("late_fee_days")} /></Suffix>

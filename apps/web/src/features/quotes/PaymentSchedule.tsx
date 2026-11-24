@@ -14,6 +14,7 @@ import { DEPOSIT_LAW_NOTE, SCHEDULE_AFTER_MAX, SCHEDULE_DUE, scheduleAmounts, sc
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
@@ -125,7 +126,7 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
                   {last && <option value="rest">The rest</option>}
                 </Select>
                 {d.kind !== "rest" && (
-                  <input className="input input-sm" style={{ width: 96, textAlign: "right" }} inputMode="decimal" aria-label={d.kind === "percent" ? `Payment ${i + 1} percent` : `Payment ${i + 1} amount`}
+                  <DecimalInput className="input input-sm" style={{ width: 96, textAlign: "right" }} inputMode="decimal" aria-label={d.kind === "percent" ? `Payment ${i + 1} percent` : `Payment ${i + 1} amount`}
                     value={d.value} onChange={(e) => set(i, { value: e.target.value.replace(/[^0-9.]/g, "") })} />
                 )}
                 <span className={styles.paymentAmount}>{formatMoneyCents(sums.rows[i]?.amount ?? 0)}</span>

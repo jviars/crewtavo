@@ -7,6 +7,7 @@ import { ROOF_EDGES, type RoofEdge } from "@crewtavo/core/geo";
 import { ROOF_EDGE_COLORS, suggestedWaste } from "@crewtavo/core/roofing";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
 import { formatNumber } from "@/lib/format";
@@ -92,7 +93,7 @@ export function RoofSteps({
             <strong>Save and price it</strong>
             <label className="roof-waste">
               <span>Waste</span>
-              <input className="input input-sm" inputMode="decimal" value={waste} onChange={(e) => onWaste(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Waste %" />
+              <DecimalInput className="input input-sm" inputMode="decimal" value={waste} onChange={(e) => onWaste(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Waste %" />
               <span>%</span>
               {Number(waste || 0) !== suggested && (
                 <button type="button" className="link-btn small" onClick={() => onWaste(String(suggested))}>Use {suggested}%{suggested > 10 ? " (hips or valleys)" : ""}</button>

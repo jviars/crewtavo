@@ -11,6 +11,7 @@ import { localDate } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormChecks, FormError } from "@/components/ui/Field";
 import { Select } from "@/components/ui/Select";
@@ -161,7 +162,7 @@ export function AddWorkDialog({ invoiceId, jobId, onClose, skipEmpty = false }: 
                   {m.unit_price !== null ? (
                     <span className={styles.pickEnd}>{formatMoneyCents(lineTotal(m.quantity, m.unit_price))}</span>
                   ) : (
-                    <input
+                    <DecimalInput
                       className="input input-sm"
                       inputMode="decimal"
                       style={{ width: 110 }}

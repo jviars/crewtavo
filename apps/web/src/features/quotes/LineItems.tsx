@@ -19,6 +19,7 @@ import { promoCodeOf, removedPromoWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Icon } from "@/components/ui/Icon";
 import { Menu } from "@/components/ui/Menu";
 import { NumberInput } from "@/components/ui/NumberInput";
@@ -699,7 +700,7 @@ function LineRow({ table, line, withOptions, showCosts, place, viewing, saveStat
               <label style={{ gap: 6 }} title={`${rule.target === "unit_price" ? "Price" : "Quantity"} = ${rule.formula}`}>
                 {rule.target === "unit_price" ? "Price by size" : "Quantity by size"}
                 <span className="input-group" style={{ width: 132 }}>
-                  <input className="input input-sm" aria-label="Size in square feet" inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value.replace(/[^0-9.]/g, ""))} onBlur={() => size !== sized.current && bySize(size)} onKeyDown={blurOnEnter} />
+                  <DecimalInput className="input input-sm" aria-label="Size in square feet" inputMode="decimal" value={size} onChange={(e) => setSize(e.target.value.replace(/[^0-9.]/g, ""))} onBlur={() => size !== sized.current && bySize(size)} onKeyDown={blurOnEnter} />
                   <span className="addon addon-right addon-unit">sq ft</span>
                 </span>
               </label>

@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { choose } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { DetailColumns } from "@/components/ui/DetailPage";
@@ -246,7 +247,7 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
           <Field label={f.kind === "percent" ? "Percent" : "Amount"} error={valueError}>
             <span className="input-group">
               {f.kind === "amount" && <span className="addon">{currencySymbol()}</span>}
-              <input className="input" style={f.kind === "amount" ? { paddingLeft: 22 } : undefined} inputMode="decimal" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value.replace(/[^0-9.]/g, "") })} placeholder={f.kind === "percent" ? "10" : "50.00"} required />
+              <DecimalInput className="input" style={f.kind === "amount" ? { paddingLeft: 22 } : undefined} inputMode="decimal" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value.replace(/[^0-9.]/g, "") })} placeholder={f.kind === "percent" ? "10" : "50.00"} required />
               {f.kind === "percent" && <span className="addon addon-right">%</span>}
             </span>
           </Field>
@@ -258,7 +259,7 @@ function PromoDialog({ promo, onClose, onSaved }: { promo: Promo | null; onClose
           <Field label="Starts" optional><input className="input" type="date" value={f.starts_on} onChange={(e) => setF({ ...f, starts_on: e.target.value })} /></Field>
           <Field label="Ends" optional error={datesError}><input className="input" type="date" value={f.ends_on} min={f.starts_on || undefined} onChange={(e) => setF({ ...f, ends_on: e.target.value })} /></Field>
           <Field label="Minimum order" optional>
-            <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={f.min_subtotal} onChange={(e) => setF({ ...f, min_subtotal: e.target.value.replace(/[^0-9.]/g, "") })} placeholder="0" /></span>
+            <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={f.min_subtotal} onChange={(e) => setF({ ...f, min_subtotal: e.target.value.replace(/[^0-9.]/g, "") })} placeholder="0" /></span>
           </Field>
           <Field label="Total uses allowed" optional hint="Leave empty for no limit.">
             <NumberInput className="input" min={1} value={f.max_uses} onChange={(e) => setF({ ...f, max_uses: e.target.value })} />

@@ -13,6 +13,7 @@ import { extraBillingHint, extraState, extraStateText, extrasToReview, takesExtr
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -214,10 +215,10 @@ export function VisitExtrasEditor({ visitId, jobId, onChanged, titled = true }: 
               {services.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
             <input className="input input-sm grow" style={{ minWidth: 140 }} placeholder="What was done" aria-label="Extra work" value={draft.name} maxLength={200} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-            <input className="input input-sm" style={{ width: 70 }} inputMode="decimal" aria-label="Quantity" title="Quantity" value={draft.quantity} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, quantity: e.target.value.replace(/[^0-9.]/g, "") })} />
+            <DecimalInput className="input input-sm" style={{ width: 70 }} inputMode="decimal" aria-label="Quantity" title="Quantity" value={draft.quantity} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, quantity: e.target.value.replace(/[^0-9.]/g, "") })} />
             <span className="input-group" style={{ width: 110 }}>
               <span className="addon">{currencySymbol()}</span>
-              <input className="input input-sm" style={{ paddingLeft: 22 }} inputMode="decimal" placeholder="Price" aria-label={`Price for each ${draft.unit || "one"}`} title="Price for each" value={draft.price} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, price: e.target.value.replace(/[^0-9.-]/g, "") })} />
+              <DecimalInput className="input input-sm" style={{ paddingLeft: 22 }} inputMode="decimal" placeholder="Price" aria-label={`Price for each ${draft.unit || "one"}`} title="Price for each" value={draft.price} onKeyDown={onKey} onChange={(e) => setDraft({ ...draft, price: e.target.value.replace(/[^0-9.-]/g, "") })} />
             </span>
             <label className="row small" style={{ gap: 6 }}>
               <input type="checkbox" checked={draft.taxable} onChange={(e) => setDraft({ ...draft, taxable: e.target.checked })} />

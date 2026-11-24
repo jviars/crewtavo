@@ -10,6 +10,7 @@
 import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -108,7 +109,7 @@ function AddWorkDialog({ choices, loading, toVisit, onClose, onAdd }: { choices:
           )}
         </Field>
         <Field label={t("How many")} hint={item?.unit} requiredMessage={t("Enter how many.")}>
-          <input className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required />
+          <DecimalInput className="input" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9.]/g, ""))} required />
         </Field>
         <FormError error={problem} />
         <div className="form-actions">
@@ -230,7 +231,7 @@ function CashOrCheckDialog({ invoice, onClose, onSaved }: { invoice: { id: strin
           <button type="button" aria-pressed={method === "check"} onClick={() => setMethod("check")}>{t("Check")}</button>
         </div>
         <Field label={t("Amount")} requiredMessage={t("Enter the amount you received.")}>
-          <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required /></span>
         </Field>
         {method === "check" && (
           <Field label={t("Check number")} requiredMessage={t("Enter the check number.")}>

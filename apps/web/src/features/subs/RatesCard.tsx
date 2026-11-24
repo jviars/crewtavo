@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Menu } from "@/components/ui/Menu";
@@ -191,7 +192,7 @@ function RateDialog({ payee, rate, onClose }: { payee: PayeeRef; rate: PayRate |
           <span className="row" style={{ gap: 8 }}>
             <span className="input-group" style={{ width: 160 }}>
               <span className="addon">{currencySymbol()}</span>
-              <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required style={{ paddingLeft: 24, textAlign: "right" }} aria-label="Rate" />
+              <DecimalInput className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required style={{ paddingLeft: 24, textAlign: "right" }} aria-label="Rate" />
             </span>
             <span className="muted">{per}</span>
           </span>

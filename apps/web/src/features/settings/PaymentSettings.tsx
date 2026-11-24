@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
@@ -227,7 +228,7 @@ export function PaymentSettings() {
             <Field label="Most to charge without asking" optional className={f.timing === "days" ? "set-full" : undefined} hint={`Over this, a card's charge waits for your OK. Leave it blank for no limit. ${f.max.trim() ? AUTOPAY_BANK_NOTE : AUTOPAY_NO_LIMIT_NOTE}`}>
               <span className="input-group">
                 <span className="addon">{currencySymbol()}</span>
-                <input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={f.max} onChange={(e) => set("max", e.target.value.replace(/[^0-9.]/g, ""))} placeholder="No limit" />
+                <DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={f.max} onChange={(e) => set("max", e.target.value.replace(/[^0-9.]/g, ""))} placeholder="No limit" />
               </span>
             </Field>
           </div>

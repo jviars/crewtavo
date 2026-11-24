@@ -20,6 +20,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, typ
 import { flushSync } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyLink } from "@/components/ui/PrivacyLink";
@@ -1493,7 +1494,7 @@ function TipChoices({ percents, base, choice, onChoice, custom, onCustom }: {
       <div className="hub-tip-other">
         <button type="button" className="hub-link" aria-pressed={choice === "custom"} onClick={() => onChoice("custom")}>Other amount</button>
         {choice === "custom" && (
-          <span className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" inputMode="decimal" aria-label="Tip amount" value={custom} onChange={(e) => onCustom(e.target.value.replace(/[^0-9.]/g, ""))} autoFocus /></span>
         )}
       </div>
     </>

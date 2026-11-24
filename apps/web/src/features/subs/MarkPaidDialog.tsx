@@ -7,6 +7,7 @@ import { jobPayMethodLabel, SUB_PAY_METHODS, type SubPayMethod } from "@crewtavo
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { readAmount } from "@/components/ui/MoneyInput";
@@ -52,7 +53,7 @@ export function MarkPaidDialog({ pays, onClose, onPaid }: { pays: readonly ToPay
             <Field label="Amount" requiredMessage="Enter the amount you paid." hint={Number(amount) !== total ? `Their pay comes to ${formatMoneyCents(total)}.` : undefined}>
               <span className="input-group">
                 <span className="addon">{currencySymbol()}</span>
-                <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
+                <DecimalInput className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} style={{ paddingLeft: 24, textAlign: "right" }} required />
               </span>
             </Field>
           ) : (

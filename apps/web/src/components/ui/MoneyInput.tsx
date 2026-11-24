@@ -1,14 +1,18 @@
 import { toUnits } from "@crewtavo/core/money";
 import { useEffect, useState } from "react";
+import { decimalPoint } from "@/lib/decimal";
 import { currencySymbol } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { NumberInput } from "./NumberInput";
 
 /**
  * What was typed in a MoneyInput, read as written and rounded to cents, or for a percent to
- * 0.0001% (the precision tax rates are kept to, so 8.875 stays 8.875). Null when it isn't valid.
+ * 0.0001% (the precision tax rates are kept to, so 8.875 stays 8.875). A decimal comma is a point
+ * ("12,50" is 12.50) and a comma before three digits a thousands separator ("1,250"). Null when it
+ * isn't valid.
  */
-export function readAmount(draft: string, { percent, max }: { percent?: boolean; max?: number } = {}): number | null {
+export function readAmount(typed: string, { percent, max }: { percent?: boolean; max?: number } = {}): number | null {
+  const draft = decimalPoint(typed);
   const n = Number(draft);
   if (draft.trim() === "" || !Number.isFinite(n) || n < 0 || (max !== undefined && n > max)) return null;
   const decimals = percent ? 4 : 2;
@@ -55,7 +59,8 @@ export function MoneyInput({ value, onSave, onEdit, onUnchanged, percent, max, w
         aria-invalid={error || undefined}
         title={error ? (max !== undefined ? t("Enter 0 to {max}", { max }) : t("Enter a number")) : undefined}
         onChange={(e) => {
-          setDraft(e.target.value.replace(/[^0-9.]/g, ""));
+          // NumberInput has read a decimal comma as a point already ("12,50" is "12.50").
+          setDraft(decimalPoint(e.target.value).replace(/[^0-9.]/g, ""));
           onEdit?.();
         }}
         onFocus={(e) => e.target.select()}

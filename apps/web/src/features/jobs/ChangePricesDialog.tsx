@@ -17,6 +17,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -203,7 +204,7 @@ export function ChangePricesDialog({ picked, onClose, onChanged }: { picked: rea
             {/* "$" before the figure, "%" after it (the field makes room on the side the sign is on). */}
             <span className={cx("input-group", styles.amountField)}>
               {kind === "amount" && <span className="addon">{currencySymbol()}</span>}
-              <input className="input" style={kind === "amount" ? { paddingLeft: 22 } : undefined} inputMode="decimal" autoFocus aria-label={kind === "percent" ? "Percent" : "Amount added to or taken off each line's price"} value={amount} onChange={(e) => edit(setAmount)(e.target.value.replace(/[^0-9.]/g, ""))} />
+              <DecimalInput className="input" style={kind === "amount" ? { paddingLeft: 22 } : undefined} inputMode="decimal" autoFocus aria-label={kind === "percent" ? "Percent" : "Amount added to or taken off each line's price"} value={amount} onChange={(e) => edit(setAmount)(e.target.value.replace(/[^0-9.]/g, ""))} />
               {kind === "percent" && <span className="addon addon-right">%</span>}
             </span>
           </div>

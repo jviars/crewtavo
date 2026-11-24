@@ -8,6 +8,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -20,6 +21,7 @@ import { statusText } from "@/components/ui/StatusPill";
 import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
+import { decimalPoint } from "@/lib/decimal";
 import { currencySymbol, dateIn, formatMoney, formatMoneyCents, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -486,8 +488,8 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
     meta: { inline: true, success: "Goals saved" },
     mutationFn: async () => {
       const m = margin.trim() ? Number(margin) : null;
-      const g = goal.trim() ? Number(goal.replace(/,/g, "")) : null;
-      if (g !== null && !(g >= 0 && g < 1e10)) throw new Error("Enter a revenue goal of $0 or more.");
+      const g = goal.trim() ? Number(decimalPoint(goal)) : null;
+      if (g !== null && !(g >= 0 && g < 1e10)) throw new Error(`Enter a revenue goal of ${currencySymbol()}0 or more.`);
       if (m !== null && !(m >= 0 && m < 100)) throw new Error("Target margin must be between 0 and 99%.");
       // Re-read settings so a concurrent change elsewhere isn't overwritten.
       const current = await loadSettings(company.id);
@@ -505,7 +507,7 @@ function GoalDialog({ settings, onClose }: { settings: Record<string, unknown>; 
           <div className="input-group"><span className="addon">{currencySymbol()}</span><input className="input" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="500,000" autoFocus /></div>
         </Field>
         <Field label="Target job margin" optional hint="Jobs under it are counted on Profit.">
-          <div className="input-group"><input className="input" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="30" style={{ paddingLeft: 12, paddingRight: 32 }} /><span className="addon addon-right">%</span></div>
+          <div className="input-group"><DecimalInput className="input" inputMode="decimal" value={margin} onChange={(e) => setMargin(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="30" style={{ paddingLeft: 12, paddingRight: 32 }} /><span className="addon addon-right">%</span></div>
         </Field>
         <FormError error={save.error} />
         <div className="form-actions"><FormChecks /><Button onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" loading={save.isPending}>Save goals</Button></div>

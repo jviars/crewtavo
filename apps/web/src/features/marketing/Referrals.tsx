@@ -27,6 +27,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { DetailColumns } from "@/components/ui/DetailPage";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
@@ -265,7 +266,7 @@ function CreditAndOffer() {
             </div>
             <span className="input-group" style={{ width: 130 }}>
               {!percent && <span className="addon">{currencySymbol()}</span>}
-              <input className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
+              <DecimalInput className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
                 placeholder={percent ? "10" : "50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
               {percent && <span className="addon addon-right">%</span>}
             </span>
