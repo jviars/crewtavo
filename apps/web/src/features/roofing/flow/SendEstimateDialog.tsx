@@ -15,6 +15,7 @@
  * and the roof's sections too low for a shingle package.
  */
 import { inRangeMode, rangeSettings } from "@crewtavo/core/estimates";
+import { phoneExample } from "@crewtavo/core/phone";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -26,7 +27,7 @@ import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { formatMoneyCents } from "@/lib/format";
+import { companyCountry, formatMoneyCents } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { useQuoteOptions } from "../../quotes/options";
@@ -205,7 +206,7 @@ function SendForm({ quote, mode, startWith, onClose, onSent, words }: SendProps 
           )}
           {channel !== "link" && (
             <Field label={channel === "email" ? "To" : "Mobile number"}>
-              <input className="input" type={channel === "email" ? "email" : "tel"} value={to} onChange={(e) => setTo(channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value)} required placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"} />
+              <input className="input" type={channel === "email" ? "email" : "tel"} value={to} onChange={(e) => setTo(channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value)} required placeholder={channel === "email" ? "client@example.com" : (phoneExample(companyCountry()) ?? "(555) 555-0123")} />
             </Field>
           )}
           {channel === "email" && <Field label="Subject"><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={200} required /></Field>}

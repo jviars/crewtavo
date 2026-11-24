@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "@/lib/errors";
-import { phoneDigits } from "@/lib/validate";
+import { northAmericanPhones, phoneDigits } from "@/lib/validate";
 import { Icon } from "./Icon";
 import { msg, t } from "@/lib/i18n";
 
@@ -49,6 +49,8 @@ export function validityMessage(control: Checkable, label: string, requiredMessa
 /**
  * Email and phone checks the browser doesn't make: an email needs a dot after its @, and a phone
  * number its area code ("+…" numbers are left alone). Never replaces a message the form set itself.
+ * A number is only taken to need 10 digits for a business in the US or Canada; elsewhere numbers
+ * are shorter or longer, and only one too long to be a number is caught ("00…" ones dial out first).
  */
 function checkContact(control: Checkable) {
   if (!(control instanceof HTMLInputElement) || (control.type !== "email" && control.type !== "tel")) return;
@@ -59,7 +61,7 @@ function checkContact(control: Checkable) {
   const message =
     control.type === "email"
       ? value.includes("@") && /@[^.]*$/.test(value) ? t("Add the rest of the email, like name@company.com.") : ""
-      : !value.startsWith("+") && ((digits >= 1 && digits <= 9) || digits > 15) ? t("Enter the full phone number, with area code.") : "";
+      : !value.startsWith("+") && (northAmericanPhones() ? (digits >= 1 && digits <= 9) || digits > 15 : !value.startsWith("00") && digits > 15) ? t("Enter the full phone number, with area code.") : "";
   if (message) {
     control.setCustomValidity(message);
     control.dataset.fieldCustom = "1";

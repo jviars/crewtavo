@@ -7,6 +7,7 @@
  * of this, and says so.
  */
 import { TEXT_CONSENT_HINT } from "@crewtavo/core/marketing";
+import { phoneExample } from "@crewtavo/core/phone";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -14,6 +15,7 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Fact, Facts, Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import type { AppRow, TwilioState } from "./catalog";
 import { CodeRow, Fold, Step, Steps, kit } from "./PanelKit";
@@ -87,7 +89,7 @@ function ConnectForm({ app, changing, optional, onSaved, onCancel }: { app: AppR
             <input className="input" value={f.account_sid} onChange={(e) => set({ account_sid: e.target.value.trim() })} autoComplete="off" spellCheck={false} maxLength={60} required placeholder="AC…" />
           </Field>
           <Field label="Your Twilio number" requiredMessage="Enter your Twilio number.">
-            <input className="input" type="tel" value={f.from_number} onChange={(e) => set({ from_number: formatPhoneTyping(e.target.value) })} maxLength={40} required placeholder="(555) 555-0123" />
+            <input className="input" type="tel" value={f.from_number} onChange={(e) => set({ from_number: formatPhoneTyping(e.target.value) })} maxLength={40} required placeholder={phoneExample(companyCountry()) ?? "(555) 555-0123"} />
           </Field>
         </div>
         <Field label="Auth Token" hint="Stored encrypted and never shown again." requiredMessage="Paste your Auth Token.">

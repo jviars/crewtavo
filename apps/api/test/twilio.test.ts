@@ -175,8 +175,18 @@ describe("checking a Twilio account before it's kept", () => {
   it("says what to fix without asking Twilio when the SID or number isn't one", async () => {
     const t = twilio();
     expect(await problem(checkTwilio({ ...good, account_sid: "SK123" }, t.fetcher))).toMatch(/^That doesn't look like an Account SID/);
-    expect(await problem(checkTwilio({ ...good, from_number: "555-0100" }, t.fetcher))).toMatch(/^Enter your Twilio number in full/);
+    expect(await problem(checkTwilio({ ...good, from_number: "555-0100" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
+    expect(await problem(checkTwilio({ ...good, from_number: "555-0100", country: "CA" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
+    expect(await problem(checkTwilio({ ...good, from_number: "900123", country: "GB" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like 07700 900123.");
     expect(t.requests).toEqual([]);
+  });
+
+  it("finds a number typed as the company's country writes it", async () => {
+    const t = twilio();
+    expect((await checkTwilio({ ...good, from_number: "07700 900100", country: "GB" }, t.fetcher)).from_number).toBe("+447700900100");
+    expect(t.requests[1]!.url.searchParams.get("PhoneNumber")).toBe("+447700900100");
+    // A US company's is read as it always was.
+    expect(await problem(checkTwilio({ ...good, from_number: "07700 900100", country: "US" }, t.fetcher))).toMatch(/^Enter your Twilio number in full/);
   });
 
   it("says so when Twilio turns the token down, the number isn't the account's, or it can't text", async () => {
@@ -219,6 +229,15 @@ describe("connecting it on the Apps page", () => {
     // And the company can text from then on.
     expect(await smsReady(env, ALDER)).toBe(true);
     expect(await smsReady(env, BIRCH)).toBe(false);
+  });
+
+  it("takes a UK company's number as it's written there", async () => {
+    const { state } = fakeDb();
+    state.countries[ALDER] = "GB";
+    vi.stubGlobal("fetch", twilio().fetcher);
+    const res = await put({ ...body, from_number: "07700 900100" });
+    expect(res.status).toBe(200);
+    expect(state.integrations[0]).toMatchObject({ account_label: "Alder Lawn · +447700900100", settings: { from_number: "+447700900100" } });
   });
 
   it("refuses credentials Twilio doesn't accept, saying why, and keeps nothing", async () => {

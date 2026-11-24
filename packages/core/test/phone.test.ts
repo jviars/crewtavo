@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { internationalPhone, phoneDisplay, phoneE164, signInPhone, textsCodesTo } from "../src/phone";
+import { COUNTRY_CODES } from "../src/countries";
+import { internationalPhone, phoneDisplay, phoneE164, phoneExample, signInPhone, textsCodesTo } from "../src/phone";
 import { emailKey } from "../src/email";
 import { signInCodeEmail, signInCodeText, subSettings } from "../src/subs";
 
@@ -133,6 +134,19 @@ describe("numbers texted for a business", () => {
   it("are whole E.164 numbers, which phoneE164 alone doesn't make of a UK one", () => {
     expect(phoneE164(internationalPhone("07700 900123", "GB"))).toBe("+447700900123");
     expect(phoneE164("07700 900123")).toBeNull();
+  });
+
+  it("have an example as the country writes them, which is completed like any number typed there", () => {
+    expect(phoneExample("GB")).toBe("07700 900123");
+    expect(phoneExample("gb")).toBe("07700 900123");
+    for (const country of ["US", "CA", "MX", "", null, undefined]) expect(phoneExample(country), String(country)).toBeNull();
+    const known = COUNTRY_CODES.filter((country) => phoneExample(country));
+    expect(known).toEqual(expect.arrayContaining(["GB", "IE", "AU", "NZ", "ZA", "DE", "FR", "ES", "IT"]));
+    for (const country of known) {
+      const texted = internationalPhone(phoneExample(country)!, country);
+      expect(texted, country).toMatch(/^\+[2-9][0-9]{6,14}$/);
+      expect(phoneE164(texted), country).toBe(texted);
+    }
   });
 });
 

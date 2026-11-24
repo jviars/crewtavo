@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { formatPhoneTyping, isCompleteEmail } from "../src/lib/validate";
+import { afterEach, describe, expect, it } from "vitest";
+import { setCountry } from "../src/lib/format";
+import { formatPhoneTyping, isCompleteEmail, northAmericanPhones } from "../src/lib/validate";
 
 /** Types each character at the end, the way a tel input's onChange sees it. */
 const type = (text: string, start = "") => [...text].reduce((value, char) => formatPhoneTyping(value + char), start);
@@ -31,6 +32,33 @@ describe("phone numbers as they're typed", () => {
     expect(type("+44 20 7946 0958")).toBe("+44 20 7946 0958");
     expect(formatPhoneTyping("540-555-0142 ext. 12")).toBe("540-555-0142 ext. 12");
     expect(formatPhoneTyping("15405550142")).toBe("15405550142");
+  });
+});
+
+describe("phone numbers outside the US and Canada", () => {
+  afterEach(() => setCountry(null));
+
+  it("are laid out the US way for a Canadian business too", () => {
+    setCountry({ country: "CA" });
+    expect(northAmericanPhones()).toBe(true);
+    expect(type("4165550199")).toBe("(416) 555-0199");
+  });
+
+  it("are left as typed for a business elsewhere, though they have 10 digits", () => {
+    setCountry({ country: "AU" });
+    expect(northAmericanPhones()).toBe(false);
+    expect(type("02 9876 5432")).toBe("02 9876 5432");
+    expect(formatPhoneTyping("0412345678")).toBe("0412345678");
+    setCountry({ country: "GB" });
+    expect(type("07700 900123")).toBe("07700 900123");
+    expect(formatPhoneTyping("0201234567")).toBe("0201234567");
+  });
+
+  it("go by the time zone for a sub, whose company basics don't say the country", () => {
+    setCountry({ timezone: "Europe/London" });
+    expect(northAmericanPhones()).toBe(false);
+    setCountry({ timezone: "America/Toronto" });
+    expect(northAmericanPhones()).toBe(true);
   });
 });
 
