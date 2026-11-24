@@ -66,6 +66,7 @@ update public.companies set country = 'GB' where id = :'co';
 select t1124c.check((select country from public.companies where id = :'co') = 'GB', 'its owner sets it');
 select t1124c.check(t1124c.error_of(format($q$update public.companies set country = 'gb' where id = %L$q$, :'co')) like '23514:%', 'as a two-letter code in capitals');
 select t1124c.check(t1124c.error_of(format($q$update public.companies set country = 'GBR' where id = %L$q$, :'co')) like '23514:%', 'not three letters');
+select t1124c.check(t1124c.error_of(format($q$update public.companies set country = 'UK' where id = %L$q$, :'co')) like '23514:%', 'and one Crewtavo knows (the UK is GB)');
 select t1124c.as_user(:'ada');
 update public.companies set country = 'CA' where id = :'co';
 select t1124c.check((select country from public.companies where id = :'co') = 'CA', 'an admin sets it too');

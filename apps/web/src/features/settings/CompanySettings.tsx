@@ -210,7 +210,7 @@ export function CompanySettings() {
       </Section>
       <Section level={3} title="Defaults">
         <div className="set-grid">
-          <Field label="Country" hint="Where you work. It decides how addresses are found on the map and how phone numbers are read.">
+          <Field label="Country" hint="Where you work. It decides how addresses are found on the map, how phone numbers are read, and whether subs are asked for US tax forms (W-9, 1099).">
             <Select className="select" value={f.country} onChange={set("country")}>
               {countryChoices().map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
             </Select>

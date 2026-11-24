@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { businessCountry, countryChoices, countryCode, countryFor, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode } from "../src/countries";
+import { businessCountry, COUNTRY_CODES, countryChoices, countryCode, countryFor, countryName, currencyForCountry, FIRST_COUNTRIES, isCountryCode } from "../src/countries";
 import { CURRENCIES } from "../src/money";
 
 describe("a business's country", () => {
@@ -38,6 +39,12 @@ describe("a business's country", () => {
     expect(countryCode("UK")).toBeNull();
     expect(countryCode("USA")).toBeNull();
     expect(countryCode(null)).toBeNull();
+  });
+
+  it("is one of the codes the database takes (companies_country_code), the same list", () => {
+    const sql = readFileSync(new URL("../../../supabase/migrations/20261124100100_business_country.sql", import.meta.url), "utf8");
+    const check = sql.slice(sql.indexOf("companies_country_code"), sql.indexOf("));", sql.indexOf("companies_country_code")));
+    expect([...check.matchAll(/'([A-Z]{2})'/g)].map((m) => m[1])).toEqual([...COUNTRY_CODES]);
   });
 
   it("is listed with the usual ones first, then by name", () => {

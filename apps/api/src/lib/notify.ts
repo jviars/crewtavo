@@ -11,7 +11,7 @@
  * and by push when its email or texts stop going out, and not only on Settings → Email.
  */
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
-import { internationalPhone } from "@crewtavo/core/phone";
+import { textedNumber } from "@crewtavo/core/phone";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
@@ -424,12 +424,13 @@ export async function sendSms(env: Env, message: { to: string; body: string; com
 /**
  * The number Twilio is given. Numbers are kept as the office typed them, which outside North
  * America leaves out the country code Twilio needs ("07700 900123"): the company's country
- * completes it (core internationalPhone). A US or Canadian company's go as typed, as they always
- * have, and so does every number when the company's country can't be read.
+ * completes it (core textedNumber), where replies and STOPs from the completed number still find
+ * the client. A US or Canadian company's go as typed, as they always have, and so does every
+ * number when the company's country can't be read.
  */
 async function numberToText(env: Env, companyId: string | null, to: string): Promise<string> {
   if (!companyId || /^\+[0-9]+$/.test(to)) return to;
-  return internationalPhone(to, await textingCountry(env, companyId).catch(() => null));
+  return textedNumber(to, await textingCountry(env, companyId).catch(() => null));
 }
 
 /**

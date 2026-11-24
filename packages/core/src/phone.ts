@@ -115,11 +115,13 @@ const DIALING: Record<string, Dialing> = {
  * - A number starting with + or 00 (Australia's 0011 too) already has its country code: it's
  *   only spelled in E.164. "+44 (0)20 7946 0018" leaves out the (0).
  * - One starting with the trunk prefix ("07700 900123") gets the calling code in its place.
- * - One without either is the country's own number written without its trunk prefix ("7700
- *   900123"), or one with the calling code but no + ("44 7700 900123"): told apart by how many
- *   digits the country's numbers have. Where both fit, a country with a trunk prefix takes it as
- *   having the calling code (its own numbers are written with the 0), one without takes it as its
- *   own (Italy's 393 mobiles).
+ * - One without either, in a country with a trunk prefix, is completed only when it starts with the
+ *   calling code ("44 7700 900123"): its own numbers are written with the 0, so "540 555 0101" is
+ *   more likely an American client's kept without its +1 than a UK number missing its 0, and is
+ *   left as typed rather than sent to +44 5405 550101.
+ * - In a country without one, it's the country's own number ("612 345 678" in Spain), or one with
+ *   the calling code but no + ("34 612 345 678"): told apart by how many digits the country's
+ *   numbers have; where both fit, it's taken as the country's own (Italy's 393 mobiles).
  * - A number too long or short for the country is left as typed.
  *
  * Not phoneE164: that one reads every number as North American unless it says otherwise, as
@@ -140,8 +142,23 @@ export function internationalPhone(input: string, country: string | null | undef
     return fits(national) ? `+${dialing.code}${national}` : input;
   }
   const withCode = s.startsWith(dialing.code) && fits(s.slice(dialing.code.length));
-  if (withCode && (dialing.trunk !== "" || !fits(s))) return `+${s}`;
+  if (dialing.trunk) return withCode ? `+${s}` : input;
+  if (withCode && !fits(s)) return `+${s}`;
   return fits(s) ? `+${dialing.code}${s}` : input;
+}
+
+const lastTen = (number: string) => number.replace(/\D/g, "").slice(-10);
+
+/**
+ * The number a text is sent to: internationalPhone's, when replies and STOPs from it will still find
+ * the client. Those are matched by the number's last 10 digits (recipients.ts phoneMatchKey, the
+ * API's phoneKey), which a UK number keeps when "07700 900123" becomes +447700900123. Where the
+ * country code changes them, an Irish "087 123 4567" becoming +353871234567, the number goes as
+ * typed, as it always did, rather than reach someone whose "stop" Crewtavo couldn't match to them.
+ */
+export function textedNumber(input: string, country: string | null | undefined): string {
+  const done = internationalPhone(input, country);
+  return done === input || lastTen(done) === lastTen(input) ? done : input;
 }
 
 /**
