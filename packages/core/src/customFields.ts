@@ -45,19 +45,26 @@ export function customFieldKey(label: string, taken: readonly string[]): string 
 const YES = /^(yes|y|true|1|x|on)$/i;
 const NO = /^(no|n|false|0|off)$/i;
 
-/** "2026-03-04", or "3/4/2026" as a spreadsheet writes it, as YYYY-MM-DD; null when it isn't a real day. */
-function isoDay(text: string): string | null {
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
-  const iso = us ? `${us[3]}-${us[1]!.padStart(2, "0")}-${us[2]!.padStart(2, "0")}` : /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
-  return iso && new Date(`${iso}T00:00:00Z`).toISOString().slice(0, 10) === iso ? iso : null;
+/**
+ * "2026-03-04", or "3/4/2026" as a spreadsheet writes it, as YYYY-MM-DD; null when it isn't a real
+ * day. "3/4/2026" is March 4, or 3 April with `dayFirst`, as a spreadsheet in the UK writes it.
+ */
+function isoDay(text: string, dayFirst = false): string | null {
+  const slashed = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  const [month, day] = slashed ? (dayFirst ? [slashed[2]!, slashed[1]!] : [slashed[1]!, slashed[2]!]) : [];
+  const iso = slashed ? `${slashed[3]}-${month!.padStart(2, "0")}-${day!.padStart(2, "0")}` : /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+  // A month past 12 ("16/10/2026" read month first) is no day at all, rather than an error.
+  const at = iso ? new Date(`${iso}T00:00:00Z`) : null;
+  return at && !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === iso ? iso : null;
 }
 
 /**
  * A value for a field, checked against its type: the value to keep, null to clear it, or why it
- * can't be. Text is trimmed; a number can be written "1,200"; a date is YYYY-MM-DD (or 3/4/2026);
- * a choice is one of the field's, in any case; yes/no is true/false or "yes"/"no".
+ * can't be. Text is trimmed; a number can be written "1,200"; a date is YYYY-MM-DD (or 3/4/2026,
+ * the day first with `dayFirst`); a choice is one of the field's, in any case; yes/no is true/false
+ * or "yes"/"no".
  */
-export function checkCustomValue(field: CustomFieldDef, raw: unknown): { value: CustomValue | null } | { error: string } {
+export function checkCustomValue(field: CustomFieldDef, raw: unknown, { dayFirst = false }: { dayFirst?: boolean } = {}): { value: CustomValue | null } | { error: string } {
   if (raw === null || raw === undefined) return { value: null };
   const text = typeof raw === "string" ? raw.trim() : typeof raw === "number" || typeof raw === "boolean" ? String(raw) : null;
   if (text === null) return { error: `${field.label} can't be that.` };
@@ -68,7 +75,7 @@ export function checkCustomValue(field: CustomFieldDef, raw: unknown): { value: 
       return Number.isFinite(n) && Math.abs(n) < 1e15 ? { value: n } : { error: `${field.label} needs a number.` };
     }
     case "date": {
-      const day = isoDay(text);
+      const day = isoDay(text, dayFirst);
       return day ? { value: day } : { error: `${field.label} needs a date.` };
     }
     case "choice": {

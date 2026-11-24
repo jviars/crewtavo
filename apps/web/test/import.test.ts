@@ -52,6 +52,14 @@ describe("client import", () => {
     expect(hoa!.properties.map((p) => p.custom_fields)).toEqual([{ gate_code: "4821", pool_volume: 12500 }, {}]);
   });
 
+  it("reads a date field's 3/4/2026 as March 4, or as 3 April for a business where the day comes first", () => {
+    const rows = parseCsv(["Client Name,Permit date", "Thames Gardens,3/4/2026"].join("\n"));
+    const mapping = guessMapping(rows[0]!);
+    const columns = customColumns(rows[0]!, mapping, { client: [{ key: "permit", label: "Permit date", type: "date" }], property: [] });
+    expect(toClients(rows.slice(1), mapping, columns.matched)[0]!.custom_fields).toEqual({ permit: "2026-03-04" });
+    expect(toClients(rows.slice(1), mapping, columns.matched, { dayFirst: true })[0]!.custom_fields).toEqual({ permit: "2026-04-03" });
+  });
+
   it("groups a properties export by client and skips repeats and nameless rows", () => {
     const clients = read(["Client Name,Client Email,Street 1,City", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Ln,Rocky Mount", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Lane,Rocky Mount", "Meadowbrook HOA,board@hoa.test,80 Pool Rd,Rocky Mount", ",x@y.test,1 Nowhere,Rocky Mount"].join("\n"));
     expect(clients).toHaveLength(1);

@@ -36,6 +36,11 @@ describe("checking a value against its type", () => {
   it("takes real days, written either way", () => {
     expect(checkCustomValue(permit, "2026-03-04")).toEqual({ value: "2026-03-04" });
     expect(checkCustomValue(permit, "3/4/2026")).toEqual({ value: "2026-03-04" });
+    // Where the day comes first (the UK), a spreadsheet's 3/4/2026 is 3 April, and 16/10/2026 is 16 October.
+    expect(checkCustomValue(permit, "3/4/2026", { dayFirst: true })).toEqual({ value: "2026-04-03" });
+    expect(checkCustomValue(permit, "16/10/2026", { dayFirst: true })).toEqual({ value: "2026-10-16" });
+    expect(checkCustomValue(permit, "16/10/2026")).toHaveProperty("error");
+    expect(checkCustomValue(permit, "2026-03-04", { dayFirst: true })).toEqual({ value: "2026-03-04" });
     expect(checkCustomValue(permit, "2026-02-30")).toHaveProperty("error");
   });
   it("takes one of a choice field's choices, in any case", () => {
