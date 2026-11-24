@@ -81,7 +81,7 @@ async function sendTest(c: Ctx, d: { to?: string; subject: string; body: string;
   const me = must(await c.var.db.from("profiles").select("email, full_name").eq("user_id", c.var.userId).maybeSingle());
   const to = d.to ?? me.email;
   if (!to || !isEmail(to)) throw new HttpError(400, "Add an email address to send the test to.");
-  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, website, address, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, website, address, country, settings").eq("id", c.var.companyId).maybeSingle());
   // A test of a marketing email is held to what the real one is: no postal address, no email.
   const noAddress = d.marketing ? senderAddressProblem(company) : null;
   if (noAddress) throw new HttpError(400, noAddress);

@@ -135,6 +135,25 @@ describe("a company's address, as a marketing email needs it", () => {
     expect(senderAddressProblem({ address: { line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP", country: "United Kingdom" } })).toBeNull();
     expect(senderAddressProblem({ address: { line1: "12 High Street", city: "Leeds", country: "United Kingdom" } })).toBe(SENDER_ADDRESS_NEEDED);
   });
+
+  it("is read as addresses are written in the business's country, since the address doesn't say it", () => {
+    const leeds = { line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" };
+    // A UK address usually has no county.
+    expect(senderAddressProblem({ address: leeds, country: "GB" })).toBeNull();
+    expect(senderAddressProblem({ address: { ...leeds, postal_code: "" }, country: "GB" })).toBe(SENDER_ADDRESS_NEEDED);
+    expect(senderAddressProblem({ address: { line1: "Hauptstraße 1", city: "Berlin", postal_code: "10115" }, country: "DE" })).toBeNull();
+    // A Canadian one has its province, as a US one has its state.
+    const toronto = { line1: "1 King St W", city: "Toronto", postal_code: "M5H 1A1" };
+    expect(senderAddressProblem({ address: toronto, country: "CA" })).toBe(SENDER_ADDRESS_NEEDED);
+    expect(senderAddressProblem({ address: { ...toronto, region: "ON" }, country: "CA" })).toBeNull();
+    for (const country of ["US", null, undefined]) {
+      expect(senderAddressProblem({ address: { ...FULL, region: null }, country }), String(country)).toBe(SENDER_ADDRESS_NEEDED);
+      expect(senderAddressProblem({ address: FULL, country }), String(country)).toBeNull();
+    }
+    // An address that says its country goes by that, as before.
+    expect(senderAddressProblem({ address: { ...leeds, country: "United Kingdom" }, country: "US" })).toBeNull();
+    expect(senderAddressProblem({ address: { ...leeds, country: "US" }, country: "GB" })).toBe(SENDER_ADDRESS_NEEDED);
+  });
 });
 
 describe("a campaign from a company with no address", () => {
@@ -153,6 +172,16 @@ describe("a campaign from a company with no address", () => {
     serve({ tables: tables(FULL) });
     expect((await call(`/campaigns/${CAMPAIGN}/test`)).status).toBe(200);
     expect(sendEmail.mock.calls[0]![1].text).toContain("Acme Lawn · 1 Main St, Radford, VA, 24141");
+  });
+
+  it("goes from a UK business whose address has no county", async () => {
+    const leeds = { line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" };
+    serve({ tables: { ...tables(null), companies: [{ ...company(leeds), country: "GB" }] } });
+    expect((await call(`/campaigns/${CAMPAIGN}/test`)).status).toBe(200);
+    expect(sendEmail.mock.calls[0]![1].text).toContain("Acme Lawn · 12 High Street, Leeds, LS1 4AP");
+    // The same address in the US is missing its state.
+    serve({ tables: { ...tables(null), companies: [{ ...company(leeds), country: "US" }] } });
+    expect(await (await call(`/campaigns/${CAMPAIGN}/test`)).json()).toEqual({ error: SENDER_ADDRESS_NEEDED });
   });
 
   it("doesn't go out when it was scheduled before the address was taken away, and the owners hear once", async () => {

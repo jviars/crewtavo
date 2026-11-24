@@ -216,7 +216,7 @@ export async function sendReviewRequest(env: Env, admin: Db, args: ReviewArgs): 
   const client = await withNumberStop(admin, args.companyId, args.client);
   const name = client.display_name;
   const skipped = (detail: string): ReviewResult => ({ sent: false, link: "", detail, id: "", skipped: true });
-  const { data: company } = await admin.from("companies").select("name, phone, email, address, timezone, settings").eq("id", args.companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("name, phone, email, address, country, timezone, settings").eq("id", args.companyId).maybeSingle();
   if (!company) throw new Error("Company not found.");
   const settings = (company.settings ?? {}) as Record<string, unknown> & { review_url?: string; review_message?: string };
 
@@ -339,7 +339,7 @@ export async function sendDueReminders(env: Env) {
   if (!claimed.length) return tally;
 
   const [companies, clients] = await Promise.all([
-    admin.from("companies").select("id, name, phone, email, address, timezone, settings").in("id", [...new Set(claimed.map((r) => r.company_id))]),
+    admin.from("companies").select("id, name, phone, email, address, country, timezone, settings").in("id", [...new Set(claimed.map((r) => r.company_id))]),
     admin.from("clients").select("id, display_name, email, phone, status, review_opt_out, marketing_opt_out, sms_opt_out_at, reviewed_at").in("id", [...new Set(claimed.map((r) => r.client_id))]),
   ]);
   if (companies.error) throw new Error(companies.error.message);

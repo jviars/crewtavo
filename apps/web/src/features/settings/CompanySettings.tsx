@@ -7,6 +7,7 @@ import { FT_PER_M } from "@crewtavo/core/geo";
 import { GEOFENCE_MODE_HINTS, GEOFENCE_MODE_LABELS, GEOFENCE_NOTE, GEOFENCE_RADIUS, geofence, geofenceRadius, type GeofenceMode } from "@crewtavo/core/geofence";
 import { completesWhenVisitsDone } from "@crewtavo/core/jobBilling";
 import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { regionNeeded } from "@crewtavo/core/postcards";
 import { PRESETS } from "@crewtavo/core/presets";
 import { PRIVACY_URL_MAX, privacyUrlTyped } from "@crewtavo/core/privacyPolicy";
 import { workdays } from "@crewtavo/core/slots";
@@ -200,7 +201,7 @@ export function CompanySettings() {
         </div>
       </Section>
       <Section level={3} title="Shop address">
-        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, {words.regionInText} and {words.postalCodeInText}.</p>
+        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city{regionNeeded(f.country) ? `, ${words.regionInText}` : ""} and {words.postalCodeInText}.</p>
         <div className="set-grid">
           <Field label="Street" className="set-full"><input className="input" value={f.line1} onChange={set("line1")} maxLength={200} /></Field>
           <div className="set-grid set-grid-3 set-full">

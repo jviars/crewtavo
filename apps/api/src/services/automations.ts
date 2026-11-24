@@ -91,6 +91,7 @@ interface CompanyInfo {
   trade_preset: string | null;
   settings: Record<string, unknown>;
   address: Record<string, string | undefined>;
+  country: string;
 }
 
 export interface RunContext {
@@ -242,7 +243,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
   if (!SUBJECTS.includes(subjectType as SubjectKind)) return null;
   const subject = subjectType as SubjectKind;
 
-  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address, country").eq("id", companyId).maybeSingle();
   if (!company) return null;
   const co = company as unknown as CompanyInfo;
   const fmt = (n: number | string | null | undefined) => money(n, co.currency || "USD");

@@ -66,7 +66,7 @@ export async function sendReferralAsk(env: Env, admin: Db, args: ReferralAskArgs
   const automatic = args.automatic === true;
   const { client } = args;
   const skipped = (detail: string): ReferralAskResult => ({ sent: false, detail, id: "", skipped: true });
-  const { data: company } = await admin.from("companies").select("name, phone, email, address, currency, settings").eq("id", args.companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("name, phone, email, address, country, currency, settings").eq("id", args.companyId).maybeSingle();
   if (!company) throw new Error("Company not found.");
   const settings = (company.settings ?? {}) as Record<string, unknown>;
 
