@@ -336,6 +336,8 @@ export default {
   "Change requested:": "Piden un cambio:",
   " visit": " visita",
   " visits": " visitas",
+  "{hours} h": "{hours} h",
+  "{hours} hours booked": "{hours} horas agendadas",
   "No crew": "Sin cuadrilla",
   "Organize this crew's route by distance": "Ordenar la ruta de esta cuadrilla por distancia",
   "Plan route": "Planear ruta",

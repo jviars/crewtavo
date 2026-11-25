@@ -90,7 +90,7 @@ import { buildCalendar } from "../lib/ics";
 import { bookingVisit } from "../services/analytics";
 import { StripeError, verifyStripeSignature, type StripeEvent } from "../services/stripe";
 import { UPLOAD_LIMIT } from "../services/uploads";
-import { membersOfCrews } from "../services/visitPeople";
+import { membersOfCrews, peopleOnVisits } from "../services/visitPeople";
 
 export const publicRoutes = new Hono<AppEnv>();
 
@@ -430,6 +430,23 @@ async function hubFields(admin: ReturnType<typeof adminClient>, companyId: strin
   return { pdf_fields: shown("pdf"), portal_fields: shown("portal") };
 }
 
+/**
+ * A quote or invoice opened through a client's link, never the office's preview: when, for the
+ * office's lists and pages, and on the first open a line in its history that automations can follow
+ * (20261125100200_hub_opens.sql). In the background, so it never slows or fails the page.
+ */
+function opened(c: Context<AppEnv>, l: ClientLink) {
+  if (l.pv || (l.t !== "quote" && l.t !== "invoice")) return;
+  runInBackground(
+    c,
+    (async () => {
+      const { data: first, error } = await adminClient(c.env).rpc("hub_opened", { p_company: l.c, p_kind: l.t, p_id: l.id });
+      if (error) throw dbError(error);
+      if (first) kickAutomations(c, l.c);
+    })(),
+  );
+}
+
 publicRoutes.get("/hub/:token", async (c) => {
   const l = await link(c);
   const admin = adminClient(c.env);
@@ -450,6 +467,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     if (quote.status === "draft" && !l.pv) throw new HttpError(404, "This quote isn't ready yet.");
     // A quote template (no client) never reaches the Client Hub, not even as a preview.
     if (!quote.client_id) throw new HttpError(404, "Quote not found.");
+    opened(c, l);
     const signed = quote.status === "approved" || quote.status === "converted";
     const [lineRows, options, drawings, template, roofPackage, home, fields, reviews] = await Promise.all([
       // The formula only tells the server which line is the tear-off; it's never sent.
@@ -631,6 +649,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     "Invoice not found.",
   );
   if ((invoice.status === "draft" && !l.pv) || invoice.status === "void") throw new HttpError(404, invoice.status === "void" ? "This invoice was cancelled. Contact us with any questions." : "This invoice isn't ready yet.");
+  opened(c, l);
   (invoice.lines as Array<{ sort: number }>).sort((a, b) => a.sort - b.sort);
   // The Hub lists what was paid and refunded against the total. A payment that was only a tip (or
   // the refund of one) doesn't change what's owed, so it isn't among them.
@@ -1534,9 +1553,13 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
   const onIt = (v: (typeof shown)[number]) => visitPeople({ crew_id: v.crew_id, assignees: v.assignees as Array<{ user_id: string }> }, crews).map((user_id) => ({ user_id }));
   const people = [...new Set(shown.flatMap((v) => onIt(v).map((a) => a.user_id)))];
   const names = new Map<string, string>();
+  // Who has a photo to show in place of their initial, when the business shows them (Settings →
+  // Company): never a sub's, whose profile is their own. Served by /hub/:token/visits/:id/faces/:user.
+  const withPhoto = new Set<string>();
+  const showFaces = (settings.settings as { hub_crew_photos?: unknown } | null)?.hub_crew_photos === true;
   if (people.length) {
     const [profiles, subLogins] = await Promise.all([
-      admin.from("profiles").select("user_id, full_name").in("user_id", people),
+      admin.from("profiles").select("user_id, full_name, avatar_url").in("user_id", people),
       admin.from("memberships").select("user_id, subcontractor_id").eq("company_id", companyId).in("user_id", people).not("subcontractor_id", "is", null),
     ]);
     const subOf = new Map((subLogins.data ?? []).map((m) => [m.user_id, m.subcontractor_id as string]));
@@ -1549,6 +1572,7 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
       const name = sub ? contactOf.get(sub) : (profiles.data ?? []).find((p) => p.user_id === id)?.full_name;
       const first = name?.trim().split(/\s+/)[0];
       if (first) names.set(id, first);
+      if (showFaces && !sub && (profiles.data ?? []).some((p) => p.user_id === id && p.avatar_url)) withPhoto.add(id);
     }
   }
   // A move or cancel they asked for that's waiting on the office.
@@ -1560,6 +1584,8 @@ async function clientHome(c: Parameters<typeof appUrl>[0], admin: ReturnType<typ
     id: v.id, title: v.title, scheduled_on: v.scheduled_on, starts_at: v.starts_at, ends_at: v.ends_at, status: v.status, completed_at: v.completed_at,
     address: (v.property as unknown as { line1: string } | null)?.line1 ?? null,
     crew: firstNames(onIt(v), names),
+    // Each of them in the same order: whose photo to show (their id), or null for their initial.
+    faces: onIt(v).filter((a) => names.has(a.user_id)).map((a) => (withPhoto.has(a.user_id) ? a.user_id : null)),
     // Reschedule and Cancel, or "call us": started, done or today's visits aren't changed online.
     can_change: changeableOnline(v, today),
     change_requested: asked.find((a) => a.visit_id === v.id)?.kind ?? null,
@@ -1734,6 +1760,39 @@ publicRoutes.get("/hub/:token/photos/:file", async (c) => {
   if (!within) throw new HttpError(429, LINK_PAUSED);
   return c.body(small.body, 200, { "Content-Type": small.type, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600" });
 });
+/** A crew member's face on the client's visit card: shown 36px, so this is sharp on any screen. */
+const FACE_PX = 144;
+
+// A crew member's photo on one of the client's visits, through the link to their account, when the
+// business shows them (Settings → Company, hub_crew_photos): only someone on that visit and never a
+// sub (their profile is their own), small, and never as a storage link. Else the page shows initials.
+publicRoutes.get("/hub/:token/visits/:id/faces/:file", async (c) => {
+  if (!(await allow(c.env, `hub-photos:ip:${clientIp(c)}`, PHOTOS_AN_HOUR, 60 * 60))) throw new HttpError(429, "Too many requests. Try again later.");
+  const l = await link(c, ["client"]);
+  const visitId = c.req.param("id") ?? "";
+  const userId = (c.req.param("file") ?? "").replace(/\.jpg$/i, "");
+  if (!z.uuid().safeParse(visitId).success || !z.uuid().safeParse(userId).success) throw new HttpError(404, "Photo not found.");
+  const admin = adminClient(c.env);
+  const [company, visit] = await Promise.all([
+    admin.from("companies").select("settings->hub_crew_photos").eq("id", l.c).maybeSingle(),
+    admin.from("visits").select("status, job:jobs(client_id), request:requests(client_id, asked_starts_at)").eq("company_id", l.c).eq("id", visitId).maybeSingle(),
+  ]);
+  if ((company.data as { hub_crew_photos?: unknown } | null)?.hub_crew_photos !== true) throw new HttpError(404, "Photo not found.");
+  const v = must(visit, "Photo not found.");
+  if (v.status === "cancelled" || !clientsVisit(v, l.id)) throw new HttpError(404, "Photo not found.");
+  if (!(await peopleOnVisits(admin, l.c, [visitId])).get(visitId)?.includes(userId)) throw new HttpError(404, "Photo not found.");
+  const [member, profile] = await Promise.all([
+    admin.from("memberships").select("subcontractor_id").eq("company_id", l.c).eq("user_id", userId).maybeSingle(),
+    admin.from("profiles").select("avatar_url").eq("user_id", userId).maybeSingle(),
+  ]);
+  const path = profile.data?.avatar_url;
+  if (!member.data || member.data.subcontractor_id || !path) throw new HttpError(404, "Photo not found.");
+  const stored = await storedFile(admin, path, PHOTO_MAX_BYTES);
+  if (!stored || !isJpeg(stored)) throw new HttpError(404, "Photo not found.");
+  const small = await thumbnail(stored, "image/jpeg", FACE_PX);
+  return c.body(small.body, 200, { "Content-Type": small.type, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600" });
+});
+
 /** The business's public pictures one visitor's address may ask for in an hour: browsers and mail apps keep each one, so a person asks once. */
 const PICTURES_AN_HOUR = 600;
 const TOO_MANY_PICTURES = "Too many requests. Try again later.";

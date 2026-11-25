@@ -183,6 +183,35 @@ describe("sending to the people named", () => {
   });
 });
 
+describe("Send me a copy", () => {
+  const withCopy = (copyTo: string) => ({ ...scope(), copyTo });
+
+  it("sends the sender their own email with the office's link, and keeps it off the timeline", async () => {
+    const result = await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"], copy: true }));
+    expect(result).toMatchObject({ sent: true, sent_to: ["pat@example.com"], copy: { to: "me@ridge.example", sent: true } });
+    const mine = emails.find((m) => m.to === "me@ridge.example")!;
+    expect(mine.text).toContain("Your copy of what was sent to pat@example.com.");
+    expect(mine.text).toContain("/office/inv-1");
+    expect(mine.text).not.toContain("/own/");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.recipients).toEqual([{ to: "pat@example.com", name: "Pat Lee" }]);
+  });
+
+  it("says so when the copy didn't go, and the client's send still stands", async () => {
+    refuse.to.add("me@ridge.example");
+    const result = await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"] }));
+    expect(result).toMatchObject({ sent: true, sent_to: ["pat@example.com"], copy: { to: "me@ridge.example", sent: false, reason: "That email address isn't valid, so Resend didn't send it." } });
+    expect(logged).toHaveLength(1);
+  });
+
+  it("sends no copy when the send reached nobody, or by text", async () => {
+    refuse.to.add("pat@example.com");
+    expect(await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"] }))).not.toHaveProperty("copy");
+    expect(await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ channel: "sms" }))).not.toHaveProperty("copy");
+    expect(emails.map((m) => m.to)).toEqual([]);
+  });
+});
+
 describe("who the Send dialog offers", () => {
   it("is the client and every contact, by email and by text, with who starts ticked", async () => {
     server.tables = { client_contacts: contacts, sms_stops: [{ phone_key: "5405550122" }] };

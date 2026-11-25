@@ -30,7 +30,7 @@ export function settingsGroups(session: Session): Array<{ title: string; items: 
     {
       title: "Business",
       items: [
-        isAdmin && { tab: "company", label: "Company", icon: "home", keywords: "business name address phone email website brand color sales tax time zone workday hours quotes valid invoice due jobs last visit finished mark work complete requires invoicing numbering next number invoice number quote number job number starting number" },
+        isAdmin && { tab: "company", label: "Company", icon: "home", keywords: "business name address phone email website brand color client hub crew photos faces sales tax time zone workday hours quotes valid invoice due jobs last visit finished mark work complete requires invoicing numbering next number invoice number quote number job number starting number" },
         // Autopay's terms, timing and cap, and the cards brought in from Stripe: for the people who look after money.
         isAdmin && can(session, "invoices") && { tab: "payments", label: "Payments", icon: "card", keywords: "payments autopay automatic charge card on file saved card bank receipts tips tip stripe limit cap terms refund" },
         session.role === "owner" && { tab: "data", label: "Your data", icon: "download", keywords: "export download backup all data everything spreadsheet spreadsheets csv excel google sheets zip copy move switch leave another app crm jobber housecall pro" },

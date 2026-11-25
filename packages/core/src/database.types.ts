@@ -858,6 +858,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"conversations_done": {
+                  Row: {
+                    "client_id": string,"company_id": string,"done_at": string,"done_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "client_id": string,"company_id": string,"done_at"?: string,"done_by"?: string | null
+                  }
+                  Update: {
+                    "client_id"?: string,"company_id"?: string,"done_at"?: string,"done_by"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "conversations_done_company_id_client_id_fkey"
+      columns: ["company_id","client_id"]
+isOneToOne: false
+      referencedRelation: "clients"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "conversations_done_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"crew_members": {
                   Row: {
                     "company_id": string,"crew_id": string,"user_id": string
@@ -1163,6 +1189,38 @@ isOneToOne: false
       columns: ["company_id","equipment_id"]
 isOneToOne: false
       referencedRelation: "equipment"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"hub_opens": {
+                  Row: {
+                    "company_id": string,"first_at": string,"invoice_id": string | null,"last_at": string,"quote_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"first_at"?: string,"invoice_id"?: string | null,"last_at"?: string,"quote_id"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"first_at"?: string,"invoice_id"?: string | null,"last_at"?: string,"quote_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "hub_opens_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "hub_opens_invoice_fkey"
+      columns: ["company_id","invoice_id"]
+isOneToOne: true
+      referencedRelation: "invoices"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "hub_opens_quote_fkey"
+      columns: ["company_id","quote_id"]
+isOneToOne: true
+      referencedRelation: "quotes"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -3754,6 +3812,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"upload_links": {
+                  Row: {
+                    "company_id": string,"created_at": string,"expires_at": string,"kind": string,"max_bytes": number,"path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"expires_at": string,"kind": string,"max_bytes": number,"path": string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"expires_at"?: string,"kind"?: string,"max_bytes"?: number,"path"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "upload_links_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"user_signatures": {
                   Row: {
                     "company_id": string,"created_at": string,"image": string,"updated_at": string,"user_id": string
@@ -4780,6 +4858,11 @@ isOneToOne: false
 "expire_sub_offers":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"expired_upload_links":
+{ Args: { "p_limit"?: number }; Returns: {
+              "company_id": string,"links": number,"paths": (string)[]
+            }[]
+                           },
 "finish_automation_run":
 { Args: { "p_error"?: string,"p_id": number,"p_result": Json,"p_status": string,"p_token": string }; Returns: boolean
                            },
@@ -4817,6 +4900,9 @@ isOneToOne: false
                            },
 "hub_deposit_invoice":
 { Args: { "p_company": string,"p_online"?: boolean,"p_quote": string }; Returns: string
+                           },
+"hub_opened":
+{ Args: { "p_company": string,"p_id": string,"p_kind": string }; Returns: boolean
                            },
 "import_jobber":
 { Args: { "p_company": string,"p_kind": string,"p_rows": Json }; Returns: Json
@@ -5672,6 +5758,9 @@ isOneToOne: false
 { Args: { "p_visits": (string)[] }; Returns: {
               "id": string,"price": number,"price_note": string
             }[]
+                           },
+"waiting_conversations":
+{ Args: { "p_company": string }; Returns: number
                            },
 "web_analytics_save":
 { Args: { "p_changes": Json,"p_company": string }; Returns: Json

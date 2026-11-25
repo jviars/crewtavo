@@ -86,7 +86,8 @@ describe("Google's address suggestions on the measuring map", () => {
     expect(box).toContain("onEdit={setAddress}");
     expect(box).not.toContain("onPickPlace");
     expect(box).not.toContain("google=");
-    // Without somewhere to put a place, Google is never asked where it is.
-    expect(read("../src/features/measure/AddressSearch.tsx")).toContain("if (!onPickPlace) return;");
+    expect(box).not.toContain("onPickAddress");
+    // Without somewhere to put a place, or a form's city, state and ZIP boxes to fill, Google is never asked about it.
+    expect(read("../src/features/measure/AddressSearch.tsx")).toContain("if (!onPickPlace && !onPickAddress) return;");
   });
 });

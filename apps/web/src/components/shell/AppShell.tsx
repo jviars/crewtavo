@@ -1,7 +1,7 @@
 import { isPlaceholderEmail } from "@crewtavo/core/email";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useNavigation, useViewTransitionState } from "react-router-dom";
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useNavigation, useNavigationType, useViewTransitionState } from "react-router-dom";
 import { supabase } from "@/lib/api";
 import { logoUrl } from "@/lib/files";
 import { announceTopLayer } from "@/lib/motion";
@@ -17,6 +17,7 @@ import { TaskIsland } from "../ui/TaskIsland";
 import { topLayerProps, useSpace, useTopLayer } from "../ui/topLayer";
 import { CommandPalette, openPalette } from "./CommandPalette";
 import { useChatBadge, useChatLive } from "@/features/chat/data";
+import { useWaitingCount } from "@/features/messages/done";
 import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
 import { signOutNote, subCodeWays } from "@/features/auth/textCode";
 import { inkOn } from "@/features/documents/words";
@@ -104,6 +105,9 @@ function OfflinePill() {
   );
 }
 
+/** How far down each screen in this tab's history was scrolled, by its history entry (location.key). */
+const scrolledTo = new Map<string, number>();
+
 // Fields that don't bring up the phone's keyboard (or a picker in its place).
 const NO_KEYBOARD = new Set(["button", "checkbox", "radio", "range", "color", "file", "submit", "reset", "image", "hidden"]);
 const opensKeyboard = (el: Element | null) =>
@@ -149,10 +153,12 @@ export function AppShell() {
   const shellLang = getLocale() === "es" ? "es" : undefined;
   const navigate = useNavigate();
   const navigation = useNavigation();
+  const navigationType = useNavigationType();
   const online = useOnline();
   const typing = useTyping();
   const counts = useNavCounts();
   const chat = useChatBadge();
+  const waiting = useWaitingCount().data ?? 0;
   const theme = useTheme();
   useChatLive();
   // A sub's job offers waiting for their answer, beside My jobs.
@@ -196,8 +202,14 @@ export function AppShell() {
     }
   }, []);
 
+  // Where this history entry is scrolled to, kept for coming Back to it.
+  const entry = useRef(location.key);
+  entry.current = location.key;
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
+    const onScroll = () => {
+      setScrolled(window.scrollY > 4);
+      scrolledTo.set(entry.current, window.scrollY);
+    };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -215,10 +227,31 @@ export function AppShell() {
     pill.setAttribute("data-placed", "");
   });
 
-  // New screen: start at the top and close the phone menu.
-  useEffect(() => {
-    window.scrollTo({ top: 0 });
+  // New screen: start at the top and close the phone menu. Back (or Forward) to a screen returns to
+  // where it was scrolled, so a client opened from far down the list comes back to that spot.
+  useLayoutEffect(() => {
     setMoreOpen(false);
+    const y = navigationType === "POP" ? scrolledTo.get(location.key) : undefined;
+    if (!y) return void window.scrollTo({ top: 0, behavior: "instant" });
+    // The list may still be drawing its rows: keep trying for a moment until it's tall enough. Someone
+    // scrolling meanwhile wins.
+    const until = performance.now() + 1000;
+    let frame = 0;
+    const restore = () => {
+      window.scrollTo({ top: y, behavior: "instant" });
+      if (Math.abs(window.scrollY - y) > 1 && performance.now() < until) frame = requestAnimationFrame(restore);
+    };
+    const stop = () => cancelAnimationFrame(frame);
+    restore();
+    window.addEventListener("wheel", stop, { once: true, passive: true });
+    window.addEventListener("touchstart", stop, { once: true, passive: true });
+    return () => {
+      stop();
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+    };
+    // Only a new screen: a filter or tab changing the address keeps the page where it is.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   /**
@@ -355,7 +388,11 @@ export function AppShell() {
           {!sub && (
             <>
               <button type="button" className="icon-btn mobile-only" onClick={openPalette} aria-label={t("Search")}><Icon name="search" size={20} /></button>
-              <Link className="icon-btn hide-mobile" to="/messages" aria-label={t("Messages")} title={t("Messages")}><Icon name="messages" size={20} /></Link>
+              <Link className="icon-btn hide-mobile" to="/messages" aria-label={waiting ? t.plural(waiting, { one: "Messages, {count} waiting on a reply", other: "Messages, {count} waiting on a reply" }) : t("Messages")} title={t("Messages")}>
+                <Icon name="messages" size={20} />
+                {/* A client's message waits on the office: as the bell's dot, until it's answered or marked done. */}
+                {waiting > 0 && <span className="notif-dot" aria-hidden="true" />}
+              </Link>
             </>
           )}
           {/* On a phone the team finds Help in More; a sub, who has no More, keeps it here. */}

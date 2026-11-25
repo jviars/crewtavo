@@ -6,8 +6,10 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { NumberInput } from "@/components/ui/NumberInput";
 import { TagInput } from "@/components/ui/TagInput";
 import { api, supabase, unwrap } from "@/lib/api";
+import { shopPlace } from "@/lib/maps";
 import { hasRole, useSession } from "@/lib/session";
 import { CustomFieldInputs, customFieldsToSave, useCustomFields } from "../customFields/CustomFields";
+import { AddressSearch } from "../measure/AddressSearch";
 
 export interface PropertyRow {
   id: string;
@@ -36,6 +38,9 @@ export interface AccessRow {
 /** Add or edit a service address, including gate and lockbox codes (office only), its tags, lot size and the business's own fields. */
 export function PropertyDialog({ clientId, property, access, onClose }: { clientId: string; property?: PropertyRow; access?: AccessRow | null; onClose: () => void }) {
   const session = useSession();
+  // Address suggestions lean toward places near the shop.
+  const shop = shopPlace(session.company);
+  const near = shop?.lat != null && shop.lng != null ? { lat: shop.lat, lng: shop.lng } : null;
   const queryClient = useQueryClient();
   const isOffice = hasRole(session, "admin", "office");
   const [p, setP] = useState({
@@ -98,7 +103,9 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="Label" optional><input className="input" value={p.label} onChange={set("label")} placeholder="Main office, Lot B, Rental #2…" maxLength={80} /></Field>
         {/* No leading spaces, so a street of only spaces is caught as missing. */}
-        <Field label="Street address" requiredMessage="Add the street address so crews can find it."><input className="input" value={p.line1} onChange={(e) => setP({ ...p, line1: e.target.value.trimStart() })} required maxLength={200} autoComplete="off" /></Field>
+        <Field label="Street address" requiredMessage="Add the street address so crews can find it.">
+          <AddressSearch disabled={false} near={near} initial={p.line1} label={null} placeholder="Start typing the address" required maxLength={200} onEdit={(line1) => setP((was) => ({ ...was, line1: line1.trimStart() }))} onPickAddress={(a) => setP((was) => ({ ...was, ...a }))} />
+        </Field>
         <Field label="Apartment, suite or unit" optional><input className="input" value={p.line2} onChange={set("line2")} maxLength={100} /></Field>
         <div className="form-grid-3">
           <Field label="City"><input className="input" value={p.city} onChange={set("city")} maxLength={100} /></Field>

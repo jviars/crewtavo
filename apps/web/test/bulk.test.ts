@@ -1,7 +1,7 @@
 /** Bulk actions on the list pages (lib/bulk.ts): picking rows, writing them in chunks, and what's said after. */
 import { describe, expect, it, vi } from "vitest";
 import { remindInChunks } from "../src/features/invoices/InvoicesPage";
-import { bulkOutcome, inChunks, mergeResults, NOT_CHANGED, pageState, pickedOnPage, toggleAll, toggleOne } from "../src/lib/bulk";
+import { bulkOutcome, inChunks, mergeResults, NOT_CHANGED, pageState, pickedOnPage, toggleAll, toggleOne, toggleRange } from "../src/lib/bulk";
 import { ApiError, OFFLINE } from "../src/lib/errors";
 
 const page = ["a", "b", "c"];
@@ -119,5 +119,23 @@ describe("payment reminders for picked invoices", () => {
     const result = await remindInChunks([inv("a", 1), inv("b", 2)], post, async () => []);
     expect(post).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ done: [], failed: [{ id: "a", reason: "Email isn't set up." }, { id: "b", reason: "Email isn't set up." }] });
+  });
+});
+
+describe("toggleRange", () => {
+  const page = ["a", "b", "c", "d", "e"];
+
+  it("picks every row from the one clicked last to this one, either way up", () => {
+    expect([...toggleRange(new Set(["b"]), page, "b", "d")].sort()).toEqual(["b", "c", "d"]);
+    expect([...toggleRange(new Set(["d"]), page, "d", "a")].sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("unpicks the range when the row clicked is being unpicked", () => {
+    expect([...toggleRange(new Set(["a", "b", "c", "d"]), page, "a", "c")].sort()).toEqual(["d"]);
+  });
+
+  it("is one row alone with nothing clicked before, or a row no longer on the page", () => {
+    expect([...toggleRange(new Set(), page, null, "c")]).toEqual(["c"]);
+    expect([...toggleRange(new Set(["z"]), page, "z", "c")].sort()).toEqual(["c", "z"]);
   });
 });

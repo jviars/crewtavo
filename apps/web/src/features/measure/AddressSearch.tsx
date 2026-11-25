@@ -18,7 +18,9 @@ import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { googlePlace, googlePlacesKey, googleSuggest } from "./googlePlaces";
 
-export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null }
+/** An address in a property's own boxes (a US state as its two letters), for a form to fill in. */
+export interface AddressParts { line1: string; city: string; region: string; postal_code: string }
+export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null; parts?: AddressParts }
 export interface PlaceSuggestion {
   label: string;
   detail: string | null;
@@ -28,13 +30,15 @@ export interface PlaceSuggestion {
   kind: "address" | "street" | "place";
   /** Google said where this is: it's for a map showing Google's tiles, and isn't kept. */
   from?: "google";
+  /** A house's address in its own boxes (OpenStreetMap's, when it knows the house number). */
+  parts?: AddressParts;
 }
 interface Suggestions { clients: ClientSuggestion[]; places: PlaceSuggestion[]; places_unavailable?: boolean }
 
 type Item = { key: string; group: string; icon: IconName; title: string; sub: string | null; pick: () => void };
 
 export function AddressSearch({
-  disabled, busy, near, onSubmit, onPickClient, onPickPlace, onEdit, initial = "", placeholder = "Search a client or an address, US or worldwide", label = "Search a client or an address", google: googleAllowed = true,
+  disabled, busy, near, onSubmit, onPickClient, onPickPlace, onPickAddress, onEdit, initial = "", placeholder = "Search a client or an address, US or worldwide", label = "Search a client or an address", google: googleAllowed = true, required, maxLength = 300,
 }: {
   disabled: boolean;
   /** An exact lookup is running. */
@@ -45,6 +49,13 @@ export function AddressSearch({
   onSubmit?: (text: string) => void;
   onPickClient?: (s: ClientSuggestion) => void;
   onPickPlace?: (s: PlaceSuggestion) => void;
+  /**
+   * A form's street box: a picked house fills in its city, state and ZIP too (onEdit gets just the
+   * street). A street or a town picked is only words in the box, as before.
+   */
+  onPickAddress?: (address: AddressParts) => void;
+  required?: boolean;
+  maxLength?: number;
   /** The text in the box, as typed or picked. */
   onEdit: (text: string) => void;
   initial?: string;
@@ -109,24 +120,35 @@ export function AddressSearch({
     setOpen(false);
     setIndex(-1);
   };
-  const choose = (pick: () => void, label: string) => {
+  /** A house picked for a form: the street in the box, the rest in the form's own boxes. */
+  const fill = (parts: AddressParts) => {
+    setText(parts.line1);
+    onEdit(parts.line1);
+    onPickAddress?.(parts);
+  };
+  const choose = (pick: () => void, label: string, parts?: AddressParts) => {
     setText(label);
     close();
     onEdit(label);
     pick();
+    if (parts && onPickAddress) fill(parts);
   };
   /** A place Google suggested: where it is, when the map needs to go there; else just its words. */
   const pickGoogle = (placeId: string, place: Omit<PlaceSuggestion, "lat" | "lng" | "country">) => {
     const session = sessionToken();
     googleSession.current = null;
     const label = [place.label, place.detail].filter(Boolean).join(", ");
-    if (!onPickPlace) return;
+    if (!onPickPlace && !onPickAddress) return;
     setLocating(true);
     googlePlace(googleKey!, placeId, session)
-      // Not Google's tiles anymore: the words are looked up the other way instead.
-      .then((at) => (googleNow.current ? onPickPlace({ ...place, ...at, from: "google" }) : onSubmit?.(label)))
-      // Google's lookup failing: look the address up the other way.
-      .catch(() => onSubmit?.(label))
+      .then((at) => {
+        // A form takes only the address's words, into its own boxes.
+        if (onPickAddress && at.parts) fill(at.parts);
+        // Not Google's tiles anymore: the words are looked up the other way instead.
+        if (onPickPlace) void (googleNow.current ? onPickPlace({ ...place, ...at, from: "google" }) : onSubmit?.(label));
+      })
+      // Google's lookup failing: look the address up the other way (a form keeps the words picked).
+      .catch(() => onPickPlace && onSubmit?.(label))
       .finally(() => setLocating(false));
   };
   const data = term.length >= 3 ? suggest.data : undefined;
@@ -138,7 +160,7 @@ export function AddressSearch({
       icon: "user" as IconName,
       title: s.label,
       sub: [s.client, s.detail].filter(Boolean).join(" · ") || null,
-      pick: () => choose(() => onPickClient?.(s), [s.label, s.detail].filter(Boolean).join(", ")),
+      pick: () => choose(() => onPickClient?.(s), [s.label, s.detail].filter(Boolean).join(", "), s.parts),
     })),
     ...(data?.places ?? []).map((s, i) => ({
       key: `p-${i}-${s.label}`,
@@ -146,7 +168,7 @@ export function AddressSearch({
       icon: (s.kind === "place" ? "map" : "pin") as IconName,
       title: s.label,
       sub: s.detail,
-      pick: () => choose(() => onPickPlace?.(s), [s.label, s.detail].filter(Boolean).join(", ")),
+      pick: () => choose(() => onPickPlace?.(s), [s.label, s.detail].filter(Boolean).join(", "), s.parts),
     })),
     ...fromGoogle.map((s) => ({
       key: `g-${s.placeId}`,
@@ -215,7 +237,8 @@ export function AddressSearch({
         disabled={disabled}
         value={text}
         onFocus={() => setOpen(true)}
-        maxLength={300}
+        required={required}
+        maxLength={maxLength}
         onChange={(e) => {
           setText(e.target.value);
           setOpen(true);

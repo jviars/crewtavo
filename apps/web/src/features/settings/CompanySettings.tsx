@@ -70,6 +70,7 @@ export function CompanySettings() {
       arrival_window_min: String(arrivalWindowMin(s)),
       color: s.branding?.color ?? "#0f2a35",
       hub_tips: s.hub_tips ? "1" : "",
+      hub_crew_photos: s.hub_crew_photos === true ? "1" : "",
       record_location: s.clock?.record_location === false ? "" : "1",
       breaks: breakPay(s),
       clock_mode: clockMode(s),
@@ -127,6 +128,8 @@ export function CompanySettings() {
         arrival_window_min: Number(v.arrival_window_min),
         branding: { color: v.color },
         hub_tips: v.hub_tips === "1",
+        // Read by the server when it shows a client their visits (routes/public.ts): off unless chosen.
+        hub_crew_photos: v.hub_crew_photos === "1",
         // mode: read by the database too, when a visit is finished (private.clock_mode).
         // geofence: the clock at the property, off unless chosen here (core/geofence.ts).
         clock: { record_location: v.record_location === "1", breaks: v.breaks, mode: v.clock_mode, geofence: { mode: v.geofence_mode, radius: geofenceRadius(v.geofence_radius) } },
@@ -194,6 +197,14 @@ export function CompanySettings() {
               <input type="color" className="set-swatch" value={f.color} onChange={set("color")} aria-label={ownColor ? "Custom brand color, in use" : "Custom brand color"} title="Your own color" data-on={ownColor || undefined} />
             </div>
           </div>
+        </div>
+        <div className="set-rows">
+          <SwitchRow
+            label="Show the crew's photos in the Client Hub"
+            hint="On a client's visit, each person's profile photo in place of their initial, so they know who's coming. Never a subcontractor's. Off: initials only."
+            checked={f.hub_crew_photos === "1"}
+            onChange={(on) => setF({ ...f, hub_crew_photos: on ? "1" : "" })}
+          />
         </div>
       </Section>
       <Section level={3} title="Shop address">

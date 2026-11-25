@@ -7,6 +7,7 @@
  * its name on suggestions shown without a Google map, which AddressSearch heads "From Google Maps".
  */
 import type { MapSettings } from "@crewtavo/core/imagery";
+import type { AddressParts } from "./AddressSearch";
 
 const PLACES = "https://places.googleapis.com/v1";
 
@@ -23,6 +24,8 @@ export interface GooglePlace {
   lng: number;
   /** Two-letter country code. */
   country: string | null;
+  /** A house's address in a property's own boxes, when Google gave its number and street. */
+  parts?: AddressParts;
 }
 
 /** The company's own Google key, when it turned on Google's address suggestions in Settings > Maps. */
@@ -84,14 +87,19 @@ export async function googleSuggest(key: string, input: string, near: { lat: num
 
 /** Where a suggested place is. Ends the session its suggestions were asked in. */
 export async function googlePlace(key: string, placeId: string, session: string): Promise<GooglePlace> {
-  const body = await ask<{ location?: { latitude?: number; longitude?: number }; addressComponents?: Array<{ shortText?: string; types?: string[] }> }>(
+  const body = await ask<{ location?: { latitude?: number; longitude?: number }; addressComponents?: Array<{ longText?: string; shortText?: string; types?: string[] }> }>(
     `${PLACES}/places/${encodeURIComponent(placeId)}?${new URLSearchParams({ sessionToken: session })}`,
     { headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": "location,addressComponents" } },
   );
   const { latitude: lat, longitude: lng } = body.location ?? {};
   if (typeof lat !== "number" || typeof lng !== "number") throw new PlacesError("Google didn't say where that place is.");
-  const country = body.addressComponents?.find((c) => c.types?.includes("country"))?.shortText?.toUpperCase() ?? null;
-  return { lat, lng, country };
+  const part = (type: string) => body.addressComponents?.find((c) => c.types?.includes(type));
+  const country = part("country")?.shortText?.toUpperCase() ?? null;
+  const street = [part("street_number")?.longText, part("route")?.shortText].filter(Boolean).join(" ");
+  const parts = part("street_number") && street
+    ? { line1: street, city: (part("locality") ?? part("postal_town") ?? part("sublocality"))?.longText ?? "", region: part("administrative_area_level_1")?.shortText ?? "", postal_code: part("postal_code")?.longText ?? "" }
+    : undefined;
+  return { lat, lng, country, ...(parts ? { parts } : {}) };
 }
 
 /** Settings > Maps: whether this key can suggest places. A sentence to show, or null when it works. */

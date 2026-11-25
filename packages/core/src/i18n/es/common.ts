@@ -598,6 +598,7 @@ export default {
 
   // The app's frame and notifications (components/shell/AppShell.tsx, Notifications.tsx)
   "{count} past due": { one: "{count} vencida", other: "{count} vencidas" },
+  "Messages, {count} waiting on a reply": { one: "Mensajes, {count} esperando respuesta", other: "Mensajes, {count} esperando respuesta" },
   "Match device": "Igual que el dispositivo",
   "Earlier": "Anteriores",
   "Mark all read": "Marcar todo como leído",
@@ -656,6 +657,18 @@ export default {
   // A client's preview card, and a toast that waits on something (components/ui/ClientPreview.tsx, features/settings/NotificationSettings.tsx)
   "Owes {amount}": "Debe {amount}",
   "Nothing owed": "No debe nada",
+  "Next visit {when}": "Próxima visita {when}",
+
+  // A record's place in the list it was opened from (components/ui/RecordSteps.tsx)
+  "This list": "Esta lista",
+  "{n} of {count}": "{n} de {count}",
+  "Previous in the list": "Anterior en la lista",
+  "Next in the list": "Siguiente en la lista",
+  "Previous (K)": "Anterior (K)",
+  "Next (J)": "Siguiente (J)",
+
+  // An email box's check for a slip on a common mailbox (components/ui/EmailTypo.tsx)
+  "Did you mean <fix>{email}</fix>?": "¿Quiso decir <fix>{email}</fix>?",
   "Sending a test…": "Enviando una prueba…",
   "The test didn't send": "La prueba no se envió",
 

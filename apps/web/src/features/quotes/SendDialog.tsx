@@ -8,6 +8,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { useEmailTypo } from "@/components/ui/EmailTypo";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
@@ -27,6 +28,26 @@ interface Sent {
   /** Who it went to, and anyone it didn't reach (a server from before it sent to several says neither). */
   sent_to?: string[];
   not_sent?: Array<{ to: string; reason: string }>;
+  /** The sender's own copy, when they asked for one. */
+  copy?: { to: string; sent: boolean; reason?: string };
+}
+
+// "Send me a copy" stays as this person last left it, on this device: there's no per-person setting to keep it in.
+const copyKey = (companyId: string, userId: string) => `crewtavo.send-copy.${companyId}.${userId}`;
+function readCopy(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+function storeCopy(key: string, on: boolean) {
+  try {
+    if (on) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
+  } catch {
+    // Private mode: it starts unticked next time.
+  }
 }
 
 export function SendDialog({
@@ -49,7 +70,9 @@ export function SendDialog({
   onClose: () => void;
   onSent?: () => void;
 }) {
-  const { company, config } = useSession();
+  const { company, config, userId } = useSession();
+  const copyAt = copyKey(company.id, userId);
+  const [copyMe, setCopyMe] = useState(() => readCopy(copyAt));
   const [channel, setChannel] = useState<Channel>(email ? "email" : phone && !textsOffSince ? "sms" : "link");
   const label = (kind === "quote" ? t("Quote #{number}", { number: number ?? "" }) : t("Invoice #{number}", { number: number ?? "" })).trim();
   // i18n-ignore: the email's subject, which the client reads (clients are written to in English for now)
@@ -68,6 +91,8 @@ export function SendDialog({
   // Who's ticked by email and by text, once the person has changed it; before that, who starts ticked.
   const [picked, setPicked] = useState<Partial<Record<SendChannel, string[]>>>({});
   const [typed, setTyped] = useState<Record<SendChannel, string>>({ email: "", sms: "" });
+  // A slip in the address typed ("gmial.com"): the quote would bounce where nobody sees it.
+  const typo = useEmailTypo(typed.email, (email) => setTyped((was) => ({ ...was, email })));
   const people = channel === "link" ? [] : offered[channel];
   const ticked = channel === "link" ? [] : (picked[channel] ?? people.filter((p) => p.ticked).map((p) => p.to));
   const list = channel === "link" ? [] : sendList(channel, ticked, typed[channel]);
@@ -80,7 +105,7 @@ export function SendDialog({
 
   const send = useMutation({
     meta: { inline: true },
-    mutationFn: () => api.post<Sent>(`/${kind}s/${id}/send`, sendPayload({ channel, list, subject, message })),
+    mutationFn: () => api.post<Sent>(`/${kind}s/${id}/send`, { ...sendPayload({ channel, list, subject, message }), ...(channel === "email" && copyMe ? { copy: true } : {}) }),
     onSuccess: (r) => {
       onSent?.();
       if (channel === "link") copyText(r.link, t("Link copied. Paste it into a message to your client."));
@@ -102,6 +127,7 @@ export function SendDialog({
             <div className="stack-sm" style={{ justifyItems: "center", textAlign: "center", padding: "8px 0" }}>
               <span className="success-mark"><Icon name="check" size={30} bold /></span>
               <strong style={{ fontSize: 16 }}>{channel === "email" ? t("Emailed to {who}", { who: listWords(reached) }) : t("Texted to {who}", { who: listWords(reached) })}</strong>
+              {done.copy?.sent && <span className="muted small">{t("A copy went to {who}.", { who: done.copy.to })}</span>}
               {config.features.devMail && <span className="muted small">{t("Development mode: it's in the local Mailpit inbox.")}</span>}
             </div>
           ) : (
@@ -110,6 +136,9 @@ export function SendDialog({
           {done.not_sent?.map((missed) => (
             <div key={missed.to} className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{t("It didn't reach {who}.", { who: missed.to })} <span style={{ fontWeight: 400 }}>{translateError(getLocale(), missed.reason)}</span></div></div>
           ))}
+          {done.copy && !done.copy.sent && (
+            <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{t("Your copy didn't go.")} <span style={{ fontWeight: 400 }}>{translateError(getLocale(), done.copy.reason ?? "")}</span></div></div>
+          )}
           <div className="field">
             <span>{t("Client link")}</span>
             <div className="row">
@@ -163,7 +192,7 @@ export function SendDialog({
             <Field
               label={people.length ? (channel === "email" ? t("Another address") : t("Another number")) : channel === "email" ? t("To") : t("Mobile number")}
               optional={people.length > 0}
-              hint={channel === "email" && people.length > 0 ? t("For more than one, put a comma between them.") : undefined}
+              hint={channel === "email" ? (typo.hint ?? (people.length > 0 ? t("For more than one, put a comma between them.") : undefined)) : undefined}
               requiredMessage={channel === "email" ? t("Add the email to send it to.") : t("Add the number to text it to.")}
             >
               <input
@@ -173,6 +202,7 @@ export function SendDialog({
                 value={typed[channel]}
                 onChange={(e) => setTyped({ ...typed, [channel]: channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value })}
                 required={people.length === 0}
+                onBlur={channel === "email" ? typo.onBlur : undefined}
                 placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"}
               />
             </Field>
@@ -183,6 +213,19 @@ export function SendDialog({
             <Field label={t("Message")} optional hint={t("The link is added automatically.")}>
               <textarea className="textarea" value={message} onChange={(e) => setMessage(e.target.value)} maxLength={channel === "sms" ? 400 : 4000} placeholder={kind === "quote" ? t("Thanks for having us out. Here's what we recommend…") : t("Thanks for your business.")} />
             </Field>
+          )}
+          {channel === "email" && (
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={copyMe}
+                onChange={(e) => {
+                  setCopyMe(e.target.checked);
+                  storeCopy(copyAt, e.target.checked);
+                }}
+              />
+              {t("Send me a copy")}
+            </label>
           )}
           {channel === "link" && <p className="muted" style={{ margin: 0 }}>{kind === "quote" ? t("Copies a link you can paste into any message, and marks the quote as sent.") : t("Copies a link you can paste into any message, and marks the invoice as sent.")}</p>}
           <FormError error={send.error} />

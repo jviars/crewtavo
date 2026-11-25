@@ -825,7 +825,8 @@ describe("place suggestions on the measuring map", () => {
     const calls = serve(() => photon);
     const places = await suggestPlaces("  418  Pell ", { lat: 36.9958, lng: -79.8862 });
     expect(places).toEqual([
-      { label: "418 Pell Avenue", detail: "Rocky Mount, Virginia", lat: 36.99, lng: -79.88, country: "US", kind: "address" },
+      // A house also comes in a property's own boxes, its state as two letters, for a form to fill in.
+      { label: "418 Pell Avenue", detail: "Rocky Mount, Virginia", lat: 36.99, lng: -79.88, country: "US", kind: "address", parts: { line1: "418 Pell Avenue", city: "Rocky Mount", region: "VA", postal_code: "" } },
       { label: "Diamond Avenue", detail: "Rocky Mount, Virginia", lat: 37, lng: -79.87, country: "US", kind: "street" },
       { label: "Hyde Park Corner", detail: "London, England, United Kingdom", lat: 51.5, lng: -0.15, country: "GB", kind: "place" },
     ]);

@@ -21,6 +21,7 @@ import { MessageBody } from "../clients/MessageBody";
 import { messageFrom, messagePeople } from "../clients/messagePeople";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ConversationRow } from "./ConversationRow";
+import { isWaiting, useDoneMarks, useMarkDone } from "./done";
 import { UnknownRows, UnknownThread, useUnknownNumbers } from "./UnknownNumbers";
 import { matchingNumbers } from "./unknownTexts";
 
@@ -45,6 +46,8 @@ export function MessagesPage() {
   // A number that isn't a client's or a contact's, by its last 10 digits (UnknownNumbers.tsx).
   const unknown = params.get("unknown");
   const strangers = useUnknownNumbers();
+  const marks = useDoneMarks().data;
+  const markDone = useMarkDone();
   const f = FILTERS.find((x) => x.key === filter)!;
 
   const messages = useQuery({
@@ -100,19 +103,27 @@ export function MessagesPage() {
                 <UnknownRows numbers={unknownNumbers} selected={unknown} onOpen={(key) => setParams({ unknown: key }, { replace: true })} />
                 {conversations.length > 0 && (
                   <InboxGroup label={unknownNumbers.length ? "Clients" : undefined} count={unknownNumbers.length ? conversations.length : undefined}>
-                    {conversations.map((c) => (
+                    {conversations.map((c) => {
+                      const waiting = isWaiting(c, marks?.get(c.client!.id));
+                      return (
                       <ConversationRow
                         key={c.client!.id}
                         name={c.client!.display_name}
                         current={selected === c.client!.id}
-                        unread={c.direction === "in" ? "Latest message is from the client" : undefined}
+                        unread={waiting ? "Waiting on a reply: the latest message is the client's" : undefined}
                         at={c.created_at}
                         onOpen={() => open(c.client!.id)}
+                        actions={waiting && marks && (
+                          <button type="button" className="icon-btn" aria-label={`Mark ${c.client!.display_name}'s conversation done`} title="Done: no reply needed" onClick={() => markDone.mutate({ clientId: c.client!.id, name: c.client!.display_name })}>
+                            <Icon name="check" size={16} />
+                          </button>
+                        )}
                       >
                         <Icon name={ICON[c.channel] ?? "messages"} size={13} />
                         <span>{c.direction === "in" ? "" : c.direction === "internal" ? "Note: " : "You: "}{c.subject ? `${c.subject} · ` : ""}<MessageBody body={c.body} /></span>
                       </ConversationRow>
-                    ))}
+                      );
+                    })}
                   </InboxGroup>
                 )}
               </InboxList>
@@ -144,6 +155,8 @@ const dayLabel = (iso: string) => {
 function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) {
   const session = useSession();
   const queryClient = useQueryClient();
+  const marks = useDoneMarks().data;
+  const markDone = useMarkDone();
   const body = useRef<HTMLDivElement>(null);
   const thread = useQuery({
     queryKey: ["client", clientId, "thread"],
@@ -171,6 +184,8 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
     );
   if (thread.error || !thread.data.client) return <div className="thread-empty"><ErrorState error={thread.error ?? new ApiError("This client no longer exists. They may have been deleted.", 404)} onRetry={thread.error ? () => thread.refetch() : undefined} /></div>;
   const { client, rows } = thread.data;
+  const latest = rows[rows.length - 1];
+  const waiting = Boolean(marks && latest && isWaiting(latest, marks.get(client.id)));
   let lastDay = "";
   return (
     <div className="thread">
@@ -180,6 +195,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
           <Link to={`/clients/${client.id}`} className="who-name">{client.display_name}</Link>
           <span className="who-sub">{[client.phone, client.email].filter(Boolean).join(" · ") || "No phone or email on file"}</span>
         </span>
+        {waiting && <Button size="sm" icon="check" className="thread-done" title="The client's last message needs no reply" onClick={() => markDone.mutate({ clientId: client.id, name: client.display_name })}>Done</Button>}
         {client.phone && <a className="btn btn-sm btn-ghost btn-icon thread-call" href={`tel:${client.phone}`} aria-label={`Call ${client.display_name}`} title={`Call ${client.display_name}`}><Icon name="phone" size={16} /></a>}
       </div>
       <div className="thread-body" ref={body}>
@@ -211,7 +227,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
           );
         })}
       </div>
-      <Composer key={client.id} client={client} onSent={() => { queryClient.invalidateQueries({ queryKey: ["client", clientId] }); queryClient.invalidateQueries({ queryKey: ["messages", session.company.id] }); }} />
+      <Composer key={client.id} client={client} onSent={() => { queryClient.invalidateQueries({ queryKey: ["client", clientId] }); queryClient.invalidateQueries({ queryKey: ["messages", session.company.id] }); queryClient.invalidateQueries({ queryKey: ["conversations-waiting", session.company.id] }); }} />
     </div>
   );
 }

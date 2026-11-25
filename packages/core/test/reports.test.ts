@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expenseCosts, jobProfit, materialUse, serviceFigures, type ServiceItem, type ServiceLineRow } from "../src";
+import { calendarWords, expenseCosts, jobProfit, materialUse, resolveRange, serviceFigures, stepRange, type ServiceItem, type ServiceLineRow } from "../src";
 
 const items: ServiceItem[] = [
   { id: "s1", name: "Mowing", category: "Lawn", unit_cost: 20, labor_cost: 15 },
@@ -144,5 +144,48 @@ describe("job costs count labor and materials once", () => {
     const profit = jobProfit([byTon, paving], [], expenses, () => 0);
     expect(profit.jobs[0]).toMatchObject({ expenses: 120, expenses_in_line_costs: 3795, materials: 3680, cost: 3800, profit: 1920 });
     expect(profit.jobs[1]).toMatchObject({ expenses: 55, expenses_in_line_costs: 0 });
+  });
+});
+
+describe("date ranges a step at a time", () => {
+  const today = "2026-11-24";
+  const at = (key: Parameters<typeof resolveRange>[0], custom?: { from: string; to: string }) => resolveRange(key, today, "America/New_York", custom);
+  const back = (key: Parameters<typeof resolveRange>[0], custom?: { from: string; to: string }) => stepRange(at(key, custom), -1, today);
+  const on = (key: Parameters<typeof resolveRange>[0], custom?: { from: string; to: string }) => stepRange(at(key, custom), 1, today);
+
+  it("has last quarter, the whole quarter before this one, across a new year too", () => {
+    expect(at("last_quarter")).toMatchObject({ from: "2026-07-01", to: "2026-09-30", label: "Last quarter", days: 92 });
+    expect(resolveRange("last_quarter", "2026-02-10", "UTC")).toMatchObject({ from: "2025-10-01", to: "2025-12-31" });
+  });
+
+  it("says a whole month, quarter or year as people do, and any other range by its dates", () => {
+    expect(calendarWords("2026-10-01", "2026-10-31")).toBe("October 2026");
+    expect(calendarWords("2026-07-01", "2026-09-30")).toBe("Q3 2026");
+    expect(calendarWords("2025-01-01", "2025-12-31")).toBe("2025");
+    expect(calendarWords("2026-08-01", "2026-10-31")).toBeNull();
+    expect(at("custom", { from: "2026-09-01", to: "2026-09-30" }).label).toBe("September 2026");
+    expect(at("custom", { from: "2026-09-02", to: "2026-09-30" }).label).toBe("Sep 2 – Sep 30");
+  });
+
+  it("moves a month, quarter or year by the calendar, landing on a preset where there is one", () => {
+    expect(back("month")).toEqual({ key: "last_month" });
+    expect(back("last_month")).toEqual({ key: "custom", from: "2026-09-01", to: "2026-09-30" });
+    expect(on("custom", { from: "2026-09-01", to: "2026-09-30" })).toEqual({ key: "last_month" });
+    expect(on("last_month")).toEqual({ key: "month" });
+    expect(back("quarter")).toEqual({ key: "last_quarter" });
+    expect(back("last_quarter")).toEqual({ key: "custom", from: "2026-04-01", to: "2026-06-30" });
+    expect(back("year")).toEqual({ key: "last_year" });
+    expect(back("last_year")).toEqual({ key: "custom", from: "2024-01-01", to: "2024-12-31" });
+    expect(back("custom", { from: "2026-01-01", to: "2026-03-31" })).toEqual({ key: "custom", from: "2025-10-01", to: "2025-12-31" });
+  });
+
+  it("moves any other range by its own number of days, and never later than today", () => {
+    expect(back("30d")).toEqual({ key: "custom", from: "2026-09-26", to: "2026-10-25" });
+    expect(on("custom", { from: "2026-09-26", to: "2026-10-25" })).toEqual({ key: "30d" });
+    expect(back("custom", { from: "2026-11-01", to: "2026-11-10" })).toEqual({ key: "custom", from: "2026-10-22", to: "2026-10-31" });
+    expect(on("custom", { from: "2026-11-01", to: "2026-11-10" })).toEqual({ key: "custom", from: "2026-11-11", to: "2026-11-20" });
+    // A step that would pass today ends today instead, the same number of days long.
+    expect(on("custom", { from: "2026-11-06", to: "2026-11-15" })).toEqual({ key: "custom", from: "2026-11-15", to: "2026-11-24" });
+    for (const key of ["month", "quarter", "year", "30d", "90d"] as const) expect(on(key)).toBeNull();
   });
 });

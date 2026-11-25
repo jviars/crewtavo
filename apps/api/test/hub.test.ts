@@ -461,6 +461,77 @@ describe("the crew on the client's home page", () => {
   });
 });
 
+describe("the crew's photos on the client's visits", () => {
+  const CY = "00000000-0000-4000-8000-0000000000e1";
+  const AL = "00000000-0000-4000-8000-0000000000e2";
+  const DEE = "00000000-0000-4000-8000-0000000000e3";
+  const VISIT = "00000000-0000-4000-8000-0000000000e4";
+  const face = (user: string) => `${ROOFER}/avatars/${user}/00000000-0000-4000-8000-0000000000e9.jpg`;
+  beforeEach(() => {
+    Object.assign(state.tables, {
+      jobs: [{ id: "job-1", company_id: ROOFER, client_id: CLIENT }],
+      visits: [{
+        id: VISIT, company_id: ROOFER, job_id: "job-1", title: "Tear off", scheduled_on: "2099-01-01", starts_at: null, ends_at: null, status: "scheduled", completed_at: null,
+        crew_id: null, property: null, assignees: [{ user_id: CY }, { user_id: AL }], job: { client_id: CLIENT }, request: null,
+      }],
+      // Cy is on the crew; Al is a sub, whose profile (photo and all) is their own; Dee isn't on the visit.
+      profiles: [{ user_id: CY, full_name: "Cy Crewman", avatar_url: face(CY) }, { user_id: AL, full_name: "Al", avatar_url: face(AL) }, { user_id: DEE, full_name: "Dee", avatar_url: face(DEE) }],
+      memberships: [
+        { company_id: ROOFER, user_id: CY, role: "field_crew", subcontractor_id: null },
+        { company_id: ROOFER, user_id: AL, role: "subcontractor", subcontractor_id: "apex" },
+        { company_id: ROOFER, user_id: DEE, role: "field_crew", subcontractor_id: null },
+      ],
+      subcontractors: [{ id: "apex", company_id: ROOFER, name: "Apex Roofing LLC", contact_name: "Albert Apex" }],
+    });
+    for (const user of [CY, AL, DEE]) state.files[face(user)] = JPEG;
+  });
+  const showPhotos = () => Object.assign(state.tables.companies![0]!.settings as Row, { hub_crew_photos: true });
+
+  it("are initials until the business shows them, and never a sub's", async () => {
+    expect((await (await hub({ t: "client", id: CLIENT })).json()).visits[0].faces).toEqual([null, null]);
+    expect((await hub({ t: "client", id: CLIENT }, `/visits/${VISIT}/faces/${CY}.jpg`)).status).toBe(404);
+    showPhotos();
+    expect((await (await hub({ t: "client", id: CLIENT })).json()).visits[0]).toMatchObject({ crew: ["Cy", "Albert"], faces: [CY, null] });
+  });
+
+  it("sends only someone on the client's visit, through the link to their account", async () => {
+    showPhotos();
+    const res = await hub({ t: "client", id: CLIENT }, `/visits/${VISIT}/faces/${CY}.jpg`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect((await hub({ t: "client", id: CLIENT }, `/visits/${VISIT}/faces/${AL}.jpg`)).status).toBe(404);
+    expect((await hub({ t: "client", id: CLIENT }, `/visits/${VISIT}/faces/${DEE}.jpg`)).status).toBe(404);
+    expect((await hub({ t: "quote", id: QUOTE }, `/visits/${VISIT}/faces/${CY}.jpg`)).status).toBe(404);
+    (state.tables.visits![0]! as Row).job = { client_id: "someone-else" };
+    expect((await hub({ t: "client", id: CLIENT }, `/visits/${VISIT}/faces/${CY}.jpg`)).status).toBe(404);
+  });
+});
+
+describe("a client opening a quote or invoice", () => {
+  const opens = () => state.calls.filter((c) => c.name === "hub_opened").map((c) => c.args);
+
+  it("is recorded through their link, never the office's preview", async () => {
+    state.rpcs.hub_opened = () => ({ data: true, error: null });
+    await hub({ t: "quote", id: QUOTE, pv: 1 });
+    await new Promise((done) => setTimeout(done, 0));
+    expect(opens()).toEqual([]);
+    expect((await hub({ t: "quote", id: QUOTE })).status).toBe(200);
+    await vi.waitFor(() => expect(opens()).toEqual([{ p_company: ROOFER, p_kind: "quote", p_id: QUOTE }]));
+  });
+
+  it("never fails the page", async () => {
+    state.rpcs.hub_opened = () => ({ data: null, error: { message: "boom" } });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect((await hub({ t: "quote", id: QUOTE })).status).toBe(200);
+  });
+
+  it("isn't opening each of them from the client's account page", async () => {
+    await hub({ t: "client", id: CLIENT });
+    await new Promise((done) => setTimeout(done, 0));
+    expect(opens()).toEqual([]);
+  });
+});
+
 describe("photos from the client's finished visits", () => {
   const PHOTO = "00000000-0000-4000-8000-0000000000f7";
   const HIDDEN = "00000000-0000-4000-8000-0000000000f8";

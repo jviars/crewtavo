@@ -39,6 +39,11 @@ export interface SalesScope {
    * (sendTo), and never just for the link (lib/noAssistants.ts).
    */
   assistant?: boolean;
+  /**
+   * "Send me a copy": the sending person's own email on file (routes/sales.ts), never an address the
+   * browser names. Empty when they asked for one and have no email on file.
+   */
+  copyTo?: string;
 }
 
 export const sendSchema = z.object({
@@ -55,6 +60,8 @@ export const sendSchema = z.object({
     .describe("Every email address (or phone number, for a text) to send it to, 10 at most. Leave out to send to the client and their contacts ticked for emails or texts."),
   subject: z.string().trim().max(200).optional(),
   message: z.string().max(4000).optional(),
+  // An email copy to the person sending: the route reads their address (SalesScope.copyTo).
+  copy: z.boolean().optional(),
 });
 export type SendBody = z.infer<typeof sendSchema>;
 
@@ -204,6 +211,8 @@ export interface Delivered {
   sent_to?: string[];
   /** It reached some and not these. */
   not_sent?: Array<{ to: string; reason: string }>;
+  /** The sender's own copy, when they asked for one: whether it went, and why not. */
+  copy?: { to: string; sent: boolean; reason?: string };
 }
 
 /**
@@ -240,14 +249,13 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const { data: onFile } = await s.db.from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("id", record.client_id).maybeSingle();
   const client = onFile ?? { id: record.client_id, display_name: record.client?.display_name ?? "This client", email: record.client?.email ?? null, phone: record.client?.phone ?? null, sms_opt_out_at: null };
   const people = await sendTo(admin, s.companyId, channel, client, body, company.settings, s.assistant === true);
+  const subject = body.subject || defaults.subject || `${label} from ${company.name}`;
+  const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
+  const email = (to: string, text: string) =>
+    sendEmail(s.env, { to, subject, ...renderEmail({ companyName: company.name, logo: logoImage(s.baseUrl, s.companyId, company.settings), text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, s.companyId);
   const delivery =
     channel === "email"
-      ? await sendToEach(people, (person) => {
-          const subject = body.subject || defaults.subject || `${label} from ${company.name}`;
-          const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
-          const text = message(linkFor("email", person.to));
-          return sendEmail(s.env, { to: person.to, subject, ...renderEmail({ companyName: company.name, logo: logoImage(s.baseUrl, s.companyId, company.settings), text, footer }), replyTo: company.email ?? undefined, fromName: company.name }, s.companyId);
-        })
+      ? await sendToEach(people, (person) => email(person.to, message(linkFor("email", person.to))))
       : await sendToEach(people, async (person) => {
           const result = await textWithStopLine(admin, s.companyId, person.to, `${company.name}: ${intro} ${linkFor("sms", person.to)}`, (text) => sendSms(s.env, { to: person.to, body: text, company: s.companyId }));
           await noteRefusedText(admin, client, person.to, result, s.companyId);
@@ -268,6 +276,19 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
       recipients: recipientsColumn(delivery),
     });
   }
+  // A separate email, not a Bcc: the client's own link says yes and pays as them, so the sender's
+  // copy carries the office's. It isn't put on the timeline, and one that doesn't go never undoes the send.
+  let copy: Delivered["copy"];
+  if (channel === "email" && s.copyTo !== undefined && delivery.went.length) {
+    const to = s.copyTo;
+    if (!isEmail(to)) copy = { to, sent: false, reason: "There's no email address on your profile to send the copy to." };
+    else if (delivery.went.some((person) => emailMatchKey(person.to) === emailMatchKey(to))) copy = { to, sent: true };
+    else {
+      const went = delivery.went.map((person) => person.to).join(", ");
+      const result = await email(to, `Your copy of what was sent to ${went}.\n\n${message(links.office)}`).catch((error: unknown) => ({ sent: false, reason: error instanceof Error ? error.message : undefined }));
+      copy = result.sent ? { to, sent: true } : { to, sent: false, reason: result.reason || "The copy couldn't be sent." };
+    }
+  }
   const first = delivery.failed[0];
   return {
     link: links.office,
@@ -278,6 +299,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     sent_to: delivery.went.map((person) => person.to),
     // Reached some and not others: who it didn't reach, and why.
     ...(delivery.went.length && delivery.failed.length ? { not_sent: delivery.failed.map((person) => ({ to: person.to, reason: person.reason })) } : {}),
+    ...(copy ? { copy } : {}),
   };
 }
 

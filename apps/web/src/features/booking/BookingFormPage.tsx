@@ -5,6 +5,7 @@ import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { useEmailTypo } from "@/components/ui/EmailTypo";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
@@ -64,6 +65,8 @@ export function BookingFormPage() {
   const path = `/public/forms/${encodeURIComponent(company)}/${encodeURIComponent(form)}`;
   const view = useQuery({ queryKey: ["booking", company, form], retry: false, queryFn: () => publicFetch<FormView>(path) });
   const [contact, setContact] = useState({ name: "", email: "", phone: "", line1: "", city: "", postal_code: "" });
+  // A slip in their own email ("gmial.com") means the booking's confirmation never reaches them.
+  const typo = useEmailTypo(contact.email, (email) => setContact((was) => ({ ...was, email })));
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   // Files picked for "Files" and "Photos" questions; they go up after the request is in.
   const [files, setFiles] = useState<Record<string, File[]>>({});
@@ -216,7 +219,7 @@ export function BookingFormPage() {
             <Part title="How to reach you">
               <div className={k.grid2}>
                 <Field className={k.full} label="Your name" requiredMessage={NAME_NEEDED} error={touched && contact.name.trim().length < 2 ? NAME_NEEDED : null}><input className="input" value={contact.name} onChange={set("name")} required minLength={2} maxLength={120} autoComplete="name" /></Field>
-                <Field label="Email" error={touched && noContact ? "Add an email or a phone number, so we can reach you." : null}><input className="input" type="email" value={contact.email} onChange={set("email")} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
+                <Field label="Email" error={touched && noContact ? "Add an email or a phone number, so we can reach you." : null} hint={typo.hint}><input className="input" type="email" value={contact.email} onChange={set("email")} onBlur={typo.onBlur} maxLength={200} autoComplete="email" aria-invalid={touched && noContact} /></Field>
                 <Field label="Phone" hint={view.data.company.texts ? textDisclosure(view.data.company.name) : undefined}><input className="input" type="tel" value={contact.phone} onChange={(e) => setContact({ ...contact, phone: formatPhoneTyping(e.target.value) })} maxLength={30} autoComplete="tel" aria-invalid={touched && noContact} /></Field>
               </div>
             </Part>

@@ -1,5 +1,6 @@
 /** Small clients for keyless or key-only public APIs: Google's Solar API and the free geocoders (US Census, OpenStreetMap). (Forecasts: services/forecast.ts.) */
 import { pitchFromDegrees, SQFT_PER_SQM } from "@crewtavo/core";
+import { usStateCode } from "@crewtavo/core/postcards";
 
 /** Places this close share a forecast: about a kilometer, finer than the forecast itself. */
 export const placeKey = (lat: number, lng: number) => `${lat.toFixed(2)},${lng.toFixed(2)}`;
@@ -97,7 +98,11 @@ export interface PlaceSuggestion {
   country: string | null;
   /** How close in to zoom: a house, a street, or a town or landmark. */
   kind: "address" | "street" | "place";
+  /** A house's address in a property's own boxes, for a form to fill in (a US state as its two letters). */
+  parts?: AddressParts;
 }
+
+export interface AddressParts { line1: string; city: string; region: string; postal_code: string }
 
 // Typeahead asks again on every few keystrokes; the same text near the same place gets the same
 // answer for a day, which also keeps us a fair user of the public server.
@@ -141,7 +146,8 @@ export async function suggestPlaces(text: string, near?: { lat: number; lng: num
     const id = `${label}|${detail}`;
     if (!label || seen.has(id)) return [];
     seen.add(id);
-    return [{ label, detail, lat, lng, country, kind }];
+    const parts = kind === "address" ? { line1: street, city: p.city ?? p.locality ?? "", region: (country === "US" ? usStateCode(p.state) : null) ?? p.state ?? "", postal_code: p.postcode ?? "" } : undefined;
+    return [{ label, detail, lat, lng, country, kind, ...(parts ? { parts } : {}) }];
   });
   if (SUGGEST_CACHE.size > 2000) SUGGEST_CACHE.clear();
   SUGGEST_CACHE.set(key, { at: Date.now(), places });

@@ -7,7 +7,7 @@
 import type { ReactNode } from "react";
 import { InboxRow, RowAge } from "@/components/ui/InboxList";
 
-export function ConversationRow({ name, face, current, unread, at, onOpen, children }: {
+export function ConversationRow({ name, face, current, unread, at, onOpen, actions, children }: {
   name: string;
   /** In place of the initials (an unknown number's "?"). */
   face?: ReactNode;
@@ -16,6 +16,8 @@ export function ConversationRow({ name, face, current, unread, at, onOpen, child
   unread?: string;
   at: string;
   onOpen: () => void;
+  /** Quick actions over the age while the row is hovered (Done), on a desktop. */
+  actions?: ReactNode;
   /** The latest message, on the second line. */
   children: ReactNode;
 }) {
@@ -30,6 +32,7 @@ export function ConversationRow({ name, face, current, unread, at, onOpen, child
       unread={unread}
       subject={<span className="msg-row-latest">{children}</span>}
       aside={<RowAge at={at} />}
+      actions={actions}
     />
   );
 }

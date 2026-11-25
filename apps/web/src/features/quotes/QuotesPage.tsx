@@ -55,7 +55,7 @@ export async function loadQuotes({ companyId, statuses, templates, term }: { com
     () => {
       let q = supabase()
         .from("quotes")
-        .select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), sent_at, approved_at, converted_at, lost_reason, valid_until, updated_at, change_order_for, client:clients(display_name), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)", { count: "exact" })
+        .select("id, number, title, status, total, tax_rate, discount_amount, promo:promo_codes(kind, value), sent_at, approved_at, converted_at, lost_reason, valid_until, updated_at, change_order_for, client:clients(display_name), opened:hub_opens(last_at), options:quote_options!quote_options_quote_fkey(id), option:quote_options!quotes_option_fkey(name, tier)", { count: "exact" })
         .eq("company_id", companyId)
         .in("status", [...statuses])
         .eq("is_template", templates);
@@ -220,7 +220,8 @@ export function QuotesPage() {
       return ask ? [<span className={styles.said}>“{ask.body.trim()}”</span>, <span className={styles.when}>{timeAgo(ask.created_at)}</span>] : ["Asked for changes", timeAgo(q.updated_at)];
     }
     if (q.status === "approved") return [q.approved_at ? `Approved ${shortDate(q.approved_at, timeZone)}` : null];
-    if (q.status === "sent") return [q.sent_at ? `Sent ${timeAgo(q.sent_at)}` : null, isExpired(q, today) && <span className={styles.said}>Expired {shortDate(q.valid_until!, timeZone)}</span>];
+    // When the client last opened it in the Client Hub (hub_opens): whether to call them.
+    if (q.status === "sent") return [q.sent_at ? `Sent ${timeAgo(q.sent_at)}` : null, q.opened && `Opened ${timeAgo(q.opened.last_at)}`, isExpired(q, today) && <span className={styles.said}>Expired {shortDate(q.valid_until!, timeZone)}</span>];
     if (q.status === "draft") return [`Edited ${timeAgo(q.updated_at)}`, isExpired(q, today) && <span className={styles.said}>Expired {shortDate(q.valid_until!, timeZone)}</span>];
     if (q.status === "converted") return [q.converted_at ? `Converted ${shortDate(q.converted_at, timeZone)}` : null];
     if (q.status === "lost") return [q.lost_reason, `Changed ${timeAgo(q.updated_at)}`];

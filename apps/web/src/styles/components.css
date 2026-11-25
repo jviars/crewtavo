@@ -1340,6 +1340,11 @@ a.strip-link:hover, button.strip-link:hover { color: inherit; text-decoration: n
 .crumb:hover > svg { transform: translateX(-2px); }
 .crumb.back-link { margin-bottom: -16px; }
 .detail-crumb { display: flex; flex-basis: 100%; margin-bottom: -4px; }
+/* "3 of 25" and ‹ › to the record before and after in the list it was opened from (RecordSteps.tsx): quiet, at the crumb's far end. */
+.record-steps { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; color: var(--text-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.record-steps-count { margin-right: 6px; }
+.record-steps-btn { width: 28px; height: 28px; color: var(--text-2); }
+.record-steps-btn:disabled { opacity: 0.35; cursor: default; background: none; transform: none; }
 /*
  * A request, quote, job or invoice: its stage's rule along the top of the header, as on Home's
  * workflow strip, and the way back to its list in the stage's color with its icon.

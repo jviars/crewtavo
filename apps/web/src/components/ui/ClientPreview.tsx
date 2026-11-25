@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRef, useState, type ReactElement, type SyntheticEvent } from "react";
 import { Link } from "react-router-dom";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
+import { nextWhen, useClientVisits } from "@/lib/clientVisits";
 import { addressLine, formatMoney } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -82,6 +83,8 @@ function Card({ id }: { id: string }) {
     },
   });
 
+  const next = useClientVisits(id).data?.next;
+
   if (client.isPending) {
     return (
       <div className={styles.head} aria-hidden="true">
@@ -100,11 +103,12 @@ function Card({ id }: { id: string }) {
         <span className={styles.name}>{c.display_name}</span>
         {c.company_name && c.company_name !== c.display_name && <span className={styles.company}>{c.company_name}</span>}
       </div>
-      {(c.phone || c.email || address) && (
+      {(c.phone || c.email || address || next) && (
         <ul className={styles.lines}>
           {c.phone && <li className={styles.line}><Icon name="phone" size={14} />{c.phone}</li>}
           {c.email && <li className={styles.line}><Icon name="mail" size={14} />{c.email}</li>}
           {address && <li className={styles.line}><Icon name="pin" size={14} />{address}</li>}
+          {next && <li className={styles.line}><Icon name="calendar" size={14} />{t("Next visit {when}", { when: nextWhen(next, session.company.timezone) })}</li>}
         </ul>
       )}
       <div className={styles.foot}>

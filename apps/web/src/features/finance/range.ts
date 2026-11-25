@@ -3,7 +3,7 @@ import { addDays, localDate } from "@crewtavo/core/time";
 import { formatDate } from "@/lib/format";
 
 // The ranges themselves are shared with AI assistants' report tools (packages/core/src/reports.ts).
-export { hoursBetween, REPORT_PRESETS as PRESETS, resolveRange, type ReportPreset as PresetKey, type ReportRange as Range } from "@crewtavo/core/reports";
+export { calendarWords, hoursBetween, REPORT_PRESETS as PRESETS, resolveRange, stepRange, type ReportPreset as PresetKey, type ReportRange as Range } from "@crewtavo/core/reports";
 import type { ReportRange as Range } from "@crewtavo/core/reports";
 
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);

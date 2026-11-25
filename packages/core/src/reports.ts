@@ -15,6 +15,7 @@ export const REPORT_PRESETS = [
   { key: "30d", label: "Last 30 days" },
   { key: "90d", label: "Last 90 days" },
   { key: "quarter", label: "This quarter" },
+  { key: "last_quarter", label: "Last quarter" },
   { key: "year", label: "This year" },
   { key: "last_year", label: "Last year" },
   { key: "custom", label: "Custom" },
@@ -35,6 +36,25 @@ export interface ReportRange {
 
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
 const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+/** A date's year and month (1–12) and day. */
+const parts = (d: string) => d.split("-").map(Number) as [number, number, number];
+
+/** How many whole calendar months a range is when it's exactly one month, quarter or year: 1, 3 or 12. */
+function calendarMonths(from: string, to: string): 1 | 3 | 12 | null {
+  const [y, m, d] = parts(from);
+  if (d !== 1) return null;
+  return ([1, 3, 12] as const).find((n) => (m - 1) % n === 0 && to === iso(y, m - 1 + n, 0)) ?? null;
+}
+
+/** A range that's a whole month, quarter or year, as it's said: "October 2026", "Q3 2026", "2025". Null for any other. */
+export function calendarWords(from: string, to: string): string | null {
+  const months = calendarMonths(from, to);
+  const [y, m] = parts(from);
+  if (months === 12) return String(y);
+  if (months === 3) return `Q${(m + 2) / 3} ${y}`;
+  if (months === 1) return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return null;
+}
 
 export function resolveRange(key: ReportPreset, today: string, tz: string, custom?: { from?: string | null; to?: string | null }): ReportRange {
   const [y, m] = today.split("-").map(Number) as [number, number];
@@ -54,6 +74,12 @@ export function resolveRange(key: ReportPreset, today: string, tz: string, custo
     case "quarter":
       from = iso(y, Math.floor((m - 1) / 3) * 3, 1);
       break;
+    case "last_quarter": {
+      const start = Math.floor((m - 1) / 3) * 3;
+      from = iso(y, start - 3, 1);
+      to = iso(y, start, 0);
+      break;
+    }
     case "year":
       from = iso(y, 0, 1);
       break;
@@ -74,13 +100,45 @@ export function resolveRange(key: ReportPreset, today: string, tz: string, custo
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
   return {
     key,
-    label: key === "custom" ? `${shortDate(from)} – ${shortDate(to)}` : REPORT_PRESETS.find((p) => p.key === key)!.label,
+    label: key === "custom" ? (calendarWords(from, to) ?? `${shortDate(from)} – ${shortDate(to)}`) : REPORT_PRESETS.find((p) => p.key === key)!.label,
     from,
     to,
     start: zonedTimeToUtc(from, "00:00", tz).toISOString(),
     end: zonedTimeToUtc(addDays(to, 1), "00:00", tz).toISOString(),
     days,
   };
+}
+
+/** The calendar months each preset spans: "This month" counts as its whole month for stepping. */
+const PRESET_MONTHS: Partial<Record<ReportPreset, 1 | 3 | 12>> = { month: 1, last_month: 1, quarter: 3, last_quarter: 3, year: 12, last_year: 12 };
+const THIS: Record<1 | 3 | 12, ReportPreset> = { 1: "month", 3: "quarter", 12: "year" };
+const LAST: Record<1 | 3 | 12, ReportPreset> = { 1: "last_month", 3: "last_quarter", 12: "last_year" };
+
+/**
+ * The range one step earlier (-1) or later (1), by its own length: a month, quarter or year (this
+ * one so far, or a whole one) moves a calendar month, quarter or year; any other moves its number of
+ * days. Where the step lands on a preset it's that preset ("Last month", "This quarter"), else a
+ * custom range of its dates. Null going later from a range that already reaches today.
+ */
+export function stepRange(range: Pick<ReportRange, "key" | "from" | "to" | "days">, by: -1 | 1, today: string): { key: ReportPreset; from?: string; to?: string } | null {
+  if (by > 0 && range.to >= today) return null;
+  const months = PRESET_MONTHS[range.key] ?? (range.key === "custom" ? calendarMonths(range.from, range.to) : null);
+  if (months) {
+    const [y, m] = parts(range.from);
+    const first = m - 1 + by * months;
+    const from = iso(y, first, 1);
+    const to = iso(y, first + months, 0);
+    if (from <= today && today <= to) return { key: THIS[months] };
+    const last = resolveRange(LAST[months], today, "UTC");
+    return last.from === from && last.to === to ? { key: LAST[months] } : { key: "custom", from, to };
+  }
+  const from = addDays(range.from, by * range.days);
+  const to = addDays(range.to, by * range.days);
+  if (to < today) return { key: "custom", from, to };
+  // Later as far as today: the same number of days, ending today.
+  if (range.days === 30) return { key: "30d" };
+  if (range.days === 90) return { key: "90d" };
+  return { key: "custom", from: addDays(today, 1 - range.days), to: today };
 }
 
 /** The same length of time just before the range: for "vs previous period". */

@@ -31,7 +31,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addDaysIso, addressLine, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, addressLine, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -499,6 +499,17 @@ export function SchedulePage() {
 
   /** How many visits a day (or a crew's lane) has, rolling to the new count as visits move. */
   const visitCount = (n: number) => n > 0 && <span className="sched-count"><AnimatedNumber value={n} /><span className="sr-only">{n === 1 ? t(" visit") : t(" visits")}</span></span>;
+  /**
+   * The hours booked in a crew's (or a person's) lane, beside its count, so the office sees at a glance
+   * who still has room: timed visits not called off, to the nearest quarter hour.
+   */
+  const bookedHours = (lane: readonly Visit[]) => {
+    const minutes = lane.reduce((sum, v) => (v.status === "cancelled" || !v.starts_at || !v.ends_at ? sum : sum + Math.max(0, Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60_000), 0);
+    if (minutes < 15) return null;
+    const hours = Math.round(minutes / 15) / 4;
+    const words = formatNumber(hours, Number.isInteger(hours) ? 0 : Number.isInteger(hours * 2) ? 1 : 2);
+    return <span className="sched-count sched-hours" title={t("{hours} hours booked", { hours: words })}>{t("{hours} h", { hours: words })}</span>;
+  };
 
   const newAt = (col: GridColumn, minutes: number | null) => {
     const start = minutes === null ? null : zonedTimeToUtc(col.date, hhmm(minutes), tz);
@@ -533,6 +544,7 @@ export function SchedulePage() {
       headerExtra: (
         <>
           {visitCount(lane.length)}
+          {bookedHours(lane)}
           <span className="tg-colhead-end">
             {route.stops.length > 1 && anchor >= today && (
               <RouteMapsLink className="btn btn-ghost btn-sm btn-icon tg-colhead-btn" route={route}>
@@ -548,7 +560,7 @@ export function SchedulePage() {
       ),
     };
   });
-  const personColumns: GridColumn[] = personLanes.map((col) => ({ ...col, today: anchor === today, past: anchor < today, headerExtra: visitCount(laneVisits(col).length) }));
+  const personColumns: GridColumn[] = personLanes.map((col) => ({ ...col, today: anchor === today, past: anchor < today, headerExtra: <>{visitCount(laneVisits(col).length)}{bookedHours(laneVisits(col))}</> }));
   // Day view on a phone: one column, under the week strip that already says which day it is.
   const mergedColumns: GridColumn[] = [{ key: "all", date: anchor, today: anchor === today, past: anchor < today, label: heading }];
   const weekColumns: GridColumn[] = days.map((date) => ({

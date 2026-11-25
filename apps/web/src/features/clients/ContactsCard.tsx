@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { useEmailTypo } from "@/components/ui/EmailTypo";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { MetaLine, RowPerson } from "@/components/ui/InboxList";
@@ -165,6 +166,7 @@ function ContactDialog({ clientId, contact, onClose }: { clientId: string; conta
       onClose();
     },
   });
+  const typo = useEmailTypo(f.email, (email) => setF((was) => ({ ...was, email })));
   return (
     <Dialog open onClose={onClose} title={contact ? "Edit contact" : "Add contact"}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
@@ -172,7 +174,7 @@ function ContactDialog({ clientId, contact, onClose }: { clientId: string; conta
           {/* No leading spaces, so a name of only spaces is caught as missing. */}
           <Field label="Name" requiredMessage="Add a name for this contact."><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value.trimStart() })} required maxLength={120} /></Field>
           <Field label="Role" optional><input className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })} placeholder="Spouse, property manager…" maxLength={60} /></Field>
-          <Field label="Email" optional error={fieldError(save.error, "email")}><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} maxLength={200} /></Field>
+          <Field label="Email" optional error={fieldError(save.error, "email")} hint={typo.hint}><input className="input" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} onBlur={typo.onBlur} maxLength={200} /></Field>
           <Field label="Phone" optional error={fieldError(save.error, "phone")}><input className="input" type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: formatPhoneTyping(e.target.value) })} maxLength={40} /></Field>
         </div>
         <label className="checkbox"><input type="checkbox" checked={f.is_primary} onChange={(e) => setF({ ...f, is_primary: e.target.checked })} /> Primary contact</label>

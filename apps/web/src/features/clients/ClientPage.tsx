@@ -40,6 +40,7 @@ import { askedNot, sendWay } from "./sendWays";
 import { MergeClientsDialog } from "./MergeClientsDialog";
 import { TextsSwitch, useTextStops } from "./TextsSwitch";
 import { Timeline } from "./Timeline";
+import { lastWhen, nextWhen, useClientVisits, visitLink } from "@/lib/clientVisits";
 import { PhotosCard } from "../files/PhotosCard";
 import { socialKey } from "../marketing/socialData";
 import { askToastKind, type AskResult } from "../marketing/askForm";
@@ -69,6 +70,7 @@ export function ClientPage() {
   const seesMoney = isOffice && can(session, "invoices");
   const autopayOn = autopaySettings(session.company.settings, session.company.trade_preset).enabled;
   const contacts = useClientContacts(id);
+  const visits = useClientVisits(id);
   const clientFields = useCustomFields("client");
   const propertyFields = useCustomFields("property");
   const autopayInvite = useAutopayInvite(id);
@@ -350,6 +352,9 @@ export function ClientPage() {
         ) : c.sms_opt_out_at ? (
           <Fact label="Texts">Off since {formatDate(c.sms_opt_out_at)}. They asked not to be texted.</Fact>
         ) : null}
+        {/* For "when are you coming?" on the phone: the day as a link to its job, what it is under it. */}
+        <Fact label="Next visit">{visits.data?.next && <><Link to={visitLink(visits.data.next)}>{nextWhen(visits.data.next, session.company.timezone)}</Link><span className={styles.hint}>{visits.data.next.title}</span></>}</Fact>
+        <Fact label="Last visit">{visits.data?.last && <><Link to={visitLink(visits.data.last)}>{lastWhen(visits.data.last, session.company.timezone)}</Link><span className={styles.hint}>{visits.data.last.title}</span></>}</Fact>
         <Fact label="Balance">
           {owed > 0 && (
             <>

@@ -12,8 +12,8 @@
  *     </InboxGroup>
  *   </InboxList>
  */
-import { createContext, Fragment, useContext, useId, useLayoutEffect, useRef, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { createContext, Fragment, useContext, useId, useLayoutEffect, useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { copyText } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/format";
 import { intlLocale, t } from "@/lib/i18n";
@@ -22,7 +22,8 @@ import { cx } from "./Button";
 import { ContextMenu } from "./ContextMenu";
 import { Icon, type IconName } from "./Icon";
 import type { MenuEntry } from "./menuModel";
-import { useHoldToPick, type Selection } from "./Selection";
+import { listWalk, withWalk } from "./RecordSteps";
+import { shiftHeld, useHoldToPick, type Selection } from "./Selection";
 
 /** What a group heading says about its rows: amber for waiting too long, red for gone wrong, green for ready. */
 export type GroupTone = "warning" | "danger" | "good";
@@ -144,6 +145,16 @@ export function InboxRow({ to, replace, onClick, title, number, badge, subject, 
   const picked = selection && id ? selection.has(id) : false;
   const hold = useHoldToPick(selection && id ? selection : undefined);
   const dot = unread ? (typeof unread === "string" ? unread : t("Unread")) : null;
+  const navigate = useNavigate();
+  // A plain click takes the list's rows along, for the record's ‹ › (RecordSteps). A click with a
+  // key held (a new tab, a new window) is the browser's, as is any row with nothing to add.
+  const open = (e: ReactMouseEvent<HTMLAnchorElement>) => {
+    if (to === undefined || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.defaultPrevented) return;
+    const next = withWalk(state, listWalk(e.currentTarget));
+    if (next === state) return;
+    e.preventDefault();
+    navigate(to, { state: next, replace });
+  };
   const lines = (
     <>
       {dot && <span className="sr-only">{dot}: </span>}
@@ -166,14 +177,14 @@ export function InboxRow({ to, replace, onClick, title, number, badge, subject, 
     >
       {selection && id && (
         <label className="il-check">
-          <input type="checkbox" data-pick={id} aria-label={selectLabel ?? t("Select")} checked={picked} onChange={() => selection.toggle(id)} />
+          <input type="checkbox" data-pick={id} aria-label={selectLabel ?? t("Select")} checked={picked} onChange={(e) => selection.toggle(id, shiftHeld(e))} />
         </label>
       )}
       {dot && <span className="il-unread" aria-hidden="true" title={dot} />}
       {face !== null && <span className={cx("il-avatar", square && "il-avatar-square")} aria-hidden="true">{face}</span>}
       <div className="il-body">
         {to !== undefined ? (
-          <Link className="il-link" to={to} state={state} replace={replace} aria-current={current || undefined}>{lines}</Link>
+          <Link className="il-link" to={to} state={state} replace={replace} aria-current={current || undefined} onClick={open}>{lines}</Link>
         ) : onClick ? (
           <button type="button" className="il-link il-link-button" onClick={onClick} aria-current={current || undefined}>{lines}</button>
         ) : (

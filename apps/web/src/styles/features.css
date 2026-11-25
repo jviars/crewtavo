@@ -123,6 +123,9 @@
 .sched-uns-toggle { color: var(--text-2); }
 .sched-uns-toggle[aria-pressed="true"] { color: var(--ink); }
 .sched-count { font-size: var(--fs-12); font-weight: 500; color: var(--quiet); font-variant-numeric: tabular-nums; }
+/* A lane's booked hours after its count: "3 · 6.5 h". */
+.sched-count + .sched-hours { margin-left: -2px; }
+.sched-count + .sched-hours::before { content: "·"; margin-right: 6px; }
 /* A person in a menu or on the People week's row: their face, or a dashed ring for nobody. A crew: its color. */
 .sched-face { display: inline-grid; place-items: center; flex: none; width: 20px; height: 20px; overflow: hidden; border-radius: var(--radius-pill); background: var(--p, var(--avatar)); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
 .sched-face[data-none] { box-sizing: border-box; border: 1px dashed var(--border-strong); background: none; }
@@ -2721,7 +2724,9 @@ button:where(.address-link) { display: inline; margin: 0; padding: 0; border: 0;
 .hub-progress li[aria-current="step"] { font-weight: 700; color: var(--ink); }
 .hub-crew { display: flex; align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--row-divider); }
 .hub-crew .faces { display: flex; flex: none; }
-.hub-crew .face { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--brand-tint); color: var(--brand-deep); font-size: var(--fs-14); font-weight: 700; box-shadow: 0 0 0 2px var(--m-card); }
+.hub-crew .face { position: relative; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: var(--brand-tint); color: var(--brand-deep); font-size: var(--fs-14); font-weight: 700; box-shadow: 0 0 0 2px var(--m-card); }
+/* A crew member's photo, when the business shows them, over their initial. */
+.hub-crew .face img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .hub-crew .face + .face { margin-left: -8px; }
 .hub-crew .who { display: grid; min-width: 0; line-height: 1.3; }
 .hub-crew .who > strong { font-size: var(--fs-15); font-weight: 600; }

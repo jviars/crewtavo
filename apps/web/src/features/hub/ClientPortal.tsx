@@ -31,6 +31,8 @@ export interface PortalVisit {
   completed_at: string | null;
   address: string | null;
   crew: string[];
+  /** The crew in the same order: whose photo to show (served by /hub/:token/visits/:id/faces/:id), or null for their initial. Servers that don't send it have initials. */
+  faces?: Array<string | null>;
   /** Reschedule and Cancel work online: not started, and not today. Servers that don't send it have only Ask to change. */
   can_change?: boolean;
   /** A move or cancel they asked for, waiting on the office. */
@@ -155,11 +157,23 @@ function Progress({ status }: { status: string }) {
   );
 }
 
-function Crew({ crew }: { crew: string[] }) {
+function Crew({ token, visit }: { token: string; visit: PortalVisit }) {
+  const { crew } = visit;
   if (!crew.length) return null;
   return (
     <span className="hub-crew">
-      <span className="faces" aria-hidden="true">{crew.slice(0, 3).map((n) => <span key={n} className="face">{n.slice(0, 1)}</span>)}</span>
+      <span className="faces" aria-hidden="true">
+        {crew.slice(0, 3).map((n, i) => {
+          const photo = visit.faces?.[i];
+          // The initial stays under the photo: it shows while the photo loads, and if it can't.
+          return (
+            <span key={`${n}-${i}`} className="face">
+              {n.slice(0, 1)}
+              {photo && <img src={`/api/hub/${token}/visits/${visit.id}/faces/${photo}.jpg`} alt="" loading="lazy" onError={(e) => { e.currentTarget.hidden = true; }} />}
+            </span>
+          );
+        })}
+      </span>
       <span className="who"><strong>{names(crew)}</strong><span>Your crew</span></span>
     </span>
   );
@@ -206,7 +220,7 @@ function VisitCard({ token, visit, tz, windowMin, onMessage, onChange }: { token
         {visit.address && <span className="hub-sub">{visit.address}</span>}
         {visit.change_requested && <span className="hub-sub">We'll let you know by email.</span>}
       </div>
-      <Crew crew={visit.crew} />
+      <Crew token={token} visit={visit} />
       {/* Two buttons (Client-Phone); a message and cancelling, asked for less often, as quiet words under them. */}
       <div className="hub-acts">
         {online && <button type="button" className="hub-btn hub-btn-sm hub-btn-ghost" onClick={() => onChange(visit, "reschedule")}><Icon name="calendar" size={16} />Reschedule</button>}

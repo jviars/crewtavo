@@ -49,6 +49,12 @@ export function shortWhen(value: string, now = Date.now()): string {
 const subjectPath = (type: string, id: string | null) =>
   !id ? null : ({ client: `/clients/${id}`, request: `/requests/${id}`, quote: `/quotes/${id}`, job: `/jobs/${id}`, invoice: `/invoices/${id}`, equipment: `/equipment/${id}` } as Record<string, string>)[type] ?? null;
 
+/** The count on the installed app's icon, or none. Browsers without badges, or a refusal, are left be. */
+function appBadge(count: number) {
+  const nav = navigator as Navigator & { setAppBadge?: (count?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+  (count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.())?.catch(() => undefined);
+}
+
 export function NotificationsButton() {
   const session = useSession();
   const queryClient = useQueryClient();
@@ -94,6 +100,13 @@ export function NotificationsButton() {
       ),
   });
   const unread = notifications.data?.filter((n) => !n.read_at).length ?? 0;
+
+  // Crewtavo installed on a phone's home screen or a computer's dock shows the count on its icon, as
+  // other apps do (a browser tab has no icon to badge, and ignores it). Signed out, it goes.
+  useEffect(() => {
+    if (notifications.data) appBadge(unread);
+  }, [unread, notifications.data]);
+  useEffect(() => () => appBadge(0), []);
 
   // New notifications for me that arrive while Crewtavo is open show as a toast. The first load (and
   // switching company) only marks what's already there as seen.

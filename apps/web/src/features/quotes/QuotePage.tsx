@@ -90,6 +90,7 @@ import { QuotePrint, useQuotePrint } from "../roofing/flow/QuotePrint";
 import { SendEstimateDialog } from "../roofing/flow/SendEstimateDialog";
 import { PackagePicture } from "../roofing/PackageCards";
 import { lineSums, LineItems, visibleLines } from "./LineItems";
+import { OpenedWhen } from "./OpenedWhen";
 import { ALREADY_ANSWERED, duplicateQuote, hasOptionArt, optionsOpen, optionTabs, quoteOptionsKey, showOption, sortOptions, useQuoteOptions, viewedOption, type OptionsQuote, type QuoteOptionRow } from "./options";
 import styles from "./QuotePage.module.css";
 import { depthLines, lineDepths, type DepthLine } from "./depths";
@@ -124,7 +125,7 @@ async function loadQuoteRow(id: string) {
   return unwrapOne(
     await supabase()
       .from("quotes")
-      .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, deposit_percent, valid_until, recurrence_rule, active_months, starts_on, ends_on, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, option_id, section_ids, roof_package_id, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, every_visit), request:requests(promo_code, website_form_id, rejected_promo_code, promo_problem), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at, tax_exempt, tax_exempt_note), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, option_id, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name, warranty, price_mode, markup_pct), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, custom_fields, is_template, left_out, payment_schedule, drafted")
+      .select("id, number, title, status, message, subtotal, discount_amount, tax_rate, tax_amount, total, deposit_amount, deposit_percent, valid_until, recurrence_rule, active_months, starts_on, ends_on, sent_at, approved_at, approval, lost_reason, request_id, created_at, template_id, option_id, section_ids, roof_package_id, promo_code_id, promo_every_visit, promo:promo_codes(code, kind, value, description, every_visit), request:requests(promo_code, website_form_id, rejected_promo_code, promo_problem), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at, tax_exempt, tax_exempt_note), property:properties(id, line1, city, region, postal_code, lat, lng), lines:quote_line_items(id, name, description, quantity, unit, unit_price, unit_cost, taxable, optional, selected, option_group, option_id, formula, sort, service_id), jobs!jobs_company_id_quote_id_fkey(id, number), change_order_for, change_job:jobs!quotes_change_order_fkey(id, number, title), package:roof_packages!quotes_roof_package_fkey(name, warranty, price_mode, markup_pct), range_low, range_high, range_accepted_at, priced_on_site_at, exact_sent_at, custom_fields, is_template, left_out, payment_schedule, drafted, opened:hub_opens(first_at, last_at)")
       .eq("id", id)
       .order("sort", { referencedTable: "quote_line_items" })
       .maybeSingle(),
@@ -767,6 +768,7 @@ export function QuotePage() {
           !isTemplate && <EntityStatus kind="quote" status={q.status} />,
           q.status === "lost" && q.lost_reason,
           q.status === "sent" && q.sent_at && !ranged && `Sent ${timeAgo(q.sent_at)}`,
+          (q.status === "sent" || q.status === "changes_requested") && q.opened && <OpenedWhen opened={q.opened} />,
           <SaveStatus status={save.status} />,
           q.client && <ClientPreview id={q.client.id}><Link to={`/clients/${q.client.id}`} className={styles.client}>{q.client.display_name}</Link></ClientPreview>,
           q.property && addressLine(q.property),
@@ -997,6 +999,7 @@ export function historyIcon(verb: string): IconName {
   if (verb.endsWith("approved") || verb.endsWith("accepted")) return "check";
   if (verb.endsWith("sent")) return "send";
   if (verb.endsWith("changes_requested")) return "messages";
+  if (verb.endsWith("viewed")) return "eye";
   if (verb.endsWith("converted")) return "job";
   if (verb.endsWith("lost")) return "x";
   return "history";

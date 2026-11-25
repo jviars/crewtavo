@@ -130,6 +130,7 @@ insert into public.plan_files (company_id, job_id, title, path, file_name, crew_
   (:'co', :'j1', 'Signed contract', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b2.pdf', 'contract.pdf', false),
   (:'co', :'j2', 'Gutter plan', :'co' || '/plans/d1070000-0000-0000-0000-0000000000b3.pdf', 'gutters.pdf', true);
 insert into public.messages (company_id, client_id, channel, direction, body) values (:'co', :'c1', 'note', 'internal', 'Gate sticks');
+insert into public.conversations_done (company_id, client_id) values (:'co', :'c1');
 insert into public.invoices (company_id, client_id, job_id) values (:'co', :'c1', :'j1');
 insert into public.expenses (company_id, amount, user_id, job_id) values (:'co', 54.20, 'd1070000-0000-0000-0000-000000000004', :'j1');
 insert into public.job_materials (company_id, job_id, name, quantity, unit, logged_by) values (:'co', :'j1', 'Shingles', 26, 'sq', 'd1070000-0000-0000-0000-000000000001');
@@ -720,6 +721,8 @@ select t1070.check(array(
   'visit_extra_scope(uuid)',
   -- What visits bill: the roles that read a job's lines only (it checks), no rows for a sub.
   'visit_prices(uuid[])',
+  -- The dot on Messages: runs as the caller and counts only messages they can already read, so it tells a sub nothing new.
+  'waiting_conversations(uuid)',
   'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
   'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');

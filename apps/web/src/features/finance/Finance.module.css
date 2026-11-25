@@ -12,6 +12,9 @@
 .rangeBtn:hover { border-color: var(--border-strong); background: var(--fill); color: var(--ink); }
 .rangeBtn svg { color: var(--quiet); }
 :global(.page-header) .rangeBtn, :global(.page-actions) .rangeBtn { border-color: var(--border); color: var(--ink); }
+/* ‹ › either side of the range: quiet arrows until pointed at. */
+.step { color: var(--quiet); }
+.step:hover:not(:disabled) { color: var(--ink); }
 
 /* A custom range's two dates, under the title's line. */
 .custom { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-3); }

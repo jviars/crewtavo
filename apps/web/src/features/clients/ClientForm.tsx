@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { initials } from "@/components/ui/Avatar";
+import { useEmailTypo } from "@/components/ui/EmailTypo";
 import { Icon } from "@/components/ui/Icon";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { NumberInput } from "@/components/ui/NumberInput";
@@ -15,9 +16,11 @@ import { TagInput } from "@/components/ui/TagInput";
 import { supabase, textFilter, unwrap } from "@/lib/api";
 import { fieldError } from "@/lib/errors";
 import { addressLine } from "@/lib/format";
+import { shopPlace } from "@/lib/maps";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { CustomFieldInputs, customFieldsToSave, useCustomFields } from "../customFields/CustomFields";
+import { AddressSearch } from "../measure/AddressSearch";
 import styles from "./clients.module.css";
 
 export interface ClientFields {
@@ -86,6 +89,7 @@ function ClientFieldset({ value, onChange, clientId, current, error }: { value: 
   const tags = useClientTags();
   const custom = useCustomFields("client");
   const duplicate = useDuplicateEmail(value.email, clientId);
+  const typo = useEmailTypo(value.email, (email) => onChange({ ...value, email }));
   return (
     <>
       <div className="form-grid">
@@ -96,9 +100,9 @@ function ClientFieldset({ value, onChange, clientId, current, error }: { value: 
           label="Email"
           optional
           error={fieldError(error, "email")}
-          hint={duplicate.data ? <span style={{ color: "var(--warning)", fontWeight: 600 }}>Already used by <Link to={`/clients/${duplicate.data.id}`} target="_blank">{duplicate.data.display_name}</Link></span> : undefined}
+          hint={typo.hint ?? (duplicate.data ? <span style={{ color: "var(--warning)", fontWeight: 600 }}>Already used by <Link to={`/clients/${duplicate.data.id}`} target="_blank">{duplicate.data.display_name}</Link></span> : undefined)}
         >
-          <input className="input" type="email" value={value.email} onChange={set("email")} maxLength={200} autoComplete="off" />
+          <input className="input" type="email" value={value.email} onChange={set("email")} onBlur={typo.onBlur} maxLength={200} autoComplete="off" />
         </Field>
         <Field label="Phone" optional error={fieldError(error, "phone")}><input className="input" type="tel" value={value.phone} onChange={(e) => onChange({ ...value, phone: formatPhoneTyping(e.target.value) })} maxLength={40} autoComplete="off" /></Field>
         <Field label="Lead source" optional>
@@ -123,9 +127,13 @@ const blankAddress = { line1: "", city: "", region: "", postal_code: "" };
 
 function AddressFields({ value, onChange, required }: { value: typeof blankAddress; onChange: (v: typeof blankAddress) => void; required?: boolean }) {
   const set = (key: keyof typeof blankAddress) => (e: { target: { value: string } }) => onChange({ ...value, [key]: e.target.value });
+  const shop = shopPlace(useSession().company);
   return (
     <>
-      <Field label="Street address" optional={!required}><input className="input" value={value.line1} onChange={set("line1")} placeholder="123 Main St" maxLength={200} required={required} autoComplete="off" /></Field>
+      {/* Suggests addresses as it's typed (near the shop): picking a house fills in the boxes below. */}
+      <Field label="Street address" optional={!required}>
+        <AddressSearch disabled={false} near={shop?.lat != null && shop.lng != null ? { lat: shop.lat, lng: shop.lng } : null} initial={value.line1} label={null} placeholder="123 Main St" required={required} maxLength={200} onEdit={(line1) => onChange({ ...value, line1 })} onPickAddress={(a) => onChange({ ...value, ...a })} />
+      </Field>
       <div className="form-grid-3">
         <Field label="City"><input className="input" value={value.city} onChange={set("city")} maxLength={100} /></Field>
         <Field label="State / Province"><input className="input" value={value.region} onChange={set("region")} maxLength={20} /></Field>

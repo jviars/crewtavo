@@ -76,6 +76,8 @@ export const TRIGGERS: TriggerDef[] = [
   { verb: "request.created", label: "A request comes in", group: "Requests", subject: "request", delayable: true },
   { verb: "quote.sent", label: "A quote is sent", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.approved", label: "A quote is approved", group: "Quotes", subject: "quote", delayable: true },
+  // The first time the client opens it in the Client Hub, not the office's preview (20261125100200_hub_opens.sql).
+  { verb: "quote.viewed", label: "A client opens a quote", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.changes_requested", label: "A client asks for changes to a quote", group: "Quotes", subject: "quote", delayable: false },
   { verb: "quote.range_accepted", label: "A client says yes to a price range", group: "Quotes", subject: "quote", delayable: true },
   { verb: "quote.lost", label: "A quote is marked lost", group: "Quotes", subject: "quote", delayable: true },

@@ -5,7 +5,7 @@
  */
 import type { QueryKey } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { inChunks, mergeResults, pageState, pickedOnPage, reportBulk, toggleAll, toggleOne, type BulkResult, type BulkWords } from "@/lib/bulk";
+import { inChunks, mergeResults, pageState, pickedOnPage, reportBulk, toggleAll, toggleOne, toggleRange, type BulkResult, type BulkWords } from "@/lib/bulk";
 import { queryClient } from "@/lib/queryClient";
 import type { ToastTone } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
@@ -22,6 +22,8 @@ export function useSelection(pageIds: readonly string[], reset: string) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const [picking, setPicking] = useState(false);
   const [shown, setShown] = useState(reset);
+  // The row clicked last, where a shift-click's range starts.
+  const last = useRef<string | null>(null);
   if (shown !== reset) {
     setShown(reset);
     setPicked(new Set());
@@ -35,7 +37,12 @@ export function useSelection(pageIds: readonly string[], reset: string) {
     /** Picking (a phone's Select mode), or something is picked. */
     active: picking || ids.length > 0,
     has: (id: string) => picked.has(id),
-    toggle: (id: string) => setPicked((p) => toggleOne(p, id)),
+    /** One row, or with `range` (shift held) every row from the one clicked last to this one. */
+    toggle: (id: string, range = false) => {
+      const from = last.current;
+      last.current = id;
+      setPicked((p) => (range ? toggleRange(p, pageIds, from, id) : toggleOne(p, id)));
+    },
     toggleAll: () => setPicked((p) => toggleAll(p, pageIds)),
     /** A phone's Select: the boxes show. */
     start: () => setPicking(true),
@@ -62,11 +69,14 @@ export function SelectAllCell({ selection, label }: { selection: Selection; labe
   return <th className="select-cell"><label><SelectAllBox selection={selection} label={label} /></label></th>;
 }
 
-/** A row's box. A click on it, or near it, picks the row rather than opening it. */
+/** Whether a box was clicked with shift held: a checkbox's change comes from its click. */
+export const shiftHeld = (e: { nativeEvent: Event }) => e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey;
+
+/** A row's box. A click on it, or near it, picks the row rather than opening it; shift picks a range. */
 export function SelectCell({ selection, id, label }: { selection: Selection; id: string; label: string }) {
   return (
     <td className="select-cell" data-pick={id} onClick={(e) => e.stopPropagation()}>
-      <label><input type="checkbox" aria-label={label} checked={selection.has(id)} onChange={() => selection.toggle(id)} /></label>
+      <label><input type="checkbox" aria-label={label} checked={selection.has(id)} onChange={(e) => selection.toggle(id, shiftHeld(e))} /></label>
     </td>
   );
 }

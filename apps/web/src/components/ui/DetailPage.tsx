@@ -21,6 +21,7 @@ import { Icon, type IconName } from "./Icon";
 import { MetaLine } from "./InboxList";
 import { Menu, type MenuEntry } from "./Menu";
 import { Crumb, useDocumentTitle } from "./PageHeader";
+import { RecordSteps } from "./RecordSteps";
 import { t } from "@/lib/i18n";
 
 export { Crumb };
@@ -54,7 +55,7 @@ export function DetailHeader({ crumb, title, status, meta, actions, more, moreLa
   const stage = crumb ? STAGES[crumb.to.split(/[?#]/)[0]!] : undefined;
   return (
     <div className="page-header detail-head" data-stage={stage}>
-      {crumb && <div className="detail-crumb"><Crumb to={crumb.to} state={crumb.state}>{stage && <Icon name={stage} size={16} />}{crumb.label}</Crumb></div>}
+      {crumb && <div className="detail-crumb"><Crumb to={crumb.to} state={crumb.state}>{stage && <Icon name={stage} size={16} />}{crumb.label}</Crumb><RecordSteps /></div>}
       {typeof title === "string" ? <h1 className="page-title">{title}</h1> : title}
       {(actions || more) && (
         <div className="page-actions">

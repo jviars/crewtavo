@@ -11,7 +11,7 @@ import { requireCompany, requireUser } from "../lib/auth";
 import { appUrl, dbError, HttpError, isoDate, must, param, readJson, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { adminClient } from "../lib/supabase";
-import { geocodeAddress, suggestPlaces } from "../services/external";
+import { geocodeAddress, suggestPlaces, type AddressParts } from "../services/external";
 import { bookAskedTime, nextOpenings } from "../services/onlineBooking";
 import { geocodeLater, geocodeProperty } from "../services/properties";
 import { answerVisitChange } from "../services/visitChanges";
@@ -86,7 +86,7 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
     })(),
   ]);
   type Row = { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null; lat: number | null; lng: number | null };
-  const clients = new Map<string, { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null }>();
+  const clients = new Map<string, { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null; parts: AddressParts }>();
   const add = (p: Row, client: { id: string; display_name: string } | null) => {
     if (!p.line1 || clients.has(p.id) || clients.size >= 6) return;
     clients.set(p.id, {
@@ -97,6 +97,7 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
       detail: [p.city, p.region].filter(Boolean).join(", ") || null,
       lat: p.lat,
       lng: p.lng,
+      parts: { line1: p.line1, city: p.city ?? "", region: p.region ?? "", postal_code: p.postal_code ?? "" },
     });
   };
   for (const p of (byStreet.data ?? []) as Array<Row & { client: { id: string; display_name: string } | null }>) add(p, p.client);

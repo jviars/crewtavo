@@ -14,7 +14,7 @@ import { settingsAs } from "../lib/companySettings";
 
 const OFFICE = ["owner", "admin", "office"] as const;
 const rangeInput = {
-  range: z.enum(REPORT_PRESETS.map((p) => p.key) as [ReportPreset, ...ReportPreset[]]).default("month").describe("month, last_month, 30d, 90d, quarter, year, last_year, or custom with from and to."),
+  range: z.enum(REPORT_PRESETS.map((p) => p.key) as [ReportPreset, ...ReportPreset[]]).default("month").describe("month, last_month, 30d, 90d, quarter, last_quarter, year, last_year, or custom with from and to."),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 };

@@ -19,7 +19,7 @@ import { api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { BULK_CHUNK, inChunks, reportBulk, type BulkResult } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { errorMessage } from "@/lib/errors";
-import { addDaysIso, formatMoney, todayIn } from "@/lib/format";
+import { addDaysIso, formatMoney, timeAgo, todayIn } from "@/lib/format";
 import { intlLocale } from "@/lib/i18n";
 import { useStatusCounts } from "@/lib/listing";
 import { everyRow, firstRows } from "@/lib/paging";
@@ -82,7 +82,7 @@ export async function remindInChunks(
 
 /** How many invoices the list shows at first, and how many more each "Load more" brings. */
 const PAGE = 300;
-const LIST_COLUMNS = "id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name)";
+const LIST_COLUMNS = "id, number, kind, status, subject, issued_on, due_on, total, balance_due, client:clients(display_name), opened:hub_opens(last_at)";
 
 /** The invoices a tab shows: its statuses, narrowed by what was typed. `settled`: paid, written off or void. */
 export interface Showing { companyId: string; statuses: readonly string[]; term: string; settled: boolean }
@@ -426,6 +426,8 @@ function InvoicesPageScreen() {
                                 <span><Icon name="clock" size={13} />{i.due_on ? `Due ${shortDate(i.due_on, today)}` : "Due on receipt"}</span>
                               ),
                               i.status === "partially_paid" && <EntityStatus kind="invoice" status={i.status} />,
+                              // When the client last opened it in the Client Hub (hub_opens).
+                              i.opened && `Opened ${timeAgo(i.opened.last_at)}`,
                             ]
                           : [
                               `Issued ${shortDate(i.issued_on, today)}`,

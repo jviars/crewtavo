@@ -35,6 +35,21 @@ export function toggleOne(picked: ReadonlySet<string>, id: string): Set<string> 
   return next;
 }
 
+/**
+ * Shift and a click: every row from the one clicked before (`from`) to this one (`to`) takes the state
+ * this one is turning to, as a mail app's list does. Picked: all of them picked; unpicked: all of them
+ * unpicked. With no row clicked before, or one no longer on the page, it's this row alone.
+ */
+export function toggleRange(picked: ReadonlySet<string>, pageIds: readonly string[], from: string | null, to: string): Set<string> {
+  const a = from === null ? -1 : pageIds.indexOf(from);
+  const b = pageIds.indexOf(to);
+  if (a < 0 || b < 0) return toggleOne(picked, to);
+  const pick = !picked.has(to);
+  const next = new Set(picked);
+  for (const id of pageIds.slice(Math.min(a, b), Math.max(a, b) + 1)) pick ? next.add(id) : next.delete(id);
+  return next;
+}
+
 export interface BulkResult {
   done: string[];
   failed: Array<{ id: string; reason: string }>;

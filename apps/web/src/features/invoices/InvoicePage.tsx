@@ -43,6 +43,7 @@ import { AddWorkDialog } from "./AddWorkDialog";
 import { recordPayment, type PaymentMethod } from "./recordPayment";
 import { owedAgainNote, recordRefund, refundToasts, type RefundResult } from "./recordRefund";
 import { ReferralCredits } from "./ReferralCredits";
+import { OpenedWhen } from "../quotes/OpenedWhen";
 import { SendDialog } from "../quotes/SendDialog";
 import { refundable, stripeCharge, stripeRefundable, stripeRefundToasts, type StripeRefundResult } from "./refunds";
 import { settle } from "./settle";
@@ -79,7 +80,7 @@ function InvoicePageScreen() {
     queryFn: async () => {
       // Its autopay charges and referral credits come in alongside, by the same key: one select with
       // them embedded too is more than the typed client can read.
-      const [row, autopay, credits] = await Promise.all([
+      const [row, autopay, credits, opened] = await Promise.all([
         supabase()
           .from("invoices")
           .select("*, promo:promo_codes(code, kind, value, description), client:clients(id, display_name, email, phone, billing_address, sms_opt_out_at, tax_exempt, tax_exempt_note), job:jobs(id, number, title, po_number, kind, billing_mode, property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, option:quote_options!quotes_option_fkey(name, warranty), package:roof_packages!quotes_roof_package_fkey(name, warranty))), lines:invoice_line_items(id, name, description, quantity, unit, unit_price, taxable, sort, service_id, discount_quote_id, time_entry_ids, material_ids, kind), payments(id, amount, tip_amount, method, received_at, processor, processor_ref, notes, fee_amount, payout:payouts(arrival_on, status)), stripe:stripe_invoices(stripe_id, origin, status, number, hosted_url, livemode, amount_due, created_at, detached_at, processing_at, collection, purpose)")
@@ -94,8 +95,10 @@ function InvoicePageScreen() {
           .eq("invoice_id", id)
           .order("created_at", { ascending: false }),
         supabase().from("referral_credits").select("id, amount, note, referral_id, created_at").eq("invoice_id", id).order("created_at"),
+        // When the client opened it in the Client Hub, if they have: a nicety the page doesn't fail over.
+        supabase().from("hub_opens").select("first_at, last_at").eq("invoice_id", id).maybeSingle(),
       ]);
-      return { ...unwrapOne(row, "This invoice"), autopay: unwrap(autopay), credits: unwrap(credits) };
+      return { ...unwrapOne(row, "This invoice"), autopay: unwrap(autopay), credits: unwrap(credits), opened: opened.data ?? null };
     },
     // While it's being charged (or was just approved), look again every few seconds until Stripe
     // answers; and while it's on its way to the client instead (over a bank account's limit), until it has gone.
@@ -373,6 +376,7 @@ function InvoicePageScreen() {
           inv.kind === "deposit" && <span className="tag">Deposit</span>,
           inv.kind === "retainage" && <span className="tag">Retainage</span>,
           inv.kind === "visits" && <span className="tag">Completed visits</span>,
+          ["sent", "partially_paid", "overdue"].includes(inv.status) && inv.opened && <OpenedWhen opened={inv.opened} />,
           <SaveStatus status={save.status} />,
         ]}
         actions={

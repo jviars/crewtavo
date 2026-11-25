@@ -37,6 +37,13 @@ export const sales = new Hono<AppEnv>();
 /** The person's client, their company, and the address client links use (services/sales.ts). */
 const scope = (c: Context<AppEnv>): SalesScope => ({ db: c.var.db, env: c.env, companyId: c.var.companyId, baseUrl: appUrl(c), noMoney: !seesInvoices(c.var.role, c.var.permissions) });
 
+/** A send's scope, with the person's own email on file when they ticked "Send me a copy". */
+async function sendScope(c: Context<AppEnv>, copy: boolean | undefined): Promise<SalesScope> {
+  if (!copy) return scope(c);
+  const { data } = await c.var.db.from("profiles").select("email").eq("user_id", c.var.userId).maybeSingle();
+  return { ...scope(c), copyTo: data?.email ?? "" };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Requests and quotes
 // ---------------------------------------------------------------------------------------------
@@ -87,7 +94,8 @@ sales.post("/quotes/:id/convert", requireUser, requireCompany(SALES, "sales"), a
 });
 
 sales.post("/quotes/:id/send", requireUser, requireCompany(SALES, "sales"), async (c) => {
-  return c.json(await sendQuote(scope(c), param(c, "id"), await readJson(c, sendSchema)));
+  const body = await readJson(c, sendSchema);
+  return c.json(await sendQuote(await sendScope(c, body.copy), param(c, "id"), body));
 });
 
 /**
@@ -168,7 +176,8 @@ for (const [path, kind, roles, area] of [["quotes", "quote", SALES, "sales"], ["
 }
 
 sales.post("/invoices/:id/send", requireUser, requireCompany(OFFICE, "invoices"), async (c) => {
-  return c.json(await sendInvoice(scope(c), param(c, "id"), await readJson(c, sendSchema)));
+  const body = await readJson(c, sendSchema);
+  return c.json(await sendInvoice(await sendScope(c, body.copy), param(c, "id"), body));
 });
 
 // ---------------------------------------------------------------------------------------------

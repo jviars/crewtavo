@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { cx } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -15,7 +15,7 @@ import { api } from "@/lib/api";
 import { formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./Finance.module.css";
-import { PRESETS, resolveRange, shortDate, type PresetKey, type Range } from "./range";
+import { calendarWords, PRESETS, resolveRange, shortDate, stepRange, type PresetKey, type Range } from "./range";
 
 export interface TeamMember { user_id: string; labor_rate: number | null; active: boolean; profile: { full_name: string; color: string | null } | null; sub?: { id: string; name: string } }
 export { memberName } from "../subs/memberName";
@@ -54,8 +54,36 @@ export type RangeParams = ReturnType<typeof useRangeParams>;
 /** Carries the date range to another page's address: "range=month", or a custom range's dates. */
 export const rangeQuery = (range: Range) => (range.key === "custom" ? `range=custom&from=${range.from}&to=${range.to}` : `range=${range.key}`);
 
-/** The button's words: the preset ("This month"), or "Custom range". */
-const presetWords = (key: PresetKey) => (key === "custom" ? "Custom range" : (PRESETS.find((p) => p.key === key)?.label ?? key));
+/** The button's words: the preset ("This month"), a whole month, quarter or year ("October 2026"), or "Custom range". */
+const rangeButtonWords = (range: Pick<Range, "key" | "from" | "to">) =>
+  range.key === "custom" ? (calendarWords(range.from, range.to) ?? "Custom range") : (PRESETS.find((p) => p.key === range.key)?.label ?? range.key);
+
+/**
+ * A custom range's two date boxes: for dates of the person's own, or once they pick Custom range. A
+ * whole month, quarter or year stepped to with ‹ › is named on the button ("September 2026"), so it
+ * needs no boxes under it.
+ */
+const showDates = ({ presetKey, range, params }: RangeParams) => presetKey === "custom" && (params.get("dates") === "edit" || !calendarWords(range.from, range.to));
+
+/** ‹ or ›: the range one step earlier or later by its own length (core stepRange); later stops at today. */
+function StepRange({ state, by }: { state: RangeParams; by: -1 | 1 }) {
+  const { range, today, update } = state;
+  const next = stepRange(range, by, today);
+  const words = next && rangeButtonWords(resolveRange(next.key, today, "UTC", next));
+  const name = by < 0 ? `Earlier: ${words}` : next ? `Later: ${words}` : "Later: this range already reaches today";
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={by < 0 ? "chevronLeft" : "chevronRight"}
+      className={styles.step}
+      disabled={!next}
+      aria-label={name}
+      title={name}
+      onClick={() => next && update({ range: next.key, from: next.from ?? null, to: next.to ?? null, dates: null })}
+    />
+  );
+}
 
 /** A custom range's two dates. */
 export function CustomRange({ state }: { state: RangeParams }) {
@@ -77,22 +105,24 @@ export function CustomRange({ state }: { state: RangeParams }) {
 export function RangePicker({ state, dates = true }: { state: RangeParams; dates?: boolean }) {
   const { presetKey, range, update } = state;
   const items: MenuEntry[] = [
-    ...PRESETS.filter((p) => p.key !== "custom").map((p) => ({ label: p.label, checked: presetKey === p.key, onSelect: () => update({ range: p.key, from: null, to: null }) })),
+    ...PRESETS.filter((p) => p.key !== "custom").map((p) => ({ label: p.label, checked: presetKey === p.key, onSelect: () => update({ range: p.key, from: null, to: null, dates: null }) })),
     { separator: true },
-    { label: "Custom range", checked: presetKey === "custom", onSelect: () => update({ range: "custom", from: range.from, to: range.to }) },
+    { label: "Custom range", checked: presetKey === "custom", onSelect: () => update({ range: "custom", from: range.from, to: range.to, dates: "edit" }) },
   ];
   const menu = (
     <Menu
       items={items}
-      label={`Date range: ${presetWords(presetKey)}`}
+      label={`Date range: ${rangeButtonWords(range)}`}
       title="Date range"
       align="end"
       triggerClassName={cx("btn btn-sm", styles.rangeBtn)}
-      trigger={<>{presetWords(presetKey)}<Icon name="chevronDown" size={14} /></>}
+      trigger={<>{rangeButtonWords(range)}<Icon name="chevronDown" size={14} /></>}
     />
   );
-  if (!dates || presetKey !== "custom") return menu;
-  return <div className={styles.picker}><CustomRange state={state} />{menu}</div>;
+  // Siblings, not wrapped: a phone styles the page header's buttons as its own children.
+  const stepped = <><StepRange state={state} by={-1} />{menu}<StepRange state={state} by={1} /></>;
+  if (!dates || !showDates(state)) return stepped;
+  return <div className={styles.picker}><CustomRange state={state} />{stepped}</div>;
 }
 
 /** Two dates in words: "Oct 1 – Oct 20", with the year when it isn't this one ("Jan 2 – Dec 31, 2024"). */
@@ -115,7 +145,7 @@ export const PANEL_ID = "report-panel";
  * underline tabs (chips on a phone). Arrow keys, Home and End move between the tabs.
  */
 export function RangeHeader<K extends string>({ title, state, tabs, tab }: { title: string; state: RangeParams; tabs: ReadonlyArray<{ key: K; label: string }>; tab: K }) {
-  const { range, today, update, presetKey } = state;
+  const { range, today, update } = state;
   const first = tabs[0]?.key;
   const open = (key: K) => update({ tab: key === first ? null : key });
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -129,7 +159,7 @@ export function RangeHeader<K extends string>({ title, state, tabs, tab }: { tit
   return (
     <>
       <PageHeader title={title} lede={rangeWords(range, today)} actions={<RangePicker state={state} dates={false} />}>
-        {presetKey === "custom" && <CustomRange state={state} />}
+        {showDates(state) && <CustomRange state={state} />}
       </PageHeader>
       <div className={cx("underline-tabs", styles.tabs)} role="tablist" aria-label={title} onKeyDown={keys}>
         {tabs.map((t) => (

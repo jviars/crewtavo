@@ -205,3 +205,63 @@ export function emailKey(input: string | null | undefined): string | null {
   const key = (input ?? "").trim().toLowerCase();
   return key.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(key) ? key : null;
 }
+
+// The mailboxes people mistype most, by the name before the dot, with the address each one really is.
+const PROVIDERS: Record<string, string> = {
+  gmail: "gmail.com", googlemail: "googlemail.com", yahoo: "yahoo.com", ymail: "ymail.com", hotmail: "hotmail.com", outlook: "outlook.com",
+  icloud: "icloud.com", comcast: "comcast.net", verizon: "verizon.net", sbcglobal: "sbcglobal.net", bellsouth: "bellsouth.net",
+  earthlink: "earthlink.net", charter: "charter.net", protonmail: "protonmail.com", aol: "aol.com", live: "live.com", msn: "msn.com",
+  att: "att.net", cox: "cox.net", me: "me.com",
+};
+// Real mailboxes a letter or two from one above ("email.com" isn't a mistyped "gmail.com").
+const ALSO_REAL = new Set(["email", "mail", "gmx", "mac", "aim", "rocketmail", "fastmail", "zoho", "proton", "pm", "hey"]);
+// Endings that aren't real (.con), or that are only a slip on one of the mailboxes above (gmail.co).
+const COM_SLIPS = new Set(["con", "cmo", "ocm", "vom", "xom", "comm", "cpm", "cim", "co", "cm", "om"]);
+const NET_SLIPS = new Set(["nte", "ner", "nett", "bet", "met", "ne", "nt"]);
+const NOT_REAL = new Set(["con", "cmo", "ocm", "vom", "xom", "comm", "cpm", "cim", "nte", "ner", "nett"]);
+
+/** How many letters apart two words are: one changed, added, dropped, or two side by side swapped. */
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]!;
+}
+
+/**
+ * The address someone most likely meant, when the one typed looks like a slip on a common mailbox
+ * ("jo@gmial.com" → "jo@gmail.com", "jo@yahoo.con" → "jo@yahoo.com"), or null. A quote sent to a
+ * mistyped address can bounce later, where nobody sees it, so the form asks while it's being typed.
+ * Careful not to second-guess a business's own domain: only near misses of the big mailboxes count.
+ */
+export function emailTypo(email: string): string | null {
+  const typed = email.trim();
+  const at = typed.lastIndexOf("@");
+  if (at < 1) return null;
+  const domain = typed.slice(at + 1).toLowerCase();
+  const dot = domain.indexOf(".");
+  if (dot < 1 || dot === domain.length - 1) return null;
+  const name = domain.slice(0, dot);
+  const ending = domain.slice(dot + 1);
+  const comOrNet = (real: string) => real.slice(real.indexOf(".") + 1);
+  let fixed: string | null = null;
+  if (PROVIDERS[name]) {
+    const real = comOrNet(PROVIDERS[name]!);
+    if ((real === "com" && COM_SLIPS.has(ending)) || (real === "net" && NET_SLIPS.has(ending))) fixed = PROVIDERS[name]!;
+  } else if (name.length >= 4 && !ALSO_REAL.has(name)) {
+    let best: { name: string; d: number } | null = null;
+    for (const provider of Object.keys(PROVIDERS)) {
+      if (provider.length < 5) continue;
+      const d = distance(name, provider);
+      if (d > 0 && d <= (provider.length <= 6 ? 1 : 2) && (!best || d < best.d)) best = { name: provider, d };
+    }
+    if (best) fixed = COM_SLIPS.has(ending) || NET_SLIPS.has(ending) || ending === comOrNet(PROVIDERS[best.name]!) ? PROVIDERS[best.name]! : `${best.name}.${ending}`;
+  }
+  if (!fixed && NOT_REAL.has(ending)) fixed = `${name}.${COM_SLIPS.has(ending) ? "com" : "net"}`;
+  return fixed && fixed !== domain ? `${typed.slice(0, at)}@${fixed}` : null;
+}
