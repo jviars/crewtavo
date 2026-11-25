@@ -452,7 +452,10 @@ describe("the Campaigns tab and a campaign's page", () => {
 
   it("shows an automated campaign as its results, and says opens are approximate", () => {
     expect(source("../src/features/marketing/CampaignPage.tsx")).toContain('c?.kind === "automated"');
-    expect(source("../src/features/marketing/CampaignResults.tsx")).toContain("Opens are approximate: Apple Mail and some others load images to protect privacy");
+    const results = source("../src/features/marketing/CampaignResults.tsx");
+    expect(results).toContain("Approximate: Apple Mail and some others load images to protect privacy");
+    // On the figure it explains, not a paragraph under the numbers.
+    expect(results).toContain("<InfoTip text={OPENS_TIP} />");
   });
 
   it("writes both kinds of email with the same editor", () => {
@@ -515,7 +518,7 @@ describe("the Referrals tab's credit, offer and email", () => {
 
   it("writes settings.referrals, and never the old referral_reward or referral_offer", () => {
     const tab = source("../src/features/marketing/Referrals.tsx");
-    expect(tab).toContain("save.mutate((current) => referralPatch(form, current))");
+    expect(tab).toContain("save.mutate((current) => referralPatch(form, current), { onSuccess: () => setOpen(false) })");
     expect(source("../src/features/marketing/MarketingPage.tsx")).toContain("<Referrals />");
     for (const file of ["../src/features/marketing/Referrals.tsx", "../src/features/marketing/referralForm.ts", "../src/features/marketing/MarketingPage.tsx", "../src/features/clients/ClientPage.tsx"]) {
       expect(source(file), file).not.toMatch(/referral_reward|referral_offer|rewards_pending/);
@@ -1010,7 +1013,8 @@ describe("Marketing → Social", () => {
     expect(social).toContain("const last = state.auto.enabled && live.length === 1;");
     expect(social).toContain("(last && live.includes(c.network))");
     expect(social).toContain("if (savedKey) setNetworks(");
-    expect(social).toContain("from the next day (the same day for a review in before {clockText(8)})");
+    expect(social).toContain("post the next day, at most {AUTO_POSTS_PER_DAY} a day");
+    expect(social).toContain("the same day for a review in before ${clockText(8)}");
     expect(social).not.toContain("starting the next day");
   });
 

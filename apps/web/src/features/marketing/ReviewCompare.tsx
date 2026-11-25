@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { InfoTip } from "@/components/ui/InfoTip";
 import { Section } from "@/components/ui/Section";
 import { SectionSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
@@ -167,9 +168,10 @@ function CompareCard() {
       <div className={styles.form}>
         {!s.enabled ? (
           <>
+            {/* Where the figures come from and what it costs is an (i), so the page says what it does first. */}
             <p className={styles.note}>
-              See your Google rating and number of reviews next to up to five nearby competitors'. Your browser reads them from Google Places with{" "}
-              {ownKey ? <>your Google key from <Link to="/settings?tab=maps" style={{ textDecoration: "underline" }}>Settings → Maps</Link></> : googleKey ? "the Google key this Crewtavo was set up with" : "a Google key"} when you press Compare now: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says.
+              See your Google rating and number of reviews next to up to five nearby competitors'.
+              <InfoTip text={`Your browser reads them from Google Places with ${ownKey ? "your Google key from Settings → Maps" : googleKey ? "the Google key this Crewtavo was set up with" : "a Google key"} when you press Compare now: one lookup for each place every time, which Google may bill to the key's account. Crewtavo doesn't keep what Google says.`} />
             </p>
             {!googleKey && <NoKey />}
             {!s.can_switch && <p className={styles.note}>An owner or admin can turn it on here.</p>}

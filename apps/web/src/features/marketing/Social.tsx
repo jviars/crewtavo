@@ -21,6 +21,8 @@ import { confirm } from "@/components/ui/Confirm";
 import { DetailColumns } from "@/components/ui/DetailPage";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { InfoTip } from "@/components/ui/InfoTip";
+import { SourceMark } from "./SourceMark";
 import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
 import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
@@ -175,7 +177,14 @@ function PostRow({ post, state, onEdit, highlight }: { post: SocialPost; state: 
     if (highlight) ref.current?.scrollIntoView({ block: "center" });
   }, [highlight]);
   // When it goes first; a review's post says whose review on a line of its own.
-  const details = [whenWords(post, session.company.timezone), summary.networks, post.source !== "review" && sourceWords(post), post.automatic && "Automatic"];
+  // Where it goes as each network's logo, as Buffer and Later badge a post; the words are its title and for a screen reader.
+  const networks = post.networks.length > 0 && (
+    <span className={styles.networkMarks} title={summary.networks}>
+      {post.networks.map((n) => <SourceMark key={n} name={n} size={13} />)}
+      <span className="sr-only">{summary.networks}</span>
+    </span>
+  );
+  const details = [whenWords(post, session.company.timezone), networks, post.source !== "review" && sourceWords(post), post.automatic && "Automatic"];
   // Queued says nothing the line above doesn't while a post waits its turn.
   const shownResults = post.status === "draft" || post.status === "scheduled" ? results.filter((r) => r.status !== "waiting") : results;
   const posted = shownResults.filter((r) => r.status === "posted");
@@ -227,7 +236,7 @@ function PostRow({ post, state, onEdit, highlight }: { post: SocialPost; state: 
                     <StatusPill label="Posted to" tone="good" />
                     {posted.map((r, i) => (
                       <span key={r.network} className={styles.resultPlace}>
-                        {r.permalink ? <a href={r.permalink} target="_blank" rel="noreferrer" aria-label={networkLine(r).text ?? NETWORK_NAMES[r.network]}>{NETWORK_NAMES[r.network]} <Icon name="external" size={12} /></a> : NETWORK_NAMES[r.network]}
+                        {r.permalink ? <a href={r.permalink} target="_blank" rel="noreferrer" aria-label={networkLine(r).text ?? NETWORK_NAMES[r.network]}><SourceMark name={r.network} size={12} />{NETWORK_NAMES[r.network]} <Icon name="external" size={12} /></a> : <span className={styles.placeName}><SourceMark name={r.network} size={12} />{NETWORK_NAMES[r.network]}</span>}
                         {i < posted.length - 1 && <span aria-hidden>,</span>}
                       </span>
                     ))}
@@ -258,6 +267,11 @@ function PostRow({ post, state, onEdit, highlight }: { post: SocialPost; state: 
       )}
     </InboxRow>
   );
+}
+
+/** A network's logo on the round tile a related row leads with (Where it posts). */
+function NetworkTile({ network }: { network: Network }) {
+  return <span className="rel-icon"><SourceMark name={network} size={16} /></span>;
 }
 
 /** A post's picture: its first photo, a review's card in small, or what it is. */
@@ -298,9 +312,9 @@ function WherePosts({ state }: { state: SocialState }) {
   return (
     <Section title="Where it posts">
       <RelatedList label="Where posts go">
-        <RelatedRow title="Facebook" detail={facebook.page_name} end={pill(facebook.connected, facebook.problem, facebook.missing)} />
-        <RelatedRow title="Instagram" detail={instagram.username ? `@${instagram.username}` : null} end={pill(instagram.connected, instagram.problem, instagram.missing)} />
-        <RelatedRow title="Google Business Profile" end={google.ready ? <StatusPill label="Connected" tone="good" /> : <StatusPill label={googleWaits ? "Waiting on Google" : "Not connected"} tone={googleWaits ? "warning" : "muted"} />} />
+        <RelatedRow lead={<NetworkTile network="facebook" />} title="Facebook" detail={facebook.page_name} end={pill(facebook.connected, facebook.problem, facebook.missing)} />
+        <RelatedRow lead={<NetworkTile network="instagram" />} title="Instagram" detail={instagram.username ? `@${instagram.username}` : null} end={pill(instagram.connected, instagram.problem, instagram.missing)} />
+        <RelatedRow lead={<NetworkTile network="google" />} title="Google Business Profile" end={google.ready ? <StatusPill label="Connected" tone="good" /> : <StatusPill label={googleWaits ? "Waiting on Google" : "Not connected"} tone={googleWaits ? "warning" : "muted"} />} />
       </RelatedList>
       <div className={cx(styles.copy, styles.afterList)}>
         {!facebook.connected && (connect ? <Link className={cx("btn btn-sm", styles.connect)} to="/apps/meta">{facebook.problem === "signin" ? "Reconnect Facebook & Instagram" : facebook.problem === "pick" ? "Pick your Page" : "Connect Facebook & Instagram"}</Link> : ask(facebook.problem === "signin" ? "reconnect Facebook & Instagram" : "connect Facebook & Instagram"))}
@@ -393,8 +407,10 @@ function AutoPosts({ state, timeZone }: { state: SocialState; timeZone: string }
             </div>
           </div>
         )}
+        {/* What it does in a line; exactly when is an (i), so the side column stays quiet. */}
         <p className={styles.note}>
-          New 5-star reviews with words post at {clockText(10)}, {clockText(13)} or {clockText(16)} ({timeZoneWords(timeZone)}), at most {AUTO_POSTS_PER_DAY} a day, from the next day (the same day for a review in before {clockText(8)}). You can change or cancel each one before it goes.
+          New 5-star reviews with words post the next day, at most {AUTO_POSTS_PER_DAY} a day. You can change or cancel each one before it goes.
+          <InfoTip text={`At ${clockText(10)}, ${clockText(13)} or ${clockText(16)} (${timeZoneWords(timeZone)}), the same day for a review in before ${clockText(8)}.`} />
         </p>
         <fieldset className={styles.fieldset}>
           <legend>Post to</legend>
@@ -410,7 +426,8 @@ function AutoPosts({ state, timeZone }: { state: SocialState; timeZone: string }
                   if (state.auto.enabled && next.some(ready)) save.mutate({ enabled: true, networks: next });
                 }}
               />
-              <span>
+              <span className={styles.networkChoice}>
+                <SourceMark name={c.network} size={14} />
                 {NETWORK_NAMES[c.network]}
                 {state.auto.enabled && networks.includes(c.network) && !c.enabled && c.reason && <span className={styles.checkNote}>{c.reason}</span>}
               </span>

@@ -5,15 +5,15 @@
  * job's page, or a finished visit's (?job=…&visit=… opens a new one here).
  *
  * As inbox rows grouped by what needs a look (B-Inbox.dc.html): one that came down by itself first,
- * then the published ones, then drafts. A row opens its showcase; its menu shares it.
+ * then the published ones, then drafts, then recent finished jobs with photos and no showcase yet,
+ * each a click from being one. A row opens its showcase; its menu shares it.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { cx } from "@/components/ui/Button";
+import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
 import { DetailColumns } from "@/components/ui/DetailPage";
-import { Icon } from "@/components/ui/Icon";
 import { InboxGroup, InboxList, InboxRow, ListFoot } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
 import { InboxSkeleton } from "@/components/ui/Skeleton";
@@ -25,8 +25,13 @@ import { useSession } from "@/lib/session";
 import styles from "./Presence.module.css";
 import { ShowcaseDialog, showcaseLink, socialPostPath } from "./ShowcaseDialog";
 import { takenDownWords } from "./showcaseWords";
+import { Thumb, useThumbs } from "./Thumbs";
 
 type Open = { jobId: string; visitId?: string | null; showcaseId?: string | null };
+
+/** How many recent finished jobs are looked at for photos, and how many of those are suggested. */
+const READY_LOOKED_AT = 10;
+const READY_SHOWN = 5;
 
 export function Showcases() {
   const session = useSession();
@@ -48,13 +53,39 @@ export function Showcases() {
       unwrap(
         await supabase()
           .from("showcases")
-          .select("id, job_id, visit_id, title, description, status, token, published_at, unpublished_reason, created_at, job:jobs(number, title), photos:showcase_photos(attachment_id, sort)")
+          .select("id, job_id, visit_id, title, description, status, token, published_at, unpublished_reason, created_at, job:jobs(number, title), photos:showcase_photos(attachment_id, sort, use_marked)")
           .eq("company_id", session.company.id)
           .order("created_at", { ascending: false })
           .limit(200),
       ),
   });
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["showcases", session.company.id] });
+  // Finished jobs with photos that could be shared, newest first, so making a showcase is a click from
+  // here: the same photos the dialog offers (record_photos), for the few most recent jobs.
+  const ready = useQuery({
+    queryKey: ["showcase-ready", session.company.id],
+    queryFn: async () => {
+      const jobs = unwrap(
+        await supabase()
+          .from("jobs")
+          .select("id, number, title, client:clients(display_name)")
+          .eq("company_id", session.company.id)
+          .in("status", ["requires_invoicing", "completed"])
+          .order("updated_at", { ascending: false })
+          .limit(READY_LOOKED_AT),
+      );
+      const counted = await Promise.all(
+        jobs.map(async (j) => {
+          const photos = ((unwrap(await supabase().rpc("record_photos", { p_company: session.company.id, p_job: j.id })) ?? []) as Array<{ id: string; can_share: boolean }>).filter((p) => p.can_share);
+          return { ...j, photos: photos.length, first: photos[0]?.id ?? null };
+        }),
+      );
+      return counted.filter((j) => j.photos > 0);
+    },
+  });
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["showcases", session.company.id] });
+    void queryClient.invalidateQueries({ queryKey: ["showcase-ready", session.company.id] });
+  };
   const unpublish = useMutation({ meta: { success: "Unpublished" }, mutationFn: (id: string) => api.post(`/showcases/${id}/unpublish`), onSuccess: refresh });
   const remove = useMutation({
     meta: { success: "Showcase deleted" },
@@ -71,6 +102,14 @@ export function Showcases() {
   const takenDown = rows.filter((s) => takenDownWords(s));
   const published = rows.filter((s) => s.status === "published");
   const drafts = rows.filter((s) => s.status !== "published" && !takenDownWords(s));
+  const made = new Set(rows.map((s) => s.job_id));
+  const suggestions = (ready.data ?? []).filter((j) => !made.has(j.id)).slice(0, READY_SHOWN);
+  // Each row leads with its first photo, as a social post does.
+  const firstPhoto = (s: Row) => [...(s.photos ?? [])].sort((a, b) => a.sort - b.sort)[0];
+  const thumbs = useThumbs([
+    ...rows.map((s) => ({ key: s.id, attachmentId: firstPhoto(s)?.attachment_id, marked: firstPhoto(s)?.use_marked })),
+    ...suggestions.map((j) => ({ key: j.id, attachmentId: j.first })),
+  ]).data ?? {};
 
   const row = (s: Row) => {
     const job = s.job as { number: number; title: string } | null;
@@ -84,7 +123,7 @@ export function Showcases() {
         className={styles.showcase}
         onClick={() => setOpen({ jobId: s.job_id, showcaseId: s.id })}
         title={s.title}
-        avatar={<Icon name="image" size={16} />}
+        avatar={<Thumb url={thumbs[s.id]} />}
         square
         // It came down by itself: why, in place of what it's about, as on the bell, so nobody wonders where the page went.
         subject={down ? <span className={styles.downLine}>{down}</span> : s.description.trim() || job?.title || "Job"}
@@ -114,6 +153,20 @@ export function Showcases() {
     );
   };
 
+  const suggestion = (j: (typeof suggestions)[number]) => (
+    <InboxRow
+      key={j.id}
+      className={styles.showcase}
+      onClick={() => setOpen({ jobId: j.id })}
+      title={j.title}
+      avatar={<Thumb url={thumbs[j.id]} />}
+      square
+      subject={(j.client as { display_name: string } | null)?.display_name ?? "Job"}
+      meta={[j.number != null && `Job #${j.number}`, `${j.photos} ${j.photos === 1 ? "photo" : "photos"}`]}
+      aside={<Button size="sm" icon="image" onClick={() => setOpen({ jobId: j.id })}>Make a showcase</Button>}
+    />
+  );
+
   return (
     <div className={cx("m-grouped", styles.tab)}>
       <DetailColumns>
@@ -122,8 +175,8 @@ export function Showcases() {
         </p>
         {list.isPending ? <InboxSkeleton rows={3} /> : list.error ? (
           <ErrorState error={list.error} onRetry={() => list.refetch()} />
-        ) : !rows.length ? (
-          <EmptyState icon="image" title="No showcases yet" action={<Link className="btn" to="/jobs">Go to jobs</Link>}>Open a finished job and pick Make a showcase.</EmptyState>
+        ) : !rows.length && !suggestions.length ? (
+          <EmptyState icon="image" title="No showcases yet" action={<Link className="btn" to="/jobs">Go to jobs</Link>}>Finished jobs with photos show up here, ready to make into one.</EmptyState>
         ) : (
           <InboxList
             label="Showcases"
@@ -133,6 +186,7 @@ export function Showcases() {
             {takenDown.length > 0 && <InboxGroup label="Taken down" count={takenDown.length} tone="warning" icon="alert">{takenDown.map(row)}</InboxGroup>}
             {published.length > 0 && <InboxGroup label="Published" count={published.length}>{published.map(row)}</InboxGroup>}
             {drafts.length > 0 && <InboxGroup label="Drafts" count={drafts.length}>{drafts.map(row)}</InboxGroup>}
+            {suggestions.length > 0 && <InboxGroup label="Ready to showcase" count={suggestions.length}>{suggestions.map(suggestion)}</InboxGroup>}
           </InboxList>
         )}
       </DetailColumns>

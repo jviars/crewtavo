@@ -19,6 +19,13 @@
 .textLink { justify-self: start; font-size: var(--fs-13); font-weight: 600; color: var(--green); }
 .textLink:hover { color: var(--green-dark); text-decoration: underline; text-underline-offset: 2px; }
 .copy { display: grid; gap: 10px; min-width: 0; }
+/* A finished part of the setup, folded to what it does (SetupSummary.tsx), Edit on the right. */
+.summary { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
+.summaryText { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.summaryLead { margin: 0; font-size: var(--fs-14); line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+/* What a message says, as a client reads it with sample values (Reviews' review link, Referrals' email). */
+.sample { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--fill-2); font-size: var(--fs-13); line-height: 1.5; color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere; }
+.label { font-size: var(--fs-13); font-weight: 600; color: var(--ink); }
 .notes { display: grid; gap: 4px; }
 .notes:empty { display: none; }
 .standing { margin: 0; font-size: var(--fs-13); color: var(--text-2); }
@@ -160,7 +167,8 @@
 .totalValue :global(.chip) { font-size: var(--fs-12); }
 .totalHint { font-size: var(--fs-12); color: var(--text-3); }
 .source { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.source > i { flex: none; width: 8px; height: 8px; border-radius: var(--radius-pill); }
+.sourceSlot { display: grid; place-items: center; flex: none; width: 14px; }
+.sourceSlot > i { width: 8px; height: 8px; border-radius: var(--radius-pill); }
 .sourceText { display: grid; min-width: 0; }
 .sourceText strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .sourceText span { font-size: var(--fs-12); color: var(--text-3); }
@@ -185,6 +193,7 @@
 .resultLine a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .results :is(a, button) { position: relative; z-index: 1; }
 .resultPlace { display: inline-flex; align-items: center; gap: 1px; }
+.placeName { display: inline-flex; align-items: center; gap: 3px; }
 /* The status leads the meta line only on a phone: on a desktop it's on the right, so neither it nor its dot shows here. */
 :global(.il-meta) > .metaStatus:first-child + :global(.meta-dot) { display: none; }
 .resultActions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -199,6 +208,11 @@
 .fieldset > legend { padding: 0 0 6px; font-size: var(--fs-12); font-weight: 600; color: var(--text-3); }
 .fieldset :global(.checkbox) { font-size: var(--fs-13); }
 .checkNote { display: block; font-size: var(--fs-12); font-weight: 400; color: var(--text-3); }
+/* A network's logo before its name: on a post's quiet line, in Posted to, and in Post to's choices (SourceMark.tsx). */
+.titleMark { display: inline-flex; align-items: center; gap: 7px; }
+.networkMarks { display: inline-flex; align-items: center; gap: 4px; vertical-align: -2px; }
+.networkChoice { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 6px; }
+.networkChoice > .checkNote { flex-basis: 100%; }
 
 @media (max-width: 900px) {
   .tab { gap: 22px; }

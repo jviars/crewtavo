@@ -58,11 +58,13 @@ import { toast } from "@/lib/toast";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ReviewLinkOffer } from "../apps/GoogleBusinessPanel";
-import { askBody, askRules, askToastKind, daysInOrder, reminderDropWords, remindersDroppedWords, type AskForm, type AskResult, type AskRuleRow } from "./askForm";
+import { askBody, askRules, askSummary, askToastKind, daysInOrder, reminderDropWords, remindersDroppedWords, type AskForm, type AskResult, type AskRuleRow } from "./askForm";
+import { MessageField, renderSample, type Token } from "./EmailEditor";
 import { GoogleNumbers, GoogleReviewList, GoogleSide, useGoogleState, useReviewStats } from "./GoogleReviews";
 import { hasNumbers, hasReviews, showsList, type GoogleState } from "./googleReviewData";
 import styles from "./Presence.module.css";
 import { ReviewCompare } from "./ReviewCompare";
+import { SetupSummary } from "./SetupSummary";
 import { useSettingsSaver } from "./useSettingsSaver";
 import { Select } from "@/components/ui/Select";
 
@@ -77,6 +79,14 @@ const WHEN_HINTS: Record<AskWhen, string> = {
   "visit.completed": "Each visit of a one-off job, not assessments or tasks.",
   "invoice.paid": "Not deposits or progress billing: the work isn't done yet.",
 };
+/** What a review ask can say, as the server fills it in (services/reviews.ts vars). */
+const REVIEW_TOKENS: Token[] = [
+  { token: "client.first_name", label: "First name" },
+  { token: "client.name", label: "Full name" },
+  { token: "company.name", label: "Your company" },
+  { token: "company.phone", label: "Your phone" },
+  { token: "link", label: "Review link" },
+];
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
 /** Where the two columns stack (base.css .two-col), and a phone's numbers move under the forms. */
@@ -117,11 +127,16 @@ export function Reviews() {
   const stacked = useStacked();
   const numbers = hasNumbers(g) && <GoogleNumbers g={g!} stats={stats} />;
 
-  // The lists run the full width under the rest, so on a phone Ask a client now comes before a long list.
+  // The review link is step one, so until it's saved it comes first; after that it folds under asking.
+  const linked = Boolean((session.company.settings as { review_url?: string }).review_url);
+
+  // The lists run the full width under the rest. On a phone Ask a client now comes first: setup is
+  // set once, asking happens every day.
   return (
     <div className={cx("m-grouped", styles.tab)}>
       {!stacked && numbers}
       <DetailColumns
+        sideFirst
         side={
           <>
             <AskNow />
@@ -129,6 +144,7 @@ export function Reviews() {
           </>
         }
       >
+        {!linked && <ReviewLink google={g} />}
         {!can(session, "automations") ? (
           <Section title="Ask automatically">
             <p className={styles.note}>Owners and admins with the Automations area choose when clients are asked for a review.</p>
@@ -140,7 +156,7 @@ export function Reviews() {
         ) : (
           <AskAutomatically rules={rules.data} google={g} />
         )}
-        <ReviewLink google={g} />
+        {linked && <ReviewLink google={g} />}
         <ReviewCompare />
       </DetailColumns>
       {stacked && numbers}
@@ -173,10 +189,15 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
   const canSave = hasRole(session, "admin") && can(session, "automations");
   const inOrder = daysInOrder(form);
   const [counted, setCounted] = useState<unknown>(null);
+  // Folded to a summary once the review link is saved; a rule changed in Automations stays open, as its note says how.
+  const foldable = Boolean(settings.review_url) && !afterCustom && !recurringCustom;
+  const [open, setOpen] = useState(!foldable);
+  const folded = foldable && !open;
   const save = useMutation({
     meta: { inline: true },
-    mutationFn: () => api.put<{ kept: Array<{ id: string; name: string }>; reminders_dropped?: number }>("/reviews/asks", askBody(form)),
+    mutationFn: (f: AskForm) => api.put<{ kept: Array<{ id: string; name: string }>; reminders_dropped?: number }>("/reviews/asks", askBody(f)),
     onSuccess: async (r) => {
+      setOpen(false);
       queryClient.invalidateQueries({ queryKey: ["automation-rules", session.company.id] });
       // New reminder days move the reminders still to come.
       queryClient.invalidateQueries({ queryKey: ["review-requests", session.company.id] });
@@ -202,7 +223,13 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
       const words = reminderDropWords(before, form.reminders, count ?? 0);
       if (words && !(await confirm({ ...words, danger: true }))) return;
     }
-    save.mutate();
+    save.mutate(form);
+  };
+  // Folded, the switch saves at once: there's no Save to press.
+  const switchNow = (enabled: boolean) => {
+    const next = { ...initial, enabled };
+    setForm(next);
+    save.mutate(next, { onSuccess: () => toast.success(enabled ? "Review asks turned on" : "Review asks turned off") });
   };
   const saved = useJustDone(save);
   const whenLabel = ASK_WHEN.find((w) => w.verb === form.when)?.label ?? "";
@@ -221,22 +248,31 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
 
   // Changed here and not saved yet: said by Save, since the switch in the heading saves with it.
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const headSwitch = (
+    <label className={styles.headSwitch}>
+      <span>{form.enabled ? "On" : "Off"}</span>
+      <input type="checkbox" role="switch" className="switch" aria-label="Ask automatically" checked={form.enabled} disabled={disabled || (folded && save.isPending)}
+        onChange={(e) => (folded ? switchNow(e.target.checked) : set({ enabled: e.target.checked }))} />
+    </label>
+  );
+
+  if (folded) {
+    return (
+      <Section title="Ask automatically" action={headSwitch}>
+        <SetupSummary lines={[timing, askSummary(form)]} onEdit={() => setOpen(true)} editLabel={canSave ? "Edit" : "View"} />
+        <FormError error={save.error} />
+      </Section>
+    );
+  }
 
   return (
-    <Section
-      title="Ask automatically"
-      action={
-        <label className={styles.headSwitch}>
-          <span>{form.enabled ? "On" : "Off"}</span>
-          <input type="checkbox" role="switch" className="switch" aria-label="Ask automatically" checked={form.enabled} disabled={disabled} onChange={(e) => set({ enabled: e.target.checked })} />
-        </label>
-      }
-    >
+    <Section title="Ask automatically" action={headSwitch}>
       <form className={styles.form} onSubmit={(e: FormEvent) => { e.preventDefault(); if (inOrder) void submit(); }}>
+        {/* The review link is the section above until it's saved (Reviews), so this points up at it. */}
         {!settings.review_url && (
           <div className="callout callout-warning">
             <Icon name="alert" size={16} />
-            <div className="grow">{google?.review_link.suggested ? "Use the link Google gives below first." : "Add your Google review link below first."} Until then there's nothing to send.</div>
+            <div className="grow">{google?.review_link.suggested ? "Use the link Google gives above first." : "Add your Google review link above first."} Until then there's nothing to send.</div>
           </div>
         )}
         {form.enabled && onlyRecurring && !afterCustom && (
@@ -325,10 +361,14 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
           {canSave ? (
             <>
               <Button type="submit" loading={save.isPending} done={saved} disabled={!inOrder}>Save</Button>
+              {foldable && <Button onClick={() => { setForm(initial); setOpen(false); }}>Cancel</Button>}
               {dirty && !save.isPending && <span className={styles.saveNote}>Not saved yet</span>}
             </>
           ) : (
-            <span className={styles.saveNote}>Only owners and admins can change these.</span>
+            <>
+              <span className={styles.saveNote}>Only owners and admins can change these.</span>
+              {foldable && <Button onClick={() => setOpen(false)}>Close</Button>}
+            </>
           )}
         </div>
       </form>
@@ -350,6 +390,29 @@ function ReviewLink({ google }: { google: GoogleState | undefined }) {
   const saved = useJustDone(save);
   const validUrl = /^https:\/\/\S+\.\S+/.test(url.trim());
   const linked = message.includes("{{link}}") && reminder.includes("{{link}}");
+  // Saved once, it folds to the link and how the message reads; Google offering a new link opens it.
+  const foldable = Boolean(settings.review_url) && !offer;
+  const [open, setOpen] = useState(!foldable);
+  const vars = {
+    "client.first_name": "Jordan",
+    "client.name": "Jordan Rivera",
+    "company.name": session.company.name,
+    "company.phone": session.company.phone ?? "",
+    link: url.trim() || "https://g.page/r/…/review",
+  };
+  const sample = renderSample(message, vars).trim();
+
+  if (foldable && !open) {
+    return (
+      <Section title="Your review link">
+        <SetupSummary
+          lines={[url.replace(/^https?:\/\//, ""), `“${sample.length > 160 ? `${sample.slice(0, 160).trimEnd()}…` : sample}”`]}
+          onEdit={() => setOpen(true)}
+          editLabel={canSave ? "Edit" : "View"}
+        />
+      </Section>
+    );
+  }
 
   return (
     <Section title="Your review link">
@@ -358,11 +421,14 @@ function ReviewLink({ google }: { google: GoogleState | undefined }) {
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           // settings.reviews is also saved by Ask automatically: what's there now is kept.
-          save.mutate((current) => ({
-            review_url: url.trim(),
-            review_message: message.trim(),
-            reviews: { ...((current.reviews as Record<string, unknown> | undefined) ?? {}), reminder_message: reminder.trim() },
-          }));
+          save.mutate(
+            (current) => ({
+              review_url: url.trim(),
+              review_message: message.trim(),
+              reviews: { ...((current.reviews as Record<string, unknown> | undefined) ?? {}), reminder_message: reminder.trim() },
+            }),
+            { onSuccess: () => setOpen(false) },
+          );
         }}
       >
         {offer && (
@@ -378,18 +444,28 @@ function ReviewLink({ google }: { google: GoogleState | undefined }) {
         <Field label="Google review URL" error={url && !validUrl ? "Paste the full link, starting with https://" : null} hint={<a href="https://support.google.com/business/answer/3474122" target="_blank" rel="noreferrer">Where to find it</a>}>
           <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://g.page/r/…/review" disabled={!canSave} />
         </Field>
+        {/* The campaign editor's fields (EmailEditor), so a name or the link goes in with a tap. */}
         <div className={styles.grid2}>
-          <Field label="Message" hint={<>{`{{link}} is replaced with your review link. Texts end with “${STOP_LINE}” unless yours says STOP.`} {REVIEW_ASK_RULES} <a href={REVIEW_ASK_POLICY_URL} target="_blank" rel="noreferrer" style={{ textDecoration: "underline" }}>Google's policy</a></>}>
-            <textarea className="textarea" style={{ minHeight: 132 }} value={message} maxLength={1000} onChange={(e) => setMessage(e.target.value)} disabled={!canSave} />
-          </Field>
-          <Field label="Reminder message" hint="Sent to anyone who hasn't opened the link, with the same link.">
-            <textarea className="textarea" style={{ minHeight: 132 }} value={reminder} maxLength={1000} onChange={(e) => setReminder(e.target.value)} disabled={!canSave} />
-          </Field>
+          <div className="stack-sm">
+            <MessageField label="Message" value={message} onChange={setMessage} tokens={REVIEW_TOKENS} maxLength={1000} minHeight={132} disabled={!canSave}
+              hint={<>{`{{link}} is replaced with your review link. Texts end with “${STOP_LINE}” unless yours says STOP.`} {REVIEW_ASK_RULES} <a href={REVIEW_ASK_POLICY_URL} target="_blank" rel="noreferrer" style={{ textDecoration: "underline" }}>Google's policy</a></>} />
+          </div>
+          <div className="stack-sm">
+            <MessageField label="Reminder message" value={reminder} onChange={setReminder} tokens={REVIEW_TOKENS} maxLength={1000} minHeight={132} disabled={!canSave}
+              hint="Sent to anyone who hasn't opened the link, with the same link." />
+          </div>
         </div>
-        {!linked && <p className="error-text" style={{ margin: 0 }}>Include {"{{link}}"} in both messages so clients can click through.</p>}
+        {!linked && <p className="error-text" style={{ margin: 0 }}>Include the review link in both messages so clients can click through.</p>}
+        {sample && (
+          <div className="stack-sm">
+            <span className={styles.label}>How it reads</span>
+            <p className={styles.sample}>{sample}</p>
+          </div>
+        )}
         <FormError error={save.error} />
         <div className={styles.saveBar}>
           {canSave ? <Button type="submit" loading={save.isPending} done={saved} disabled={!validUrl || !linked}>Save</Button> : <span className={styles.saveNote}>Only owners and admins can change these.</span>}
+          {foldable && <Button onClick={() => { setUrl(settings.review_url ?? ""); setMessage(settings.review_message ?? DEFAULT_REVIEW_MESSAGE); setReminder(reviewSettings(session.company.settings).reminderMessage); setOpen(false); }}>{canSave ? "Cancel" : "Close"}</Button>}
         </div>
       </form>
     </Section>

@@ -17,8 +17,10 @@ import {
   REFERRAL_EMAIL_NOT_CONNECTED,
   REFERRAL_GAP_DAYS,
   referralPill,
+  referralRewards,
   referralRuleTiming,
   referralsReady,
+  REFERRAL_LINK_BUTTON,
   REFERRALS_NOT_SET_UP,
   type CreditPart,
 } from "@crewtavo/core/marketing";
@@ -49,7 +51,9 @@ import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { BOOKS, creditRoom, takesCredit } from "../invoices/creditRules";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import styles from "./Marketing.module.css";
-import { messageError, referralForm, referralPatch, rewardChanged, rewardError, type ReferralForm } from "./referralForm";
+import { companyAddressLine, EmailPreview, MessageField, renderSample, type Token } from "./EmailEditor";
+import { messageError, referralForm, referralPatch, referralSummary, rewardChanged, rewardError, type ReferralForm } from "./referralForm";
+import { SetupSummary } from "./SetupSummary";
 import { useSettingsSaver } from "./useSettingsSaver";
 
 interface Stats {
@@ -59,6 +63,16 @@ interface Stats {
   credits: { pending: number; pending_count: number; pending_percent: number; earned: number; applied: number; given: number };
   top_referrers: Array<{ client_id: string; name: string; referrals: number; won: number; revenue: number | null }>;
 }
+
+/** What a referral email can say, as the server fills it in (services/referrals.ts). */
+const REFERRAL_TOKENS: Token[] = [
+  { token: "client.first_name", label: "First name" },
+  { token: "client.name", label: "Full name" },
+  { token: "company.name", label: "Your company" },
+  { token: "company.phone", label: "Your phone" },
+  { token: "link", label: "Their referral link" },
+  { token: "rewards", label: "What they get" },
+];
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 /** "Maria" from "Maria Lopez". */
@@ -75,18 +89,22 @@ function useRefresh() {
 
 export function Referrals() {
   const session = useSession();
+  // The credit or offer is step one, so until there's one it comes first; after that it folds under asking.
+  const ready = referralsReady(session.company.settings);
   const stats = useQuery({
     queryKey: ["referral-stats", session.company.id],
     queryFn: async () => unwrap(await supabase().rpc("referral_stats", { p_company: session.company.id })) as unknown as Stats,
   });
 
-  // The list runs the full width under the rest, so on a phone Ask for referrals comes before a long
-  // list. Each part is a section on a hairline; a phone shows them as inset cards on the grey ground.
+  // The list runs the full width under the rest. On a phone Ask for referrals comes first: setup is
+  // set once, asking happens every day. Each part is a section on a hairline; a phone shows them as
+  // inset cards on the grey ground.
   return (
     <>
       <Numbers stats={stats} />
       <DetailColumns
         grouped
+        sideFirst
         side={
           <>
             <AskNow />
@@ -95,8 +113,9 @@ export function Referrals() {
           </>
         }
       >
+        {!ready && <CreditAndOffer />}
         <AskAutomatically />
-        <CreditAndOffer />
+        {ready && <CreditAndOffer />}
       </DetailColumns>
       <DetailColumns grouped>
         <ReferralList />
@@ -197,7 +216,8 @@ function AskAutomatically() {
     >
       <div className="stack-sm">
         {!ready && (
-          <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{REFERRALS_NOT_SET_UP} Until then there's nothing to tell them.</div></div>
+          // Credit, offer and email is the section above until one's set (Referrals), so this points up at it.
+          <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">Add a credit or an offer above first. Until then there's nothing to tell them.</div></div>
         )}
         {!emailReady && (
           <div className="callout callout-warning">
@@ -240,6 +260,33 @@ function CreditAndOffer() {
   const valueError = rewardError(form);
   const emailError = messageError(form);
   const percent = form.kind === "percent";
+  // Set once, it folds to what clients and friends get; Edit opens the form.
+  const foldable = referralsReady(settings);
+  const [open, setOpen] = useState(!foldable);
+  const currency = session.company.currency;
+  // The email as a client reads it, with what the form says now.
+  const shown = { ...settings, ...referralPatch(form, settings ?? {}) };
+  const vars = {
+    "client.first_name": "Jordan",
+    "client.name": "Jordan Rivera",
+    "company.name": session.company.name,
+    "company.phone": session.company.phone ?? "",
+    link: `${window.location.origin}/r/…`,
+    rewards: referralRewards(shown, currency),
+  };
+
+  if (foldable && !open) {
+    const sample = renderSample(form.message, vars).replace(/\n{2,}/g, " ").trim();
+    return (
+      <Section title="Credit, offer and email">
+        <SetupSummary
+          lines={[referralSummary(settings, currency), `“${sample.length > 160 ? `${sample.slice(0, 160).trimEnd()}…` : sample}”`]}
+          onEdit={() => setOpen(true)}
+          editLabel={canSave ? "Edit" : "View"}
+        />
+      </Section>
+    );
+  }
 
   return (
     <Section title="Credit, offer and email" flush>
@@ -249,7 +296,7 @@ function CreditAndOffer() {
           e.preventDefault();
           if (valueError || emailError) return;
           // settings.referrals has more than this form: what's there now is kept.
-          save.mutate((current) => referralPatch(form, current));
+          save.mutate((current) => referralPatch(form, current), { onSuccess: () => setOpen(false) });
         }}
       >
         <Field
@@ -267,26 +314,35 @@ function CreditAndOffer() {
             <span className="input-group" style={{ width: 130 }}>
               {!percent && <span className="addon">{currencySymbol()}</span>}
               <DecimalInput className="input" inputMode="decimal" aria-label={percent ? "Percent" : "Amount"} value={form.value} disabled={!canSave}
-                placeholder={percent ? "10" : "50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
+                placeholder={percent ? "e.g. 10" : "e.g. 50"} onChange={(e) => set({ value: e.target.value.replace(/[^0-9.]/g, "") })} />
               {percent && <span className="addon addon-right">%</span>}
             </span>
           </div>
         </Field>
-        <Field label="Offer shown to friends" optional hint="Written to the friend, like “10% off your first service”. It's on their referral page, and quoted in the Client Hub and the referral email.">
-          <input className="input" value={form.offer} maxLength={200} onChange={(e) => set({ offer: e.target.value })} disabled={!canSave} placeholder="10% off your first service" />
+        {/* Examples say "e.g.", so an empty box never reads as a credit or an offer that's already set. */}
+        <Field label="Offer shown to friends" optional hint="Written to the friend. It's on their referral page, and quoted in the Client Hub and the referral email.">
+          <input className="input" value={form.offer} maxLength={200} onChange={(e) => set({ offer: e.target.value })} disabled={!canSave} placeholder="e.g. 10% off your first service" />
         </Field>
-        <Field label="Referral email" error={emailError} hint="{{link}} is the client's own link. {{rewards}} says what they and their friend get.">
-          <textarea className="textarea" style={{ minHeight: 130 }} value={form.message} maxLength={2000} onChange={(e) => set({ message: e.target.value })} disabled={!canSave} />
-        </Field>
+        {/* The campaign editor's field (EmailEditor), with the email as a client gets it beside it. */}
+        <div className="stack-sm">
+          <MessageField label="Referral email" value={form.message} onChange={(message) => set({ message })} tokens={REFERRAL_TOKENS} maxLength={2000} minHeight={130} disabled={!canSave} error={emailError}
+            hint="{{link}} is the client's own link. {{rewards}} says what they and their friend get." />
+        </div>
+        <EmailPreview companyName={session.company.name} address={companyAddressLine(session.company.address)} subject={`Know someone who could use ${session.company.name}?`}
+          body={form.message} vars={vars} unsubscribe={false} linkLabel={REFERRAL_LINK_BUTTON} />
         <FormError error={save.error} />
         <div className="form-actions" style={{ justifyContent: "flex-start", alignItems: "center" }}>
           {canSave ? (
             <>
               <Button type="submit" loading={save.isPending} done={saved} disabled={Boolean(valueError || emailError)}>Save</Button>
+              {foldable && <Button onClick={() => { setForm(referralForm(settings)); setOpen(false); }}>Cancel</Button>}
               {rewardChanged(form, settings) && <span className="muted small">Friends already referred keep the credit they were offered.</span>}
             </>
           ) : (
-            <span className="muted small">Only owners and admins can change these.</span>
+            <>
+              <span className="muted small">Only owners and admins can change these.</span>
+              {foldable && <Button onClick={() => setOpen(false)}>Close</Button>}
+            </>
           )}
         </div>
       </form>

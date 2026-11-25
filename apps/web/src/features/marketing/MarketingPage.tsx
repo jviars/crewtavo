@@ -7,7 +7,7 @@
  * visits when Website Analytics is installed (Home and Website Analytics open them here).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { lazy, Suspense } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { featureOn } from "@/components/shell/nav";
 import { Button, cx } from "@/components/ui/Button";
@@ -15,7 +15,6 @@ import { DetailColumns } from "@/components/ui/DetailPage";
 import { Icon } from "@/components/ui/Icon";
 import { InboxGroup, InboxList, InboxRow } from "@/components/ui/InboxList";
 import { Menu } from "@/components/ui/Menu";
-import { SHEET_QUERY } from "@/components/ui/menuModel";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { CardSkeleton, InboxSkeleton, Loading, StatsSkeleton } from "@/components/ui/Skeleton";
@@ -34,25 +33,13 @@ import { resultsSummary, useCampaignResults } from "./CampaignResults";
 import styles from "./Marketing.module.css";
 import { PostcardCampaigns } from "./PostcardCampaigns";
 import { PromoCodes } from "./PromoCodes";
+import { LeadSources } from "./LeadSources";
 import { EARNED_HINT, Referrals } from "./Referrals";
 import { Reviews } from "./Reviews";
 import { SenderAddressNote } from "./SenderAddress";
 import { Showcases } from "./Showcases";
 import { Social } from "./Social";
 import { analyticsOn } from "./website";
-
-/** A phone's layout, as menus decide it (the width they turn into sheets at). */
-function usePhone() {
-  return useSyncExternalStore(
-    (changed) => {
-      const query = window.matchMedia?.(SHEET_QUERY);
-      query?.addEventListener("change", changed);
-      return () => query?.removeEventListener("change", changed);
-    },
-    () => Boolean(window.matchMedia?.(SHEET_QUERY).matches),
-    () => false,
-  );
-}
 
 type Tab = "campaigns" | "social" | "showcases" | "promos" | "reviews" | "referrals" | "website";
 // Charts load with the tab, not with the rest of Marketing.
@@ -67,7 +54,6 @@ export function MarketingPage() {
   const setTab = (t: Tab) => setParams({ tab: t }, { replace: true });
   // Six tabs don't fit a phone: the one picked is scrolled into view, and the strip shows there are more.
   const tabs = useTabStrip<HTMLDivElement>(tab);
-  const phone = usePhone();
   const summary = useQuery({
     queryKey: ["marketing-summary", session.company.id],
     meta: { silent: true },
@@ -85,11 +71,11 @@ export function MarketingPage() {
   // Short labels, as the board has them, with the 30 days leading the note, so a phone's two across don't wrap them.
   const strip = summary.isPending ? <StatsSkeleton count={5} /> : s && (
     <StatStrip label="Marketing" className={styles.stats}>
-      <Stat label="Emails sent" value={s.emails_sent_30d.toLocaleString("en-US")} note={`Past 30 days · ${emailsSentHint(s)}`} onClick={tab === "campaigns" ? undefined : () => setTab("campaigns")} />
+      <Stat label="Emails sent" value={s.emails_sent_30d.toLocaleString("en-US")} note={`Past 30 days · ${emailsSentHint(s)}`} />
       {/* Someone without the Invoices area has no revenue to see. */}
       {s.campaign_revenue !== null && <Stat label="Revenue from campaigns" value={formatMoneyCents(s.campaign_revenue)} note="Paid work after a click, before tax" />}
-      <Stat label="Review requests" value={s.reviews_requested_30d.toLocaleString("en-US")} note={`Past 30 days · ${s.reviews_requested_30d ? `${Math.round((s.reviews_clicked_30d / s.reviews_requested_30d) * 100)}% opened the link` : "None sent yet"}`} onClick={tab === "reviews" ? undefined : () => setTab("reviews")} />
-      <Stat label="Referrals" value={s.referrals_total.toLocaleString("en-US")} note={`${s.referrals_won} became ${s.referrals_won === 1 ? "a job" : "jobs"}${s.referral_revenue === null ? "" : ` · ${formatMoneyCents(s.referral_revenue)} paid, before tax`}`} onClick={tab === "referrals" ? undefined : () => setTab("referrals")} />
+      <Stat label="Review requests" value={s.reviews_requested_30d.toLocaleString("en-US")} note={`Past 30 days · ${s.reviews_requested_30d ? `${Math.round((s.reviews_clicked_30d / s.reviews_requested_30d) * 100)}% opened the link` : "None sent yet"}`} onClick={() => setTab("reviews")} />
+      <Stat label="Referrals" value={s.referrals_total.toLocaleString("en-US")} note={`${s.referrals_won} became ${s.referrals_won === 1 ? "a job" : "jobs"}${s.referral_revenue === null ? "" : ` · ${formatMoneyCents(s.referral_revenue)} paid, before tax`}`} onClick={() => setTab("referrals")} />
       <Stat label={`Referral credits ${statusText("credit", "earned").toLowerCase()}`} value={formatMoneyCents(s.credits_owed)} note={EARNED_HINT} />
     </StatStrip>
   );
@@ -97,8 +83,6 @@ export function MarketingPage() {
     <>
       <PageHeader title="Marketing" />
       <SenderAddressNote what="campaigns, review asks and referral asks by email won't go out" />
-      {/* On a phone the sections come first, under the title, and the figures only on Campaigns (Mobile-Apps.dc.html): each other section has its own. */}
-      {!phone && strip}
       {/* Words only, as the board has them; on a phone they're chips that scroll sideways (Mobile-Apps.dc.html). */}
       <div ref={tabs} className={cx("underline-tabs underline-tabs-compact", styles.tabs)} role="tablist" aria-label="Marketing sections">
         <button type="button" role="tab" aria-selected={tab === "campaigns"} onClick={() => setTab("campaigns")}>Campaigns</button>
@@ -109,7 +93,9 @@ export function MarketingPage() {
         <button type="button" role="tab" aria-selected={tab === "referrals"} onClick={() => setTab("referrals")}>Referrals</button>
         {website && <button type="button" role="tab" aria-selected={tab === "website"} onClick={() => setTab("website")}>Website</button>}
       </div>
-      {phone && tab === "campaigns" && strip}
+      {/* The figures only on Campaigns, under the tabs, as a phone always had them (Mobile-Apps.dc.html):
+          each other section has its own, and Referrals' under these said the same twice. */}
+      {tab === "campaigns" && strip}
       {tab === "campaigns" && <Campaigns />}
       {tab === "social" && <Social />}
       {tab === "showcases" && <Showcases />}
@@ -214,8 +200,9 @@ function Campaigns() {
     });
 
   // One group on the grouped phone page: each section an inset card (Mobile-Apps.dc.html › Marketing).
+  // Where new clients came from sits beside, as Jobber's Marketing opens with it.
   return (
-    <DetailColumns grouped>
+    <DetailColumns grouped side={<LeadSources />}>
       {!session.config.features.email && (
         <div className="callout callout-info"><Icon name="info" size={16} /><div className="grow">Email isn't connected yet, so campaigns can't be sent.<ConnectEmailHint /></div></div>
       )}

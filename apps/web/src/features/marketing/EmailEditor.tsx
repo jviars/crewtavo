@@ -5,7 +5,7 @@
  * draws a link on a line of its own as the button clients get (lib/email.ts on the server).
  */
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
@@ -29,7 +29,9 @@ export function SubjectField({ value, onChange, placeholder, disabled }: { value
   );
 }
 
-export function MessageField({ value, onChange, tokens, hint, disabled }: { value: string; onChange: (body: string) => void; tokens: Token[]; hint?: string; disabled?: boolean }) {
+export function MessageField({ value, onChange, tokens, hint, disabled, label = "Message", maxLength = 20000, minHeight = 240, error }: {
+  value: string; onChange: (body: string) => void; tokens: Token[]; hint?: ReactNode; disabled?: boolean; label?: string; maxLength?: number; minHeight?: number; error?: string | null;
+}) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const insert = (token: string) => {
     const el = ref.current;
@@ -43,8 +45,8 @@ export function MessageField({ value, onChange, tokens, hint, disabled }: { valu
   };
   return (
     <>
-      <Field label="Message" hint={hint}>
-        <textarea ref={ref} className="textarea" style={{ minHeight: 240 }} value={value} maxLength={20000} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
+      <Field label={label} hint={hint} error={error}>
+        <textarea ref={ref} className="textarea" style={{ minHeight }} value={value} maxLength={maxLength} disabled={disabled} onChange={(e) => onChange(e.target.value)} />
       </Field>
       {!disabled && (
         <div className="token-list">

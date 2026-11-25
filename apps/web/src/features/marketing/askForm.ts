@@ -3,7 +3,7 @@
  * starter rules and settings.reviews, and what it sends to PUT /api/reviews/asks, which changes the
  * rules (packages/core/src/marketing.ts says their shapes).
  */
-import { readAskRule, reviewSettings, type AskChannel, type AskWhen } from "@crewtavo/core/marketing";
+import { ordinal, readAskRule, reviewSettings, type AskChannel, type AskWhen } from "@crewtavo/core/marketing";
 
 export interface AskRuleRow {
   id: string;
@@ -112,3 +112,15 @@ export interface AskResult {
 
 /** The toast for an ask that went: a warning when it went one way but not the other, so that isn't missed. */
 export const askToastKind = (r: Pick<AskResult, "warning">): "warning" | "success" => (r.warning ? "warning" : "success");
+
+/**
+ * The rest of Ask automatically on one line, under its timing, once it's folded (SetupSummary):
+ * "By email · reminders 3 and 5 days after · recurring jobs after the 3rd visit".
+ */
+export function askSummary(form: Pick<AskForm, "channel" | "reminders" | "days" | "recurring" | "visits">): string {
+  const by = form.channel === "both" ? "By text and email" : form.channel === "sms" ? "By text" : "By email";
+  const days = form.days.slice(0, form.reminders);
+  const reminders = !days.length ? "no reminders" : days.length === 1 ? `a reminder ${days[0]} ${days[0] === 1 ? "day" : "days"} after` : `reminders ${days[0]} and ${days[1]} days after`;
+  const recurring = form.recurring ? `recurring jobs after the ${ordinal(form.visits)} visit` : "not on recurring work";
+  return [by, reminders, recurring].join(" · ");
+}

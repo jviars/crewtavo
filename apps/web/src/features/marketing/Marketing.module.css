@@ -154,3 +154,13 @@ a.recipientName:hover { color: var(--ink); text-decoration: underline; text-unde
 @media (prefers-reduced-motion: reduce) {
   .who > summary::after { transition: none; }
 }
+
+/* Where new clients came from (LeadSources.tsx): each source's name and count over a thin bar. */
+.sources { display: grid; gap: 10px; margin: 10px 0 0; padding: 0; list-style: none; }
+.sources li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; font-size: var(--fs-13); }
+.sourceName { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); }
+.sourceSlot { display: grid; place-items: center; flex: none; width: 14px; }
+.sourceLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sourceCount { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sourceBar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--fill-2); overflow: hidden; }
+.sourceBar > span { display: block; height: 100%; border-radius: 2px; background: var(--green); }

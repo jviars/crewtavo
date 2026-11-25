@@ -1114,6 +1114,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--green); }
   .il-inset .il-foot { padding-left: 4px; padding-right: 4px; }
 }
 
+/* The (i) that explains a label or heading on hover (components/ui/InfoTip.tsx). */
+.info-tip { display: inline-grid; place-items: center; margin-left: 6px; padding: 0; border: 0; background: none; vertical-align: -2px; color: var(--quiet); cursor: help; }
+.info-tip:hover { color: var(--ink); }
+
 /* ---------- Sections, facts and related lists (components/ui/Section.tsx, Page-Client.dc.html) ---------- */
 /*
  * A part of a page on a hairline, never a box: a 15px heading with a quiet count and one quiet action

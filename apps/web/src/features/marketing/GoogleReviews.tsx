@@ -58,6 +58,7 @@ import {
   type SuggestedClient,
 } from "./googleReviewData";
 import styles from "./Presence.module.css";
+import { SourceMark } from "./SourceMark";
 import { quotePickItem, QuoteReviewsCard, useQuoteReviews, useSetQuoteReviews } from "./QuoteReviews";
 import { UsingChatGptPlan } from "@/features/apps/UsingChatGptPlan";
 
@@ -170,10 +171,15 @@ export function GoogleNumbers({ g, stats }: { g: GoogleState; stats: ReturnType<
   );
 }
 
+/** A heading about Google's reviews, with Google's G before it. */
+function GoogleTitle({ children }: { children: string }) {
+  return <span className={styles.titleMark}><SourceMark name="google" size={15} />{children}</span>;
+}
+
 /** Not connected: a short section saying what it adds, and who can connect it. */
 function ConnectGoogleCard({ g }: { g: GoogleState }) {
   return (
-    <Section title="Google reviews">
+    <Section title={<GoogleTitle>Google reviews</GoogleTitle>}>
       <div className={styles.copy}>
         <p className={styles.note}>
           Connect Google Business Profile to see your reviews here, reply with a suggestion, and stop asking clients who already left one. Google approves each server first, which
@@ -381,7 +387,7 @@ export function GoogleReviewList({ g }: { g: GoogleState }) {
   return (
     <Section
       id="google-reviews"
-      title="Your Google reviews"
+      title={<GoogleTitle>Your Google reviews</GoogleTitle>}
       flush
       action={
         <>

@@ -3,7 +3,7 @@
  * settings.referrals, and the settings it saves (packages/core/src/marketing.ts referralSettings
  * reads them back, as the database does for a new referral).
  */
-import { DEFAULT_REFERRAL_MESSAGE, MAX_REFERRAL_AMOUNT, referralSettings, type ReferralRewardKind } from "@crewtavo/core/marketing";
+import { creditMoney, DEFAULT_REFERRAL_MESSAGE, MAX_REFERRAL_AMOUNT, referralSettings, type ReferralRewardKind } from "@crewtavo/core/marketing";
 
 type Settings = Record<string, unknown>;
 
@@ -60,4 +60,18 @@ export function referralPatch(form: ReferralForm, current: Settings): Settings {
 export function rewardChanged(form: ReferralForm, settings: Settings | null | undefined): boolean {
   const { reward } = referralSettings(settings);
   return reward.value > 0 && (form.kind !== reward.kind || rewardValue(form) !== reward.value);
+}
+
+/**
+ * Credit, offer and email folded to a line (SetupSummary): "$50 credit for each friend who becomes a
+ * client · friends see “10% off your first service”".
+ */
+export function referralSummary(settings: Settings | null | undefined, currency = "USD"): string {
+  const { reward, offer } = referralSettings(settings);
+  const credit = reward.value <= 0
+    ? "No credit for clients"
+    : reward.kind === "percent"
+      ? `${Number(reward.value.toFixed(2))}% of each friend's first job as credit`
+      : `${creditMoney(reward.value, currency)} credit for each friend who becomes a client`;
+  return [credit, offer ? `friends see “${offer}”` : "no offer for friends"].join(" · ");
 }

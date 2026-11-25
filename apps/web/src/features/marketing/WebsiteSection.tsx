@@ -20,6 +20,7 @@ import { Breakdown, Change, ReportCard, ReportTable, TrendChart } from "../finan
 import { bucketize, bucketizeShifted, bucketsFor, shortDate } from "../finance/range";
 import { pct, plural, RangePicker, rangeWords, TabBody, useRangeParams } from "../finance/shared";
 import styles from "./Presence.module.css";
+import { SourceMark, sourceMark } from "./SourceMark";
 import { periodTotals, useWebStats, type Figure } from "./website";
 
 /** `short` names it in the segmented control, where four have to fit a phone. */
@@ -199,7 +200,8 @@ function channelName(channel: string): string {
 function SourceName({ name, channel }: { name: string; channel: Channel }) {
   return (
     <span className={styles.source}>
-      <i aria-hidden style={{ background: CHANNEL_COLORS[channel] ?? "var(--text-4)" }} />
+      {/* A known site or network's logo, else its channel's color, as the chart above has it. */}
+      <span className={styles.sourceSlot} aria-hidden>{sourceMark(name) ? <SourceMark name={name} size={14} /> : <i style={{ background: CHANNEL_COLORS[channel] ?? "var(--text-4)" }} />}</span>
       <span className={styles.sourceText}>
         <strong>{name}</strong>
         {name !== channelName(channel) && <span>{channelName(channel)}</span>}

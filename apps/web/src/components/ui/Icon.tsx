@@ -235,6 +235,17 @@ const ICONS = {
   /** A client's page: a licensed business and an insured one. */
   certificate: "certificate",
   shieldCheck: "shield-check",
+  /** Where marketing goes and where clients come from (Marketing: Social, lead and website sources). */
+  facebook: "facebook-logo",
+  instagram: "instagram-logo",
+  google: "google-logo",
+  youtube: "youtube-logo",
+  tiktok: "tiktok-logo",
+  xLogo: "x-logo",
+  signpost: "signpost",
+  mailbox: "mailbox",
+  handshake: "handshake",
+  gavel: "gavel",
 } satisfies Record<string, PhosphorName | Own>;
 
 export type IconName = keyof typeof ICONS;

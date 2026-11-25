@@ -17,6 +17,7 @@ import { dateLocale, formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { PostcardsUsOnly } from "../apps/LobPanel";
 import styles from "./Marketing.module.css";
+import { Thumb, useThumbs } from "./Thumbs";
 
 /** A new postcard's message, to change. */
 export const POSTCARD_STARTER = "Hi {{client.first_name}},\n\nOur schedule fills up fast this time of year. Book your visit today and we'll get you on the calendar.\n\n{{link}}\n\n{{company.name}}\n{{company.phone}}";
@@ -31,7 +32,7 @@ export function PostcardCampaigns() {
       unwrap(
         await supabase()
           .from("postcard_campaigns")
-          .select("id, name, size, status, mode, recipients_count, made_count, failed_count, finished_at, created_at")
+          .select("id, name, size, status, mode, recipients_count, made_count, failed_count, finished_at, created_at, front_attachment_id, front_marked, front_path")
           .eq("company_id", session.company.id)
           .order("created_at", { ascending: false })
           .limit(200),
@@ -50,6 +51,8 @@ export function PostcardCampaigns() {
     onSuccess: (row) => navigate(`/marketing/postcards/${row.id}`),
   });
   type Row = NonNullable<typeof list.data>[number];
+  // Each row leads with its front picture, as a social post leads with its photo.
+  const thumbs = useThumbs((list.data ?? []).map((c) => ({ key: c.id, attachmentId: c.front_attachment_id, marked: c.front_marked, path: c.front_path }))).data ?? {};
   const when = (c: Row) => {
     const made = c.mode === "live" ? "mailed" : "made in test mode";
     // Its status says Draft beside it: the line says what size, and when it was started.
@@ -75,7 +78,7 @@ export function PostcardCampaigns() {
                 key={c.id}
                 to={`/marketing/postcards/${c.id}`}
                 title={c.name}
-                avatar={false}
+                avatar={<Thumb url={thumbs[c.id]} icon="mailbox" />}
                 badge={c.mode === "test" && c.status !== "draft" ? <span className="tag">Test</span> : null}
                 // Quiet under the name, as a one-off campaign's when is.
                 meta={when(c)}

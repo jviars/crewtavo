@@ -9,6 +9,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ListFoot } from "@/components/ui/InboxList";
+import { InfoTip } from "@/components/ui/InfoTip";
 import { Section } from "@/components/ui/Section";
 import { SectionSkeleton, StatsSkeleton } from "@/components/ui/Skeleton";
 import { Stat, StatStrip } from "@/components/ui/StatStrip";
@@ -21,6 +22,10 @@ import { useSession } from "@/lib/session";
 import styles from "./Marketing.module.css";
 
 /** Every campaign's numbers, drafts left out: the one-off list and the automated cards read them. */
+const OPENS_TIP = "Approximate: Apple Mail and some others load images to protect privacy, so some emails show as opened when they weren't.";
+const BOOKINGS_TIP = "Requests and approved quotes from people who clicked a link, within 30 days. A request and the quote made from it count once.";
+const REVENUE_TIP = "What that work has been paid so far, before tax. Work booked another way counts when it was set up after the click and paid within 30 days of it, so invoices for work they already had, like recurring visits, don't.";
+
 export function useCampaignResults() {
   const session = useSession();
   return useQuery({
@@ -85,20 +90,14 @@ export function CampaignStats({ campaignId, live = false }: { campaignId: string
       ) : (
         <StatStrip label="What it brought in">
           <Stat label="Sent" value={(r?.sent ?? 0).toLocaleString()} />
-          <Stat label="Opened" value={`${rates?.opened ?? 0}%`} note={emails(r?.opened)} />
+          {/* How each figure is counted is an (i) on its label, so the page isn't paragraphs under the numbers. */}
+          <Stat label={<>Opened<InfoTip text={OPENS_TIP} /></>} value={`${rates?.opened ?? 0}%`} note={emails(r?.opened)} />
           <Stat label="Clicked" value={`${rates?.clicked ?? 0}%`} note={emails(r?.clicked)} />
-          <Stat label="Bookings" value={(r?.bookings ?? 0).toLocaleString()} note="Requests and approved quotes" />
+          <Stat label={<>Bookings<InfoTip text={BOOKINGS_TIP} /></>} value={(r?.bookings ?? 0).toLocaleString()} note="Requests and approved quotes" />
           {/* Someone without the Invoices area has no revenue to see. */}
-          {r?.revenue != null && <Stat label="Revenue" value={formatMoneyCents(r.revenue)} note="Paid so far, before tax" />}
+          {r?.revenue != null && <Stat label={<>Revenue<InfoTip text={REVENUE_TIP} /></>} value={formatMoneyCents(r.revenue)} note="Paid so far, before tax" />}
         </StatStrip>
       )}
-      <div className="stack-sm">
-        <p className={styles.fine}>Opens are approximate: Apple Mail and some others load images to protect privacy, so some emails show as opened when they weren't.</p>
-        <p className={styles.fine}>
-          Bookings are requests and approved quotes from people who clicked a link, within 30 days. A request and the quote made from it count once. Revenue is what that work has been paid so far, before tax.
-          Work booked another way counts when it was set up after the click and paid within 30 days of it, so invoices for work they already had, like recurring visits, don't.
-        </p>
-      </div>
     </>
   );
 }
