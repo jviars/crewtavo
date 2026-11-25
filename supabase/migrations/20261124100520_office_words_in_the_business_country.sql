@@ -1638,19 +1638,16 @@ begin
 end $$;
 
 -- As private.auto_post_when (20261031000450_social_post_words.sql), for a business in `p_country`:
--- "6 Oct at 17:30" in the UK, "tomorrow at 5 p.m." in Canada, "tomorrow at 5:30 pm" in Australia.
--- A clock that says AM and PM drops ":00" as before; a 24-hour one keeps it. In the US (and with no
--- country) it is the one without a country, which stays, as the release before this one has it. Core
+-- the day past tomorrow as the country writes it (private.date_text 'Mon FMDD'), and the time as
+-- the country keeps it with ":00" left out before AM or PM: "6 Nov at 17:30" in the UK, "tomorrow at
+-- 5 p.m." in Canada, "today at 5:30 pm" in Australia. In the US (and with no country) it says what
+-- the one without a country says; that one stays, as the release before this one has it. Core
 -- autoPostWhen writes the same words.
 create function private.auto_post_when(p_at timestamptz, p_tz text, p_country text) returns text
 language sql stable set search_path = '' as $$
-  select case when private.month_first(p_country) and private.clock_style(p_country) = 'AM' then private.auto_post_when(p_at, p_tz)
-    else case (p_at at time zone p_tz)::date - (now() at time zone p_tz)::date
+  select case (p_at at time zone p_tz)::date - (now() at time zone p_tz)::date
            when 0 then 'today' when 1 then 'tomorrow' else private.date_text(p_at at time zone p_tz, 'Mon FMDD', p_country) end
-         || ' at ' || case when private.clock_style(p_country) = '24' then to_char(p_at at time zone p_tz, 'HH24:MI')
-           else to_char(p_at at time zone p_tz, 'FMHH12') || case when to_char(p_at at time zone p_tz, 'MI') = '00' then '' else ':' || to_char(p_at at time zone p_tz, 'MI') end
-             || ' ' || to_char(p_at at time zone p_tz, case private.clock_style(p_country) when 'a.m.' then 'a.m.' else 'am' end) end
-  end
+         || ' at ' || replace(private.date_text(p_at at time zone p_tz, 'FMHH12:MI AM', p_country), ':00 ', ' ')
 $$;
 revoke all on function private.auto_post_when(timestamptz, text, text) from public;
 
