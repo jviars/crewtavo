@@ -1,4 +1,4 @@
--- Database tests for 20261124100500_dates_in_the_business_country.sql: private.date_text writes the
+-- Database tests for 20261125100100_dates_in_the_business_country.sql: private.date_text writes the
 -- database's to_char patterns the way the business's country writes them, as core writtenDate does
 -- (the examples are packages/core/test/regional.test.ts WRITTEN), and exactly as to_char does in the
 -- US. private.money_pattern writes an amount in the business's currency, "$" exactly as before.

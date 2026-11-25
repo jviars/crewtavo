@@ -1,11 +1,11 @@
 
 -- Dates, times and amounts in what the office reads, written the way the business's country
--- writes them and in its currency (20261124100500_dates_in_the_business_country.sql): Activity,
+-- writes them and in its currency (20261125100100_dates_in_the_business_country.sql): Activity,
 -- the office's notifications, and the errors its pages show: invoices, quotes, payments, autopay,
 -- referral credits, price changes, payment schedules, equipment, pay, snow, postcards, automatic
 -- social posts and the dashboard.
 --
--- As in 20261124100510_words_for_clients_subs_and_crew.sql: each function is its newest definition,
+-- As in 20261125100110_words_for_clients_subs_and_crew.sql: each function is its newest definition,
 -- copied as it is, with only its dates and amounts written by private.date_text and the business's
 -- currency, and the country and currency read with the company. A US business in dollars reads every
 -- word as before, and no function's arguments change: the payment schedule's problems and the time

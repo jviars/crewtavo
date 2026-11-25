@@ -1,5 +1,5 @@
--- Database tests for 20261124100510_words_for_clients_subs_and_crew.sql and
--- 20261124100520_office_words_in_the_business_country.sql: the words the database writes for
+-- Database tests for 20261125100110_words_for_clients_subs_and_crew.sql and
+-- 20261125100120_office_words_in_the_business_country.sql: the words the database writes for
 -- people say dates, times and amounts the way the business's country and currency do. A UK business
 -- in pounds reads "Tue 2 Nov", "17:00" and "£2,040.50", a Canadian one "Tue Nov 2", "5:00 p.m." and
 -- "$2,040.50", and a US business in dollars reads every word as before: the new functions beside the

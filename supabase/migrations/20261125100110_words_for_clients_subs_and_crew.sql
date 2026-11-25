@@ -1,6 +1,6 @@
 
 -- Dates, times and amounts in what clients, subs and the crew read, written the way the business's
--- country writes them and in its currency (20261124100500_dates_in_the_business_country.sql): the
+-- country writes them and in its currency (20261125100100_dates_in_the_business_country.sql): the
 -- lines of an invoice ("Visit on 6 Oct 2026", a late fee's "The invoice was due 6 October 2026"),
 -- a promo code's and the client hub's words, a sub's offers, pay and paperwork, the crew's schedule
 -- and clock, and a snow visit's notes.
