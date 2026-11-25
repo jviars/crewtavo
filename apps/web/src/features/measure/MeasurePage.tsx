@@ -1224,9 +1224,6 @@ export function MeasurePage() {
   };
   const panelName = roofSteps ? "Roof" : paving ? "Takeoff" : "Measurement";
   const ready = mapState === "ready";
-  const drawingTool = tool !== "select" && !aligning && !tap.item;
-  // On a phone, drawing is done with the crosshair and its buttons, in the sheet's place.
-  const touchDrawing = phone && ready && drawingTool;
   const status = save.isPending ? "Saving…" : savedClean ? "Saved" : dirty ? "Unsaved changes" : null;
   const home = back ?? { to: "/", label: "Home" };
 
@@ -1458,7 +1455,7 @@ export function MeasurePage() {
         <span className="measure-drawbar-what">{drawSwatch}<strong>{drawWhat}</strong><span className="num">{drawSoFar}</span></span>
         <span className="measure-drawbar-how">{tool === "linestring" ? `Double-${touch ? "tap" : "click"}, or press Finish, to end it.` : touch ? "Tap the first corner, or press Finish, to close it." : "Click the first corner, or press Enter, to finish. Esc drops it."}</span>
       </div>
-      <button type="button" className="measure-drawbar-btn" onClick={() => mapRef.current?.undo()}>Undo corner</button>
+      <button type="button" className="measure-drawbar-btn" onClick={() => mapRef.current?.undo()} aria-label="Undo corner" title="Undo corner">{phone ? <Icon name="undo" size={16} /> : "Undo corner"}</button>
       <button type="button" className="measure-drawbar-btn" data-solid onClick={() => mapRef.current?.finish()}>Finish{!touch && <kbd>Enter</kbd>}</button>
       <button type="button" className="measure-drawbar-x" onClick={() => mapRef.current?.cancel()} aria-label="Stop drawing this shape" title={touch ? "Stop drawing this shape" : "Stop drawing this shape (Esc)"}><Icon name="x" size={16} /></button>
     </div>
@@ -1476,19 +1473,21 @@ export function MeasurePage() {
       trigger={trigger}
     />
   );
-  // Every drawing tool, in one dock at the foot of the map. A phone picks the item on its drawing buttons, once a tool's chosen.
+  // Every drawing tool, in one dock at the foot of the map. On a phone the next shape's item is a round button at its left end, just the item's swatch.
   const dock = (
     <div className="measure-dock" role="toolbar" aria-label="Drawing tools">
-      {itemGroups.length > 0 && !phone && (
+      {itemGroups.length > 0 && (
         <>
-          {itemMenu(
-            "measure-dock-item",
-            <>
-              {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={16} />}
-              <span className="measure-dock-item-text"><span>Next shape</span><strong>{activeItem?.name ?? "Plain"}</strong></span>
-              <Icon name="chevronDown" size={14} />
-            </>,
-          )}
+          {phone
+            ? itemMenu("measure-dock-chip", activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={18} />)
+            : itemMenu(
+                "measure-dock-item",
+                <>
+                  {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={16} />}
+                  <span className="measure-dock-item-text"><span>Next shape</span><strong>{activeItem?.name ?? "Plain"}</strong></span>
+                  <Icon name="chevronDown" size={14} />
+                </>,
+              )}
           <span className="measure-dock-sep measure-dock-item-sep" aria-hidden="true" />
         </>
       )}
@@ -1590,7 +1589,7 @@ export function MeasurePage() {
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
-        <p className="measure-quiet"><strong>Find</strong> outlines the lawn: put a box round the yard. Mark beds, edging, trees and obstacles {phone ? "by picking Area, Line or Count, then tapping its name" : "with Next shape under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
+        <p className="measure-quiet"><strong>Find</strong> outlines the lawn: put a box round the yard. Mark beds, edging, trees and obstacles with {phone ? "the round button at the left of the tools" : "Next shape under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
         <LawnAddOns />
       </div>
     </details>
@@ -1627,7 +1626,6 @@ export function MeasurePage() {
         data-panel={panelShown ? "open" : "closed"}
         data-extended={extend.extended || undefined}
         data-sheet={sheetOpen ? "open" : "peek"}
-        data-drawing={touchDrawing || undefined}
         data-google={imagery === "google" || undefined}
       >
         {phone && (
@@ -1697,21 +1695,21 @@ export function MeasurePage() {
             {ready && (
               <>
                 {!aligning && dock}
-                <div className="measure-mapstack">
+                {!phone && <div className="measure-mapstack">
                   <div className="measure-mapgroup measure-zoom">
                     <button type="button" className="measure-round-btn" onClick={() => mapRef.current?.zoomIn()} aria-label="Zoom in" title="Zoom in"><Icon name="plus" size={17} /></button>
                     <button type="button" className="measure-round-btn" onClick={() => mapRef.current?.zoomOut()} aria-label="Zoom out" title="Zoom out"><Icon name="minus" size={17} /></button>
                   </div>
                   <div className="measure-mapgroup">
                     {shapes.length > 0 && <button type="button" className="measure-round-btn" onClick={() => mapRef.current?.fitShapes()} aria-label="Show all shapes" title={touch ? "Show all shapes" : "Show all shapes (F)"}><Icon name="eye" size={17} /></button>}
-                    {!phone && <button type="button" className="measure-round-btn" onClick={locate} aria-label="Go to where I am" title="Go to where I am"><Icon name="navigation" size={17} /></button>}
+                    <button type="button" className="measure-round-btn" onClick={locate} aria-label="Go to where I am" title="Go to where I am"><Icon name="navigation" size={17} /></button>
                     {extend.available && wide && (
                       <button type="button" className="measure-round-btn" onClick={() => extend.setExtended(!extend.extended)} title={extend.extended ? "Back to the page" : "Fill the screen with the map"} aria-label="Full-screen map" aria-pressed={extend.extended}>
                         <Icon name={extend.extended ? "minimize" : "maximize"} size={17} />
                       </button>
                     )}
                   </div>
-                </div>
+                </div>}
                 {bannerOnMap && mapBanner}
                 {overlays.includes("slope") && (
                   <div className="measure-legend" aria-label="Slope colors">
@@ -1721,35 +1719,9 @@ export function MeasurePage() {
                 )}
                 {pickedRow
                   ? shapeCard(pickedRow)
-                  : !aligning && !tap.item && !touchDrawing && (drawBar || (
+                  : !aligning && !tap.item && (drawBar || (
                     <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : activeEdge && !drawing && tool === "linestring" ? `${EDGE_NAMES[activeEdge]}: draw along ${EDGE_HINTS[activeEdge]}. ${touch ? "Double-tap" : "Double-click"} to finish each one.` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>
                   ))}
-                {touchDrawing && (
-                  <>
-                    <span className="measure-crosshair" aria-hidden="true" />
-                    <div className="measure-touch" role="group" aria-label="Place points">
-                      <div className="measure-touch-head">
-                        {/* What it's drawn as: tap to make it a bed, a tree, asphalt... (not mid-shape, which a new tool would drop). */}
-                        {itemGroups.length > 0 && !drawing && !activeEdge
-                          ? itemMenu("measure-touch-item", <>{drawSwatch}<strong>{drawItem ? drawWhat : `Plain ${drawWhat.toLowerCase()}`}</strong><Icon name="chevronDown" size={15} /></>)
-                          : <>{drawSwatch}<strong>{drawWhat}</strong></>}
-                        <span className="num">{drawSoFar}</span>
-                      </div>
-                      <p className="measure-touch-note" role="status" aria-live="polite">
-                        {tool === "point" ? "Move the map to put the cross on each one, then tap Add count." : drawing ? "Move the map to the next corner and tap Add point. Tap the first corner, or Finish, to close it." : "Move the map to put the cross on the first corner, then tap Add point."}
-                      </p>
-                      <div className="measure-touch-row">
-                        <button type="button" className="measure-touch-btn" disabled={!drawing} onClick={() => mapRef.current?.undo()}><span><Icon name="undo" size={21} /></span>Undo</button>
-                        <button type="button" className="measure-touch-add" onClick={() => mapRef.current?.addAtCenter()}><span><Icon name="plus" size={28} /></span>{tool === "point" ? "Add count" : "Add point"}</button>
-                        {tool === "point" ? (
-                          <button type="button" className="measure-touch-btn" onClick={() => pickTool("select")}><span><Icon name="check" size={21} /></span>Done</button>
-                        ) : (
-                          <button type="button" className="measure-touch-btn" disabled={!drawing} onClick={() => mapRef.current?.finish()}><span><Icon name="check" size={21} /></span>Finish</button>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
                 {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
                 {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
                   <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>

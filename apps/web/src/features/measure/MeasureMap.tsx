@@ -61,8 +61,6 @@ export interface MeasureMapHandle {
   setTool(tool: Tool): void;
   /** Finishes the shape being drawn, as Enter does (an area needs three corners, a line two). */
   finish(): void;
-  /** A corner (or a count) where the middle of the map is, as a tap there would put it: the phone's crosshair. */
-  addAtCenter(): void;
   zoomIn(): void;
   zoomOut(): void;
   /** Lets go of the shape picked. */
@@ -904,14 +902,6 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     },
     finish() {
       callbacks()?.onKeyUp({ key: "Enter", heldKeys: [], preventDefault: () => {} });
-    },
-    addAtCenter() {
-      const map = mapRef.current;
-      const on = callbacks();
-      if (!map || !on || toolRef.current === "select") return;
-      const c = map.getCenter();
-      const p = map.project(c);
-      on.onClick({ lng: c.lng, lat: c.lat, containerX: p.x, containerY: p.y, button: "left", heldKeys: [], isContextMenu: false });
     },
     zoomIn: () => mapRef.current?.zoomIn(),
     zoomOut: () => mapRef.current?.zoomOut(),

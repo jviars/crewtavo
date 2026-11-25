@@ -58,7 +58,7 @@ export function MeasureHelp({ open, onClose, touch }: { open: boolean; onClose: 
         <section className="measure-help-more" aria-labelledby="measure-help-tips">
           <h3 id="measure-help-tips">Tips</h3>
           <ul className="measure-help-tips">
-            <li>{tap} the first point to close an area, or press Finish{touch ? "" : " (or Enter)"} on the bar over the dock. Double-{tap.toLowerCase()} finishes a line.{touch ? " On a phone you can also move the map under the cross and tap Add point, so your finger doesn't cover the corner." : ""}</li>
+            <li>{tap} the first point to close an area, or press Finish{touch ? "" : " (or Enter)"} on the bar over the dock. Double-{tap.toLowerCase()} finishes a line.{touch ? " Zoom in close first, so your finger lands on the corner." : ""}</li>
             <li>Made a mistake? Undo takes back the last point while you draw{touch ? "" : " (Ctrl+Z or ⌘Z)"}. {touch ? "Cancel" : "Esc"} drops the shape you're drawing.</li>
             <li>Select picks a shape: its card shows its size and sides, what it is, and Make it a cutout and Delete. Drag its corners to move them; drag the small dots between corners to add one.</li>
             <li>Roofs: set the pitch in the panel (Set the pitch, or Roof pitch and edges). From lidar reads it from free USGS lidar for each roof you've drawn, without leaving the office; or measure it with your phone on the roof or from a photo. A porch or dormer at another pitch gets its own from its card or its row. Mark lines as eaves, rakes, ridges, hips or valleys for drip edge and ridge cap.</li>

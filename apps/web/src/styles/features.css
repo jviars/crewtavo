@@ -1937,11 +1937,10 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   /*
    * The phone: the map edge to edge under a bar of round buttons (back, the name, search, where I am,
    * more, which holds the imagery), the dock over a sheet at the foot that shows the totals and pulls up to the whole panel,
-   * all clear of the notch and the home bar. While a drawing tool is in use, the sheet makes way for
-   * the crosshair's buttons.
+   * all clear of the notch and the home bar. Corners are tapped on the map, as on a computer, with the
+   * drawing bar over the dock.
    */
   .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); --left: max(10px, env(safe-area-inset-left)); --right: max(10px, env(safe-area-inset-right)); --bottom: env(safe-area-inset-bottom); --sheet: calc(134px + var(--bottom)); display: block; }
-  .measure-stage[data-extended][data-drawing] { --sheet: calc(178px + var(--bottom)); }
   .measure-stage[data-extended] > .measure-map-wrap { position: absolute; inset: 0; height: auto; border-radius: 0; }
   .measure-topbar { position: absolute; top: var(--top); left: var(--left); right: var(--right); z-index: 6; display: flex; align-items: center; gap: 8px; }
   .measure-topbar .measure-round { display: grid; flex: none; place-items: center; width: 44px; height: 44px; padding: 0; gap: 0; border: 0; border-radius: var(--radius-pill); background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -1962,18 +1961,33 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-stage[data-extended]:has(.measure-card) > .measure-panel { display: none; }
   .measure-stage[data-extended] .measure-card { top: auto; bottom: 0; left: 0; right: 0; z-index: 7; width: auto; max-width: none; height: var(--sheet); overflow-y: auto; padding: 16px 20px calc(14px + var(--bottom)); border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); }
   /* The hint over the dock's row of buttons, clear of the scale and credits at the top. */
-  .measure-stage[data-extended] .measure-hint { top: auto; bottom: calc(var(--sheet) + 128px); font-size: var(--fs-14); }
+  .measure-stage[data-extended] .measure-hint { top: auto; bottom: calc(var(--sheet) + 64px); font-size: var(--fs-14); }
   .measure-stage[data-extended] .measure-banner ~ .measure-hint { display: none; }
-  .measure-stage[data-extended] .measure-legend { left: var(--left); bottom: calc(var(--sheet) + 124px); }
+  .measure-stage[data-extended] .measure-legend { left: var(--left); bottom: calc(var(--sheet) + 64px); }
   /* MapLibre's scale and credits, and Google's, under the bar, where nothing else sits. */
   .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { top: calc(var(--top) + 52px); bottom: auto; }
   .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
   .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
 
-  /* The dock just over the sheet. Redo and a roof's edges stay in the panel (its steps), so the tools fit. */
-  .measure-stage[data-extended] .measure-dock { bottom: calc(var(--sheet) + 10px); max-width: calc(100% - 20px); padding: 3px; border-radius: 16px; }
-  .measure-stage[data-extended] .measure-tool { width: 46px; height: 50px; font-size: var(--fs-11); }
-  .measure-stage[data-extended] .measure-tool > svg { width: 20px; height: 20px; }
+  /* The dock just over the sheet, compact. Redo and a roof's edges stay in the panel (its steps), so the tools fit. */
+  .measure-stage[data-extended] .measure-dock { bottom: calc(var(--sheet) + 8px); max-width: calc(100% - 20px); padding: 3px; border-radius: 14px; overflow-x: auto; scrollbar-width: none; }
+  .measure-stage[data-extended] .measure-tool { width: 40px; height: 42px; gap: 2px; font-size: 10px; }
+  .measure-stage[data-extended] .measure-tool > svg { width: 18px; height: 18px; }
+  .measure-stage[data-extended] .measure-dock-sep { margin: 8px 1px; }
+  /* The next shape's item: a round button at the dock's left end, its swatch (or the trade's icon for plain), with the item list a tap away. */
+  .measure-dock-chip { display: grid; flex: none; place-items: center; width: 36px; height: 36px; margin: 0 2px 0 1px; padding: 0; border: 0; border-radius: 50%; background: var(--fill-2); color: var(--text-2); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .measure-dock-chip > .paving-swatch { width: 16px; height: 16px; }
+  .measure-dock-chip > .paving-swatch[data-geometry="line"] { height: 5px; }
+  .measure-dock-chip > .paving-swatch[data-geometry="count"] { width: 12px; height: 12px; }
+  .measure-dock-chip:focus-visible { outline: none; box-shadow: var(--ring); }
+  /* The drawing bar over the dock, the width of the screen: what it is and its size, Undo as an icon, Finish, and stop. */
+  .measure-stage[data-extended] .measure-drawbar { left: var(--left); right: var(--right); bottom: calc(var(--sheet) + 64px); transform: none; width: auto; max-width: none; padding: 6px 6px 6px 12px; }
+  .measure-stage[data-extended] .measure-drawbar-text { flex: 1; }
+  .measure-stage[data-extended] .measure-drawbar-what { overflow: hidden; text-overflow: ellipsis; }
+  .measure-stage[data-extended] .measure-drawbar-how { display: none; }
+  .measure-stage[data-extended] .measure-drawbar-btn { height: 36px; }
+  .measure-stage[data-extended] .measure-drawbar-btn:not([data-solid]) { width: 36px; padding: 0; justify-content: center; }
+  .measure-stage[data-extended] .measure-drawbar-x { width: 36px; height: 36px; }
   .measure-stage[data-extended] :is(.measure-tool-redo, .measure-dock-edges, .measure-dock-item-sep) { display: none; }
   .measure-stage[data-extended] .measure-mapstack { right: var(--right); bottom: calc(var(--sheet) + 78px); display: flex; }
   .measure-stage[data-extended] .measure-mapgroup { display: flex; border-radius: 20px; }
@@ -1987,7 +2001,6 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-stage[data-extended][data-sheet="open"] > .measure-panel { height: calc(100dvh - var(--top) - 66px); }
   .measure-stage[data-extended][data-sheet="peek"] .measure-panel-scroll { overflow: hidden; }
   .measure-stage[data-extended][data-sheet="peek"] .measure-panel-foot { display: none; }
-  .measure-stage[data-extended][data-drawing] > .measure-panel { display: none; }
   /* While a finger has it, the sheet follows the finger (the height is set as it moves). */
   .measure-stage[data-extended] > .measure-panel[data-pulling] { transition: none; }
   .measure-stage[data-extended] .measure-panel-head { touch-action: none; }
@@ -2000,29 +2013,6 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-unit button { height: 34px; padding: 0 12px; font-size: var(--fs-13); }
   .measure-panel .measure-sum { padding: 2px 20px 14px; }
   .measure-fig-value { font-size: var(--fs-20); }
-
-  /* Placing points: the crosshair in the middle of the map's open part, and its buttons in the sheet's place. */
-  .measure-crosshair { position: absolute; left: 50%; top: calc(64px + (100% - 304px) / 2); z-index: 3; width: 64px; height: 64px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.85)); }
-  .measure-crosshair::before { content: ""; position: absolute; inset: 17px; border: 2px solid #fff; border-radius: 50%; }
-  .measure-crosshair::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle, #fff 0 2.5px, transparent 3px), linear-gradient(#fff, #fff) 50% 0 / 2px 14px no-repeat, linear-gradient(#fff, #fff) 50% 100% / 2px 14px no-repeat, linear-gradient(#fff, #fff) 0 50% / 14px 2px no-repeat, linear-gradient(#fff, #fff) 100% 50% / 14px 2px no-repeat; }
-  .measure-touch { position: absolute; left: 0; right: 0; bottom: 0; z-index: 7; height: var(--sheet); padding: 14px 20px calc(10px + var(--bottom)); border-radius: 20px 20px 0 0; background: var(--page); box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); }
-  .measure-touch-head { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: var(--fs-15); }
-  .measure-touch-head > strong { font-weight: 600; }
-  /* What the shapes are drawn as, tapped to change: Plain area, Bed, Tree... */
-  .measure-touch-item { display: inline-flex; align-items: center; gap: 8px; min-width: 0; height: 34px; margin: -5px 0 -5px -10px; padding: 0 10px; border: 0; border-radius: 10px; background: var(--fill-2); color: var(--ink); font: inherit; font-size: var(--fs-15); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .measure-touch-item > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-  .measure-touch-item > svg { flex: none; color: var(--text-3); }
-  .measure-touch-item:focus-visible { outline: none; box-shadow: var(--ring); }
-  .measure-touch-head > .num { margin-left: auto; font-size: var(--fs-18); font-weight: 700; letter-spacing: -0.01em; }
-  .measure-touch-note { margin: 2px 0 0; color: var(--text-3); font-size: var(--fs-13); line-height: 1.4; }
-  .measure-touch-row { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 10px; padding: 0 12px; }
-  .measure-touch-btn, .measure-touch-add { display: grid; justify-items: center; gap: 5px; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .measure-touch-btn > span { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--fill-2); color: var(--ink); }
-  .measure-touch-btn:disabled, .measure-touch-btn:disabled > span { color: var(--text-4); cursor: default; }
-  .measure-touch-add { color: var(--ink); }
-  .measure-touch-add > span { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--green-solid); color: #fff; box-shadow: 0 8px 18px -8px rgb(59 125 35 / 0.8); }
-  .measure-touch-add:active > span { transform: scale(0.96); }
-  :is(.measure-touch-btn, .measure-touch-add):focus-visible > span { box-shadow: var(--ring); }
 
   /* The panel's rows at a finger's size: 44px targets, 16px fields so a phone doesn't zoom in on them. */
   .measure-group-head { padding-top: 16px; font-size: var(--fs-12); }
