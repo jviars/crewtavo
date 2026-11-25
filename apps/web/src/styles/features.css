@@ -1289,24 +1289,35 @@ html.dark .app-shot-light, html:not(.dark) .app-shot-dark { display: none; }
 
 /* ---------- Measure ---------- */
 /*
- * Measure (measure/MeasurePage.tsx) is a map tool that fills the page under its header. Its chrome
- * floats quietly on the map, each piece on the menu surface (a hairline, the menu's shadow, radius
- * 10 to 12): the search with the imagery menu at the top left, the tools down the left, the map's own
- * buttons at the top right and a dark hint pill at the bottom. The panel of totals, items and shapes
- * sits beside the map on a hairline, in Sections. On a phone the search, the map and the panel stack
- * on the grouped grey ground (.m-grouped), and each of the panel's sections is an inset card.
+ * Measure (measure/MeasurePage.tsx) is a map tool: the map fills the page under a one-line header,
+ * and its chrome floats on it, each piece on the menu surface (a hairline, the menu's shadow): the
+ * search at the top left and the imagery at the top right, every drawing tool in one dock at the
+ * foot, the map's own buttons in the bottom right, a dark bar over the dock while a shape is drawn,
+ * and a card at the top right for the shape picked. The panel beside it reads in the order the work
+ * goes: the totals, what's drawn (grouped by takeoff item), the extras on hairline rows, and where
+ * it's used at its foot. On a phone the map fills the screen and the panel is a sheet over its foot.
  */
 .measure-head { display: flex; flex-direction: column; gap: 12px; }
 .measure-saved { margin-right: 6px; }
 .measure-quiet { color: var(--text-3); font-size: var(--fs-12); font-weight: 400; line-height: 1.45; }
 p.measure-quiet { margin: 0; }
+/* The drawing's name, typed over where the page's title would be. */
+.measure-title { min-width: 0; max-width: 100%; margin-left: -7px; padding: 0 6px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); font-family: inherit; outline: none; text-overflow: ellipsis; transition: background var(--dur-fast), border-color var(--dur-fast); }
+.measure-title::placeholder { color: var(--text-3); }
+@media (hover: hover) { .measure-title:hover { background: var(--fill-2); } }
+.measure-title:focus { border-color: var(--green); background: var(--page); box-shadow: var(--ring); }
 
-/* The address search and the imagery menu, in one field. */
-.measure-searchbar { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.measure-find { flex: 1 1 220px; min-width: 150px; }
-.measure-searchbar .address-search > .input { height: 36px; border-color: transparent; background: transparent; box-shadow: none; }
-.measure-searchbar .address-search > .input:disabled { background: transparent; }
+/* The address search over the map's top left; the imagery menu over its top right. */
+.measure-searchbar { position: absolute; top: 12px; left: 12px; z-index: 5; display: flex; width: min(340px, calc(100% - 24px)); }
+.measure-searchbar > .measure-find { flex: 1; min-width: 0; }
+.measure-searchbar .address-search > .input { height: 40px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
+.measure-searchbar .address-search > .input:focus { border-color: var(--green); }
+.measure-searchbar .address-search > .input:disabled { background: var(--menu); }
 .measure-searchbar .address-search > .addon { color: var(--quiet); }
+.measure-imagery { position: absolute; top: 12px; right: 12px; z-index: 5; }
+.measure-imagery > .imagery-button { height: 40px; padding: 0 12px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); }
+.measure-imagery > .imagery-button:hover { background: var(--menu-hi); }
+.measure-find-error { position: absolute; top: 58px; left: 12px; z-index: 5; padding: 6px 10px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
 .imagery-button { position: relative; flex: 0 1 auto; min-width: 0; gap: 6px; max-width: 100%; color: var(--text-2); }
 .imagery-button > svg { flex: none; }
 .imagery-button > svg { color: var(--quiet); }
@@ -1320,26 +1331,20 @@ p.measure-quiet { margin: 0; }
 .address-suggest .palette-item { min-height: 40px; }
 .address-suggest .p-sub { color: var(--text-3); font-size: var(--fs-12); }
 .address-suggest-foot { margin-top: 4px; padding: 8px 8px 4px; border-top: 1px solid var(--divider); color: var(--quiet); font-size: var(--fs-12); }
-/* Slope colors, bottom left over the map. */
-.measure-legend { position: absolute; left: 12px; bottom: 92px; z-index: 2; display: grid; gap: 3px; padding: 8px 10px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); color: var(--text-2); font-size: var(--fs-11); font-weight: 500; pointer-events: none; }
+/* Slope colors, bottom left over the map, above the scale. */
+.measure-legend { position: absolute; left: 12px; bottom: 64px; z-index: 2; display: grid; gap: 3px; padding: 8px 10px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); color: var(--text-2); font-size: var(--fs-11); font-weight: 500; pointer-events: none; }
 .measure-legend strong { color: var(--ink); font-weight: 600; }
 .measure-legend > span { display: flex; align-items: center; gap: 6px; }
 .measure-legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; opacity: 0.85; }
 .measure-legend-note { color: var(--quiet); }
 
-/* A size container, so the hint can move off MapLibre's credits on a narrow map (see "measure-map" below). */
+/* A size container, so the dock can move over on a narrow map (see "measure-map" below). */
 .measure-map-wrap { position: relative; height: min(72vh, 680px); background: var(--fill-2); container: measure-map / inline-size; }
 /* MapLibre's own stylesheet makes its container position: relative; the map fills the frame. */
 .measure-map-wrap > .measure-map { position: absolute; inset: 0; }
 .measure-map:focus-visible { outline: none; box-shadow: inset var(--ring); }
 .measure-map-skeleton { position: absolute; inset: 0; z-index: 1; display: grid; }
 .measure-map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-3); font-size: var(--fs-13); font-weight: 500; }
-/* MapLibre's zoom buttons, as the rest of the chrome: one joined column on the menu surface. */
-.measure-map .maplibregl-ctrl-group, .measure-map .maplibregl-ctrl-group:not(:empty) { overflow: hidden; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
-.measure-map .maplibregl-ctrl-group button { width: var(--control); height: var(--control); }
-.measure-map .maplibregl-ctrl-group button + button { border-top-color: var(--divider); }
-.measure-map .maplibregl-ctrl-group button:not(:disabled):hover { background-color: var(--menu-hi); }
-:root.dark .measure-map .maplibregl-ctrl-group .maplibregl-ctrl-icon { filter: invert(1) brightness(0.92); }
 /* MapLibre's credits on the dark ground too (its "i" folds them away). */
 :root.dark .measure-map .maplibregl-ctrl-attrib, :root.dark .measure-map .maplibregl-ctrl-attrib.maplibregl-compact { background-color: color-mix(in srgb, var(--menu) 94%, transparent); color: var(--text-2); }
 :root.dark .measure-map .maplibregl-ctrl-attrib a { color: var(--text-2); }
@@ -1352,38 +1357,49 @@ p.measure-quiet { margin: 0; }
 .measure-map .measure-google-logo img { display: block; width: 105px; height: 22px; max-width: none; }
 .measure-map .maplibregl-ctrl.measure-google-credit { max-width: min(70vw, 460px); margin: 0; padding: 1px 6px; background: rgb(255 255 255 / 0.78); color: #1f1f1f; font: 11px/1.45 system-ui, sans-serif; text-align: right; overflow-wrap: anywhere; pointer-events: none; }
 
-/* The tools down the left of the map: a quiet rail, each tool its icon over a small word, the one in use in ink. */
-.measure-rail { position: absolute; top: 12px; left: 12px; z-index: 3; display: grid; gap: 2px; padding: 4px; border: 1px solid var(--menu-border); border-radius: 12px; background: var(--menu); box-shadow: var(--menu-shadow); }
-.measure-tool { display: grid; justify-items: center; align-content: center; gap: 2px; width: 50px; min-height: 46px; padding: 6px 2px 5px; border: 0; border-radius: 8px; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-11); font-weight: 500; line-height: 1.2; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); -webkit-tap-highlight-color: transparent; }
-.measure-tool > span { color: var(--text-3); }
+/*
+ * Every drawing tool in one dock at the foot of the map: what the next shape is (with Paving), the
+ * tools, a roof's edges (for roofers), Find (with Paving), then Undo and Redo. Each tool is its icon
+ * over a small word; the one in use is in ink.
+ */
+.measure-dock { position: absolute; left: 50%; bottom: 16px; z-index: 4; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; width: max-content; max-width: calc(100% - 24px); padding: 4px; border: 1px solid var(--menu-border); border-radius: 14px; background: var(--menu); box-shadow: var(--menu-shadow); }
+.measure-dock-edges { display: contents; }
+.measure-dock-sep { flex: none; align-self: stretch; width: 1px; margin: 9px 3px; background: var(--divider); }
+.measure-tool { position: relative; display: grid; justify-items: center; align-content: center; gap: 3px; flex: none; width: 52px; height: 48px; padding: 0; border: 0; border-radius: 9px; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-11); font-weight: 500; line-height: 1.2; cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); -webkit-tap-highlight-color: transparent; }
+.measure-tool > span { color: var(--text-3); white-space: nowrap; }
 .measure-tool:hover:not(:disabled) { background: var(--menu-hi); color: var(--ink); }
 .measure-tool:hover:not(:disabled) > span { color: var(--ink); }
 .measure-tool:focus-visible { outline: none; box-shadow: var(--ring); }
 .measure-tool[aria-pressed="true"], .measure-tool[aria-pressed="true"]:hover:not(:disabled) { background: var(--solid); color: var(--on-solid); }
 .measure-tool[aria-pressed="true"] > span, .measure-tool[aria-pressed="true"]:hover:not(:disabled) > span { color: inherit; font-weight: 600; }
 .measure-tool:disabled, .measure-tool:disabled > span { color: var(--text-4); cursor: default; }
-.measure-tool[data-danger], .measure-tool[data-danger] > span, .measure-tool[data-danger]:hover > span { color: var(--danger); }
-.measure-tool[data-danger]:hover { background: var(--danger-tint); }
 .measure-tool-find:not([aria-pressed="true"]) > svg { color: var(--green); }
-.measure-rail-sep { height: 1px; margin: 3px 8px; background: var(--divider); }
-/* The map's own buttons, top right: one joined column. */
-.measure-corner { position: absolute; top: 12px; right: 12px; z-index: 3; display: grid; overflow: hidden; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
-.measure-round { display: grid; place-items: center; width: var(--control); height: var(--control); padding: 0; border: 0; background: none; color: var(--text-2); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.measure-round + .measure-round { border-top: 1px solid var(--divider); }
-.measure-round:hover { background: var(--menu-hi); color: var(--ink); }
-.measure-round[aria-pressed="true"] { color: var(--ink); }
-.measure-round:focus-visible { outline: none; box-shadow: inset var(--ring); }
-.map-extend { display: grid; place-items: center; width: var(--control); height: var(--control); border: 0; border-radius: var(--radius-control); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); cursor: pointer; }
-.map-extend:hover { background: var(--fill-2); }
-.map-extend:focus-visible { outline: none; box-shadow: var(--ring); }
+/* A roof edge's tool: its color as a short bar where the others have an icon. */
+.measure-tool > .measure-tool-edge { display: block; width: 20px; height: 4px; margin: 7px 0; border-radius: var(--radius-pill); background: var(--swatch); box-shadow: 0 0 0 1px rgb(15 42 53 / 0.25); }
+/* What the next shape is: its swatch, the item's name under a small word, and a caret. */
+.measure-dock-item { display: flex; align-items: center; gap: 9px; height: 48px; max-width: 190px; padding: 0 10px 0 12px; border: 0; border-radius: 9px; background: var(--fill-2); color: var(--ink); font: inherit; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.measure-dock-item:hover { background: var(--fill-3); }
+.measure-dock-item:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-dock-item > svg { flex: none; color: var(--quiet); }
+.measure-dock-item-text { display: grid; gap: 1px; min-width: 0; line-height: 1.15; }
+.measure-dock-item-text > span { color: var(--text-3); font-size: var(--fs-11); font-weight: 500; white-space: nowrap; }
+.measure-dock-item-text > strong { overflow: hidden; font-size: var(--fs-13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 
-/* A map filling the screen on a phone or tablet (lib/extendMap): over the top bar and the tab bar,
-   under dialogs and sheets, with the page behind it held still. */
-html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavior: none; }
-.measure-stage[data-extended] { position: fixed; inset: 0; z-index: 25; background: var(--fill-2); }
+/* The map's own buttons, bottom right: zoom, then show all and where I am (and full screen on a tablet). */
+/* Over MapLibre's folded credits (its "i") in the corner. */
+.measure-mapstack { position: absolute; right: 12px; bottom: 38px; z-index: 3; display: grid; gap: 8px; }
+.measure-mapgroup { display: grid; overflow: hidden; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
+.measure-round-btn { display: grid; place-items: center; width: var(--control); height: var(--control); padding: 0; border: 0; background: none; color: var(--text-2); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.measure-round-btn + .measure-round-btn { border-top: 1px solid var(--divider); }
+.measure-round-btn:hover { background: var(--menu-hi); color: var(--ink); }
+.measure-round-btn[aria-pressed="true"] { color: var(--ink); }
+.measure-round-btn:focus-visible { outline: none; box-shadow: inset var(--ring); }
+/* Google's credit runs along the bottom: the dock and the buttons sit above it. */
+.measure-stage[data-google] .measure-dock { bottom: 36px; }
+.measure-stage[data-google] .measure-mapstack { bottom: 58px; }
 
 /* What the map needs from you (sharper imagery here, tap to outline, lining up a plan): one floating line over its top. */
-.measure-banner { position: absolute; top: 12px; left: 50%; z-index: 4; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 160px); padding: 7px 8px 7px 12px; border: 1px solid var(--menu-border); border-radius: 12px; background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); font-size: var(--fs-13); line-height: 1.4; animation: fade-in var(--dur); }
+.measure-banner { position: absolute; top: 64px; left: 50%; z-index: 4; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 40px); padding: 7px 8px 7px 12px; border: 1px solid var(--menu-border); border-radius: 12px; background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); font-size: var(--fs-13); line-height: 1.4; animation: fade-in var(--dur); }
 .measure-banner > svg { flex: none; color: var(--info); }
 .measure-banner .grow { min-width: 180px; flex: 1 1 220px; }
 .measure-banner strong { font-weight: 600; }
@@ -1397,53 +1413,108 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
 .measure-tap-modes button:disabled { color: var(--text-4); cursor: default; }
 .measure-tap-slow { flex: 1 1 100%; display: flex; gap: 6px; align-items: flex-start; padding-top: 7px; border-top: 1px solid var(--divider); font-size: var(--fs-12); color: var(--text-2); }
 .measure-tap-slow > svg { flex: none; margin-top: 1px; color: var(--warning); }
-/* What a tool does next: a dark pill over the imagery, the same in either theme so it reads on any photo. */
-.measure-hint { position: absolute; left: 50%; bottom: 40px; z-index: 2; transform: translateX(-50%); width: max-content; max-width: calc(100% - 200px); padding: 7px 14px; border-radius: var(--radius-pill); background: rgb(17 17 16 / 0.84); color: #fff; font-size: var(--fs-13); font-weight: 500; text-align: center; box-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.5); pointer-events: none; animation: fade-in var(--dur); }
+/* What a tool does next: a dark pill over the dock, the same in either theme so it reads on any photo. */
+.measure-hint { position: absolute; left: 50%; bottom: 84px; z-index: 2; transform: translateX(-50%); width: max-content; max-width: calc(100% - 120px); padding: 7px 14px; border-radius: var(--radius-pill); background: rgb(17 17 16 / 0.84); color: #fff; font-size: var(--fs-13); font-weight: 500; text-align: center; box-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.5); pointer-events: none; animation: fade-in var(--dur); }
+/* While a shape is drawn: what it is and its size so far, how to finish it, then Undo corner, Finish and stop. */
+.measure-drawbar { position: absolute; left: 50%; bottom: 84px; z-index: 4; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 24px); padding: 8px 8px 8px 14px; border-radius: 12px; background: rgb(15 26 30 / 0.93); color: #fff; box-shadow: 0 10px 28px -10px rgb(0 0 0 / 0.6); animation: fade-in var(--dur); }
+.measure-stage[data-google] :is(.measure-drawbar, .measure-hint) { bottom: 104px; }
+.measure-drawbar-text { display: grid; gap: 1px; min-width: 0; margin-right: 6px; }
+.measure-drawbar-what { display: flex; align-items: center; gap: 7px; font-size: var(--fs-14); white-space: nowrap; }
+.measure-drawbar-what strong { font-weight: 600; }
+.measure-drawbar-what .num { color: rgb(255 255 255 / 0.86); }
+.measure-drawbar-what .paving-swatch { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.55); }
+.measure-drawbar-how { color: rgb(255 255 255 / 0.76); font-size: var(--fs-12); }
+.measure-drawbar-btn { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 1px solid rgb(255 255 255 / 0.3); border-radius: 8px; background: transparent; color: #fff; font: inherit; font-size: var(--fs-13); font-weight: 600; white-space: nowrap; cursor: pointer; }
+.measure-drawbar-btn:hover { background: rgb(255 255 255 / 0.1); }
+.measure-drawbar-btn[data-solid] { border-color: #fff; background: #fff; color: #0f2a35; }
+.measure-drawbar-btn[data-solid]:hover { background: #ecebe6; }
+.measure-drawbar-btn kbd { padding: 1px 4px; border: 1px solid #d9d8d2; border-radius: 4px; color: #4e6169; font-family: inherit; font-size: var(--fs-11); font-weight: 600; line-height: 1.3; }
+.measure-drawbar-x { display: grid; flex: none; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: rgb(255 255 255 / 0.12); color: #fff; cursor: pointer; }
+.measure-drawbar-x:hover { background: rgb(255 255 255 / 0.2); }
+:is(.measure-drawbar-btn, .measure-drawbar-x):focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .measure-capturing, .measure-zoom-note { position: absolute; left: 50%; top: 50%; z-index: 5; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--menu-border); border-radius: 12px; background: var(--menu); box-shadow: var(--menu-shadow); font-size: var(--fs-13); font-weight: 600; }
 .measure-zoom-note { pointer-events: none; max-width: calc(100% - 160px); text-align: center; }
 .measure-box-go { gap: 6px; height: var(--control); padding: 0 14px; border-radius: var(--radius-pill); white-space: nowrap; box-shadow: var(--menu-shadow); }
 .measure-box-go svg { flex: none; }
 .measure-map-error { display: grid; place-items: center; padding: 24px; }
+
+/* The shape picked: a card over the map's top right, under the imagery: its name to type over, its size, what it is, and what to do with it. */
+.measure-card { position: absolute; top: 60px; right: 12px; z-index: 5; display: grid; width: 300px; max-width: calc(100% - 24px); padding: 12px 14px; border: 1px solid var(--menu-border); border-radius: 14px; background: var(--menu); box-shadow: var(--menu-shadow); animation: fade-in var(--dur-fast); }
+.measure-card-head { display: flex; align-items: center; gap: 8px; }
+.measure-card-head > .measure-card-swatch { margin: 0; cursor: default; }
+.measure-card-name { flex: 1; min-width: 0; height: 30px; margin-left: -6px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-15); font-weight: 600; text-overflow: ellipsis; outline: none; }
+.measure-card-name::placeholder { color: var(--ink); }
+@media (hover: hover) { .measure-card-name:hover { background: var(--fill-2); } }
+.measure-card-name:focus { border-color: var(--green); background: var(--page); box-shadow: var(--ring); }
+.measure-card-name:focus::placeholder { color: var(--text-3); }
+.measure-card-size { margin-top: 6px; color: var(--ink); font-size: var(--fs-24); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.measure-card-note { margin-top: 1px; color: var(--text-3); font-size: var(--fs-12); }
+.measure-card-row { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 10px; border-top: 1px solid var(--divider); }
+.measure-card-row + .measure-card-row { margin-top: 0; }
+.measure-card-row > span:first-child { flex: 1; color: var(--text-3); font-size: var(--fs-13); }
+.measure-card-pick { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 1px solid var(--button-border); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.measure-card-pick:hover { background: var(--fill-2); }
+.measure-card-pick:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-card-pick > svg { flex: none; color: var(--quiet); }
+.measure-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--divider); }
+.measure-card-actions > .measure-card-delete { margin-left: auto; color: var(--danger); }
+.measure-card-actions > .measure-card-delete:hover { background: var(--danger-tint); color: var(--danger); }
+.measure-card-tip { margin: 10px 0 0; color: var(--text-3); font-size: var(--fs-12); line-height: 1.45; }
 .measure-panel-show { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--menu-border); border-radius: var(--radius-pill); background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); font: inherit; font-size: var(--fs-13); cursor: pointer; }
 .measure-panel-show > svg { color: var(--quiet); }
 .measure-panel-show strong { font-weight: 600; }
 .measure-panel-show:hover { background: var(--menu-hi); }
 .measure-panel-show:focus-visible { outline: none; box-shadow: var(--ring); }
 
-/* The panel: Sections on hairlines. The first is the name and the totals; then putting it on a quote, the paving items, the roof, the shapes, a plan. */
-.measure-panel { display: grid; align-content: start; gap: 28px; min-width: 0; }
-.measure-panel .sec-body > * + * { margin-top: 12px; }
-/* An empty line between other lines ("No plans for this property yet") keeps the section's spacing, with no extra of its own. */
-.measure-panel .sec-body > .empty-inline:not(:first-child) { padding-block: 0; }
-.measure-sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+/* The panel: its name and units, the totals as plain figures, then the list, the extras and its foot, on hairlines with no boxes. */
+.measure-panel { position: relative; display: flex; flex-direction: column; min-width: 0; background: var(--page); }
+.measure-panel-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; }
+.measure-panel-head { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 10px 12px 4px 20px; }
+.measure-panel-head > h2 { flex: 1; margin: 0; font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; }
+/* 26px inside the track's padding: 32 in all, a small control. */
+.measure-unit button { height: 26px; padding: 0 9px; font-size: var(--fs-12); }
+.measure-panel-scroll > :is(.form-error, .field-error, .callout) { margin: 0 20px 12px; }
+.measure-panel .measure-sum { padding: 4px 20px 18px; }
+.measure-sum { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.85fr); gap: 14px; }
 .measure-fig { display: grid; align-content: start; gap: 1px; min-width: 0; }
 .measure-fig-label { color: var(--quiet); font-size: var(--fs-12); }
 .measure-fig-value { display: flex; align-items: baseline; gap: 4px; color: var(--ink); font-size: var(--fs-22); font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .measure-fig-value small { color: var(--text-3); font-size: var(--fs-13); font-weight: 500; letter-spacing: 0; }
+.measure-fig-value.measure-fig-small { font-size: var(--fs-18); }
 .measure-fig-note { color: var(--text-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
-.measure-summary .facts { border-top: 1px solid var(--row-divider); }
-.measure-summary .fact-value { font-variant-numeric: tabular-nums; }
-.measure-summary .fact-value .measure-quiet { margin-left: 4px; }
 
-/* The shapes: a row each, its color, its name (a field that reads as text), what it is, its size, and its menu. */
-.sec-body > .measure-shape-list:first-child { margin-top: -12px; }
-/* The swatch, the size and the menu line up on the name's line (its text sits 14px down). */
-.measure-shape { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; column-gap: 10px; min-height: 52px; padding: 7px 0; border-bottom: 1px solid var(--row-divider); }
-/* A row with no second line keeps its one line in the middle. */
-.measure-shape:not(:has(.measure-shape-meta)) { padding-block: 12px; }
-.measure-shape[data-selected] { background: var(--fill-2); box-shadow: -8px 0 0 var(--fill-2), 8px 0 0 var(--fill-2); }
+/* What's drawn: groups under small headings with their totals; an item with several shapes opens to show them, each a row of its own. */
+.measure-shapes { border-top: 1px solid var(--divider); }
+.measure-empty { margin: 0; padding: 16px 20px; color: var(--text-3); font-size: var(--fs-13); line-height: 1.5; }
+.measure-empty strong { color: var(--text-2); font-weight: 600; }
+.measure-list { display: grid; padding-bottom: 8px; }
+.measure-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 20px 4px; color: var(--quiet); font-size: var(--fs-11); font-weight: 600; letter-spacing: var(--tracking-caps); text-transform: uppercase; }
+.measure-group-head > .num { font-size: var(--fs-12); letter-spacing: 0; text-transform: none; }
+.measure-item { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 20px 0 14px; }
+.measure-item:hover { background: var(--fill); }
+.measure-item-btn { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 40px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+.measure-item-btn > svg { flex: none; color: var(--quiet); }
+.measure-item-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.measure-item-name { font-weight: 600; white-space: nowrap; }
+.measure-item-meta { min-width: 0; overflow: hidden; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.measure-item-total { flex: none; color: var(--ink); font-size: var(--fs-13); font-weight: 600; white-space: nowrap; }
+/* A shape's row: its color, its name (a field that reads as text), what it is, its size, and its menu. The swatch, the size and the menu line up on the name's line. */
+.measure-shape { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; column-gap: 10px; min-height: 44px; padding: 6px 12px 6px 20px; }
+.measure-shape[data-nested] { padding-left: 46px; }
+.measure-shape:hover { background: var(--fill); }
+.measure-shape[data-selected] { background: var(--fill-2); }
 /* Drawn like the takeoff items' swatches: an area a square, a line a short bar, a count a dot (so a white stripe never reads as a check box). */
 .measure-swatch { position: relative; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 6px; padding: 0; border: 0; border-radius: 4px; background: none; cursor: pointer; }
 .measure-swatch::before { content: ""; width: 14px; height: 14px; border-radius: 4px; background: var(--swatch); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 22%, transparent); }
-.measure-shape[data-kind="Length"] .measure-swatch::before { height: 4px; border-radius: var(--radius-pill); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 22%, transparent); }
-.measure-shape[data-kind="Count"] .measure-swatch::before { width: 10px; height: 10px; border-radius: 50%; }
-.measure-shape[data-kind="Cutout"] .measure-swatch::before { background-image: repeating-linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.75) 3px 5px); }
+:is(.measure-shape, .measure-swatch)[data-kind="Length"] .measure-swatch::before, .measure-swatch[data-kind="Length"]::before { height: 4px; border-radius: var(--radius-pill); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 22%, transparent); }
+.measure-shape[data-kind="Count"] .measure-swatch::before, .measure-swatch[data-kind="Count"]::before { width: 10px; height: 10px; border-radius: 50%; }
+.measure-shape[data-kind="Cutout"] .measure-swatch::before, .measure-swatch[data-kind="Cutout"]::before { background-image: repeating-linear-gradient(135deg, transparent 0 3px, rgba(255, 255, 255, 0.75) 3px 5px); }
 .measure-swatch::after { content: ""; position: absolute; inset: -8px; }
 .measure-swatch:focus-visible { outline: none; box-shadow: var(--ring); }
 .measure-shape-body { display: grid; gap: 1px; min-width: 0; }
 .measure-shape-name { width: calc(100% + 6px); min-width: 0; height: 28px; margin-left: -6px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-13); font-weight: 600; text-overflow: ellipsis; outline: none; transition: background var(--dur-fast), border-color var(--dur-fast); }
-.measure-shape-name::placeholder { color: var(--text-3); font-weight: 500; }
-@media (hover: hover) { .measure-shape-name:hover { background: var(--fill-2); } }
+.measure-shape-name::placeholder { color: var(--text-2); font-weight: 500; }
+@media (hover: hover) { .measure-shape-name:hover { background: var(--page); } }
 .measure-shape-name:focus { border-color: var(--green); background: var(--page); box-shadow: var(--ring); }
 .measure-shape-meta { color: var(--text-3); font-size: var(--fs-12); }
 .measure-shape-value { color: var(--ink); font-size: var(--fs-13); font-weight: 600; line-height: 28px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1456,23 +1527,36 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
 .measure-inline-action { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .measure-inline-action > .measure-quiet { flex: 1 1 180px; }
 
-/* Roof pitch and edges, and depth: rows that open, on hairlines. */
-.measure-extras { display: grid; }
-.measure-extra { border-bottom: 1px solid var(--divider); }
-.measure-extra:first-child { border-top: 1px solid var(--divider); }
-.measure-extra > summary { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 8px 0; cursor: pointer; list-style: none; }
+/* The extras under the list, a hairline row each: depth, a roof's pitch (without Roofing), a site plan, cutting out buildings, finding paving with fal.ai. The ones with more open in place. */
+.measure-extras { display: grid; border-top: 1px solid var(--divider); }
+.measure-extra { border-bottom: 1px solid var(--row-divider); }
+.measure-extra > summary { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 16px 6px 20px; cursor: pointer; list-style: none; }
 .measure-extra > summary::-webkit-details-marker { display: none; }
-.measure-extra > summary > svg { flex: none; color: var(--quiet); transition: transform var(--dur-fast); }
-.measure-extra[open] > summary > svg { transform: rotate(180deg); }
+.measure-extra > summary:hover { background: var(--fill); }
+.measure-extra > summary:focus-visible { outline: none; box-shadow: inset var(--ring); }
+.measure-extra > summary > svg { flex: none; color: var(--quiet); }
+.measure-extra > summary > svg:last-child { transition: transform var(--dur-fast); }
+.measure-extra[open] > summary > svg:last-child { transform: rotate(180deg); }
 .measure-extra-text { display: grid; flex: 1; gap: 1px; min-width: 0; color: var(--text-3); font-size: var(--fs-12); }
-.measure-extra-text strong { color: var(--ink); font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; }
-.measure-extra-body { display: grid; gap: 16px; padding: 2px 0 20px; }
+.measure-extra-text strong { color: var(--ink); font-size: var(--fs-14); font-weight: 600; }
+.measure-extra-body { display: grid; gap: 16px; padding: 4px 20px 20px; }
+/* A plan's own heading is the row's. */
+.measure-extra-body > .plan-card > .sec-head { display: none; }
+.measure-row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 20px; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-14); }
+.measure-row > svg { flex: none; color: var(--quiet); }
+.measure-row-meta { color: var(--text-3); font-size: var(--fs-12); }
+.measure-row .link-btn { font-size: var(--fs-13); }
 .measure-sub-head { padding-bottom: 4px; color: var(--text-3); font-size: var(--fs-12); font-weight: 600; }
-.measure-breakdown { display: grid; }
-.measure-breakdown-row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0; border: 0; border-bottom: 1px solid var(--row-divider); background: none; color: inherit; font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
-.measure-breakdown-row:hover { background: var(--fill); box-shadow: -8px 0 0 var(--fill), 8px 0 0 var(--fill); }
-.measure-breakdown-row:focus-visible { outline: none; box-shadow: var(--ring); }
-.measure-breakdown-row strong { font-weight: 600; }
+/* Where it's used, at the panel's foot: each quote or invoice it's on, whether the client sees it there, and a menu to move it. */
+.measure-panel-foot { flex: none; padding: 12px 16px 14px 20px; border-top: 1px solid var(--divider); background: var(--fill); }
+.drawing-share { display: grid; gap: 8px; }
+.drawing-place { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+.drawing-place > svg { flex: none; color: var(--quiet); }
+.drawing-place-text { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.drawing-place-text > a { color: var(--ink); font-size: var(--fs-13); font-weight: 600; text-decoration: none; }
+.drawing-place-text > a:hover { text-decoration: underline; }
+.drawing-place-text > span { overflow: hidden; color: var(--text-3); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.drawing-add { display: inline-flex; align-items: center; gap: 6px; justify-self: start; font-size: var(--fs-13); }
 
 /* A plan on the map, in the panel (measure/PlanOnMap.tsx). */
 .plan-note { margin: 0; color: var(--text-3); font-size: var(--fs-12); line-height: 1.45; }
@@ -1488,125 +1572,108 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
 .plan-switches > .switch-row { align-items: flex-start; min-height: 44px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); font-size: var(--fs-13); font-weight: 500; }
 .plan-switches .grow { display: grid; gap: 1px; }
 
-/* The paving items (measure/PavingItems.tsx) sit in the panel as one of its sections, with no box. */
-.measure-panel > .card { border: 0; border-radius: 0; background: none; box-shadow: none; }
-.measure-panel > .card > .card-head { min-height: 40px; padding: 0; border-bottom: 1px solid var(--divider); }
-.measure-panel > .card > .card-head > strong { font-size: var(--fs-15); font-weight: 650; letter-spacing: -0.005em; }
-.measure-panel > .card > :is(.card-row, .paving-item-hint, .paving-more) { padding-left: 0; padding-right: 0; border-color: var(--row-divider); }
-.measure-panel > .card > .paving-group { margin-inline: -8px; padding-inline: 0; }
+/* The schedule map's button for filling the screen (schedule/ScheduleMap.tsx). */
+.map-extend { display: grid; place-items: center; width: var(--control); height: var(--control); border: 0; border-radius: var(--radius-control); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-md); cursor: pointer; }
+.map-extend:hover { background: var(--fill-2); }
+.map-extend:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* html.map-extended, set while a map fills the screen (lib/extendMap): the page behind it held still. */
+html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavior: none; }
+.measure-stage[data-extended] { position: fixed; inset: 0; z-index: 25; background: var(--fill-2); }
 
 @media (min-width: 901px) {
   .measure-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-height)); min-height: 560px; }
-  .measure-head { flex: none; padding: 18px max(28px, env(safe-area-inset-right)) 16px 28px; }
+  /* The header on one line: the way back, the name, where it is, then Saved and the buttons. */
+  .measure-head { flex: none; padding: 8px max(20px, env(safe-area-inset-right)) 8px 20px; }
+  .measure-head .detail-head { flex-wrap: nowrap; gap: 12px; min-height: 44px; }
+  .measure-head .detail-head[data-stage] { border-top: 0; padding-top: 0; }
+  .measure-head .detail-crumb { flex: none; order: 0; margin: 0; }
+  .measure-head .detail-head > .measure-title { flex: 0 1 auto; order: 1; height: 36px; font-size: var(--fs-18); font-weight: 650; letter-spacing: -0.01em; }
+  .measure-head .detail-meta { flex: 1 1 0; order: 2; flex-wrap: nowrap; min-width: 0; margin: 0; overflow: hidden; color: var(--text-3); white-space: nowrap; }
+  .measure-head .page-actions { flex: none; order: 3; flex-wrap: nowrap; margin-left: auto; }
   /* The map, and the panel beside it on a hairline (the map's own column ends where the panel starts). */
   .measure-stage { --panel-room: 0px; position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); border-top: 1px solid var(--divider); background: var(--fill-2); }
   .measure-stage[data-panel="open"] { --panel-room: 360px; }
   .measure-stage > :is(.measure-map-wrap, .measure-map-error) { grid-area: 1 / 1; height: auto; min-height: 0; }
-  .measure-searchbar { position: absolute; top: 12px; left: 12px; z-index: 5; width: min(560px, calc(100% - var(--panel-room) - 88px)); height: 44px; padding: 0 3px 0 0; border: 1px solid var(--menu-border); border-radius: 12px; background: var(--menu); box-shadow: var(--menu-shadow); }
-  .measure-searchbar:focus-within { border-color: var(--green); }
-  .measure-searchbar > .imagery-button { height: 34px; }
-  .measure-searchbar > .imagery-button::before { content: ""; position: absolute; left: -3px; top: 8px; bottom: 8px; width: 1px; background: var(--divider); }
-  .measure-find-error { position: absolute; top: 62px; left: 12px; z-index: 5; padding: 6px 10px; border: 1px solid var(--menu-border); border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
-  .measure-rail { top: 64px; }
-  .measure-banner { top: 64px; }
-  .measure-stage[data-panel="closed"] .measure-corner { top: 60px; }
-  /* Positioned, so what's absolutely placed inside it (screen-reader-only words) scrolls with it rather than stretching the page under the map. */
-  .measure-panel { position: relative; grid-area: 1 / 2; width: 360px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px 20px 32px; border-left: 1px solid var(--divider); background: var(--page); }
+  .measure-searchbar { width: min(340px, calc(100% - var(--panel-room) - 240px)); }
+  .measure-panel { grid-area: 1 / 2; width: 360px; min-height: 0; border-left: 1px solid var(--divider); }
   .measure-stage[data-panel="closed"] .measure-panel { display: none; }
   .measure-panel-show { position: absolute; top: 12px; right: 12px; z-index: 6; }
+  .measure-stage[data-panel="closed"] .measure-imagery { top: 58px; }
+  .measure-stage[data-panel="closed"] .measure-card { top: 106px; }
 
-  /* Full screen on a big phone held sideways, which is wider than 900px: the same layout, clear of
-     the notch and the home bar (lib/extendMap). */
+  /* Full screen on a tablet or a big phone held sideways: the same layout, clear of the notch and the home bar (lib/extendMap). */
   .measure-stage[data-extended] { --t: max(12px, env(safe-area-inset-top)); --l: max(12px, env(safe-area-inset-left)); --r: max(12px, env(safe-area-inset-right)); --b: env(safe-area-inset-bottom); border-top: 0; }
   .measure-stage[data-extended] > .measure-searchbar { top: var(--t); left: var(--l); }
-  .measure-stage[data-extended] > .measure-find-error { top: calc(var(--t) + 50px); left: var(--l); }
-  .measure-stage[data-extended] .measure-rail { top: calc(var(--t) + 52px); left: var(--l); }
-  .measure-stage[data-extended] .measure-corner { top: var(--t); }
-  .measure-stage[data-extended][data-panel="closed"] .measure-corner { top: calc(var(--t) + 48px); right: var(--r); }
-  .measure-stage[data-extended] .measure-banner { top: calc(var(--t) + 52px); }
-  .measure-stage[data-extended] .measure-hint { bottom: calc(40px + var(--b)); }
-  .measure-stage[data-extended] .measure-legend { left: calc(var(--l) + 66px); bottom: calc(92px + var(--b)); }
-  .measure-stage[data-extended] > .measure-panel { padding-top: var(--t); padding-right: var(--r); padding-bottom: max(32px, var(--b)); }
+  .measure-stage[data-extended] > .measure-find-error { top: calc(var(--t) + 46px); left: var(--l); }
+  .measure-stage[data-extended] .measure-imagery { top: var(--t); }
+  .measure-stage[data-extended] .measure-dock { bottom: calc(16px + var(--b)); }
+  .measure-stage[data-extended] .measure-mapstack { bottom: calc(38px + var(--b)); }
+  .measure-stage[data-extended] :is(.measure-hint, .measure-drawbar) { bottom: calc(84px + var(--b)); }
+  .measure-stage[data-extended] > .measure-panel { padding-top: var(--t); padding-right: env(safe-area-inset-right); padding-bottom: var(--b); }
   .measure-stage[data-extended] > .measure-panel-show { top: var(--t); right: var(--r); }
   .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: var(--b); }
   .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
-  .measure-stage[data-extended][data-panel="closed"] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
+
+  /* Measure is a map tool: there the sidebar folds to its icons, for more map. Each link keeps its name for screen readers. */
+  .shell:has(.measure-page) { --sidebar-width: 68px; }
+  .shell:has(.measure-page) .sidebar { padding-inline: 12px; }
+  .shell:has(.measure-page) .brand { align-self: center; margin-inline: 0; }
+  .shell:has(.measure-page) :is(.brand-name, .nav-label, .nav-divider, .nav-count, .nav-dot, .nav-pill) { display: none; }
+  .shell:has(.measure-page) .sidebar :is(.nav-text, .create-trigger .nav-text) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .shell:has(.measure-page) .sidebar .nav-link { justify-content: center; padding: 0; }
+  .shell:has(.measure-page) .sidebar .nav-scroll .nav-link.active { background: var(--raised); box-shadow: var(--nav-pill-edge); }
 }
-/* A map 640px or narrower (a tablet, with the panel open): MapLibre opens its credits there in a box
-   over the bottom until the map is moved, so the hint moves up between the tools and the map's
-   buttons. A banner already there (imagery) keeps it at the bottom. The phone's own rules follow. */
-@container measure-map (max-width: 640px) {
-  .measure-hint { top: 64px; bottom: auto; }
-  .measure-stage[data-extended] .measure-hint { top: calc(var(--t, 12px) + 52px); bottom: auto; }
-  .measure-banner ~ .measure-hint { top: auto; bottom: 40px; }
-  .measure-stage[data-extended] .measure-banner ~ .measure-hint { top: auto; bottom: calc(40px + var(--b, 0px)); }
+/* A map 900px or narrower beside the panel (a small laptop): the dock moves to the left so it clears the map's buttons, and MapLibre's scale and credits move over it. */
+@media (min-width: 901px) {
+  @container measure-map (max-width: 900px) {
+    .measure-dock { left: 12px; transform: none; max-width: calc(100% - 76px); overflow-x: auto; scrollbar-width: none; }
+    .measure-dock-item { max-width: 150px; }
+    .measure-map .maplibregl-ctrl-bottom-left { bottom: 74px; }
+    .measure-map .maplibregl-ctrl-bottom-right { bottom: 74px; }
+    .measure-mapstack { bottom: 112px; }
+    .measure-hint, .measure-drawbar { left: 12px; transform: none; max-width: calc(100% - 76px); }
+  }
 }
 /* A short screen (a phone held sideways): the tools without their words, so they fit. Each keeps its name. */
 @media (max-height: 500px) {
-  .measure-tool { width: 44px; min-height: 40px; padding: 0; }
-  .measure-tool > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .measure-tool { width: 44px; height: 40px; }
+  .measure-tool > span:not(.measure-tool-edge) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
-/*
- * Paving takeoff items beside the map (measure/PavingItems.tsx): a small palette, read like a menu
- * (13px, 32px rows, 44px on a phone), each item its swatch, name, kind and running total. The item
- * being drawn is ringed in ink. The swatches are shared with the roof's edges (RoofSteps).
- */
-.paving-items .card-head { padding: 12px 16px; }
-/* 26px inside the track's padding: 32 in all, a small control. */
-.paving-unit button { height: 26px; padding: 0 9px; font-size: var(--fs-12); }
-.paving-find { flex-wrap: wrap; gap: 6px 10px; padding: 10px 16px; }
-.paving-item-hint { padding: 10px 16px 4px; font-size: var(--fs-12); line-height: 1.45; color: var(--text-3); }
-.paving-item-hint strong { font-weight: 600; color: var(--ink); }
-.paving-group { display: grid; gap: 1px; padding: 6px 8px; }
-.paving-group + .paving-group { border-top: 1px solid var(--row-divider); }
-.paving-group-name { padding: 6px 8px 2px; color: var(--quiet); font-size: var(--fs-12); font-weight: 600; }
-.paving-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 7px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
-.paving-item:hover { background: var(--fill-2); }
-.paving-item:focus-visible { outline: none; box-shadow: var(--ring); }
-.paving-item[aria-pressed="true"] { background: var(--fill-2); font-weight: 600; box-shadow: inset 0 0 0 1.5px var(--ink); }
-.paving-item .num { font-weight: 600; font-variant-numeric: tabular-nums; }
-.paving-item-kind { min-width: 38px; color: var(--quiet); font-size: var(--fs-12); font-weight: 400; text-align: right; }
+/* A swatch for a paving item or a roof edge: an area a square, a line a short bar, a count a dot. */
 .paving-swatch { flex: none; width: 14px; height: 14px; border-radius: 4px; background: var(--swatch); box-shadow: 0 0 0 1px rgba(15, 42, 53, 0.3); }
 .paving-swatch[data-geometry="line"] { height: 4px; border-radius: var(--radius-pill); }
 .paving-swatch[data-geometry="count"] { width: 10px; height: 10px; margin: 0 2px; border-radius: 50%; }
-.paving-more { display: flex; align-items: center; gap: 5px; padding: 8px 16px 12px; color: var(--text-3); font-weight: 600; text-align: left; }
-.paving-more > svg { flex: none; }
-.paving-more:hover { color: var(--ink); }
-@media (max-width: 900px) {
-  .paving-item { min-height: 44px; font-size: var(--fs-15); }
-  .paving-item-hint, .paving-group-name { font-size: var(--fs-13); }
-  .paving-more { min-height: 44px; font-size: var(--fs-14); }
-  /* 38px inside the track's 3px padding: a 44px target. */
-  .paving-unit button { height: 38px; padding: 0 12px; font-size: var(--fs-14); }
-  .paving-find .btn-sm { height: var(--control); font-size: var(--fs-14); }
-  /* Stop, in the line of words: a 44px tap area around it. */
-  .paving-item-hint .link-btn { position: relative; }
-  .paving-item-hint .link-btn::after { content: ""; position: absolute; inset: -13px -10px; }
-}
 
-/* Measuring a roof, step by step, in the Measure panel (measure/RoofSteps.tsx): numbered steps on
-   hairlines, a green check on each one done and the number in ink on the one it's at. */
-.roof-step-list { display: grid; margin: 0; padding: 0; list-style: none; }
-.sec-body > .roof-step-list:first-child { margin-top: -12px; }
-.roof-step-list > li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--row-divider); }
+/* A roof, step by step, in the Measure panel (measure/RoofSteps.tsx): the squares big on top with the edges' totals, then numbered steps on hairlines, a green check on each one done and the number in ink on the one it's at. */
+.roof-hero { display: grid; gap: 2px; padding: 2px 20px 18px; }
+.roof-hero-value { color: var(--ink); font-size: 36px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; }
+.roof-hero-edges { margin-top: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.roof-step-list { display: grid; margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--divider); }
+.roof-step-list > li { display: flex; align-items: flex-start; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--row-divider); }
 .roof-step-dot { display: grid; place-items: center; flex: none; width: 22px; height: 22px; margin-top: -1px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--text-3); font-size: var(--fs-12); font-weight: 600; font-variant-numeric: tabular-nums; }
 .roof-step-dot[data-current] { background: var(--solid); color: var(--on-solid); }
 .roof-step-dot[data-done] { background: var(--green-solid); color: #fff; }
 .roof-step-body { display: grid; flex: 1; gap: 3px; min-width: 0; }
-.roof-step-body > strong { font-size: var(--fs-13); font-weight: 600; }
+.roof-step-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+:is(.roof-step-body, .roof-step-head) > strong { font-size: var(--fs-14); font-weight: 600; }
 .roof-step-note { color: var(--text-3); font-size: var(--fs-12); line-height: 1.45; }
-.roof-step-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
-.roof-edge-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
-.roof-edge-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: var(--fill-2); color: var(--ink); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer; }
-.roof-edge-pick .paving-swatch { width: 14px; }
-.roof-edge-pick:hover { background: var(--fill-3); }
-.roof-edge-pick:focus-visible { outline: none; box-shadow: var(--ring); }
-.roof-edge-pick[aria-pressed="true"] { background: var(--fill-2); box-shadow: inset 0 0 0 1.5px var(--ink); font-weight: 600; }
-.roof-edge-pick:disabled { color: var(--text-4); cursor: not-allowed; }
-.roof-edge-length { color: var(--quiet); font-weight: 500; font-variant-numeric: tabular-nums; }
-.roof-waste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; color: var(--text-3); font-size: var(--fs-12); }
-.roof-waste .input { width: 64px; }
+.roof-step-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.roof-sections, .roof-edges { display: grid; margin-top: 4px; }
+.roof-section, .roof-edge { display: flex; align-items: center; gap: 8px; width: calc(100% + 16px); min-height: 32px; margin: 0 -8px; padding: 0 8px; border: 0; border-radius: 7px; background: none; color: var(--ink); font: inherit; font-size: var(--fs-13); text-align: left; cursor: pointer; }
+:is(.roof-section, .roof-edge):hover:not(:disabled) { background: var(--fill-2); }
+:is(.roof-section, .roof-edge):focus-visible { outline: none; box-shadow: var(--ring); }
+.roof-section strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.roof-section-squares { width: 60px; color: var(--text-3); text-align: right; }
+.roof-edge .paving-swatch { width: 16px; }
+.roof-edge[aria-pressed="true"] { background: var(--fill-2); box-shadow: inset 0 0 0 1.5px var(--ink); font-weight: 600; }
+.roof-edge:disabled { color: var(--text-4); cursor: not-allowed; }
+.roof-edge-length { color: var(--text-2); font-weight: 600; }
+.roof-waste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 6px; color: var(--text-3); font-size: var(--fs-12); }
+.roof-waste > label { display: inline-flex; align-items: center; gap: 6px; }
+.roof-waste .input { width: 60px; }
+.roof-waste-finish { margin-left: auto; }
 
 /* Paving and roofing: a project's step strip and step sections (features/paving/ProjectFlow, which
    features/roofing uses too; the roof estimate's own pieces are in roofing/flow/flow.module.css, the
@@ -1850,52 +1917,115 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
 .drawing-links { display: flex; flex-wrap: wrap; gap: 6px; }
 
 @media (max-width: 900px) {
-  /* The phone: the header, the search under it, the map as a rounded card, then the panel's sections
-     as inset cards on the grouped grey ground. The header's Save floats as the green pill. */
+  /* Before the map fills the screen (or when it can't load): the header, then the map as a rounded card. */
   .measure-page { display: flex; flex-direction: column; gap: 14px; padding: 4px max(16px, env(safe-area-inset-right)) 16px max(16px, env(safe-area-inset-left)); }
   .measure-head { gap: 10px; }
-  .measure-stage { display: flex; flex-direction: column; gap: 12px; }
-  .measure-searchbar { gap: 8px; }
-  .measure-searchbar .address-search > .input { height: 44px; border: 0; border-radius: 12px; background: var(--m-card); font-size: var(--fs-16); }
-  .measure-searchbar .address-search > .input:focus { box-shadow: inset 0 0 0 1px var(--green); }
-  .measure-searchbar > .imagery-button { flex: none; width: 44px; height: 44px; padding: 0; gap: 0; border: 0; border-radius: var(--radius-pill); background: var(--m-card); color: var(--ink); }
-  .measure-searchbar > .imagery-button > svg { width: 20px; height: 20px; color: var(--ink); }
-  .measure-searchbar > .imagery-button > :is(.imagery-button-label, svg:last-child) { display: none; }
-  .measure-searchbar .imagery-button-count { position: absolute; top: -2px; right: -2px; box-shadow: 0 0 0 2px var(--m-group); background: var(--solid); color: var(--on-solid); }
-  .measure-find-error { padding: 0 4px; }
-  .measure-stage > .measure-map-wrap { height: max(340px, calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - 260px)); overflow: hidden; border-radius: 16px; }
+  .measure-stage { position: relative; display: flex; flex-direction: column; gap: 12px; }
+  .measure-stage > .measure-map-wrap { height: max(340px, calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - 200px)); overflow: hidden; border-radius: 16px; }
   .measure-stage > .measure-map-error { border-radius: 16px; background: var(--m-card); }
-  .measure-rail { top: 10px; left: 10px; padding: 3px; border-radius: 14px; }
-  .measure-tool { width: 44px; min-height: 44px; padding: 0; }
-  .measure-tool > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .measure-tool > svg { width: 20px; height: 20px; }
-  .measure-corner { top: 10px; right: 10px; border-radius: 14px; }
-  .measure-round svg { width: 18px; height: 18px; }
-  .measure-banner { top: 10px; left: 62px; right: 62px; transform: none; width: auto; max-width: none; border-radius: 14px; }
-  /* Not full screen, it sits on the page right under the map, as an inset card (MeasurePage). */
-  .measure-stage > .measure-banner { position: static; gap: 10px; padding: 12px 12px 12px 14px; border: 0; background: var(--m-card); box-shadow: none; font-size: var(--fs-14); }
-  .measure-stage > .measure-banner .grow { flex-basis: calc(100% - 40px); }
-  .measure-stage > .measure-banner .btn-sm { height: 40px; padding: 0 14px; font-size: var(--fs-14); }
-  .measure-stage > .measure-banner .measure-edge { height: 40px; font-size: var(--fs-14); }
-  .measure-stage > .measure-banner .measure-tap-modes button { height: 34px; padding: 0 14px; font-size: var(--fs-14); }
-  .measure-stage > .measure-banner .measure-tap-slow { font-size: var(--fs-13); }
-  /* At the top, between the tools and the map's buttons: MapLibre's credits open over the bottom of a phone's map. */
-  .measure-hint { top: 10px; bottom: auto; left: 66px; right: 66px; transform: none; width: auto; max-width: none; border-radius: 14px; font-size: var(--fs-14); }
-  .measure-zoom-note { max-width: calc(100% - 130px); }
-  .measure-legend { left: 62px; bottom: 96px; }
+  .measure-stage > .measure-banner { position: static; transform: none; width: auto; max-width: none; gap: 10px; padding: 12px 12px 12px 14px; border: 0; background: var(--m-card); box-shadow: none; font-size: var(--fs-14); }
+  .measure-banner .grow { flex-basis: calc(100% - 40px); }
+  .measure-banner .btn-sm { height: 40px; padding: 0 14px; font-size: var(--fs-14); }
+  .measure-banner .measure-edge { height: 40px; font-size: var(--fs-14); }
+  .measure-banner .measure-tap-modes button { height: 34px; padding: 0 14px; font-size: var(--fs-14); }
+  .measure-banner .measure-tap-slow { font-size: var(--fs-13); }
   .measure-legend-note { display: none; }
-  .measure-panel { gap: 22px; margin-top: 10px; }
-  .m-grouped .measure-panel .sec:not(.sec-flush) > .sec-body > .empty-inline:not(:first-child) { padding-block: 0; }
-  .measure-sum { gap: 14px 16px; }
-  .measure-summary .facts { border-top-color: var(--row-divider); }
-  .m-grouped .measure-summary .sec-body > .facts { margin: 0 0 -2px; }
-  .sec-body > .measure-shape-list:first-child { margin-top: 0; }
-  .m-grouped .sec:not(.sec-flush) > .sec-body > .measure-shape-list { margin-block: 0; }
-  .measure-shape { min-height: 64px; column-gap: 12px; padding: 10px 0; }
-  .measure-shape-list > .measure-shape:last-child { border-bottom: 0; }
-  .measure-shapes .measure-shape-list:has(+ .measure-inline-action) > .measure-shape:last-child { border-bottom: 1px solid var(--row-divider); }
-  .measure-shape[data-selected] { box-shadow: -16px 0 0 var(--fill-2), 16px 0 0 var(--fill-2); }
-  .measure-shape:not(:has(.measure-shape-meta)) { padding-block: 18px 12px; }
+
+  /*
+   * The phone: the map edge to edge under a bar of round buttons (back, the name, search, imagery,
+   * more), the dock over a sheet at the foot that shows the totals and pulls up to the whole panel,
+   * all clear of the notch and the home bar. While a drawing tool is in use, the sheet makes way for
+   * the crosshair's buttons.
+   */
+  .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); --left: max(10px, env(safe-area-inset-left)); --right: max(10px, env(safe-area-inset-right)); --bottom: env(safe-area-inset-bottom); --sheet: calc(134px + var(--bottom)); display: block; }
+  .measure-stage[data-extended][data-drawing] { --sheet: calc(178px + var(--bottom)); }
+  .measure-stage[data-extended] > .measure-map-wrap { position: absolute; inset: 0; height: auto; border-radius: 0; }
+  .measure-topbar { position: absolute; top: var(--top); left: var(--left); right: var(--right); z-index: 6; display: flex; align-items: center; gap: 8px; }
+  .measure-topbar :is(.measure-round, .imagery-button) { display: grid; flex: none; place-items: center; width: 44px; height: 44px; padding: 0; gap: 0; border: 0; border-radius: var(--radius-pill); background: var(--menu); color: var(--ink); box-shadow: var(--menu-shadow); cursor: pointer; }
+  .measure-topbar .measure-round[aria-pressed="true"] { background: var(--solid); color: var(--on-solid); }
+  .measure-topbar .imagery-button > svg:first-child { width: 20px; height: 20px; color: var(--ink); }
+  .measure-topbar .imagery-button > :is(.imagery-button-label, svg:last-child) { display: none; }
+  .measure-topbar .imagery-button-count { position: absolute; top: -2px; right: -2px; background: var(--solid); color: var(--on-solid); }
+  .measure-topbar-title { display: grid; flex: 1; align-content: center; min-width: 0; height: 44px; padding: 0 14px; border-radius: 22px; background: var(--menu); box-shadow: var(--menu-shadow); text-align: center; }
+  .measure-topbar-name { width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--fs-15); font-weight: 600; line-height: 1.2; text-align: center; text-overflow: ellipsis; outline: none; }
+  .measure-topbar-name:focus { text-align: left; }
+  .measure-topbar-status { overflow: hidden; color: var(--text-3); font-size: var(--fs-11); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+  .measure-topbar-status[data-state="dirty"] { color: var(--warning); }
+  .measure-stage[data-extended] > .measure-searchbar { top: calc(var(--top) + 54px); left: var(--left); right: var(--right); width: auto; }
+  .measure-stage[data-extended] .measure-searchbar .address-search > .input { height: 44px; border-radius: 12px; font-size: var(--fs-16); }
+  .measure-stage[data-extended] > .measure-find-error { top: calc(var(--top) + 104px); left: var(--left); right: var(--right); }
+  /* Over the map's top, under the bar: a banner, the hint, the shape picked. */
+  .measure-stage[data-extended] :is(.measure-banner, .measure-hint) { top: calc(var(--top) + 54px); bottom: auto; left: var(--left); right: var(--right); transform: none; width: auto; max-width: none; border-radius: 14px; }
+  /* The shape picked: its card in the sheet's place, so the shape itself stays in view over it. */
+  .measure-stage[data-extended]:has(.measure-card) { --sheet: calc(296px + var(--bottom)); }
+  .measure-stage[data-extended]:has(.measure-card) > .measure-panel { display: none; }
+  .measure-stage[data-extended] .measure-card { top: auto; bottom: 0; left: 0; right: 0; z-index: 7; width: auto; max-width: none; height: var(--sheet); overflow-y: auto; padding: 16px 20px calc(14px + var(--bottom)); border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); }
+  /* The hint over the dock's row of buttons, clear of the scale and credits at the top. */
+  .measure-stage[data-extended] .measure-hint { top: auto; bottom: calc(var(--sheet) + 128px); font-size: var(--fs-14); }
+  .measure-stage[data-extended] .measure-banner ~ .measure-hint { display: none; }
+  .measure-stage[data-extended] .measure-legend { left: var(--left); bottom: calc(var(--sheet) + 124px); }
+  /* MapLibre's scale and credits, and Google's, under the bar, where nothing else sits. */
+  .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { top: calc(var(--top) + 52px); bottom: auto; }
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
+  .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
+
+  /* The dock just over the sheet. Redo and a roof's edges stay in the panel (its steps), so the tools fit. */
+  .measure-stage[data-extended] .measure-dock { bottom: calc(var(--sheet) + 10px); max-width: calc(100% - 20px); padding: 3px; border-radius: 16px; }
+  .measure-stage[data-extended] .measure-tool { width: 46px; height: 50px; font-size: var(--fs-11); }
+  .measure-stage[data-extended] .measure-tool > svg { width: 20px; height: 20px; }
+  .measure-stage[data-extended] :is(.measure-tool-redo, .measure-dock-edges, .measure-dock-item-sep) { display: none; }
+  /* What the next shape is: a pill over the dock's left end, the map's buttons over its right. */
+  .measure-stage[data-extended] .measure-dock-item { position: absolute; left: 0; bottom: calc(100% + 10px); height: 40px; max-width: 200px; padding: 0 12px; border: 1px solid var(--menu-border); border-radius: 20px; background: var(--menu); box-shadow: var(--menu-shadow); }
+  .measure-stage[data-extended] .measure-dock-item-text > span { display: none; }
+  .measure-stage[data-extended] .measure-mapstack { right: var(--right); bottom: calc(var(--sheet) + 78px); display: flex; }
+  .measure-stage[data-extended] .measure-mapgroup { display: flex; border-radius: 20px; }
+  .measure-stage[data-extended] .measure-round-btn { width: 40px; height: 40px; }
+  .measure-stage[data-extended] .measure-round-btn + .measure-round-btn { border-top: 0; border-left: 1px solid var(--divider); }
+  /* Pinch zooms. */
+  .measure-stage[data-extended] .measure-mapgroup.measure-zoom { display: none; }
+
+  /* The panel, as a sheet over the map's foot: its totals and Save showing; its handle pulls it up to the whole panel. */
+  .measure-stage[data-extended] > .measure-panel { position: absolute; left: 0; right: 0; bottom: 0; z-index: 7; height: var(--sheet); padding-bottom: var(--bottom); overflow: hidden; border-radius: 20px 20px 0 0; box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); transition: height var(--dur) var(--ease-out); }
+  .measure-stage[data-extended][data-sheet="open"] > .measure-panel { height: calc(100dvh - var(--top) - 66px); }
+  .measure-stage[data-extended][data-sheet="peek"] .measure-panel-scroll { overflow: hidden; }
+  .measure-stage[data-extended][data-sheet="peek"] .measure-panel-foot { display: none; }
+  .measure-stage[data-extended][data-drawing] > .measure-panel { display: none; }
+  .measure-sheet-grab { position: absolute; top: 0; left: 50%; width: 96px; height: 24px; padding: 0; border: 0; background: none; transform: translateX(-50%); cursor: grab; }
+  .measure-sheet-grab::before { content: ""; display: block; width: 36px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--border-strong); }
+  .measure-sheet-grab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 8px; }
+  .measure-panel-head { position: relative; min-height: 0; padding: 22px 16px 4px 20px; }
+  .measure-panel-head > h2 { font-size: var(--fs-18); }
+  .measure-panel-head > .btn { height: 40px; padding: 0 18px; border-radius: 12px; font-size: var(--fs-15); }
+  .measure-unit button { height: 34px; padding: 0 12px; font-size: var(--fs-13); }
+  .measure-panel .measure-sum { padding: 2px 20px 14px; }
+  .measure-fig-value { font-size: var(--fs-20); }
+
+  /* Placing points: the crosshair in the middle of the map's open part, and its buttons in the sheet's place. */
+  .measure-crosshair { position: absolute; left: 50%; top: calc(64px + (100% - 304px) / 2); z-index: 3; width: 64px; height: 64px; transform: translate(-50%, -50%); pointer-events: none; filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.85)); }
+  .measure-crosshair::before { content: ""; position: absolute; inset: 17px; border: 2px solid #fff; border-radius: 50%; }
+  .measure-crosshair::after { content: ""; position: absolute; inset: 0; background: radial-gradient(circle, #fff 0 2.5px, transparent 3px), linear-gradient(#fff, #fff) 50% 0 / 2px 14px no-repeat, linear-gradient(#fff, #fff) 50% 100% / 2px 14px no-repeat, linear-gradient(#fff, #fff) 0 50% / 14px 2px no-repeat, linear-gradient(#fff, #fff) 100% 50% / 14px 2px no-repeat; }
+  .measure-touch { position: absolute; left: 0; right: 0; bottom: 0; z-index: 7; height: var(--sheet); padding: 14px 20px calc(10px + var(--bottom)); border-radius: 20px 20px 0 0; background: var(--page); box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); }
+  .measure-touch-head { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: var(--fs-15); }
+  .measure-touch-head > strong { font-weight: 600; }
+  .measure-touch-head > .num { margin-left: auto; font-size: var(--fs-18); font-weight: 700; letter-spacing: -0.01em; }
+  .measure-touch-note { margin: 2px 0 0; color: var(--text-3); font-size: var(--fs-13); line-height: 1.4; }
+  .measure-touch-row { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 10px; padding: 0 12px; }
+  .measure-touch-btn, .measure-touch-add { display: grid; justify-items: center; gap: 5px; padding: 0; border: 0; background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .measure-touch-btn > span { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--fill-2); color: var(--ink); }
+  .measure-touch-btn:disabled, .measure-touch-btn:disabled > span { color: var(--text-4); cursor: default; }
+  .measure-touch-add { color: var(--ink); }
+  .measure-touch-add > span { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--green-solid); color: #fff; box-shadow: 0 8px 18px -8px rgb(59 125 35 / 0.8); }
+  .measure-touch-add:active > span { transform: scale(0.96); }
+  :is(.measure-touch-btn, .measure-touch-add):focus-visible > span { box-shadow: var(--ring); }
+
+  /* The panel's rows at a finger's size: 44px targets, 16px fields so a phone doesn't zoom in on them. */
+  .measure-group-head { padding-top: 16px; font-size: var(--fs-12); }
+  .measure-item { min-height: 48px; }
+  .measure-item-btn { height: 48px; font-size: var(--fs-15); }
+  .measure-item-total { font-size: var(--fs-15); }
+  .measure-shape { min-height: 56px; column-gap: 12px; padding-block: 10px; }
+  .measure-shape[data-nested] { padding-left: 46px; }
+  .measure-shape:not(:has(.measure-shape-meta)) { padding-block: 16px 10px; }
   /* 44px targets drawn round the same line: the name's field reaches 8px up and 2px down, the swatch's tap area 13px out. */
   .measure-swatch { width: 18px; height: 18px; margin-top: 5px; border-radius: 5px; }
   .measure-swatch::before { width: 18px; height: 18px; border-radius: 5px; }
@@ -1908,25 +2038,27 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-shape .measure-shape-menu { width: 44px; height: 44px; margin-top: -8px; margin-right: -8px; }
   .measure-pitch-chip { position: relative; height: 30px; padding: 0 10px; border-radius: 8px; font-size: var(--fs-13); }
   .measure-pitch-chip::after { content: ""; position: absolute; inset: -7px 0; }
-  .measure-quiet, .plan-note, .drawing-note { font-size: var(--fs-13); }
-  .measure-extras { padding: 0 16px; border-radius: 14px; background: var(--m-card); }
-  .measure-extra, .measure-extra:first-child { border-top: 0; border-bottom-color: var(--row-divider); }
-  .measure-extra:last-child { border-bottom: 0; }
+  .measure-quiet, .plan-note, .drawing-note, .measure-empty { font-size: var(--fs-13); }
   .measure-extra > summary { min-height: 60px; }
   .measure-extra-text { font-size: var(--fs-13); }
-  .measure-extra-text strong { font-size: var(--fs-16); font-weight: 600; }
-  .measure-breakdown-row { min-height: 48px; font-size: var(--fs-15); }
+  .measure-extra-text strong { font-size: var(--fs-16); }
+  .measure-row { min-height: 56px; font-size: var(--fs-16); }
+  .measure-row .link-btn { position: relative; font-size: var(--fs-15); }
+  .measure-row .link-btn::after { content: ""; position: absolute; inset: -12px -8px; }
+  .measure-card-name { height: 40px; font-size: var(--fs-16); }
+  .measure-card-pick { height: 40px; font-size: var(--fs-15); }
+  .measure-card-actions > .btn { height: 40px; font-size: var(--fs-14); }
+  .drawing-place { min-height: 48px; }
+  .drawing-place-text > a { font-size: var(--fs-15); }
+  .drawing-add { min-height: 44px; font-size: var(--fs-15); }
   .plan-switches > .switch-row { min-height: 48px; font-size: var(--fs-15); }
-  .roof-step-list > li:last-child { border-bottom: 0; }
-  .m-grouped .sec:not(.sec-flush) > .sec-body > .roof-step-list { margin-block: 0; }
-  .roof-step-body > strong { font-size: var(--fs-15); }
+  :is(.roof-step-body, .roof-step-head) > strong { font-size: var(--fs-15); }
   .roof-step-note, .roof-waste { font-size: var(--fs-13); }
+  .roof-section, .roof-edge { min-height: 44px; font-size: var(--fs-15); }
   /* The waste field at full height and 16px, so a phone doesn't zoom in on it; "Use 10%" with a 44px tap area. */
   .roof-waste .input { width: 72px; height: var(--control); font-size: var(--fs-16); }
   .roof-waste .link-btn { position: relative; font-size: var(--fs-14); }
   .roof-waste .link-btn::after { content: ""; position: absolute; inset: -12px -6px; }
-  .roof-edge-pick { position: relative; height: 36px; padding: 0 12px; border-radius: 9px; font-size: var(--fs-14); }
-  .roof-edge-pick::after { content: ""; position: absolute; inset: -4px 0; }
   .pitch-grid button { min-height: 56px; font-size: var(--fs-13); }
   .drawing-row-title { font-size: var(--fs-15); }
   .drawing-row-meta { font-size: var(--fs-13); }
@@ -1935,34 +2067,6 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   /* A drawing's menu and Add to the invoice or quote: a finger's 44px. */
   .drawing-row > .btn, .drawing-row > .btn-icon { min-height: 44px; }
   .drawing-row > .btn-icon { width: 44px; }
-  /* The paving items: the heading on the grey ground like the other sections', its rows in an inset card. */
-  .measure-panel > .card > .card-head { min-height: 0; padding: 0 4px 8px; border-bottom: 0; }
-  .measure-panel > .card > .card-head > strong { color: var(--text-3); font-size: var(--fs-13); font-weight: 600; letter-spacing: normal; }
-  .measure-panel > .card > :not(.card-head) { background: var(--m-card); }
-  .measure-panel > .card > :is(.card-row, .paving-item-hint, .paving-more) { padding-left: 16px; padding-right: 16px; }
-  .measure-panel > .card > .paving-group { margin-inline: 0; padding-inline: 8px; }
-  .measure-panel > .card > .card-head + * { border-radius: 14px 14px 0 0; }
-  .measure-panel > .card > :last-child { border-radius: 0 0 14px 14px; }
-
-  /* Full screen: the map edge to edge, the search floating over its top, the tools under it, all
-     clear of the notch and the home bar. The panel waits on the page underneath. */
-  .measure-stage[data-extended] { --top: max(10px, env(safe-area-inset-top)); --left: max(10px, env(safe-area-inset-left)); --right: max(10px, env(safe-area-inset-right)); display: block; }
-  .measure-stage[data-extended] > .measure-map-wrap { position: absolute; inset: 0; height: auto; border-radius: 0; }
-  .measure-stage[data-extended] > .measure-searchbar { position: absolute; top: var(--top); left: var(--left); right: var(--right); z-index: 5; }
-  .measure-stage[data-extended] > .measure-searchbar :is(.address-search > .input, > .imagery-button) { background: var(--menu); box-shadow: var(--menu-shadow); }
-  .measure-stage[data-extended] > .measure-find-error { position: absolute; top: calc(var(--top) + 52px); left: var(--left); right: var(--right); z-index: 5; padding: 6px 10px; border-radius: 10px; background: var(--menu); box-shadow: var(--menu-shadow); }
-  .measure-stage[data-extended] .measure-rail { top: calc(var(--top) + 56px); left: var(--left); }
-  .measure-stage[data-extended] .measure-corner { top: calc(var(--top) + 56px); right: var(--right); }
-  /* Sideways the tools move in from the notch, and what sits beside them moves with them. */
-  .measure-stage[data-extended] .measure-banner { top: calc(var(--top) + 56px); left: calc(var(--left) + 56px); right: calc(var(--right) + 56px); }
-  .measure-stage[data-extended] .measure-hint { top: calc(var(--top) + 56px); bottom: auto; left: calc(var(--left) + 58px); right: calc(var(--right) + 58px); }
-  /* With a banner there it goes back to the bottom. */
-  .measure-stage[data-extended] .measure-banner ~ .measure-hint { top: auto; bottom: calc(34px + env(safe-area-inset-bottom)); }
-  .measure-stage[data-extended] .measure-legend { bottom: calc(96px + env(safe-area-inset-bottom)); left: calc(var(--left) + 54px); }
-  .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: env(safe-area-inset-bottom); }
-  .measure-stage[data-extended] .maplibregl-ctrl-bottom-left { left: env(safe-area-inset-left); }
-  .measure-stage[data-extended] .maplibregl-ctrl-bottom-right { right: env(safe-area-inset-right); }
-  .measure-stage[data-extended] > :is(.measure-panel, .measure-panel-show) { display: none; }
 }
 
 /* ---------- Roles ---------- */

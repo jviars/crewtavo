@@ -58,6 +58,14 @@ export interface BoxAction { label: string; busy: boolean; onClick: () => void }
 
 export interface MeasureMapHandle {
   setTool(tool: Tool): void;
+  /** Finishes the shape being drawn, as Enter does (an area needs three corners, a line two). */
+  finish(): void;
+  /** A corner (or a count) where the middle of the map is, as a tap there would put it: the phone's crosshair. */
+  addAtCenter(): void;
+  zoomIn(): void;
+  zoomOut(): void;
+  /** Lets go of the shape picked. */
+  deselect(): void;
   /** Takes back the last point while drawing, or the last change. */
   undo(): void;
   redo(): void;
@@ -155,6 +163,30 @@ const PALETTE = ["#22c55e", "#f59e0b", "#38bdf8", "#f472b6", "#a78bfa", "#facc15
 const OPENFREEMAP = "https://tiles.openfreemap.org/styles/liberty";
 const GLYPHS = "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf";
 const LABEL_FONT = ["Noto Sans Bold"];
+const LABEL_REGULAR = ["Noto Sans Regular"];
+/** Terra Draw's handlers for the mode in use, as its adapter keeps them: what a real click or key goes through. */
+type ModeCallbacks = {
+  onClick(e: { lng: number; lat: number; containerX: number; containerY: number; button: "left"; heldKeys: string[]; isContextMenu: boolean }): void;
+  onKeyUp(e: { key: string; heldKeys: string[]; preventDefault: () => void }): void;
+};
+
+/**
+ * A rounded box MapLibre stretches round a label's words (icon-text-fit), drawn at twice the pixels
+ * so its corners stay smooth: the shapes' labels on dark ones, side lengths on light ones.
+ */
+function chipImage(fill: string) {
+  const r = 12;
+  const size = r * 2 + 4;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, r);
+  ctx.fill();
+  const middle: [number, number][] = [[r, size - r]];
+  return { image: ctx.getImageData(0, 0, size, size), options: { pixelRatio: 2, stretchX: middle, stretchY: middle, content: [r, r, size - r, size - r] as [number, number, number, number] } };
+}
 /** The sparkle icon, as the Icon component draws it at 14px, for the button under a box. */
 const SPARKLE = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">${PHOSPHOR.sparkle.bold}</svg>`;
 const CUT_COLOR = "#ef4444";
@@ -305,6 +337,13 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const drawRef = useRef<TerraDraw | null>(null);
+  // shortcut: reads Terra Draw's protected _currentModeCallbacks to finish or add a corner from a button; switch if Terra Draw makes a public way.
+  const callbacks = () => (drawRef.current ? (adapterRef.current as unknown as { _currentModeCallbacks?: ModeCallbacks } | null)?._currentModeCallbacks : undefined);
+  const adapterRef = useRef<unknown>(null);
+  // The shape picked and the one being drawn, for the lengths along their sides; off while a picture is taken.
+  const selectedRef = useRef<string | null>(null);
+  const drawingRef = useRef<Shape | null>(null);
+  const edgesOff = useRef(false);
   const toolRef = useRef<Tool>("polygon");
   const colors = useRef(new Map<string, string>());
   const shapesRef = useRef<Shape[]>([]);
@@ -357,6 +396,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         sources: {
           ...(streets?.sources ?? {}),
           "measure-labels": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
+          "measure-edges": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "measure-fill": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
           "measure-box": { type: "geojson", data: { type: "FeatureCollection", features: [] } },
         },
@@ -390,7 +430,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       map.touchZoomRotate.disableRotation();
       // Google's logo and its credit for what's on screen go in the bottom corners, shown only while
       // its tiles are and never folded away (googleAttribution.ts). What's added later sits above:
-      // the other sources' credits, which fold away, the zoom buttons and the scale.
+      // the other sources' credits, which fold away, and the scale. The page draws its own zoom buttons.
       const google = googleAttribution({
         key: () => live.current.keys.google_key,
         view: () => {
@@ -403,7 +443,6 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       googleRef.current = google;
       map.addControl(google.credit, "bottom-right");
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
-      map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
       map.addControl(google.logo, "bottom-left");
       map.addControl(new maplibregl.ScaleControl({ unit: "imperial", maxWidth: 120 }), "bottom-left");
 
@@ -433,8 +472,10 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
         // The tools don't wait for the imagery server.
         void applyImagery(live.current.imagery).then(() => applyStreetNames(live.current.showStreetNames));
         const editable = { feature: { draggable: true, coordinates: { midpoints: true, draggable: true, deletable: true } } };
+        const adapter = new TerraDrawMapLibreGLAdapter({ map: map!, coordinatePrecision: 9 });
+        adapterRef.current = adapter;
         const draw = new TerraDraw({
-          adapter: new TerraDrawMapLibreGLAdapter({ map: map!, coordinatePrecision: 9 }),
+          adapter,
           modes: [
             // A finished area's fill is the measure-fill layer, so a cutout shows as a hole in it.
             new TerraDrawPolygonMode({
@@ -473,20 +514,40 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
             paint: { "text-color": "#ffffff", "text-halo-color": "rgba(15, 42, 53, 0.9)", "text-halo-width": 1.6 },
           }, "measure-fill");
         }
+        // Each shape's label is one line on a dark chip, its name in bold and its size after it; a
+        // count's is its number. Side lengths are dark words on white chips.
+        for (const [name, fill] of [["measure-chip", "rgba(9, 20, 26, 0.82)"], ["measure-chip-light", "#ffffff"]] as const) {
+          const chip = chipImage(fill);
+          map!.addImage(name, chip.image, chip.options);
+        }
+        const chipLayout = { "icon-text-fit": "both", "icon-allow-overlap": true, "icon-ignore-placement": true, "text-allow-overlap": true, "text-ignore-placement": true, "text-max-width": 40 } as const;
         map!.addLayer({
           id: "measure-labels",
           type: "symbol",
           source: "measure-labels",
           layout: {
-            "text-field": ["get", "text"],
+            ...chipLayout,
+            // Labels that would cover each other wait for a closer zoom, the areas' first.
+            "icon-allow-overlap": false,
+            "icon-ignore-placement": false,
+            "text-allow-overlap": false,
+            "text-ignore-placement": false,
+            "symbol-sort-key": ["match", ["get", "kind"], "Area", 0, "Cutout", 1, "Length", 2, 3],
+            "icon-image": "measure-chip",
+            "icon-text-fit-padding": [3, 8, 3, 8],
+            "text-field": ["format", ["get", "name"], {}, ["get", "value"], { "text-font": ["literal", LABEL_REGULAR], "text-color": "rgba(255, 255, 255, 0.84)" }],
             "text-font": LABEL_FONT,
-            "text-size": 13,
-            "text-line-height": 1.25,
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
-            "text-offset": ["case", ["==", ["get", "kind"], "Count"], ["literal", [0, -1.3]], ["literal", [0, 0]]],
+            "text-size": 12.5,
+            "text-offset": ["case", ["==", ["get", "kind"], "Count"], ["literal", [0, -1.6]], ["literal", [0, 0]]],
           },
-          paint: { "text-color": "#ffffff", "text-halo-color": "rgba(15, 42, 53, 0.92)", "text-halo-width": 1.8 },
+          paint: { "text-color": "#ffffff" },
+        });
+        map!.addLayer({
+          id: "measure-edges",
+          type: "symbol",
+          source: "measure-edges",
+          layout: { ...chipLayout, "icon-image": "measure-chip-light", "icon-text-fit-padding": [1, 5, 1, 5], "text-field": ["get", "text"], "text-font": LABEL_FONT, "text-size": 11 },
+          paint: { "text-color": "#0f2a35" },
         });
         map!.addLayer({ id: "measure-box-fill", type: "fill", source: "measure-box", paint: { "fill-color": "#22c55e", "fill-opacity": 0.12 } });
         map!.addLayer({ id: "measure-box-line", type: "line", source: "measure-box", paint: { "line-color": "#22c55e", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
@@ -495,8 +556,16 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
           cancelAnimationFrame(frame);
           frame = requestAnimationFrame(report);
         });
-        draw.on("select", (id) => live.current.onSelect(String(id)));
-        draw.on("deselect", () => live.current.onSelect(null));
+        draw.on("select", (id) => {
+          selectedRef.current = String(id);
+          paintEdges();
+          live.current.onSelect(String(id));
+        });
+        draw.on("deselect", () => {
+          selectedRef.current = null;
+          paintEdges();
+          live.current.onSelect(null);
+        });
         draw.on("history", () => live.current.onHistory?.(draw.canUndo(), draw.canRedo()));
         // Lining up a plan or tap to outline: taps pick spots instead of drawing. Putting a box round a
         // lot: two clicks make the box, and the second corner follows the pointer till then.
@@ -511,6 +580,15 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
           if (box?.a && !box.b) showBox(box.a, [e.lngLat.lng, e.lngLat.lat]);
         });
         trouble.current = { errors: 0, loaded: 0, since: Date.now() };
+        // The credits fold behind their "i" once they've filled in, as MapLibre folds them on the
+        // first drag, so they don't cover the map until asked for.
+        const foldCredits = () => {
+          const credits = el.current?.querySelector(".maplibregl-ctrl-attrib.maplibregl-compact-show");
+          if (!credits) return;
+          credits.classList.remove("maplibregl-compact-show");
+          map!.off("idle", foldCredits);
+        };
+        map!.on("idle", foldCredits);
         if (live.current.padding) map!.setPadding(live.current.padding);
         applyOverlays(live.current.overlays);
         applyPlan();
@@ -644,9 +722,33 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       else shapes.push(shape);
     }
     shapesRef.current = shapes;
+    drawingRef.current = drawing;
     live.current.onShapes(shapes, drawing);
     paintFill();
     paintLabels();
+    paintEdges();
+  }
+
+  /** The length of each side of the shape being drawn and of the one picked, on a chip at its middle. */
+  function paintEdges() {
+    const source = mapRef.current?.getSource("measure-edges") as GeoJSONSource | undefined;
+    if (!source) return;
+    const picked = shapesRef.current.find((s) => s.id === selectedRef.current);
+    const features = edgesOff.current ? [] : [drawingRef.current, picked].flatMap((s) => {
+      const g = s?.geometry;
+      if (!g || (g.type !== "Polygon" && g.type !== "LineString")) return [];
+      let points = g.type === "Polygon" ? (g.coordinates as number[][][])[0] : (g.coordinates as number[][]);
+      // An area still being drawn ends with the way back to its first corner, which isn't a side yet.
+      if (g.type === "Polygon" && s === drawingRef.current) points = points.slice(0, -1);
+      return points.slice(1).flatMap((b, i) => {
+        const a = points[i];
+        const ft = mToFt(lineLengthM([a, b]));
+        if (ft < 3) return [];
+        const text = `${ft < 10 ? ft.toFixed(1) : Math.round(ft).toLocaleString()} ft`;
+        return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }, properties: { text } }];
+      });
+    });
+    source.setData({ type: "FeatureCollection", features });
   }
 
   /** Each finished area's fill, with the cutouts over it left out. */
@@ -674,8 +776,9 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (!at) return [];
       const name = live.current.labels[s.id]?.trim() || names[s.id];
       const note = live.current.notes?.[s.id];
-      const text = s.kind === "Count" ? String(++count) : `${name}\n${formatShapeValue(s.kind, live.current.values?.[s.id] ?? s.value)}${note ? `\n${note}` : ""}`;
-      return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: at }, properties: { text, kind: s.kind } }];
+      const size = formatShapeValue(s.kind, live.current.values?.[s.id] ?? s.value);
+      const properties = s.kind === "Count" ? { name: String(++count), value: "", kind: s.kind } : { name, value: `  ${[size, note].filter(Boolean).join(" · ")}`, kind: s.kind };
+      return [{ type: "Feature" as const, geometry: { type: "Point" as const, coordinates: at }, properties }];
     });
     source.setData({ type: "FeatureCollection", features });
   }
@@ -797,6 +900,24 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     setTool(tool) {
       toolRef.current = tool;
       drawRef.current?.setMode(tool);
+    },
+    finish() {
+      callbacks()?.onKeyUp({ key: "Enter", heldKeys: [], preventDefault: () => {} });
+    },
+    addAtCenter() {
+      const map = mapRef.current;
+      const on = callbacks();
+      if (!map || !on || toolRef.current === "select") return;
+      const c = map.getCenter();
+      const p = map.project(c);
+      on.onClick({ lng: c.lng, lat: c.lat, containerX: p.x, containerY: p.y, button: "left", heldKeys: [], isContextMenu: false });
+    },
+    zoomIn: () => mapRef.current?.zoomIn(),
+    zoomOut: () => mapRef.current?.zoomOut(),
+    deselect() {
+      const draw = drawRef.current;
+      const id = selectedRef.current;
+      if (draw && id && draw.getMode() === "select" && draw.hasFeature(id)) draw.deselectFeature(id);
     },
     undo() {
       const draw = drawRef.current;
@@ -926,9 +1047,11 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       const before = { center: map.getCenter(), zoom: map.getZoom() };
       const mode = draw.getMode();
       const swap = options.imagery && options.imagery !== live.current.imagery ? options.imagery : null;
-      // No handles or half-drawn shapes in the picture, and the drawing in the middle of it (not off
-      // to one side of a panel's room).
+      // No handles, side lengths or half-drawn shapes in the picture, and the drawing in the middle of
+      // it (not off to one side of a panel's room).
       draw.setMode("static");
+      edgesOff.current = true;
+      paintEdges();
       const room = map.getPadding();
       map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
       if (swap) await applyImagery(swap);
@@ -956,6 +1079,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       map.setPadding(room);
       if (swap) await applyImagery(live.current.imagery);
       draw.setMode(pickRef.current ? "static" : mode === "static" ? toolRef.current : mode);
+      edgesOff.current = false;
+      paintEdges();
       return blob;
     },
     async viewImage(size, options = {}) {

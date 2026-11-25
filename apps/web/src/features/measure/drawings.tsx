@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { Menu } from "@/components/ui/Menu";
+import { Menu, type MenuEntry } from "@/components/ui/Menu";
 import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
@@ -17,7 +17,6 @@ import { supabase, unwrap } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { formatDate, formatNumber } from "@/lib/format";
 import { toast } from "@/lib/toast";
-import { Select } from "@/components/ui/Select";
 
 export interface DrawingRow {
   id: string;
@@ -120,58 +119,104 @@ export function ShareDrawing({
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't change that"),
   });
-  const attached = Boolean(drawing.quote_id || drawing.invoice_id);
   const name = (row: { client: unknown }) => (row.client as { display_name: string } | null)?.display_name;
+  const quotes = options.data?.quotes ?? [];
+  const invoices = options.data?.invoices ?? [];
+  const quote = quotes.find((q) => q.id === drawing.quote_id);
+  const invoice = invoices.find((i) => i.id === drawing.invoice_id);
 
+  if (options.isPending) return <p className="drawing-note">Loading quotes and invoices…</p>;
+  if (options.error) return <p className="field-error">Couldn't load quotes and invoices. <button type="button" className="link-btn" onClick={() => options.refetch()}>Try again</button></p>;
   return (
-    <Section title="Put it on a quote or invoice" className="drawing-share">
-      <p className="drawing-note">The picture and sizes go with it. You choose whether the client sees them.</p>
-      {options.isPending ? (
-        <span className="drawing-note">Loading quotes and invoices…</span>
-      ) : options.error ? (
-        <span className="field-error">Couldn't load quotes and invoices. <button type="button" className="link-btn" onClick={() => options.refetch()}>Try again</button></span>
+    <div className="drawing-share">
+      {drawing.quote_id ? (
+        <Placement
+          icon="quote"
+          title={quote ? `On quote #${quote.number}` : "On a quote"}
+          detail={quote?.title}
+          to={`/quotes/${drawing.quote_id}`}
+          shown={drawing.show_on_quote}
+          disabled={update.isPending}
+          where="quote"
+          onShown={(on) => update.mutate({ show_on_quote: on })}
+          more={[
+            { label: "Move it to another quote", icon: "quote", items: quotes.filter((q) => q.id !== drawing.quote_id).map((q) => ({ label: `#${q.number} ${q.title ?? ""}`.trim(), end: clientId ? undefined : name(q), onSelect: () => update.mutate({ quote_id: q.id }) })) },
+            { separator: true },
+            { label: "Take it off this quote", icon: "x", onSelect: () => update.mutate({ quote_id: null }) },
+          ]}
+        />
       ) : (
-        <>
-          <label className="field">
-            <span>Quote</span>
-            <Select className="select" value={drawing.quote_id ?? ""} disabled={update.isPending} onChange={(e) => update.mutate({ quote_id: e.target.value || null })}>
-              <option value="">Not on a quote</option>
-              {options.data.quotes.map((q) => <option key={q.id} value={q.id}>#{q.number} {q.title}{clientId ? "" : ` · ${name(q) ?? ""}`}</option>)}
-            </Select>
-          </label>
-          {drawing.quote_id && <ClientSees checked={drawing.show_on_quote} disabled={update.isPending} where="quote" onChange={(on) => update.mutate({ show_on_quote: on })} />}
-          <label className="field">
-            <span>Invoice</span>
-            <Select className="select" value={drawing.invoice_id ?? ""} disabled={update.isPending} onChange={(e) => update.mutate({ invoice_id: e.target.value || null })}>
-              <option value="">Not on an invoice</option>
-              {options.data.invoices.map((i) => <option key={i.id} value={i.id}>#{i.number}{i.subject ? ` ${i.subject}` : ""}{clientId ? "" : ` · ${name(i) ?? ""}`}</option>)}
-            </Select>
-          </label>
-          {drawing.invoice_id && <ClientSees checked={drawing.show_on_invoice} disabled={update.isPending} where="invoice" onChange={(on) => update.mutate({ show_on_invoice: on })} />}
-          {!options.data.quotes.length && !options.data.invoices.length && (
-            <p className="drawing-note">{clientId ? "This client has no open quotes or invoices yet." : "There are no open quotes or invoices yet."} Start one, then attach the drawing from its Drawings card.</p>
-          )}
-          <p className="drawing-note">
-            {attached ? "Clients see a shown drawing on that quote or invoice, in the Client Hub and in its PDF. Hidden ones are for your team only." : "Pick a quote or invoice to put it on."}
-          </p>
-        </>
+        <AddTo where="quote" items={quotes.map((q) => ({ label: `#${q.number} ${q.title ?? ""}`.trim(), end: clientId ? undefined : name(q), onSelect: () => update.mutate({ quote_id: q.id }) }))} />
+      )}
+      {drawing.invoice_id ? (
+        <Placement
+          icon="invoice"
+          title={invoice ? `On invoice #${invoice.number}` : "On an invoice"}
+          detail={invoice?.subject}
+          to={`/invoices/${drawing.invoice_id}`}
+          shown={drawing.show_on_invoice}
+          disabled={update.isPending}
+          where="invoice"
+          onShown={(on) => update.mutate({ show_on_invoice: on })}
+          more={[
+            { label: "Move it to another invoice", icon: "invoice", items: invoices.filter((i) => i.id !== drawing.invoice_id).map((i) => ({ label: `#${i.number}${i.subject ? ` ${i.subject}` : ""}`, end: clientId ? undefined : name(i), onSelect: () => update.mutate({ invoice_id: i.id }) })) },
+            { separator: true },
+            { label: "Take it off this invoice", icon: "x", onSelect: () => update.mutate({ invoice_id: null }) },
+          ]}
+        />
+      ) : (
+        <AddTo where="invoice" items={invoices.map((i) => ({ label: `#${i.number}${i.subject ? ` ${i.subject}` : ""}`, end: clientId ? undefined : name(i), onSelect: () => update.mutate({ invoice_id: i.id }) }))} />
       )}
       {!hasPicture && (drawing.show_on_quote || drawing.show_on_invoice) && <p className="drawing-note" data-tone="warning">No map picture was saved with this drawing, so the client would see the sizes only. Save again to add one.</p>}
-      {(drawing.quote_id || drawing.invoice_id) && (
-        <div className="drawing-links">
-          {drawing.quote_id && <Link className="btn btn-sm" to={`/quotes/${drawing.quote_id}`}><Icon name="quote" size={14} />Open the quote</Link>}
-          {drawing.invoice_id && <Link className="btn btn-sm" to={`/invoices/${drawing.invoice_id}`}><Icon name="invoice" size={14} />Open the invoice</Link>}
-        </div>
-      )}
-    </Section>
+    </div>
+  );
+}
+
+/** Where the drawing is (a quote, an invoice): a link to it, whether the client sees it there, and a menu to move it or take it off. */
+function Placement({ icon, title, detail, to, shown, disabled, where, onShown, more }: {
+  icon: "quote" | "invoice";
+  title: string;
+  detail?: string | null;
+  to: string;
+  shown: boolean;
+  disabled: boolean;
+  where: "quote" | "invoice";
+  onShown: (on: boolean) => void;
+  more: MenuEntry[];
+}) {
+  return (
+    <div className="drawing-place">
+      <Icon name={icon} size={17} />
+      <div className="drawing-place-text">
+        <Link to={to}>{title}</Link>
+        {detail && <span>{detail}</span>}
+      </div>
+      <ClientSees checked={shown} disabled={disabled} where={where} onChange={onShown} />
+      <Menu items={more} label={`More for the ${where}`} triggerClassName="btn btn-sm btn-ghost btn-icon" />
+    </div>
+  );
+}
+
+/** Not on one yet: a quiet link that lists the open ones to put it on. */
+function AddTo({ where, items }: { where: "quote" | "invoice"; items: MenuEntry[] }) {
+  if (!items.length) return null;
+  return (
+    <Menu
+      items={items}
+      label={`Add to ${where === "quote" ? "a quote" : "an invoice"}`}
+      title={where === "quote" ? "Add to a quote" : "Add to an invoice"}
+      align="start"
+      triggerClassName="link-btn drawing-add"
+      trigger={<><Icon name="plus" size={14} />{where === "quote" ? "Add to a quote" : "Add to an invoice"}</>}
+    />
   );
 }
 
 function ClientSees({ checked, disabled, where, onChange }: { checked: boolean; disabled: boolean; where: "quote" | "invoice"; onChange: (on: boolean) => void }) {
   return (
-    <label className="switch-row drawing-switch">
-      <input type="checkbox" className="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      Client sees it on this {where}
+    <label className="switch-row drawing-switch" title={`Whether the client sees the drawing on this ${where}, in the Client Hub and its PDF`}>
+      <span>Client sees it</span>
+      <input type="checkbox" className="switch" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} aria-label={`Client sees it on this ${where}`} />
     </label>
   );
 }

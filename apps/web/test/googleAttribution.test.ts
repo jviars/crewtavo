@@ -184,8 +184,9 @@ describe("Google's logo and where its attribution sits", () => {
 
   it("goes in the bottom corners, under the credits that fold away, and shows only with Google's tiles", () => {
     const map = read("../src/features/measure/MeasureMap.tsx");
-    // First on each side is the corner: what's added later sits above it.
-    const order = ["map.addControl(google.credit, \"bottom-right\")", "new maplibregl.AttributionControl({ compact: true })", "new maplibregl.NavigationControl", "map.addControl(google.logo, \"bottom-left\")", "new maplibregl.ScaleControl"].map((text) => map.indexOf(text));
+    // First on each side is the corner: what's added later sits above it. (The zoom buttons are the page's own, over the map.)
+    const order = ["map.addControl(google.credit, \"bottom-right\")", "new maplibregl.AttributionControl({ compact: true })", "map.addControl(google.logo, \"bottom-left\")", "new maplibregl.ScaleControl"].map((text) => map.indexOf(text));
+    expect(map).not.toContain("new maplibregl.NavigationControl");
     expect(order.every((at) => at > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(map).toContain("attributionControl: false");
