@@ -80,7 +80,10 @@ export const RECEIPT_PROMPT = "Fill in the form from this document.";
 export function receiptSystem(country: string | null | undefined): string {
   const code = countryCode(country);
   if (!code || code === "US") return RECEIPT_SYSTEM;
-  const order = monthFirst(code) ? "month first: 03/04/2026 is March 4, 2026" : "day first: 03/04/2026 is 3 April 2026";
+  // Canada's receipts come both ways round; East Asia's and Hungary's put the year first.
+  if (code === "CA") return `${RECEIPT_SYSTEM} The business is in Canada, where receipts write dates both ways round: 03/04/2026 can be March 4 or 3 April 2026. Use the receipt's own clues (a month written in words, a day over 12, its other dates) before guessing, and leave the date out if it can't be told.`;
+  const yearFirst = ["CN", "JP", "KR", "TW", "HU", "MN", "LT"].includes(code);
+  const order = yearFirst ? "year first: 2026/04/03 is 3 April 2026" : monthFirst(code) ? "month first: 03/04/2026 is March 4, 2026" : "day first: 03/04/2026 is 3 April 2026";
   return `${RECEIPT_SYSTEM} The business is in ${countryInText(code)}, where dates are usually written ${order}. Read a date whose day and month could be either way round as it's written there.`;
 }
 

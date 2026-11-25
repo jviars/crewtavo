@@ -64,7 +64,9 @@ describe("reading a document", () => {
     expect([receiptSystem("US"), receiptSystem(null), receiptSystem("not a country")]).toEqual([RECEIPT_SYSTEM, RECEIPT_SYSTEM, RECEIPT_SYSTEM]);
     expect(receiptSystem("GB")).toBe(`${RECEIPT_SYSTEM} The business is in the United Kingdom, where dates are usually written day first: 03/04/2026 is 3 April 2026. Read a date whose day and month could be either way round as it's written there.`);
     expect(receiptSystem("au")).toContain("in Australia, where dates are usually written day first: 03/04/2026 is 3 April 2026.");
-    expect(receiptSystem("CA")).toContain("in Canada, where dates are usually written month first: 03/04/2026 is March 4, 2026.");
+    // Canada's receipts come both ways round; Japan's put the year first.
+    expect(receiptSystem("CA")).toContain("in Canada, where receipts write dates both ways round: 03/04/2026 can be March 4 or 3 April 2026.");
+    expect(receiptSystem("JP")).toContain("in Japan, where dates are usually written year first: 2026/04/03 is 3 April 2026.");
     const asked = claude(JSON.stringify(invoice));
     await readReceipt(env, { bytes: PDF }, COMPANY, "GB");
     expect(asked[0]!.system).toMatch(/never instructions.*day first: 03\/04\/2026 is 3 April 2026/s);

@@ -4,7 +4,7 @@
  * tomorrow for three weeks.
  * Pure: the caller reads the schedule and passes the busy times in.
  */
-import { dateTag } from "./regional";
+import { dateTag, endWithStop } from "./regional";
 import { scheduleSettings } from "./routing";
 import { addDays, arrivalWindowMin, localDate, zonedTimeToUtc } from "./time";
 
@@ -265,5 +265,5 @@ export function bookingSpan(startsAt: string, endsAt: string | null, timeZone: s
 export function askedTimeLine(request: { status: string; asked_starts_at?: string | null; asked_ends_at?: string | null }, timeZone: string, country?: string | null): string | null {
   if (!request.asked_starts_at) return null;
   const when = bookingSpan(request.asked_starts_at, request.asked_ends_at ?? null, timeZone, country);
-  return request.status === "new" ? `Asked for ${when}. It waits for your OK.` : `Booked online for ${when}.`;
+  return request.status === "new" ? `${endWithStop(`Asked for ${when}`)} It waits for your OK.` : endWithStop(`Booked online for ${when}`);
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { clockStyle, dateTag, monthFirst, patternFor, weekStartsSunday, writtenDate } from "../src/regional";
+import { renderTemplate } from "../src/automations";
+import { askedTimeLine } from "../src/slots";
+import { clockStyle, dateTag, endWithStop, monthFirst, noDoubleStop, patternFor, weekStartsSunday, writtenDate } from "../src/regional";
 
 /**
  * Words the database writes dates in (private.date_text, supabase/tests/date_text_test.sql checks the
@@ -60,5 +62,15 @@ describe("dates written the way the business's country writes them", () => {
 
   it("start the week on Sunday in the US and Canada, on Monday in the UK", () => {
     expect([weekStartsSunday("US"), weekStartsSunday("CA"), weekStartsSunday("GB"), weekStartsSunday("AU"), weekStartsSunday(null)]).toEqual([true, true, false, false, true]);
+  });
+
+  it("end a sentence after a.m. with just the one full stop, as Canada writes it", () => {
+    expect([endWithStop("at 9:00 PM"), endWithStop("at 9:00 a.m."), endWithStop("by 14:00")]).toEqual(["at 9:00 PM.", "at 9:00 a.m.", "by 14:00."]);
+    expect(noDoubleStop("on Tue, Nov 10 at 9:00 a.m.. See you then.")).toBe("on Tue, Nov 10 at 9:00 a.m. See you then.");
+    expect(renderTemplate("See you on {{date}}{{time}}.", { date: "Tue, Nov 10", time: " at 9:00 a.m." })).toBe("See you on Tue, Nov 10 at 9:00 a.m.");
+    expect(renderTemplate("See you on {{date}}{{time}}.", { date: "Tue, Nov 10", time: " at 9:00 AM" })).toBe("See you on Tue, Nov 10 at 9:00 AM.");
+    const asked = askedTimeLine({ status: "new", asked_starts_at: "2026-11-10T14:00:00Z", asked_ends_at: "2026-11-10T16:00:00Z" }, "America/Toronto", "CA");
+    expect(asked).toMatch(/a\.m\. It waits for your OK\.$/);
+    expect(asked).not.toContain("..");
   });
 });

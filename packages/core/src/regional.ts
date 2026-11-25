@@ -40,6 +40,15 @@ export function dateTag(country: string | null | undefined, language: string = "
   return own[country] ?? "en-GB";
 }
 
+/**
+ * A sentence ending in a time, with its full stop: "at 9:00 PM." but "at 9:00 a.m.", as Canada writes
+ * it, not "a.m..". The database's twin ends its sentences the same way (rtrim(…, '.') || '.').
+ */
+export const endWithStop = (text: string) => (text.endsWith(".") ? text : `${text}.`);
+
+/** Text filled in around a time that already ends in "a.m." or "p.m.", without the full stop doubled after it. */
+export const noDoubleStop = (text: string) => text.replace(/\b([ap])\.m\.\./g, "$1.m.");
+
 /** Where calendars start the week on Sunday (CLDR's week data): the US and its territories, Canada, Mexico, Japan, South Africa, India and others. */
 const SUNDAY_FIRST = new Set([
   "AG", "AS", "BD", "BR", "BS", "BT", "BW", "BZ", "CA", "CO", "DM", "DO", "ET", "GT", "GU", "HK", "HN", "ID", "IL", "IN", "JM", "JP",

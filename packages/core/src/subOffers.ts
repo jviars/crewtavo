@@ -8,7 +8,7 @@
 import { intlLocale, msg, t } from "./i18n";
 import { isSquareUnit } from "./jobPay";
 import { moneyPrefix } from "./money";
-import { dateTag, writtenDate } from "./regional";
+import { dateTag, writtenDate, endWithStop } from "./regional";
 import type { PaperworkStatus } from "./subs";
 
 /** How an offer ended. A new price for agreed work that isn't taken leaves the pay agreed at the old one. */
@@ -127,7 +127,7 @@ export function offerTimeWords(at: string | Date, timeZone: string, country?: st
 
 /** The time to answer by, if there is one: when the offer runs out, the company's time zone, and its country (the US when it isn't given). */
 export interface AnswerBy { respondBy: string | null | undefined; timeZone: string; country?: string | null }
-const answerByWords = (by: AnswerBy | null | undefined) => (by?.respondBy ? ` Answer by ${offerTimeWords(by.respondBy, by.timeZone, by.country)}.` : "");
+const answerByWords = (by: AnswerBy | null | undefined) => (by?.respondBy ? ` ${endWithStop(`Answer by ${offerTimeWords(by.respondBy, by.timeZone, by.country)}`)}` : "");
 
 /** What the sub's sign-ins get (and their text says) when an offer goes out, with the time to answer by. */
 export const offerText = (o: OfferLineInput, by?: AnswerBy | null) => `${offerLine(o)}.${answerByWords(by)} Open Crewtavo to accept or decline.`;

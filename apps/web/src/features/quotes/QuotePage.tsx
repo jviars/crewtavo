@@ -325,7 +325,8 @@ export function paperDocument(input: {
 async function loadContract(companyId: string, input: QuoteContractInput): Promise<QuoteContract> {
   const ids = [...new Set([...input.template.sections, ...(input.option?.section_ids ?? []), ...(input.quote.section_ids ?? [])].map((s) => s.toLowerCase()))];
   const [company, library] = await Promise.all([
-    supabase().from("companies").select("name, phone, timezone").eq("id", companyId).single(),
+    // As the paper on screen reads it (documents/data.ts useContractCompany): the {Total} and {Date} it shows are the ones kept.
+    supabase().from("companies").select("name, phone, timezone, currency, country").eq("id", companyId).single(),
     // In the library's order, as the server reads it: an option's and the quote's sections print in it (core resolveSections).
     ids.length ? supabase().from("contract_sections").select("id, title, body, place, initials").eq("company_id", companyId).in("id", ids).order("sort").order("created_at").order("id") : null,
   ]);

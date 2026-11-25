@@ -10,6 +10,7 @@
  * The schedule screen (routes/schedule.ts) and AI assistants (assistant-tools/schedule.ts) both come
  * here as the person asking, so the database decides who may: whoever may move the visit.
  */
+import { endWithStop } from "@crewtavo/core/regional";
 import { arrivalWindowMin, localTime, slotLabel, zonedTimeToUtc } from "@crewtavo/core";
 import type { Env } from "../env";
 import { companyFooter, firstName, renderEmail } from "../lib/email";
@@ -113,8 +114,8 @@ async function tellClient(env: Env, s: Scope, requestId: string, note: string | 
     note === null
       ? cancel
         ? [`Your visit on ${when} is cancelled`, `Your ${visit.title} visit on ${when} is cancelled, as you asked.`]
-        : [`Your visit is now ${when}`, `Your ${visit.title} visit is now ${when}.`]
-      : [`About your visit on ${when}`, `We can't ${cancel ? "cancel" : "move"} your ${visit.title} visit, so it stays on ${when}.${note ? `\n\n${note}` : ""}`];
+        : [`Your visit is now ${when}`, endWithStop(`Your ${visit.title} visit is now ${when}`)]
+      : [`About your visit on ${when}`, `${endWithStop(`We can't ${cancel ? "cancel" : "move"} your ${visit.title} visit, so it stays on ${when}`)}${note ? `\n\n${note}` : ""}`];
   const text = [`Hi ${firstName(client.display_name)},`, line, `Questions? Reply to this email${co.phone ? ` or call ${co.phone}` : ""}.`, co.name].join("\n\n");
   const email = renderEmail({ companyName: co.name, logo: baseUrl ? logoImage(baseUrl, co.id, co.settings) : null, text, footer: companyFooter(co) });
   const delivery = await sendToEach(people, (person) => sendEmail(env, { to: person.to, subject, text: email.text, html: email.html, replyTo: co.email ?? undefined, fromName: co.name }, co.id));

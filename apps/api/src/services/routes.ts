@@ -6,7 +6,7 @@
  * organize each crew's coming week once and never redo a day someone ordered by hand.
  */
 import { addDays, DISPATCH, driveBetween, localDate, localTime, planRoute, scheduleSettings, zonedTimeToUtc, type LatLng, type PlannedStop, type RouteStop } from "@crewtavo/core";
-import { clockStyle, writtenDate } from "@crewtavo/core/regional";
+import { clockStyle, writtenDate, endWithStop } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import { dbError, HttpError, must } from "../lib/http";
 import { adminClient, type Db } from "../lib/supabase";
@@ -180,7 +180,7 @@ export function planDay(visits: DayVisit[], company: CompanyClock, date: string,
   });
 
   const warnings: string[] = [];
-  for (const p of planned.filter((x) => x.planned.late)) warnings.push(`${p.visit.title} can't be reached by ${clockLabel(p.planned.start, company.country)}.`);
+  for (const p of planned.filter((x) => x.planned.late)) warnings.push(endWithStop(`${p.visit.title} can't be reached by ${clockLabel(p.planned.start, company.country)}`));
   const nowhere = planned.filter((p) => !p.planned.located).length;
   if (nowhere) warnings.push(`${nowhere === 1 ? "1 stop has" : `${nowhere} stops have`} no map location, so ${nowhere === 1 ? "it goes" : "they go"} last. Check the address on the client.`);
   if (s.routeTimes && planned.some((p) => p.planned.end > 24 * 60)) warnings.push("The route runs past midnight. Move some stops to another day.");
