@@ -19,6 +19,7 @@ import { toast } from "@/lib/toast";
 import { PrivacyLine } from "./AppKeysCard";
 import type { AppRow } from "./catalog";
 import { kit, Row, RowsSkeleton } from "./PanelKit";
+import { dateLocale } from "@/lib/format";
 
 interface MetaPageChoice {
   id: string;
@@ -32,7 +33,7 @@ interface MetaPageChoice {
 /** "Jan 29": when Meta asks for a new sign-in, if it's within two weeks. */
 export function signInBy(expiresAt: number | null | undefined, now = Date.now()): string | null {
   if (!expiresAt || expiresAt * 1000 > now + 14 * 86_400_000) return null;
-  return new Date(expiresAt * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(expiresAt * 1000).toLocaleDateString(dateLocale(), { month: "short", day: "numeric" });
 }
 
 /** Signs in again at Meta: `again` asks for declined permissions again, `ads` adds the two a business Page needs for Instagram. */

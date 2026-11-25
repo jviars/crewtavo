@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -24,7 +25,7 @@ import { RelatedRow, Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { signedUrls, uploadFile } from "@/lib/files";
-import { formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { currencySymbol, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { everyRow } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -384,7 +385,7 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
           </div>
         )}
         <div className="form-grid">
-          <Field label={t("Amount")} requiredMessage={t("Enter what it cost.")} hint={read("amount")}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.amount} onChange={(e) => set("amount", e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></span></Field>
+          <Field label={t("Amount")} requiredMessage={t("Enter what it cost.")} hint={read("amount")}><span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.amount} onChange={(e) => set("amount", e.target.value.replace(/[^0-9.]/g, ""))} required autoFocus /></span></Field>
           <Field label={t("Date")} hint={read("date")}><input className="input" type="date" value={f.incurred_on} onChange={(e) => set("incurred_on", e.target.value)} required /></Field>
           <Field label={t("Vendor")} optional hint={read("vendor")}><input className="input" value={f.vendor} onChange={(e) => set("vendor", e.target.value)} maxLength={120} placeholder={t("Home Depot, quarry…")} /></Field>
           <Field label={t("Category")} hint={read("category")}>
@@ -392,7 +393,7 @@ export function ExpenseDialog({ jobId, expense, draft, onClose, onSaved }: { job
               {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{t(CATEGORY_NAMES[c] ?? c)}</option>)}
             </Select>
           </Field>
-          <Field label={t("Tax")} optional hint={read("tax") ?? t("Included in the amount.")}><span className="input-group"><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.tax} onChange={(e) => set("tax", e.target.value.replace(/[^0-9.]/g, ""))} /></span></Field>
+          <Field label={t("Tax")} optional hint={read("tax") ?? t("Included in the amount.")}><span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={f.tax} onChange={(e) => set("tax", e.target.value.replace(/[^0-9.]/g, ""))} /></span></Field>
           {!jobId && !draft?.job_id && (
             <Field label={t("Job #")} optional hint={suggested ? t("Suggested: {job}", { job: suggestedJobText(suggested) }) : jobLookup.data ? jobLookup.data.title : jobNumber && jobLookup.isFetched ? t("No job #{number}", { number: jobNumber }) : pickedJob ? pickedJob.title : t("Leave empty for a cost that isn't a job's.")}>
               <input className="input" inputMode="numeric" value={jobNumber || (pickedJob?.number != null ? String(pickedJob.number) : "")} onChange={(e) => { setPickedJob(null); setJobNumber(e.target.value.replace(/[^0-9]/g, "")); }} />

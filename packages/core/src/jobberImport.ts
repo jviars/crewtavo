@@ -33,6 +33,10 @@
  * Line items are read when they're written "Name (quantity, $total)" and add up to the total; then
  * the tax is worked out so the total matches Jobber's to the cent. Otherwise the total comes in as
  * one line, saying so.
+ *
+ * Amounts are read in any currency (a UK account's "£1,250.00", "CA$1,250.00"). Dates written in
+ * numbers ("03/10/2026") are read the one way all the files write them, day or month first
+ * (jobberDateOrder), which the business's country decides when the dates don't.
  */
 import { normalizeKey, sameStreet } from "./clientImport";
 import { lineTotal, quoteTotals, taxRateFromPercent } from "./money";
@@ -124,12 +128,27 @@ function reader(headers: readonly string[]) {
 // Cells
 // ---------------------------------------------------------------------------------------------
 
-/** "$1,234.50", "8.875%", "(12.00)" or "-$5" as a number; null when empty or not a number. */
+/** What can stand before or after a number: a currency's symbol, its code or both ("£", "R", "CA$", "GBP", "kr"). */
+const CURRENCY = /^(?:\p{L}{1,3}\.?\p{Sc}?|\p{Sc}\p{L}{0,3})?$/u;
+
+/**
+ * "$1,234.50", "£1,234.50", "CA$1,234.50", "1 234,50 €", "R1,234.50", "8.875%", "(12.00)" or "-$5" as
+ * a number; null when empty or not a number. Any currency's symbol or code around it is left off,
+ * as Jobber writes amounts in the account's currency. A comma followed by one or two digits at the
+ * end is a decimal comma ("1.234,50", "1234,5"); any other comma separates thousands, as in the US.
+ */
 export function jobberNumber(value: string): number | null {
   const text = value.trim();
   if (!text) return null;
-  const negative = /^\(.*\)$/.test(text) || /^-/.test(text.replace(/^\$/, ""));
-  const digits = text.replace(/[()$%,\s-]/g, "");
+  // The number from its first digit to its last, and what's around it.
+  const m = /^(.*?)(\d[\d,.\s'\u00a0\u202f]*\d|\d|\.\d+)([^\d]*)$/su.exec(text);
+  if (!m) return null;
+  const [, before, number, after] = m;
+  const negative = /^\(.*\)$/.test(text) || before.includes("-");
+  if (!CURRENCY.test(before.replace(/[\s()+-]/g, "")) || !CURRENCY.test(after.replace(/[\s()%]/g, ""))) return null;
+  let digits = number.replace(/[\s'\u00a0\u202f]/g, "");
+  if (/^\d{1,3}(\.\d{3})+,\d{1,2}$/.test(digits) || /^\d+,\d{1,2}$/.test(digits)) digits = digits.replace(/\./g, "").replace(",", ".");
+  else digits = digits.replace(/,/g, "");
   if (!/^\d*\.?\d+$/.test(digits)) return null;
   return Number(digits) * (negative ? -1 : 1);
 }
@@ -146,12 +165,46 @@ const iso = (y: number, m: number, d: number) => {
   return isIsoDate(date) ? date : null;
 };
 
+/** Which comes first in a date written in numbers, "03/10/2026": the month (the US's) or the day. */
+export type JobberDateOrder = "month_first" | "day_first";
+
+const NUMBER_DATE = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/;
+
+/** The columns with dates in them, whichever file they're in. */
+const DATE_COLUMNS: readonly Column[] = ["created", "sent", "approved", "changes", "converted", "archived", "issued", "due", "start", "end", "closed", "date"];
+
+/**
+ * Which way Jobber's files write their dates in numbers, as Jobber writes them all one way for an
+ * account: day first when a date in them starts with a number over 12 ("25/12/2026") and none has
+ * one second, month first the other way round. When they don't say (every number 12 or under, or
+ * both ways), it's the business's country's way (core countries.ts): month first in the US and
+ * Canada (and when the country isn't known), day first anywhere else.
+ */
+export function jobberDateOrder(files: ReadonlyArray<readonly (readonly string[])[]>, country?: string | null): JobberDateOrder {
+  let dayFirst = false;
+  let monthFirst = false;
+  for (const rows of files) {
+    const col = reader(rows[0] ?? []);
+    for (const cells of rows.slice(1)) {
+      for (const column of DATE_COLUMNS) {
+        const m = NUMBER_DATE.exec(col.get(cells, column));
+        if (!m) continue;
+        if (+m[1] > 12) dayFirst = true;
+        if (+m[2] > 12) monthFirst = true;
+      }
+    }
+  }
+  if (dayFirst !== monthFirst) return dayFirst ? "day_first" : "month_first";
+  return !country || ["US", "CA"].includes(country.trim().toUpperCase()) ? "month_first" : "day_first";
+}
+
 /**
  * A date as Jobber may write it: "2026-10-03", "Oct 3, 2026", "October 3 2026", "3 Oct 2026" or
- * "10/03/2026" (month first, as in the US, unless the first number can't be a month). A time after
- * it is left off. Null when it isn't a date.
+ * "10/03/2026", whose numbers go in `order` (jobberDateOrder; month first, as in the US, unless
+ * told), or the other way when that one can't be a date (a 13th month). A time after it is left
+ * off. Null when it isn't a date.
  */
-export function jobberDate(value: string): string | null {
+export function jobberDate(value: string, order: JobberDateOrder = "month_first"): string | null {
   const text = value.trim().toLowerCase().replace(/,/g, " ").replace(/\s+/g, " ");
   if (!text) return null;
   let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
@@ -160,10 +213,11 @@ export function jobberDate(value: string): string | null {
   if (m && MONTHS.includes(m[1])) return iso(+m[3], MONTHS.indexOf(m[1]) + 1, +m[2]);
   m = /^(\d{1,2}) ([a-z]{3})[a-z]*\.? (\d{4})/.exec(text);
   if (m && MONTHS.includes(m[2])) return iso(+m[3], MONTHS.indexOf(m[2]) + 1, +m[1]);
-  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})\b/.exec(text);
+  m = NUMBER_DATE.exec(text);
   if (m) {
     const year = m[3].length === 2 ? 2000 + +m[3] : +m[3];
-    return +m[1] > 12 ? iso(year, +m[2], +m[1]) : iso(year, +m[1], +m[2]);
+    const [month, day] = order === "day_first" ? [+m[2], +m[1]] : [+m[1], +m[2]];
+    return month > 12 ? iso(year, day, month) : iso(year, month, day);
   }
   return null;
 }
@@ -179,10 +233,11 @@ export interface JobberImportLine { name: string; description: string | null; qu
 
 /**
  * The "Line items" cell as lines, when it's written "Name (quantity, $total)" item after item
- * (separated by commas, semicolons or new lines); null when it isn't, or something is left over.
+ * (separated by commas, semicolons or new lines), in any currency ("£40.00", "R40.00", "40.00 €");
+ * null when it isn't, or something is left over.
  */
 export function jobberLineItems(text: string): JobberImportLine[] | null {
-  const pattern = /([^,;\n(][^(\n]*?)\s*\(\s*(\d+(?:\.\d+)?)\s*,\s*(-?\s*\$?\s*-?[\d,]*\.?\d+)\s*\)\s*(?:[,;\n]+|$)/gy;
+  const pattern = /([^,;\n(][^(\n]*?)\s*\(\s*(\d+(?:\.\d+)?)\s*,\s*(-?\s*(?:\p{L}{1,3}\.?\p{Sc}?|\p{Sc}\p{L}{0,3})?\s*-?[\d,]*\.?\d+(?:\s*\p{Sc})?)\s*\)\s*(?:[,;\n]+|$)/guy;
   const lines: JobberImportLine[] = [];
   const body = text.trim();
   if (!body) return null;
@@ -405,8 +460,8 @@ export interface JobberRead<T> {
 /** A visit in Jobber's visits report, by its job's number. */
 export interface JobberVisit { date: string; completed: boolean; duration_min: number | null }
 
-/** The parts every kind shares; null (with a problem) for a row without a number or client. */
-function base(get: (column: Column) => string, row: number, number: string, problems: JobberProblem[], seen: Set<string>): Omit<JobberRecord, "lines" | "one_line" | "notes"> | null {
+/** The parts every kind shares; null (with a problem) for a row without a number or client. Dates go in `order`. */
+function base(get: (column: Column) => string, row: number, number: string, problems: JobberProblem[], seen: Set<string>, order: JobberDateOrder): Omit<JobberRecord, "lines" | "one_line" | "notes"> | null {
   if (!number) {
     problems.push({ row, number: null, reason: "No number, so it can't be told from the others." });
     return null;
@@ -426,7 +481,7 @@ function base(get: (column: Column) => string, row: number, number: string, prob
     number,
     source_id: `jobber:${number}`,
     client: { name, email: get("email").split(/[,;\s]+/)[0]?.toLowerCase() || null, street: get("street") || null, city: get("city") || null, region: get("region") || null, postal_code: get("postal") || null },
-    created_on: jobberDate(get("created")),
+    created_on: jobberDate(get("created"), order),
   };
 }
 
@@ -452,8 +507,8 @@ function quoteStatus(status: string, dates: { converted: string; archived: strin
   return null;
 }
 
-/** Jobber's quotes report: its open quotes. `rows` has the headers first. */
-export function readJobberQuotes(rows: readonly string[][]): JobberRead<JobberOpenQuote> {
+/** Jobber's quotes report: its open quotes. `rows` has the headers first; its dates go in `order` (jobberDateOrder). */
+export function readJobberQuotes(rows: readonly string[][], order: JobberDateOrder = "month_first"): JobberRead<JobberOpenQuote> {
   const col = reader(rows[0] ?? []);
   const out: JobberRead<JobberOpenQuote> = { records: [], left_out: {}, problems: [] };
   const seen = new Set<string>();
@@ -464,7 +519,7 @@ export function readJobberQuotes(rows: readonly string[][]): JobberRead<JobberOp
     const status = quoteStatus(get("status"), { converted: get("converted"), archived: get("archived"), approved: get("approved"), changes: get("changes"), sent: get("sent") });
     if (status && typeof status === "object") return leave(out.left_out, status.closed);
     if (!status) return out.problems.push({ row, number: number || null, reason: `Its status "${get("status")}" isn't one of Jobber's.` });
-    const b = base(get, row, number, out.problems, seen);
+    const b = base(get, row, number, out.problems, seen, order);
     if (!b) return;
     const title = get("title") || `Quote #${number} from Jobber`;
     const fitted = fitJobberTotal(jobberLineItems(get("lines")), { total: jobberMoney(get("total")), subtotal: jobberMoney(get("subtotal")), discount: jobberMoney(get("discount")), name: title, text: get("lines") });
@@ -475,14 +530,14 @@ export function readJobberQuotes(rows: readonly string[][]): JobberRead<JobberOp
     out.records.push({
       ...b, title: title.slice(0, 200), status, lines: fitted.lines, one_line: !fitted.itemized, notes,
       discount_amount: fitted.discount_amount, tax_rate: fitted.tax_rate, deposit_amount: Math.max(jobberMoney(get("deposit")) ?? 0, 0),
-      sent_on: jobberDate(get("sent")), approved_on: jobberDate(get("approved")),
+      sent_on: jobberDate(get("sent"), order), approved_on: jobberDate(get("approved"), order),
     });
   });
   return out;
 }
 
-/** Jobber's invoices report: the ones sent and not yet paid, with what's owed. `today` is the company's (YYYY-MM-DD). */
-export function readJobberInvoices(rows: readonly string[][], today: string): JobberRead<JobberOpenInvoice> {
+/** Jobber's invoices report: the ones sent and not yet paid, with what's owed. `today` is the company's (YYYY-MM-DD); dates go in `order`. */
+export function readJobberInvoices(rows: readonly string[][], today: string, order: JobberDateOrder = "month_first"): JobberRead<JobberOpenInvoice> {
   const col = reader(rows[0] ?? []);
   const out: JobberRead<JobberOpenInvoice> = { records: [], left_out: {}, problems: [] };
   const seen = new Set<string>();
@@ -497,7 +552,7 @@ export function readJobberInvoices(rows: readonly string[][], today: string): Jo
     const balance = jobberMoney(get("balance"));
     if (/^paid/.test(status) || (balance !== null && balance <= 0)) return leave(out.left_out, "Paid");
     if (balance === null) return out.problems.push({ row, number: number || null, reason: "No balance, so what's owed isn't known." });
-    const b = base(get, row, number, out.problems, seen);
+    const b = base(get, row, number, out.problems, seen, order);
     if (!b) return;
     const notes: string[] = [];
     let total = jobberMoney(get("total")) ?? balance;
@@ -509,8 +564,8 @@ export function readJobberInvoices(rows: readonly string[][], today: string): Jo
     const lines = cents(total) === cents(jobberMoney(get("total")) ?? NaN) ? jobberLineItems(get("lines")) : null;
     const fitted = fitJobberTotal(lines, { total, discount: jobberMoney(get("discount")), taxPercent: jobberNumber(get("taxPercent")), taxAmount: jobberMoney(get("taxAmount")), name: subject ?? `Invoice #${number} from Jobber`, text: get("lines") });
     if (!fitted.itemized && fitted.lines.length) notes.push("Its line items came in as one line of the total.");
-    const issued = jobberDate(get("issued")) ?? b.created_on ?? today;
-    const due = jobberDate(get("due"));
+    const issued = jobberDate(get("issued"), order) ?? b.created_on ?? today;
+    const due = jobberDate(get("due"), order);
     if (!due) notes.push("No due date in the file: it's due the day it was issued.");
     // An invoice here is for one job at most, so one Jobber made for several comes in without.
     const jobs = [...new Set((get("jobs") || get("job")).split(/[,;\s]+/).map((n) => n.replace(/^#/, "")).filter(Boolean))];
@@ -524,13 +579,13 @@ export function readJobberInvoices(rows: readonly string[][], today: string): Jo
   return out;
 }
 
-/** Jobber's visits report: each job's visits, by its number. */
-export function readJobberVisits(rows: readonly string[][]): Map<string, JobberVisit[]> {
+/** Jobber's visits report: each job's visits, by its number. Dates go in `order`. */
+export function readJobberVisits(rows: readonly string[][], order: JobberDateOrder = "month_first"): Map<string, JobberVisit[]> {
   const col = reader(rows[0] ?? []);
   const visits = new Map<string, JobberVisit[]>();
   for (const cells of rows.slice(1)) {
     const job = col.get(cells, "job");
-    const date = jobberDate(col.get(cells, "date"));
+    const date = jobberDate(col.get(cells, "date"), order);
     if (!job || !date) continue;
     const hours = Number(col.get(cells, "duration"));
     visits.set(job, [...(visits.get(job) ?? []), { date, completed: yes(col.get(cells, "completed")), duration_min: hours > 0 ? Math.round(hours * 60) : null }]);
@@ -542,9 +597,15 @@ export function readJobberVisits(rows: readonly string[][]): Map<string, JobberV
  * Jobber's one-off or recurring jobs report: the jobs not closed. A recurring job's schedule comes
  * from a "Repeating" column, else from its dates in the visits report (`visits`), else it has none
  * and needs_schedule says so. A one-off's visits are its ones in the visits report not done yet, or
- * else its schedule start date. `today` is the company's (YYYY-MM-DD).
+ * else its schedule start date. `today` is the company's (YYYY-MM-DD); dates go in `order`.
  */
-export function readJobberJobs(rows: readonly string[][], kind: JobberOpenJob["kind"], today: string, visits: ReadonlyMap<string, JobberVisit[]> = new Map()): JobberRead<JobberOpenJob> {
+export function readJobberJobs(
+  rows: readonly string[][],
+  kind: JobberOpenJob["kind"],
+  today: string,
+  visits: ReadonlyMap<string, JobberVisit[]> = new Map(),
+  order: JobberDateOrder = "month_first",
+): JobberRead<JobberOpenJob> {
   const col = reader(rows[0] ?? []);
   const out: JobberRead<JobberOpenJob> = { records: [], left_out: {}, problems: [] };
   const seen = new Set<string>();
@@ -553,10 +614,10 @@ export function readJobberJobs(rows: readonly string[][], kind: JobberOpenJob["k
     const row = i + 1;
     const number = get("job");
     const status = get("status").toLowerCase();
-    const ends = jobberDate(get("end"));
+    const ends = jobberDate(get("end"), order);
     if (get("closed") || /closed|archiv|complete|cancel/.test(status)) return leave(out.left_out, "Closed");
     if (kind === "recurring" && ends && ends < today) return leave(out.left_out, "Ended");
-    const b = base(get, row, number, out.problems, seen);
+    const b = base(get, row, number, out.problems, seen, order);
     if (!b) return;
     const title = (get("title") || `Job #${number} from Jobber`).slice(0, 200);
     const lines = jobberLineItems(get("lines"));
@@ -572,7 +633,7 @@ export function readJobberJobs(rows: readonly string[][], kind: JobberOpenJob["k
       if (!f.itemized && f.lines.length) notes.push("Its line items came in as one line of the total.");
     }
     const own = visits.get(number) ?? [];
-    const starts = jobberDate(get("start")) ?? own.map((v) => v.date).sort()[0] ?? null;
+    const starts = jobberDate(get("start"), order) ?? own.map((v) => v.date).sort()[0] ?? null;
     let rule: string | null = null;
     let startsOn = kind === "recurring" ? starts : null;
     if (kind === "recurring") {
@@ -669,16 +730,19 @@ export type JobberFiles = Partial<Record<Exclude<JobberFileKind, "clients">, rea
 /**
  * What an import of these files would do, against the clients and properties here and the source
  * IDs already brought in (by kind). The two jobs reports are one list, as Jobber numbers its jobs
- * once. `today` is the company's (YYYY-MM-DD).
+ * once. `today` is the company's (YYYY-MM-DD). `country` is the business's: the files' dates are
+ * read the one way they're all written (jobberDateOrder), which the country decides when the dates
+ * don't.
  */
 export function planJobberImport(
   files: JobberFiles,
-  here: { clients: readonly KnownClient[]; properties: readonly KnownProperty[]; imported: { [K in JobberWorkKind]: ReadonlySet<string> }; today: string },
+  here: { clients: readonly KnownClient[]; properties: readonly KnownProperty[]; imported: { [K in JobberWorkKind]: ReadonlySet<string> }; today: string; country?: string | null },
 ): JobberPlan {
-  const visits = files.visits ? readJobberVisits(files.visits) : new Map<string, JobberVisit[]>();
+  const order = jobberDateOrder(Object.values(files).filter((rows): rows is readonly string[][] => Boolean(rows)), here.country);
+  const visits = files.visits ? readJobberVisits(files.visits, order) : new Map<string, JobberVisit[]>();
   const empty = <T>(): JobberRead<T> => ({ records: [], left_out: {}, problems: [] });
-  const oneOff = files.one_off_jobs ? readJobberJobs(files.one_off_jobs, "one_off", here.today, visits) : empty<JobberOpenJob>();
-  const recurring = files.recurring_jobs ? readJobberJobs(files.recurring_jobs, "recurring", here.today, visits) : empty<JobberOpenJob>();
+  const oneOff = files.one_off_jobs ? readJobberJobs(files.one_off_jobs, "one_off", here.today, visits, order) : empty<JobberOpenJob>();
+  const recurring = files.recurring_jobs ? readJobberJobs(files.recurring_jobs, "recurring", here.today, visits, order) : empty<JobberOpenJob>();
   const jobs: JobberRead<JobberOpenJob> = { records: [...recurring.records], left_out: { ...oneOff.left_out }, problems: [...recurring.problems, ...oneOff.problems] };
   for (const [why, n] of Object.entries(recurring.left_out)) jobs.left_out[why] = (jobs.left_out[why] ?? 0) + n;
   for (const job of oneOff.records) {
@@ -701,8 +765,8 @@ export function planJobberImport(
     return out;
   };
   return {
-    quotes: plan("quotes", files.quotes ? readJobberQuotes(files.quotes) : empty()),
-    invoices: plan("invoices", files.invoices ? readJobberInvoices(files.invoices, here.today) : empty()),
+    quotes: plan("quotes", files.quotes ? readJobberQuotes(files.quotes, order) : empty()),
+    invoices: plan("invoices", files.invoices ? readJobberInvoices(files.invoices, here.today, order) : empty()),
     jobs: plan("jobs", jobs),
   };
 }

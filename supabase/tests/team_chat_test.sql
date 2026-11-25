@@ -147,6 +147,22 @@ select tch.check((select unread = 0 and mentions = 0 from public.chat_overview(:
 select tch.check((select read_at is not null from public.notifications where kind = 'chat' and user_id = 'c4a70000-0000-0000-0000-000000000004' and title like 'Tyler%'), 'and its notification');
 select tch.check((select array_agg(full_name order by full_name) from public.chat_members(:'north_ch')) @> array['Marcus Reyes', 'Tyler Brooks', 'Sam Ortiz', 'Dana Whitaker', 'Jess Park']
   and not (select array_agg(full_name) from public.chat_members(:'north_ch')) @> array['Ben Carter'], 'North''s member list has North, the office and the owner, not Ben');
+-- A reply tells the person replied to, without naming them; replying to yourself tells nobody.
+insert into public.chat_messages (company_id, channel_id, author_id, body, reply_to) values (:'co', :'north_ch', 'c4a70000-0000-0000-0000-000000000004', 'Thanks, nice work', :'tyler_msg');
+insert into public.chat_messages (company_id, channel_id, author_id, body, reply_to)
+select :'co', :'north_ch', 'c4a70000-0000-0000-0000-000000000004', 'Also check the side gate', id from public.chat_messages where body = 'Thanks, nice work';
+commit;
+
+select tch.check((select count(*) from public.notifications where kind = 'chat' and title = 'Marcus Reyes replied to you in #north-crew' and user_id = 'c4a70000-0000-0000-0000-000000000005') = 1,
+  'a reply notifies the person replied to');
+select tch.check((select count(*) from public.notifications where kind = 'chat' and title like 'Marcus Reyes%') = 1, 'and nobody else, Marcus included');
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "c4a70000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select tch.check((select mentions from public.chat_overview(:'co') where id = :'north_ch') = 1, 'Tyler sees the reply as a mention in #north-crew');
+select public.chat_mark_read(:'north_ch');
+select tch.check((select mentions = 0 from public.chat_overview(:'co') where id = :'north_ch'), 'reading the channel clears it');
 commit;
 
 begin;
@@ -257,7 +273,7 @@ select tch.check(public.chat_set_enabled(:'co', true), 'turned back on');
 select tch.check((select count(*) from public.chat_channels where company_id = :'co') = 7, 'it keeps the channels it had, without making new ones');
 commit;
 
-select tch.check((select count(*) from public.chat_messages where company_id = :'co') = 5, 'and every message is still there');
+select tch.check((select count(*) from public.chat_messages where company_id = :'co') = 7, 'and every message is still there');
 
 -- Topics: chat is one of them, and on for push.
 select tch.check((select column_default like '%chat%' from information_schema.columns where table_name = 'notification_prefs' and column_name = 'push'), 'chat mentions come by push unless turned off');

@@ -28,6 +28,7 @@ import { Spinner } from "@/components/ui/Button";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { ErrorState } from "@/components/ui/States";
+import { companyCountry, currencySymbol } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { useCustomFields } from "../../customFields/CustomFields";
 import { contractTemplate, documentCompany, NO_CONTRACT, quoteDate, quoteDocument, useLetterhead, useMySignature, useQuoteContract, useQuoteTemplate } from "../../documents/data";
@@ -299,7 +300,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
           created_at: details.data?.created_at ?? null,
           approval: null,
           // The business's fields marked to print, as the quote's own PDF prints them.
-          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
+          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf", companyCountry()),
         },
         paperLines,
         {
@@ -468,7 +469,7 @@ function VisitScreen({ quote, takeoff, onStarted }: { quote: EstimateQuote; take
       <div className={styles.setPrice}>
         <label htmlFor={`${baseId}-price`}>Set the price</label>
         <span className={styles.moneyField}>
-          <span aria-hidden="true">$</span>
+          <span aria-hidden="true">{currencySymbol()}</span>
           <input
             id={`${baseId}-price`}
             className={`input ${styles.moneyInput}`}

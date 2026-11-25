@@ -156,6 +156,12 @@ describe("My paperwork", () => {
     expect(myPaperworkSummary(items.slice(0, 1))).toBe("1 thing needed");
   });
 
+  it("asks for no W-9 for a business outside the US", () => {
+    const items = myPaperwork([row("w9", "missing"), row("liability", "ok"), row("workers_comp", "ok")], "GB");
+    expect(items.map((i) => i.requirement)).toEqual(["liability", "workers_comp"]);
+    expect(myPaperworkSummary(items)).toBe("You're all set");
+  });
+
   it("shows one they sent as waiting, even when the one on file ran out", () => {
     const items = myPaperwork([
       row("w9", "ok", { verified: false }),

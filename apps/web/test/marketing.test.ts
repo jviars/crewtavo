@@ -1010,7 +1010,7 @@ describe("Marketing → Social", () => {
     expect(social).toContain("const last = state.auto.enabled && live.length === 1;");
     expect(social).toContain("(last && live.includes(c.network))");
     expect(social).toContain("if (savedKey) setNetworks(");
-    expect(social).toContain("from the next day (the same day for a review in before 8 AM)");
+    expect(social).toContain("from the next day (the same day for a review in before {clockText(8)})");
     expect(social).not.toContain("starting the next day");
   });
 

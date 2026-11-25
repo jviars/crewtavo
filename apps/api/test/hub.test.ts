@@ -195,7 +195,7 @@ const line = (id: string, service_id: string | null, name: string, values: Row =
 function roofer(quote: Row = {}) {
   state.tables = {
     companies: [{
-      id: ROOFER, name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example", timezone: "America/Chicago", currency: "USD", trade_preset: "roofing_exteriors",
+      id: ROOFER, name: "Summit Roofing", phone: "555-0100", email: "office@summit.example", website: "summit.example", timezone: "America/Chicago", currency: "USD", country: "US", trade_preset: "roofing_exteriors",
       address: { line1: "200 Main St", line2: "Suite 4", city: "Springfield", region: "IL", postal_code: "62704" },
       settings: { branding: { color: "#1f4e79" }, hub_tips: false, roofing_app: { enabled: true } },
     }],
@@ -287,6 +287,8 @@ describe("a price range in the Client Hub", () => {
     expect(text).not.toContain("roofing_app");
     expect(body.quote.package).toEqual({ name: "Architectural shingle" });
     expect(body.company.address).toEqual(["200 Main St", "Suite 4", "Springfield, IL 62704"]);
+    // Where it works, and what it calls its tax and its number for it, which its quotes print (none set: the country's name).
+    expect(body.company).toMatchObject({ country: "US", tax_name: null, tax_number: null });
     // The quote's own template, with the defaults filled in.
     expect(body.template).toMatchObject({ header: "centered", license: "RC-104882", company_signs: true, customer_signs: true });
   });

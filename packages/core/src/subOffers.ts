@@ -7,6 +7,8 @@
  */
 import { intlLocale, msg, t } from "./i18n";
 import { isSquareUnit } from "./jobPay";
+import { moneyPrefix } from "./money";
+import { dateTag, writtenDate, endWithStop } from "./regional";
 import type { PaperworkStatus } from "./subs";
 
 /** How an offer ended. A new price for agreed work that isn't taken leaves the pay agreed at the old one. */
@@ -41,12 +43,15 @@ export function respondByProblem(respondBy: string | Date | null | undefined, no
 // The offer in one line
 // ---------------------------------------------------------------------------------------------
 
-/** "$2,040", "$2,040.50": cents only when there are some. Mirrors private.money_short(). */
-export function moneyShort(amount: number | string | null | undefined): string {
+/**
+ * "$2,040", "$2,040.50": cents only when there are some, in the business's currency ("£2,040",
+ * "R 2,040": core moneyPrefix; US dollars when it isn't given). Mirrors private.money_short().
+ */
+export function moneyShort(amount: number | string | null | undefined, currency?: string | null): string {
   const n = Number(amount ?? 0) || 0;
   const cents = Math.round(n * 100);
   const whole = cents % 100 === 0;
-  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })}`;
+  return `${moneyPrefix(currency)}${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 })}`;
 }
 
 /** "24 squares", "1 day", "120 lf", "2 ea": a quantity as a note reads it. Mirrors private.amount_words(). */
@@ -58,25 +63,31 @@ export function amountWords(quantity: number | string, unit: string | null | und
   return `${String(n)} ${u || "ea"}`;
 }
 
-// In the language the app is in (the server's is always English): "Tue Nov 3", "mar 3 nov".
+// In the language the app is in (the server's is always English): "Tue Nov 3", "mar 3 nov". In
+// English, the way the business's country writes dates ("Tue 3 Nov" in the UK, core regional).
+const inEnglish = () => intlLocale().startsWith("en");
 const formats = new Map<string, { day: Intl.DateTimeFormat; monthDay: Intl.DateTimeFormat }>();
-function dateFormats() {
-  const tag = intlLocale();
+function dateFormats(country?: string | null) {
+  const tag = inEnglish() ? dateTag(country) : intlLocale();
   let found = formats.get(tag);
   if (!found) formats.set(tag, (found = { day: new Intl.DateTimeFormat(tag, { weekday: "short", timeZone: "UTC" }), monthDay: new Intl.DateTimeFormat(tag, { month: "short", day: "numeric", timeZone: "UTC" }) }));
   return found;
 }
-/** "Tue Nov 3" for a YYYY-MM-DD date (as Postgres's to_char 'Dy Mon FMDD'). */
-export function offerDate(date: string): string {
+/**
+ * "Tue Nov 3" for a YYYY-MM-DD date: in English, the database's words (private.sub_offer_line's
+ * to_char 'Dy Mon FMDD'), the way the business's `country` writes them, "Tue 3 Nov" in the UK.
+ */
+export function offerDate(date: string, country?: string | null): string {
+  if (inEnglish()) return writtenDate(date.slice(0, 10), "Dy Mon FMDD", country);
   const at = Date.parse(`${date.slice(0, 10)}T12:00:00Z`);
   return `${dateFormats().day.format(at)} ${dateFormats().monthDay.format(at)}`;
 }
 
 /** "Tue Nov 3", or "Tue Nov 3 to Thu Nov 5" for the first and last of several days; null for none. */
-export function offerDays(dates: ReadonlyArray<string | null | undefined>): string | null {
+export function offerDays(dates: ReadonlyArray<string | null | undefined>, country?: string | null): string | null {
   const days = [...new Set(dates.filter((d): d is string => Boolean(d)).map((d) => d.slice(0, 10)))].sort();
   if (!days.length) return null;
-  return days.length === 1 ? offerDate(days[0]!) : t("{from} to {to}", { from: offerDate(days[0]!), to: offerDate(days[days.length - 1]!) });
+  return days.length === 1 ? offerDate(days[0]!, country) : t("{from} to {to}", { from: offerDate(days[0]!, country), to: offerDate(days[days.length - 1]!, country) });
 }
 
 export interface OfferLineInput {
@@ -87,6 +98,10 @@ export interface OfferLineInput {
   /** Its lines, in their order. */
   lines: ReadonlyArray<{ basis: string; unit: string | null; quantity: number | string; amount: number | string }>;
   total: number | string;
+  /** The business's currency (companies.currency); US dollars when it isn't given. */
+  currency?: string | null;
+  /** The business's country (companies.country): the days are written its way; the US's when it isn't given. */
+  country?: string | null;
 }
 
 /**
@@ -98,32 +113,28 @@ export function offerLine(o: OfferLineInput): string {
     .map((l, i) => ({ ...l, i }))
     .filter((l) => l.basis === "per_unit" && Number(l.quantity) > 0)
     .sort((a, b) => Number(b.amount) - Number(a.amount) || a.i - b.i)[0];
-  return [o.title, offerDays(o.dates), perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total)].filter(Boolean).join(", ");
+  return [o.title, offerDays(o.dates, o.country), perUnit ? amountWords(perUnit.quantity, perUnit.unit) : null, moneyShort(o.total, o.currency)].filter(Boolean).join(", ");
 }
 
 /**
- * "Mon Nov 2, 5:00 PM": a moment in the company's time zone, as an offer's time to answer by reads.
- * Mirrors private.local_time_words().
+ * "Mon Nov 2, 5:00 PM": a moment in the company's time zone, as an offer's time to answer by reads,
+ * the way the business's `country` writes it ("Mon 2 Nov, 17:00" in the UK). Mirrors
+ * private.local_time_words() (to_char 'Dy Mon FMDD, FMHH12:MI AM'), as its date and its time.
  */
-export function offerTimeWords(at: string | Date, timeZone: string): string {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone })
-      .formatToParts(at instanceof Date ? at : new Date(at))
-      .map((p) => [p.type, p.value]),
-  );
-  return `${parts.weekday} ${parts.month} ${parts.day}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod).toUpperCase()}`;
+export function offerTimeWords(at: string | Date, timeZone: string, country?: string | null): string {
+  return `${writtenDate(at, "Dy Mon FMDD", country, timeZone)}, ${writtenDate(at, "FMHH12:MI AM", country, timeZone)}`;
 }
 
-/** The time to answer by, if there is one: when the offer runs out, and the company's time zone. */
-export interface AnswerBy { respondBy: string | null | undefined; timeZone: string }
-const answerByWords = (by: AnswerBy | null | undefined) => (by?.respondBy ? ` Answer by ${offerTimeWords(by.respondBy, by.timeZone)}.` : "");
+/** The time to answer by, if there is one: when the offer runs out, the company's time zone, and its country (the US when it isn't given). */
+export interface AnswerBy { respondBy: string | null | undefined; timeZone: string; country?: string | null }
+const answerByWords = (by: AnswerBy | null | undefined) => (by?.respondBy ? ` ${endWithStop(`Answer by ${offerTimeWords(by.respondBy, by.timeZone, by.country)}`)}` : "");
 
 /** What the sub's sign-ins get (and their text says) when an offer goes out, with the time to answer by. */
 export const offerText = (o: OfferLineInput, by?: AnswerBy | null) => `${offerLine(o)}.${answerByWords(by)} Open Crewtavo to accept or decline.`;
 
 /** What they get for a new price on agreed work. */
-export const changeText = (o: { title: string; total: number | string; agreed: number | string }, by?: AnswerBy | null) =>
-  `New price for ${o.title}: ${moneyShort(o.total)} (was ${moneyShort(o.agreed)}).${answerByWords(by)} Open Crewtavo to accept or decline.`;
+export const changeText = (o: { title: string; total: number | string; agreed: number | string; currency?: string | null }, by?: AnswerBy | null) =>
+  `New price for ${o.title}: ${moneyShort(o.total, o.currency)} (was ${moneyShort(o.agreed, o.currency)}).${answerByWords(by)} Open Crewtavo to accept or decline.`;
 
 // ---------------------------------------------------------------------------------------------
 // What's wrong with a sub's insurance (it only warns)
@@ -196,14 +207,14 @@ function documentWords(kind: string | null | undefined): string {
   }
 }
 
-const shortDate = (date: string | null) => (date ? dateFormats().monthDay.format(Date.parse(`${date.slice(0, 10)}T12:00:00Z`)) : "");
+const shortDate = (date: string | null, country?: string | null) => (date ? dateFormats(country).monthDay.format(Date.parse(`${date.slice(0, 10)}T12:00:00Z`)) : "");
 
 /**
  * The warning in words. For the sub: "Your workers' comp certificate on file ends before this job."
  * (mirrors private.sub_offer_warning_words()). For the office: "Their workers' comp certificate ends
- * Nov 1, before the last day of work (Nov 5)."
+ * Nov 1, before the last day of work (Nov 5)", its dates the way the business's `country` writes them.
  */
-export function insuranceWarningText(item: InsuranceWarningItem, who: "office" | "sub"): string {
+export function insuranceWarningText(item: InsuranceWarningItem, who: "office" | "sub", country?: string | null): string {
   const doc = documentWords(item.kind);
   const missing = item.requirement === "liability" ? "liability insurance" : "workers' comp certificate or exemption";
   if (who === "sub") {
@@ -216,8 +227,8 @@ export function insuranceWarningText(item: InsuranceWarningItem, who: "office" |
   }
   const words =
     item.problem === "missing" ? `No ${missing} on file.`
-    : item.problem === "expired" ? `Their ${doc} ran out${item.expires_on ? ` ${shortDate(item.expires_on)}` : ""}.`
-    : item.problem === "ends_before_work" ? `Their ${doc} ends ${shortDate(item.expires_on)}, before the last day of work (${shortDate(item.work_until)}).`
+    : item.problem === "expired" ? `Their ${doc} ran out${item.expires_on ? ` ${shortDate(item.expires_on, country)}` : ""}.`
+    : item.problem === "ends_before_work" ? `Their ${doc} ends ${shortDate(item.expires_on, country)}, before the last day of work (${shortDate(item.work_until, country)}).`
     : `The ${doc} they sent hasn't been checked yet.`;
   return item.waiting && item.problem !== "unverified" ? `${words} They've sent a new one to check.` : words;
 }

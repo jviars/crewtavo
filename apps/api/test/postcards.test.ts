@@ -667,6 +667,14 @@ describe("what Send needs first", () => {
     expect(sendProblem({ ...ready, returnAddressProblem: returnAddressProblem({ address: { line1: "1 Main St", city: "Springfield", region: "Ill.", postal_code: "62701" } }) })).toMatch(/state in your company.s address .* isn.t one Lob can read/);
     expect(returnAddressProblem({ address: { line1: "1 Main St", city: "Springfield", region: "Illinois", postal_code: "62701" } })).toBeNull();
     expect(returnAddressProblem({ address: { line1: "1 Main St" } })).toMatch(/return address/);
+    // A business outside the US is told the cards are mailed in the US only, unless its own address is a US one.
+    const leeds = { line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" };
+    expect(returnAddressProblem({ address: leeds, country: "GB" })).toBe(
+      "Postcards are mailed in the US only: Lob sends each card to a US address, and prints your company's address from Settings → Company as the return address, which has to be in the US too. Your business is in the United Kingdom.",
+    );
+    expect(returnAddressProblem({ address: { line1: "1 King St W", city: "Toronto", region: "ON", postal_code: "M5H 1A1" }, country: "CA" })).toMatch(/^Postcards are mailed in the US only: .* Your business is in Canada\.$/);
+    expect(returnAddressProblem({ address: { line1: "1 Main St", city: "Buffalo", region: "NY", postal_code: "14202" }, country: "CA" })).toBeNull();
+    expect(returnAddressProblem({ address: leeds, country: "US" })).toMatch(/^Add your company's full address/);
     expect(sendProblem({ ...ready, front: false })).toMatch(/picture for the front/);
     expect(sendProblem({ ...ready, message: "word ".repeat(400) })).toMatch(/lines too long for the back of a 4 × 6 in card/);
   });

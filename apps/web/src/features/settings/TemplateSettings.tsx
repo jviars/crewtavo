@@ -3,7 +3,8 @@
  * trade. The letterhead (Crewtavo's in a style, color and lettering, or the business's own, uploaded),
  * the license and insurer, the contract (the terms printed above the signatures, and which of the
  * business's contract sections every estimate and every invoice prints, from Settings → Contract
- * terms), the signature lines and the footer, with a live preview of the letter-size pages.
+ * terms), the signature lines and the footer, with a live preview of the pages (letter size, or A4
+ * outside the US and Canada).
  * A business can keep several templates (one is the default; a quote can pick another). One that
  * never saved a template prints with the built-in one, and its first save keeps it as "Standard".
  */
@@ -212,8 +213,8 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
   const counted = (ids: string[]) => (library.data ? inLibraryOrder(ids, library.data).length : ids.length);
   // The sample with the contract this template prints, filled in like a real estimate's (or invoice's).
   const preview = useMemo(
-    () => contractPreview({ kind: previewing, sample, template: t, library: sections, company: { name: doc.name, phone: doc.phone, timezone: company.timezone } }),
-    [previewing, sample, t, sections, doc.name, doc.phone, company.timezone],
+    () => contractPreview({ kind: previewing, sample, template: t, library: sections, company: { name: doc.name, phone: doc.phone, timezone: company.timezone, currency: company.currency } }),
+    [previewing, sample, t, sections, doc.name, doc.phone, company.timezone, company.currency],
   );
 
   const summary: Record<SectionId, string> = {
@@ -440,7 +441,7 @@ function TemplateEditor({ row, rows, onSelect }: { row: TemplateRow | null; rows
               <button type="button" aria-pressed={previewing === "estimate"} onClick={() => setPreviewing("estimate")}>Estimate</button>
               <button type="button" aria-pressed={previewing === "invoice"} onClick={() => setPreviewing("invoice")}>Invoice</button>
             </div>
-            <span className={styles.previewNote}>Live preview, with a sample {previewing === "invoice" ? "invoice" : company.trade_preset === "roofing_exteriors" ? "roof estimate" : "estimate"}. Letter size, prints and saves as a PDF.</span>
+            <span className={styles.previewNote}>Live preview, with a sample {previewing === "invoice" ? "invoice" : company.trade_preset === "roofing_exteriors" ? "roof estimate" : "estimate"}. {doc.paper === "a4" ? "A4" : "Letter size"}, prints and saves as a PDF.</span>
           </div>
           <DocumentSheet template={preview.template} company={doc} data={preview.data} />
         </section>

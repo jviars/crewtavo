@@ -20,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, cx, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Icon } from "@/components/ui/Icon";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
@@ -207,7 +208,7 @@ function Estimate({ quote, takeoff, editable, onChanged, current }: EstimateProp
           {needsDepth && (
             <label className={styles.workField}>
               <span className={styles.fieldLabel}>Depth (in)</span>
-              <input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} style={{ width: 90 }} />
+              <DecimalInput className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} style={{ width: 90 }} />
             </label>
           )}
         </div>

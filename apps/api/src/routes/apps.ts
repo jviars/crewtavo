@@ -2,6 +2,7 @@
 import { ADMINS, weatherSourceOf, type Role } from "@crewtavo/core";
 import { phoneDisplay } from "@crewtavo/core/phone";
 import { marketingOn } from "@crewtavo/core/marketing";
+import { dateTag } from "@crewtavo/core/regional";
 import { projectNumber } from "@crewtavo/core/reviews";
 import { websiteOf } from "@crewtavo/core/website";
 import { Hono, type Context } from "hono";
@@ -15,7 +16,7 @@ import { renderEmail } from "../lib/email";
 import { endConnection, teamConnections } from "../lib/assistants";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { emailReady, sendEmail, sendingWorks } from "../lib/notify";
-import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, TwilioProblem, type TwilioSettings } from "../lib/twilio";
+import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, textingCountry, TwilioProblem, type TwilioSettings } from "../lib/twilio";
 import { adminClient, type Db } from "../lib/supabase";
 import { aiChoice, askerOf, complete, countAiAsk, teamPlans, type OpenAiSettings } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
@@ -644,7 +645,7 @@ apps.put("/apps/twilio/account", requireUser, requireCompany(ADMINS, "apps"), as
   );
   let checked;
   try {
-    checked = await checkTwilio(body);
+    checked = await checkTwilio({ ...body, country: await textingCountry(c.env, c.var.companyId).catch(() => null) });
   } catch (error) {
     if (error instanceof TwilioProblem) throw new HttpError(400, error.message);
     throw error;
@@ -767,9 +768,9 @@ export async function emailOwners(
   if (!ownerIds.length) return;
   const { companyId } = c.var;
   const admin = adminClient(c.env);
-  const { data: company } = await admin.from("companies").select("name, timezone").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("name, timezone, country").eq("id", companyId).maybeSingle();
   const companyName = company?.name ?? "your company";
-  const when = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: company?.timezone || "UTC" });
+  const when = new Date().toLocaleString(dateTag(company?.country), { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: company?.timezone || "UTC" });
   const text = `${note.title} in Crewtavo for ${companyName}.\n\nWho: ${note.who.full_name || note.who.email} (${note.who.email})\nWhen: ${when}\n${note.details}\n\n${note.ifNotYou}\n\n${appUrl(c)}${note.link}`;
   const { data: people } = await admin.from("profiles").select("email").in("user_id", ownerIds);
   for (const person of people ?? []) {

@@ -11,6 +11,8 @@
  * where the numbers don't add up they're told so (core readingProblems).
  */
 import { EXPENSE_CATEGORIES, type ReceiptReading } from "@crewtavo/core";
+import { countryCode, countryInText } from "@crewtavo/core/countries";
+import { monthFirst } from "@crewtavo/core/regional";
 import { z } from "zod";
 import type { Env } from "../env";
 import { HttpError } from "../lib/http";
@@ -68,6 +70,22 @@ export const RECEIPT_SYSTEM =
   "job_reference holds anything printed that could say which customer job it is for: a job number, a PO number, or a delivery or job site address.";
 
 export const RECEIPT_PROMPT = "Fill in the form from this document.";
+
+/**
+ * The system prompt for a business in `country` (companies.country): outside the US it also says
+ * where the business is and which way round its dates are written, so a date that could be read
+ * either way is read as it's meant: 03/04/2026 is 3 April 2026 on a UK receipt, March 4 on a US one.
+ * A US business's prompt is RECEIPT_SYSTEM as it was.
+ */
+export function receiptSystem(country: string | null | undefined): string {
+  const code = countryCode(country);
+  if (!code || code === "US") return RECEIPT_SYSTEM;
+  // Canada's receipts come both ways round; East Asia's and Hungary's put the year first.
+  if (code === "CA") return `${RECEIPT_SYSTEM} The business is in Canada, where receipts write dates both ways round: 03/04/2026 can be March 4 or 3 April 2026. Use the receipt's own clues (a month written in words, a day over 12, its other dates) before guessing, and leave the date out if it can't be told.`;
+  const yearFirst = ["CN", "JP", "KR", "TW", "HU", "MN", "LT"].includes(code);
+  const order = yearFirst ? "year first: 2026/04/03 is 3 April 2026" : monthFirst(code) ? "month first: 03/04/2026 is March 4, 2026" : "day first: 03/04/2026 is 3 April 2026";
+  return `${RECEIPT_SYSTEM} The business is in ${countryInText(code)}, where dates are usually written ${order}. Read a date whose day and month could be either way round as it's written there.`;
+}
 
 // What comes back is checked as data: anything out of shape is dropped (null), never trusted.
 const clean = (max: number) =>
@@ -134,14 +152,17 @@ export function readableType(bytes: Uint8Array): (typeof READABLE_TYPES)[number]
   return null;
 }
 
-/** Read one file: what Claude found, checked. Throws an HttpError when it can't be read. */
-export async function readReceipt(env: Env, file: { bytes: Uint8Array }, asker: Asker): Promise<ReceiptReading> {
+/**
+ * Read one file: what Claude found, checked, for a business in `country` (receiptSystem). Throws an
+ * HttpError when it can't be read.
+ */
+export async function readReceipt(env: Env, file: { bytes: Uint8Array }, asker: Asker, country?: string | null): Promise<ReceiptReading> {
   if (file.bytes.length > READ_MAX_BYTES) throw new HttpError(413, "That file is too large to read. Fill it in by hand.");
   const mediaType = readableType(file.bytes);
   if (!mediaType) throw new HttpError(415, "Only photos (JPEG, PNG, GIF, WebP) and PDFs can be read. Fill it in by hand.");
   const answer = await readDocument(env, {
     asker,
-    system: RECEIPT_SYSTEM,
+    system: receiptSystem(country),
     prompt: RECEIPT_PROMPT,
     file: { data: Buffer.from(file.bytes).toString("base64"), mediaType },
     schema: RECEIPT_SCHEMA as unknown as Record<string, unknown>,

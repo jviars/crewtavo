@@ -251,7 +251,7 @@ describe("setting up a business", () => {
     expect(lawn).not.toHaveProperty("roofing_app");
   });
 
-  it("sets the currency picked at sign-up, and refuses one that isn't a code", async () => {
+  it("sets the currency picked at sign-up (and the country, guessed from the time zone), and refuses one that isn't a code", async () => {
     const writes: Array<{ path: string; body: unknown }> = [];
     vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -262,10 +262,33 @@ describe("setting up a business", () => {
     const make = (currency: string) =>
       request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Maple Lawn", timezone: "America/Toronto", currency, terms_version: TERMS_VERSION }) });
     expect((await make("cad")).status).toBe(201);
-    expect(writes[0]).toEqual({ path: "/rest/v1/companies?id=eq.company-1", body: { currency: "CAD" } });
+    // With the country guessed from the time zone, as none was sent.
+    expect(writes[0]).toEqual({ path: "/rest/v1/companies?id=eq.company-1", body: { currency: "CAD", country: "CA" } });
     const bad = await make("dollars");
     expect(bad.status).toBe(400);
     expect(await bad.json()).toEqual({ error: "Pick a currency from the list, like USD." });
+  });
+
+  it("sets the country picked at sign-up, and refuses one it doesn't know", async () => {
+    const writes: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/auth/v1/user") return Response.json({ id: "user-1", aud: "authenticated", role: "authenticated" });
+      if (init?.method === "PATCH") writes.push({ path: url.pathname + url.search, body: JSON.parse(String(init.body)) });
+      return Response.json(url.pathname === "/rest/v1/rpc/create_company" ? "company-1" : []);
+    });
+    const make = (country: string | undefined, timezone = "America/New_York", currency = "USD") =>
+      request("/api/companies", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "Thames Gardens", timezone, currency, country, terms_version: TERMS_VERSION }) });
+    expect((await make("gb", "Europe/London", "GBP")).status).toBe(201);
+    expect(writes[0]).toEqual({ path: "/rest/v1/companies?id=eq.company-1", body: { currency: "GBP", country: "GB" } });
+    // In the US, in dollars: no country or currency to change after create_company.
+    writes.length = 0;
+    expect((await make("US")).status).toBe(201);
+    expect((await make(undefined)).status).toBe(201);
+    expect(writes.filter((w) => w.body && typeof w.body === "object" && ("country" in w.body || "currency" in w.body))).toEqual([]);
+    const bad = await make("UK");
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "Pick a country from the list." });
   });
 
   it("refuses a currency the app doesn't offer, before anything is made", async () => {

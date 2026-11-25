@@ -549,7 +549,7 @@ export async function markRangeAccepted(env: Env, db: Db, companyId: string, use
   if (error) throw dbError(error);
   if (!acceptedAt) throw new HttpError(409, RANGE_NOT_WAITING);
 
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.data?.currency || "USD", maximumFractionDigits: 0 });
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.data?.currency || "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 });
   const client = quote.client?.display_name?.trim() || "The homeowner";
   const by = profile.data?.full_name?.trim() || "the office";
   const how = body.note?.trim();

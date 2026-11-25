@@ -10,6 +10,7 @@
  * it what Measure opens on (an admin can set that for the whole team in Settings > Maps). On a phone
  * or tablet the map can fill the screen (lib/extendMap).
  */
+import { addressLabels } from "@crewtavo/core/countries";
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
 import { drawingSquares, edgeLengths, isPitch, isRoofEdge, lineLengthM, mToFt, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
 import { itemFits, PAVING_ITEMS, pavingItem, pavingQuantities, stallsAlong, type PavingItem } from "@crewtavo/core/paving";
@@ -21,6 +22,7 @@ import { featureOn } from "@/components/shell/nav";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { DetailHeader } from "@/components/ui/DetailPage";
 import { Field, FormError } from "@/components/ui/Field";
@@ -32,7 +34,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
 import { useExtendedMap } from "@/lib/extendMap";
-import { addressLine, formatNumber } from "@/lib/format";
+import { addressLine, companyCountry, formatNumber } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./AddressSearch";
@@ -546,7 +548,10 @@ export function MeasurePage() {
     meta: { inline: true },
     mutationFn: async (address: string) => {
       const r = await api.post<Found>("/geocode", { address, world: true });
-      if (!r.found) throw new Error(`Couldn't find "${address}". Try adding the city and state, or the country.`);
+      if (!r.found) {
+        const words = addressLabels(companyCountry());
+        throw new Error(`Couldn't find "${address}". Try adding the city and ${words.regionOptional ? words.postalCodeInText : words.regionInText}, or the country.`);
+      }
       return r;
     },
     onSuccess: (r) => {
@@ -587,7 +592,8 @@ export function MeasurePage() {
       setTitle((t) => (t === "Measurement" || t === picked?.label ? s.label : t));
     }
     if (!at) return toast.error(`Couldn't find ${s.label} on the map. Check the property's address on ${s.client ?? "the client"}'s page.`);
-    goTo({ ...at, zoom: 19, country: "US", place: s.label });
+    // In the property's country: its business's unless it says otherwise.
+    goTo({ ...at, zoom: 19, country: s.country ?? companyCountry(), place: s.label });
   };
   /** The drawing is no longer for the client picked earlier (and loses their address as its name). */
   const unpick = () => {
@@ -1326,7 +1332,7 @@ export function MeasurePage() {
         <PitchPicker value={pitch} onChange={setPitch} />
         <MeasurePitch near={near} onPick={setPitch} roofs={roofOutlines} onPickSection={setShapePitch} />
         <Field label="Waste %" hint="About 10% for a plain gable roof, 15% or more with hips and valleys.">
-          <input className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 120 }} />
+          <DecimalInput className="input" inputMode="decimal" value={waste} onChange={(e) => setWaste(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 120 }} />
         </Field>
         {hasEdges ? (
           <Facts label="Roof edges">
@@ -1356,7 +1362,7 @@ export function MeasurePage() {
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
-        <Field label="Depth (in)"><input className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
+        <Field label="Depth (in)"><DecimalInput className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
         {depthIn > 0 && summary.total_area_sqft > 0 && <p className="measure-quiet">{formatNumber(cubicYards, 1)} cu yd at {depthIn}". Asphalt, about {formatNumber(asphaltTons, 1)} tons at 110 lb per sq yd per inch.</p>}
       </div>
     </details>

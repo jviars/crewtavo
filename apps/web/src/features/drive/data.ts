@@ -12,7 +12,7 @@ import { fileKind, fileSize, isImage, isPdf, type PlanFile } from "@/features/pl
 import { supabase, unwrap } from "@/lib/api";
 import { ApiError, friendlyDbError } from "@/lib/errors";
 import { everyRow } from "@/lib/paging";
-import { addDaysIso, dateIn, formatDate, todayIn } from "@/lib/format";
+import { dateIn, formatDate, todayIn, weekStartOf } from "@/lib/format";
 import { can, hasRole, type Session } from "@/lib/session";
 
 /** A current, live file as Drive lists it (public.drive_list), with where it is. */
@@ -359,11 +359,11 @@ export function groupClientFiles(files: DriveFile[]): PropertyGroup[] {
 
 /**
  * Recent files by when they were added (their newest version), in the company's time zone: Today,
- * This week (since Sunday), then Earlier. Empty groups are left out; each keeps the list's order.
+ * This week (since Sunday, or Monday where the week starts then), then Earlier. Empty groups are left out; each keeps the list's order.
  */
 export function groupByDay<F extends { created_at: string }>(files: readonly F[], timeZone: string): Array<{ key: "today" | "week" | "earlier"; label: string; files: F[] }> {
   const today = todayIn(timeZone);
-  const weekStart = addDaysIso(today, -new Date(`${today}T12:00:00Z`).getUTCDay());
+  const weekStart = weekStartOf(today);
   const groups = { today: [] as F[], week: [] as F[], earlier: [] as F[] };
   for (const f of files) {
     const day = dateIn(f.created_at, timeZone);

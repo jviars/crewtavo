@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Menu } from "@/components/ui/Menu";
@@ -16,6 +17,7 @@ import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { currencySymbol } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { perUnit, rateText, readRate, squaresText } from "./pay";
@@ -189,8 +191,8 @@ function RateDialog({ payee, rate, onClose }: { payee: PayeeRef; rate: PayRate |
         <Field label="Rate">
           <span className="row" style={{ gap: 8 }}>
             <span className="input-group" style={{ width: 160 }}>
-              <span className="addon">$</span>
-              <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required style={{ paddingLeft: 24, textAlign: "right" }} aria-label="Rate" />
+              <span className="addon">{currencySymbol()}</span>
+              <DecimalInput className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} required style={{ paddingLeft: 24, textAlign: "right" }} aria-label="Rate" />
             </span>
             <span className="muted">{per}</span>
           </span>

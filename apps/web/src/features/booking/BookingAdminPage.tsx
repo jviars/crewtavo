@@ -2,6 +2,7 @@
  * Online booking: public request forms, their questions and service area, links to share or embed,
  * and for an estimate or booking form, letting clients pick a time from the schedule's openings.
  */
+import { businessCountry } from "@crewtavo/core/countries";
 import { formSlug as slugify, isPostalCode, normalizeIntakeForm } from "@crewtavo/core/forms";
 import { privacyUrl } from "@crewtavo/core/privacyPolicy";
 import { slotLabel, type OpenSlot } from "@crewtavo/core/slots";
@@ -21,8 +22,10 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { companyCountry } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import { areaWords } from "../settings/salesAreas";
 import { EmbedDialog } from "./EmbedDialog";
 import ui from "./BookingAdmin.module.css";
 import { Select } from "@/components/ui/Select";
@@ -198,6 +201,7 @@ export function BookingAdminPage() {
 
 function FormEditor({ form, taken, link, onEmbed, onDelete, onClose }: { form: FormRow | null; taken: string[]; link: string | null; onEmbed?: () => void; onDelete?: () => void; onClose: () => void }) {
   const { company } = useSession();
+  const words = areaWords(businessCountry(company));
   const queryClient = useQueryClient();
   const [name, setName] = useState(form?.name ?? "Request a quote");
   const [slug, setSlug] = useState(form?.slug ?? "");
@@ -263,8 +267,8 @@ function FormEditor({ form, taken, link, onEmbed, onDelete, onClose }: { form: F
         <Field label="Link" error={clash ? "Another form uses this link" : null} hint={`${window.location.origin}/book/${company.slug}/${finalSlug}`}>
           <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={slugify(name)} maxLength={50} />
         </Field>
-        <Field label="Service area ZIP / Postal codes" optional error={badZips.length ? `Not a ZIP or postal code: ${badZips.slice(0, 3).join(", ")}` : null} hint="Separate them with commas. A code covers every one that starts with it, like M5V for M5V 2T6. Leave empty to accept any area.">
-          <textarea className="textarea" style={{ minHeight: 60 }} value={zips} onChange={(e) => setZips(e.target.value)} placeholder="24151, 24065, 24184" />
+        <Field label={words.serviceLabel} optional error={badZips.length ? `Not a ${words.code}: ${badZips.slice(0, 3).join(", ")}` : null} hint={`Separate them with commas. A code covers every one that starts with it, ${words.serviceExample}. Leave empty to accept any area.`}>
+          <textarea className="textarea" style={{ minHeight: 60 }} value={zips} onChange={(e) => setZips(e.target.value)} placeholder={words.servicePlaceholder} />
         </Field>
         {form && (
           <label className={ui.switchRow}>
@@ -407,7 +411,7 @@ function NextOpenings({ formId, minutes, leadDays, mostADay, crewId }: { formId?
         <span className="muted small">Nothing is open in the next 60 days with these settings. Check your working days and hours in Settings → Company, and what's on the schedule.</span>
       ) : (
         <>
-          <div className={ui.chips}>{next.data.slots.map((slot) => <span key={slot.starts_at} className="chip">{slotLabel(slot, next.data.timezone, next.data.window_min)}</span>)}</div>
+          <div className={ui.chips}>{next.data.slots.map((slot) => <span key={slot.starts_at} className="chip">{slotLabel(slot, next.data.timezone, next.data.window_min, companyCountry())}</span>)}</div>
           <span className="muted small">In {next.data.timezone_label}, from your working hours and what's already on the schedule.</span>
         </>
       )}

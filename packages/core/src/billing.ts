@@ -6,6 +6,7 @@
  *     and the lines that bill them (the database holds each to one line, 20261104000300).
  */
 import { lineTotal, toCents, type Amount } from "./money";
+import { dateTag } from "./regional";
 import { localDate } from "./time";
 
 export interface LateFee {
@@ -210,18 +211,19 @@ export interface WorkLine {
   material_ids?: string[];
 }
 
-const shortDay = (iso: string, timeZone: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
+/** "Oct 3" where the business is, the way its country writes it ("3 Oct" in the UK). */
+const shortDay = (iso: string, timeZone: string, country?: string | null) => new Date(iso).toLocaleDateString(dateTag(country), { month: "short", day: "numeric", timeZone });
 
 /**
  * The lines that bill the chosen hours (one line at the rate item's price) and materials (a line
  * each, at its price, or the price the office gave one with no price list item). A material with no
- * price is left off.
+ * price is left off. The hours' days are written the way the business's `country` writes them.
  */
-export function workLines(input: { hours: readonly LoggedTime[]; rate: PriceItem | null; materials: readonly MaterialGroup[]; prices?: Readonly<Record<string, number>>; timeZone: string }): WorkLine[] {
+export function workLines(input: { hours: readonly LoggedTime[]; rate: PriceItem | null; materials: readonly MaterialGroup[]; prices?: Readonly<Record<string, number>>; timeZone: string; country?: string | null }): WorkLine[] {
   const lines: WorkLine[] = [];
   const total = Math.round(input.hours.reduce((sum, t) => sum + entryHours(t), 0) * 100) / 100;
   if (input.rate && total > 0) {
-    const days = [...new Set(input.hours.map((t) => shortDay(t.started_at, input.timeZone)))];
+    const days = [...new Set(input.hours.map((t) => shortDay(t.started_at, input.timeZone, input.country)))];
     lines.push({
       service_id: input.rate.id,
       name: input.rate.name,

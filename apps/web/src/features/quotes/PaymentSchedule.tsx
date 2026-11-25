@@ -14,14 +14,19 @@ import { DEPOSIT_LAW_NOTE, SCHEDULE_AFTER_MAX, SCHEDULE_DUE, scheduleAmounts, sc
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { writtenDate } from "@crewtavo/core/regional";
+import { companyCountry, currencySymbol, formatDate, formatMoneyCents, moneyCurrency, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./QuotePage.module.css";
 import { Select } from "@/components/ui/Select";
+
+/** A payment's day as the database words the same problem (private.schedule_date_problem, 'Mon FMDD, YYYY'), the business's country's way. */
+const scheduleDay = (iso: string) => writtenDate(iso, "Mon FMDD, YYYY", companyCountry());
 
 /** When a payment is due as the editor asks it: a schedule's five, with "on a date" asked two ways. */
 export type DraftDue = ScheduleDue | "after";
@@ -108,7 +113,7 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
   if (draft) {
     const rows = draft.map(fromDraft);
     const sums = scheduleAmounts(rows, quote.total);
-    const problem = scheduleProblem(rows, quote.total) ?? scheduleDateProblem(rows, today, (iso) => formatDate(iso));
+    const problem = scheduleProblem(rows, quote.total, moneyCurrency()) ?? scheduleDateProblem(rows, today, scheduleDay);
     const set = (i: number, change: Partial<DraftRow>) => setDraft(draft.map((d, n) => (n === i ? { ...d, ...change } : d)));
     return (
       <Section title="Payment schedule" className={styles.schedule}>
@@ -121,11 +126,11 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
               <div className={styles.paymentLine}>
                 <Select className={`select input-sm ${styles.paymentKind}`} aria-label={`Payment ${i + 1} as`} value={d.kind} onChange={(e) => set(i, { kind: e.target.value as DraftRow["kind"] })}>
                   <option value="percent">%</option>
-                  <option value="amount">$</option>
+                  <option value="amount">{currencySymbol()}</option>
                   {last && <option value="rest">The rest</option>}
                 </Select>
                 {d.kind !== "rest" && (
-                  <input className="input input-sm" style={{ width: 96, textAlign: "right" }} inputMode="decimal" aria-label={d.kind === "percent" ? `Payment ${i + 1} percent` : `Payment ${i + 1} amount`}
+                  <DecimalInput className="input input-sm" style={{ width: 96, textAlign: "right" }} inputMode="decimal" aria-label={d.kind === "percent" ? `Payment ${i + 1} percent` : `Payment ${i + 1} amount`}
                     value={d.value} onChange={(e) => set(i, { value: e.target.value.replace(/[^0-9.]/g, "") })} />
                 )}
                 <span className={styles.paymentAmount}>{formatMoneyCents(sums.rows[i]?.amount ?? 0)}</span>
@@ -168,7 +173,7 @@ export function PaymentScheduleCard({ quote, editable, onSaved }: { quote: Sched
   }
 
   // A day to set again (a copy's, a template's) or one that has gone by: said here, before Send says it.
-  const dateProblem = shown.signed ? null : scheduleDateProblem(shown.rows, today, (iso) => formatDate(iso));
+  const dateProblem = shown.signed ? null : scheduleDateProblem(shown.rows, today, scheduleDay);
   return (
     <Section
       title="Payment schedule"

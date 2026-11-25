@@ -14,6 +14,7 @@ import {
 import { localDate } from "@crewtavo/core/time";
 import { api, supabase, unwrap } from "@/lib/api";
 import { parseCsv } from "@/lib/csv";
+import { companyCountry } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { everyRow } from "@/lib/paging";
 import { queryClient } from "@/lib/queryClient";
@@ -103,6 +104,8 @@ export async function previewImport(companyId: string, timeZone: string, files: 
     properties: [...here.properties, ...coming.flatMap((c) => c.client.properties.map((p, i) => ({ id: `${c.id}:${i}`, client_id: c.id, line1: p.line1, city: p.city })))],
     imported: here.imported,
     today: localDate(new Date(), timeZone),
+    // Which way the files' dates go, when they don't say: the business's country's way.
+    country: companyCountry(),
   });
   return { plan, clients, newClients: coming.filter((c) => c.isNew).length };
 }
@@ -145,7 +148,7 @@ export async function runImport(companyId: string, timeZone: string, files: read
       summary.clients += (await importClients(companyId, file.clients, { fileName: file.name })).created;
     }
     const here = await loadHere(companyId);
-    const plan = planJobberImport(workFiles(files), { ...here, today: localDate(new Date(), timeZone) });
+    const plan = planJobberImport(workFiles(files), { ...here, today: localDate(new Date(), timeZone), country: companyCountry() });
     let done = 0;
     task.progress(0, KINDS.reduce((n, k) => n + plan[k].ready.length, 0) || 1);
 

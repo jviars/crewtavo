@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
 import { MapsLink } from "@/components/ui/MapsLink";
-import { formatTime } from "@/lib/format";
+import { englishDateLocale, formatTime } from "@/lib/format";
 import type { VisitInput } from "./VisitDialog";
 
 export interface CalendarEvent {
@@ -27,14 +27,14 @@ export interface CalendarEvent {
   source: { id: string; name: string; color: string | null; crew_id: string | null; user_id?: string | null; blocks_time: boolean } | null;
 }
 
-const dayLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const dayLabel = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(englishDateLocale(), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 /** "Tue, Oct 20 · 9:00 AM – 10:30 AM", "Thu, Nov 26 (all day)", "Mon, Oct 5 – Wed, Oct 7". */
 export function eventWhen(e: CalendarEvent, tz: string): string {
   if (e.all_day || !e.starts_at || !e.ends_at) {
     return e.starts_on === e.ends_on ? `${dayLabel(e.starts_on)} (all day)` : `${dayLabel(e.starts_on)} – ${dayLabel(e.ends_on)}`;
   }
-  const time = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz });
+  const time = (iso: string) => new Date(iso).toLocaleTimeString(englishDateLocale(), { hour: "numeric", minute: "2-digit", timeZone: tz });
   if (e.starts_on === e.ends_on) return `${dayLabel(e.starts_on)} · ${time(e.starts_at)} – ${time(e.ends_at)}`;
   return `${dayLabel(e.starts_on)} ${time(e.starts_at)} – ${dayLabel(e.ends_on)} ${time(e.ends_at)}`;
 }

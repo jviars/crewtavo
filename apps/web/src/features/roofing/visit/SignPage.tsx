@@ -18,6 +18,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { ApiError } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { useCustomFields } from "../../customFields/CustomFields";
 import {
@@ -186,7 +187,7 @@ function SignScreen({ quote, takeoff }: { quote: EstimateQuote; takeoff: Takeoff
           created_at: details.data?.created_at ?? null,
           approval: null,
           // The business's fields marked to print, as the quote's own PDF prints them.
-          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),
+          pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf", companyCountry()),
         },
         lines,
         {

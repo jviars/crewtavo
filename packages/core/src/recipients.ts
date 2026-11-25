@@ -39,6 +39,11 @@ export const emailMatchKey = (value: string | null | undefined) => (value ?? "")
  * "+15405550101" are one number (phoneE164 spells all three the same too). The Twilio webhook
  * matches a text to who sent it this way, and public.sms_stops keeps numbers by it. Empty when it
  * isn't a phone number.
+ *
+ * A UK number kept as the office typed it, "07700 900123", has the same last 10 digits as
+ * Twilio's +447700900123, as a Canadian one has as a US one. A country whose numbers have 9 digits
+ * after the 0 doesn't: Australia's "0412 345 678" is 0412345678 here and 1412345678 from Twilio,
+ * so its numbers match only when they're kept with their country code.
  */
 export function phoneMatchKey(value: string | null | undefined): string {
   const digits = (value ?? "").replace(/\D/g, "");

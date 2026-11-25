@@ -17,15 +17,15 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { EntityStatus, visitKindText } from "@/components/ui/StatusPill";
 import { supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatTime } from "@/lib/format";
+import { addressLine, dateLocale, formatTime } from "@/lib/format";
 import { visitPlace } from "@/lib/maps";
 import { can, hasRole, useSession } from "@/lib/session";
 import { useVisitExtraScope } from "../field/FieldExtras";
 import { usePendingChanges } from "./changeRequests";
 import { lengthLabel } from "./VisitDialog";
-import { intlLocale, msg, t } from "@/lib/i18n";
+import { msg, t } from "@/lib/i18n";
 
-const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(intlLocale(), { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
+const day = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" });
 
 export function VisitDetails({ visitId, onClose, onEdit }: { visitId: string; onClose: () => void; onEdit?: () => void }) {
   const session = useSession();

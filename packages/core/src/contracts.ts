@@ -12,7 +12,8 @@
  * documents.ts; the paper is the web app's features/documents.
  */
 import type { TemplateSettings } from "./documents";
-import { toCents, type Amount } from "./money";
+import { moneyPrefix, toCents, type Amount } from "./money";
+import { monthFirst, writtenDate } from "./regional";
 import { isIsoDate, isTimeZoneName, localDate } from "./time";
 
 /** Above the signatures, or on the terms pages after them. */
@@ -126,6 +127,10 @@ export interface ContractInput {
   /** The option's name as it's offered (quote_options.name). */
   optionName?: string | null;
   warranty?: string | null;
+  /** The business's currency (companies.currency), which {Total} and {Deposit} are written in; US dollars when it isn't given. */
+  currency?: string | null;
+  /** The business's country (companies.country): {Date} is written as it writes dates, "25 October 2026" in the UK; the US's way when it isn't given. */
+  country?: string | null;
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -136,8 +141,11 @@ const clean = (value: string | null | undefined) => (value ?? "").trim().replace
 const oneLine = (value: readonly string[] | string | null | undefined) =>
   (typeof value === "string" ? value.split(/\r?\n/) : value ?? []).map(clean).filter(Boolean).join(", ");
 
-/** "2026-10-25" (or a timestamp) as "October 25, 2026"; the same words wherever it runs. */
-function dateWords(value: string | null | undefined, timeZone: string | null | undefined): string {
+/**
+ * "2026-10-25" (or a timestamp) as "October 25, 2026", or as a country that puts the day first
+ * writes it, "25 October 2026" (core regional); the same words wherever it runs.
+ */
+function dateWords(value: string | null | undefined, timeZone: string | null | undefined, country?: string | null): string {
   if (!value) return "";
   let day = isIsoDate(value) ? value : null;
   if (!day) {
@@ -145,16 +153,17 @@ function dateWords(value: string | null | undefined, timeZone: string | null | u
     if (Number.isNaN(instant.getTime())) return "";
     day = timeZone && isTimeZoneName(timeZone) ? localDate(instant, timeZone) : instant.toISOString().slice(0, 10);
   }
+  if (!monthFirst(country)) return writtenDate(day, "FMMonth FMDD, YYYY", country);
   const [year, month, date] = day.split("-").map(Number);
   return `${MONTHS[month - 1]} ${date}, ${year}`;
 }
 
-/** An amount as "$1,234.56", to the cent; "" when there's none. */
-function dollars(amount: Amount): string {
+/** An amount as "$1,234.56" (or "£1,234.56", "R 1,234.56": core moneyPrefix), to the cent; "" when there's none. */
+function dollars(amount: Amount, currency?: string | null): string {
   if (amount === null || amount === undefined || String(amount).trim() === "") return "";
   const cents = toCents(amount);
   const whole = String(Math.floor(Math.abs(cents) / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${cents < 0 ? "-" : ""}$${whole}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
+  return `${cents < 0 ? "-" : ""}${moneyPrefix(currency)}${whole}.${String(Math.abs(cents) % 100).padStart(2, "0")}`;
 }
 
 const blank = (amount: Amount) => amount === null || amount === undefined || String(amount).trim() === "";
@@ -193,9 +202,9 @@ export function contractValues(input: ContractInput): ContractValues {
     "Business phone": clean(input.businessPhone),
     "License number": clean(input.license),
     "Estimate number": input.estimateNumber === null || input.estimateNumber === undefined ? "" : clean(String(input.estimateNumber)),
-    Date: dateWords(input.date, input.timeZone),
-    Total: dollars(input.total),
-    Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent)),
+    Date: dateWords(input.date, input.timeZone, input.country),
+    Total: dollars(input.total, input.currency),
+    Deposit: dollars(depositFor(input.deposit, input.total, input.depositPercent), input.currency),
     Option: clean(input.optionName),
     Warranty: clean(input.warranty),
   };
@@ -468,8 +477,12 @@ const TRADE_STARTERS: Record<string, ContractStarter[]> = {
  *
  * `lateFeeLine`: for a business that charges late fees, the sentence saying so (core billing
  * lateFeeTerm), which goes in the Payment section so the fee is agreed to before one is charged.
+ *
+ * `country`: the business's (companies.country). The FTC's rule is a US one, so the right to cancel
+ * and its notice are examples for a business in the US only; without a country they're included.
  */
-export function contractStarters(trade: string | null | undefined, { lateFeeLine }: { lateFeeLine?: string | null } = {}): ContractStarter[] {
+export function contractStarters(trade: string | null | undefined, { lateFeeLine, country }: { lateFeeLine?: string | null; country?: string | null } = {}): ContractStarter[] {
+  const us = !country || country.trim().toUpperCase() === "US";
   const cleanup =
     "<p>We keep the work area tidy as we go and haul away our debris when the job is done.</p>" +
     (trade === "roofing_exteriors" ? "<p>We run a magnet over the yard and driveway for stray nails. Keep an eye out for any we missed for a few days.</p>" : "");
@@ -511,8 +524,12 @@ export function contractStarters(trade: string | null | undefined, { lateFeeLine
     ),
     // The FTC's cooling-off rule for a sale made at the buyer's home (16 CFR 429.1): the statement
     // above the signature in the rule's own words, and the Notice of Cancellation it refers to.
-    { title: "Your right to cancel", body: `<p><strong>${FTC_CANCEL_STATEMENT}</strong></p>`, place: "signatures", initials: true },
-    terms(NOTICE_OF_CANCELLATION_TITLE, NOTICE_OF_CANCELLATION.map((text) => `<p><strong>${text}</strong></p>`).join("")),
+    ...(us
+      ? [
+          { title: "Your right to cancel", body: `<p><strong>${FTC_CANCEL_STATEMENT}</strong></p>`, place: "signatures" as const, initials: true },
+          terms(NOTICE_OF_CANCELLATION_TITLE, NOTICE_OF_CANCELLATION.map((text) => `<p><strong>${text}</strong></p>`).join("")),
+        ]
+      : []),
   ];
 }
 
@@ -545,14 +562,15 @@ export function addressLines(address: unknown): string[] {
  * The plain facts a quote's fill-ins come from (core contractValues), the same on the server and in
  * the browser: the customer and their address (the job's when there's no billing address), the job
  * address, the business, the template's license, the estimate's number and date on the business's
- * calendar, its total and deposit, and the option chosen. `quote.total` is the total being signed:
- * pass the chosen option's (the total the homeowner saw) when it isn't the quote's own.
+ * calendar (written its country's way), its total and deposit in the business's currency, and the
+ * option chosen. `quote.total` is the total being signed: pass the chosen option's (the total the
+ * homeowner saw) when it isn't the quote's own.
  */
 export function contractInput(
   quote: { number: number | null; sent_at: string | null; created_at: string; total: Amount; deposit_amount: Amount; deposit_percent?: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null; country?: string | null },
   template: Pick<TemplateSettings, "license">,
   option?: { name: string; warranty: string | null } | null,
 ): ContractInput {
@@ -573,6 +591,10 @@ export function contractInput(
     ...(quote.deposit_percent === null || quote.deposit_percent === undefined ? {} : { depositPercent: quote.deposit_percent }),
     optionName: option?.name ?? null,
     warranty: option?.warranty ?? null,
+    // Only when it isn't US dollars, which is what's assumed without it: a US business's facts stay as they were.
+    ...(company.currency && company.currency.toUpperCase() !== "USD" ? { currency: company.currency } : {}),
+    // Only outside the US, as with the currency.
+    ...(company.country && company.country.toUpperCase() !== "US" ? { country: company.country } : {}),
   };
 }
 
@@ -586,7 +608,7 @@ export function invoiceInput(
   invoice: { number: number | null; issued_on: string; total: Amount },
   client: { display_name?: string | null; billing_address?: unknown } | null,
   property: unknown,
-  company: { name: string; phone: string | null; timezone: string | null },
+  company: { name: string; phone: string | null; timezone: string | null; currency?: string | null; country?: string | null },
   template: Pick<TemplateSettings, "license">,
   option: { name: string; warranty: string | null } | null = null,
 ): ContractInput {

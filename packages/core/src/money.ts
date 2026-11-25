@@ -102,6 +102,45 @@ export function taxRateFromPercent(percent: Amount): number {
   return Number(toUnits(percent, TAX_RATE_DECIMALS - 2)) / 10 ** TAX_RATE_DECIMALS;
 }
 
+// ---------------------------------------------------------------------------------------------
+// The tax's name and the business's number for it (Settings → Company: settings.tax_name and
+// settings.tax_number), as quotes and invoices print them
+// ---------------------------------------------------------------------------------------------
+
+/** The longest a tax's name and a tax number can be. */
+export const TAX_NAME_MAX = 20;
+export const TAX_NUMBER_MAX = 30;
+
+/** What the tax is called where the business works, until it says otherwise: "VAT" in the UK, "GST/HST" in Canada, "Tax" elsewhere (the US as before). */
+export const countryTaxName = (country: string | null | undefined) => (country === "GB" ? "VAT" : country === "CA" ? "GST/HST" : "Tax");
+
+const settingText = (settings: unknown, key: string, max: number) => {
+  const value = settings && typeof settings === "object" && !Array.isArray(settings) ? (settings as Record<string, unknown>)[key] : null;
+  return typeof value === "string" && value.trim() ? value.trim().replace(/\s+/g, " ").slice(0, max) : null;
+};
+
+/** The tax's name on the business's quotes and invoices: its own (settings.tax_name), else its country's (countryTaxName). */
+export const taxName = (settings: unknown, country: string | null | undefined): string => settingText(settings, "tax_name", TAX_NAME_MAX) ?? countryTaxName(country);
+
+/** The business's registration number for its tax (settings.tax_number), as a VAT invoice must show it; null without one. */
+export const taxNumber = (settings: unknown): string | null => settingText(settings, "tax_number", TAX_NUMBER_MAX);
+
+/**
+ * What the number is called beside it: "VAT number", "GST/HST number" for a tax named in capitals
+ * like those (GST, HST, QST, TVA too), else "Tax number" ("Sales tax", "Tax").
+ */
+export const taxNumberLabel = (name: string) => (/^[A-Z]{2,5}(\/[A-Z]{2,5})*$/.test(name.trim()) ? `${name.trim()} number` : "Tax number");
+
+/**
+ * The tax's line in a document's totals: its name and the rate it was worked out at, "VAT (20%)",
+ * "Tax (8.875%)"; the name alone when the rate isn't above 0 or isn't known. The same wherever it's
+ * drawn (no locale).
+ */
+export function taxLineLabel(name: string, rate: Amount): string {
+  const percent = rate === null || rate === undefined || String(rate).trim() === "" ? 0 : taxPercent(rate);
+  return percent > 0 ? `${name} (${percent}%)` : name;
+}
+
 const TIERS = ["Good", "Better", "Best"];
 
 /**
@@ -329,13 +368,24 @@ export const CURRENCIES = [
 /** Whether a currency code is one a business can pick, in either case: "cad" is, "JPY" isn't. */
 export const currencyOffered = (code: string | null | undefined) => CURRENCIES.some((c) => c.code === String(code ?? "").toUpperCase());
 
+/** The symbols that aren't "$", by currency (a space after a letter, as "R 1,250.00" is written). */
+const PREFIXES: Readonly<Record<string, string>> = { GBP: "£", EUR: "€", ZAR: "R " };
+
+/**
+ * What goes before an amount in words written out the same wherever they're made: what a client
+ * signs ({Total}, {Deposit}), agrees to (autopay's bank account paragraph) and what a sub is offered.
+ * The symbol people there write, as a screen shows it: "$" for every dollar (US, Canadian, Australian,
+ * New Zealand), "£", "€", "R " for rand. The database's private.money_prefix says the same.
+ */
+export const moneyPrefix = (currency?: string | null) => PREFIXES[String(currency ?? "").trim().toUpperCase()] ?? "$";
+
 /**
  * Why a payment can't be recorded against an invoice's balance, or null: it has to be more than
  * zero and not more than what's owed (a refund is a payment of its own, recorded in Crewtavo).
  */
 export function paymentProblem(amount: number, balance: number, currency = "USD"): string | null {
   if (!(amount > 0)) return "Enter an amount greater than zero.";
-  if (amount > balance + 0.005) return `That's more than the ${new Intl.NumberFormat("en-US", { style: "currency", currency }).format(balance)} balance.`;
+  if (amount > balance + 0.005) return `That's more than the ${new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(balance)} balance.`;
   return null;
 }
 
@@ -439,7 +489,7 @@ export const DEPOSIT_LAW_NOTE =
  */
 export function scheduleProblem(rows: readonly ScheduleRow[], total: Amount, currency = "USD"): string | null {
   if (!rows.length) return null;
-  const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
+  const money = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(n);
   if (rows.length > SCHEDULE_MAX) return `A payment schedule has ${SCHEDULE_MAX} payments at most.`;
   for (const [i, row] of rows.entries()) {
     const which = `Payment ${i + 1}`;

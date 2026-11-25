@@ -16,6 +16,16 @@ describe("a referral page", () => {
   });
 });
 
+describe("dates on the pages with no session", () => {
+  it("are written the business's way: each page that shows one sets the country from what the server sends", () => {
+    expect(source("../src/features/hub/HubPage.tsx")).toContain("setCountry(d.company);");
+    expect(source("../src/features/booking/BookingFormPage.tsx")).toContain("if (view.data) setCountry({ country: view.data.company.country });");
+    expect(source("../src/features/public/ReferralPage.tsx")).toContain("if (view.data) setCountry({ country: view.data.company.country });");
+    expect(source("../src/features/public/SharedGuidePage.tsx")).toContain("if (d) setCountry({ country: d.company.country });");
+    expect(source("../src/features/public/PaperworkPage.tsx")).toContain("if (data) setCountry({ country: data.company.country });");
+  });
+});
+
 describe("the privacy policy link", () => {
   it("is one setting in Settings → Company, saved as a web address or cleared", () => {
     const settings = source("../src/features/settings/CompanySettings.tsx");

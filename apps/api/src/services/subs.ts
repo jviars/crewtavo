@@ -5,6 +5,7 @@
  * documents itself, under row-level security; these are the parts with a signed link or a message.
  */
 import { neededPaperwork, paperworkLinkIntro, paperworkLinkMessages, subDocumentLabel, type NeededPaperwork, type PaperworkRequirement } from "@crewtavo/core";
+import { dateTag } from "@crewtavo/core/regional";
 import type { Env } from "../env";
 import { firstName, renderEmail } from "../lib/email";
 import { HttpError, must } from "../lib/http";
@@ -20,10 +21,16 @@ export interface SubPaperwork {
   waiting: PaperworkRequirement[];
 }
 
-/** A sub's paperwork that's missing, running out or run out, and what's waiting to be checked. */
+/**
+ * A sub's paperwork that's missing, running out or run out, and what's waiting to be checked: a
+ * W-9 only for a business in the US (core usesIrsForms, by companies.country).
+ */
 export async function subPaperwork(db: Db, companyId: string, subId: string): Promise<SubPaperwork> {
-  const rows = must(await db.from("sub_paperwork").select("requirement, state, expires_on, verified, waiting").eq("company_id", companyId).eq("subcontractor_id", subId));
-  return neededPaperwork(rows);
+  const [rows, company] = await Promise.all([
+    db.from("sub_paperwork").select("requirement, state, expires_on, verified, waiting").eq("company_id", companyId).eq("subcontractor_id", subId),
+    db.from("companies").select("country").eq("id", companyId).maybeSingle(),
+  ]);
+  return neededPaperwork(must(rows), must(company)?.country);
 }
 
 /** The sub's own link to send in paperwork, good for 30 days. */
@@ -32,7 +39,9 @@ export async function paperworkLink(env: Env, baseUrl: string, companyId: string
   return { link, expires_at: new Date(Date.now() + linkLifetimeDays("sub") * 86_400_000).toISOString() };
 }
 
-const dateWords = (date: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(Date.parse(date));
+/** "Oct 6, 2026", the way the business's country writes it ("6 Oct 2026" in the UK). */
+const dateWords = (date: string, country: string | null | undefined) =>
+  new Intl.DateTimeFormat(dateTag(country), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(Date.parse(date));
 
 interface Sub {
   id: string;
@@ -47,6 +56,8 @@ interface Company {
   name: string;
   email: string | null;
   settings: unknown;
+  /** Where the business is (companies.country), which its dates are written for. */
+  country?: string | null;
 }
 
 export interface SendOutcome {
@@ -127,7 +138,7 @@ export async function remindSubs(env: Env, admin: Db, alerts: readonly SubAlert[
   const subIds = [...new Set(due.map((a) => a.subcontractor_id))];
   const [subs, companies] = await Promise.all([
     admin.from("subcontractors").select(SUB_FIELDS).in("id", subIds),
-    admin.from("companies").select("id, name, email, settings").in("id", [...new Set(due.map((a) => a.company_id))]),
+    admin.from("companies").select("id, name, email, settings, country").in("id", [...new Set(due.map((a) => a.company_id))]),
   ]);
   if (subs.error || companies.error) throw new Error((subs.error ?? companies.error)!.message);
   for (const sub of subs.data ?? []) {
@@ -137,7 +148,7 @@ export async function remindSubs(env: Env, admin: Db, alerts: readonly SubAlert[
     counts.subs++;
     try {
       const { link } = await paperworkLink(env, baseUrl, company.id, sub.id);
-      const lines = items.map((a) => `${subDocumentLabel(a.kind)} ${a.days_left < 0 ? "ended" : "ends"} ${dateWords(a.expires_on)}`);
+      const lines = items.map((a) => `${subDocumentLabel(a.kind)} ${a.days_left < 0 ? "ended" : "ends"} ${dateWords(a.expires_on, company.country)}`);
       const ended = items.every((a) => a.days_left < 0);
       const intro = `${items.length === 1 ? `The ${subDocumentLabel(items[0]!.kind).toLowerCase()} we have on file for ${sub.name}` : `Some of the paperwork we have on file for ${sub.name}`} ${ended ? "has run out" : "is about to run out"}:`;
       const text = `Hi ${firstName(sub.contact_name || sub.name)},\n\n${intro}\n\n${lines.join("\n")}\n\nPlease send us ${items.length === 1 ? "the new one" : "the new ones"} here:\n\n${link}\n\nThanks,\n${company.name}`;

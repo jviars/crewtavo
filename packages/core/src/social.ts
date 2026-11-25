@@ -7,6 +7,7 @@
  * database decides the same way where it has to (supabase/migrations/20261031000410_social_posts.sql
  * and 20261031000420_automatic_review_posts.sql).
  */
+import { writtenDate } from "./regional";
 import { NAME_FOLDS, nameKey } from "./reviews";
 import { addDays, localDate, localTime, zonedTimeToUtc } from "./time";
 
@@ -438,21 +439,24 @@ export function nextAutoSlot(now: Date, timeZone: string, taken: readonly Date[]
   return null;
 }
 
-/** "10 AM", "1:30 PM", in the company's time zone. */
-export function clockWords(at: Date, timeZone: string): string {
-  const [h, m] = localTime(at, timeZone).split(":").map(Number) as [number, number];
-  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+/**
+ * "10 AM", "1:30 PM", in the company's time zone, the way its `country` keeps time ("10 a.m." in
+ * Canada, "10:00" in the UK): to_char's 'FMHH12:MI AM' (core regional) without a whole hour's ":00".
+ */
+export function clockWords(at: Date, timeZone: string, country?: string | null): string {
+  return writtenDate(at, "FMHH12:MI AM", country, timeZone).replace(":00 ", " ");
 }
 
 /**
  * "today at 10 AM", "tomorrow at 1 PM", "Nov 6 at 4 PM", as private.auto_post_when says it and the
- * Social tab lists it: a date past tomorrow, since an automatic post can be weeks out.
+ * Social tab lists it: a date past tomorrow, since an automatic post can be weeks out. The date and
+ * time are the way the business's `country` writes them: "6 Nov at 16:00" in the UK.
  */
-export function autoPostWhen(at: Date, timeZone: string, now: Date = new Date()): string {
+export function autoPostWhen(at: Date, timeZone: string, now: Date = new Date(), country?: string | null): string {
   const day = localDate(at, timeZone);
   const today = localDate(now, timeZone);
-  const words = day === today ? "today" : day === addDays(today, 1) ? "tomorrow" : at.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
-  return `${words} at ${clockWords(at, timeZone)}`;
+  const words = day === today ? "today" : day === addDays(today, 1) ? "tomorrow" : writtenDate(at, "Mon FMDD", country, timeZone);
+  return `${words} at ${clockWords(at, timeZone, country)}`;
 }
 
 /** A time zone as people say it: "Eastern Time". The zone's own name when Intl has no words for it. */

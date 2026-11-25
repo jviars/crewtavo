@@ -4,6 +4,7 @@
  * custom field fill it, and the office can keep the rest as new ones. A big file keeps importing if
  * the dialog closes: the task island shows how far along it is.
  */
+import { monthFirst } from "@crewtavo/core/regional";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -13,6 +14,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { parseCsv } from "@/lib/csv";
+import { companyCountry } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { cancelTask, taskFraction, useTasks } from "@/lib/tasks";
 import { toast } from "@/lib/toast";
@@ -59,7 +61,9 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
   };
 
   const columns = useMemo(() => customColumns(headers, mapping, { client: clientFields, property: propertyFields }), [headers, mapping, clientFields, propertyFields]);
-  const clients = useMemo(() => toClients(body, mapping, columns.matched), [body, mapping, columns]);
+  // A date like "3/4/2026" is 3 April in a spreadsheet from where the day comes first.
+  const dayFirst = !monthFirst(companyCountry());
+  const clients = useMemo(() => toClients(body, mapping, columns.matched, { dayFirst }), [body, mapping, columns, dayFirst]);
   const propertyCount = clients.reduce((n, c) => n + c.properties.length, 0);
 
   const run = useMutation({
@@ -69,7 +73,7 @@ export function ImportClientsDialog({ onClose }: { onClose: () => void }) {
       if (addsFields && keepOthers && columns.others.length) {
         const made = await addColumnFields(company.id, headers, columns.others, body, clientFields);
         void queryClient.invalidateQueries({ queryKey: customFieldsKey(company.id) });
-        rows = toClients(body, mapping, [...columns.matched, ...made]);
+        rows = toClients(body, mapping, [...columns.matched, ...made], { dayFirst });
       }
       return importClients(company.id, rows, { fileName, onTask: setTaskId });
     },

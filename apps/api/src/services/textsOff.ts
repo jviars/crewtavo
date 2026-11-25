@@ -31,6 +31,13 @@ export const TWILIO_OPTED_OUT = 21610;
 /** The last 10 digits, as the Twilio webhook matches a text to the clients it's from. */
 export const phoneKey = (phone: string | null | undefined) => (phone ?? "").replace(/\D/g, "").slice(-10);
 
+/**
+ * The numbers worth comparing with phoneKey, for the database to find first: the ones whose last
+ * four digits are the key's, however they're spaced ("07700 900 123" ends in 0 123). A regular
+ * expression for PostgREST's match: .filter("phone", "match", lastDigits(key)).
+ */
+export const lastDigits = (key: string) => `${key.slice(-4).split("").join("[^0-9]*")}[^0-9]*$`;
+
 /** The number texted is the client's own phone. */
 export function isClientPhone(to: string | null | undefined, client: { phone?: string | null }) {
   const key = phoneKey(to);
@@ -173,7 +180,7 @@ export const startOnly = (name: string, phone: string) =>
 
 /** The clients of the company whose own phone is this number (compared as phoneMatchKey compares). */
 async function clientsWithPhone(admin: Db, companyId: string, key: string): Promise<Array<{ id: string; sms_opt_out_at: string | null }>> {
-  const { data, error } = await admin.from("clients").select("id, phone, sms_opt_out_at").eq("company_id", companyId).not("phone", "is", null).ilike("phone", `%${key.slice(-4)}%`).limit(200);
+  const { data, error } = await admin.from("clients").select("id, phone, sms_opt_out_at").eq("company_id", companyId).not("phone", "is", null).filter("phone", "match", lastDigits(key)).limit(200);
   if (error) throw new Error(`Couldn't read whose number that is: ${error.message}`);
   return (data ?? []).filter((row) => phoneMatchKey(row.phone) === key);
 }

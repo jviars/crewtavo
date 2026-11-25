@@ -9,6 +9,7 @@ import { laborRates, localDate, workLines, workToBill } from "@crewtavo/core";
 import { hidesExactPrice, inRangeMode, optionsIntroText, rangeIntroText } from "@crewtavo/core/estimates";
 import { optionBaseTotal, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { clientRecipients, emailMatchKey, MAX_RECIPIENTS, phoneMatchKey, uniqueAddresses, type Recipient } from "@crewtavo/core/recipients";
+import { dateTag } from "@crewtavo/core/regional";
 import { z } from "zod";
 import type { Env } from "../env";
 import { stripeAccess, syncStripeInvoice } from "../integrations/stripe";
@@ -98,7 +99,7 @@ export interface DeliverDefaults {
  * (`optionCount`) the range runs across them.
  */
 export function rangeMessage(company: { name: string; currency: string | null }, low: number, high: number, optionCount = 0): Required<Pick<DeliverDefaults, "intro" | "subject">> {
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", maximumFractionDigits: 0 });
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 });
   return {
     intro: rangeIntroText(money.format(low), money.format(high), optionCount),
     subject: `Your roof estimate from ${company.name}`,
@@ -128,7 +129,7 @@ export function optionPrices(quote: {
  */
 export function optionsMessage(currency: string | null, prices: readonly number[]): DeliverDefaults | null {
   if (prices.length < 2) return null;
-  return { intro: optionsIntroText(prices.length, new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices))) };
+  return { intro: optionsIntroText(prices.length, new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Math.min(...prices))) };
 }
 
 /**
@@ -221,7 +222,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const company = must(await adminClient(s.env).from("companies").select("name, email, phone, address, currency, settings").eq("id", s.companyId).maybeSingle());
   const links = await clientLinks(s.env, s.baseUrl, { c: s.companyId, t: kind, id: record.id, ...(s.noMoney && { nm: 1 as const }) });
   const label = `${kind === "quote" ? "Quote" : "Invoice"} #${record.number}`;
-  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(kind === "quote" ? record.total ?? 0 : record.balance_due ?? 0));
   const amount = record.recurrence_rule ? `${money} per visit` : money;
   const greeting = `Hi ${firstName(record.client?.display_name)},`;
   const intro =
@@ -497,7 +498,8 @@ export const TOO_MANY_JOBS = `Invoice at most ${BATCH_JOBS} jobs at a time: send
 export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send: boolean, work?: { rateId?: string }) {
   const jobs = must(await s.db.from("jobs").select("id, number, title, kind, billing_mode, pricing").eq("company_id", s.companyId).in("id", [...jobIds]));
   const ids = jobs.map((j) => j.id);
-  const timeZone = work ? must(await s.db.from("companies").select("timezone").eq("id", s.companyId).maybeSingle()).timezone || "UTC" : "UTC";
+  const clock = work ? must(await s.db.from("companies").select("timezone, country").eq("id", s.companyId).maybeSingle()) : null;
+  const timeZone = clock?.timezone || "UTC";
   const [{ data: waiting }, { data: due }] = await Promise.all([
     s.db.from("autopay_charges").select("job_id").eq("company_id", s.companyId).eq("status", "waiting").in("job_id", ids),
     s.db.from("due_invoices").select("job_id, month").eq("company_id", s.companyId).in("job_id", ids).order("month"),
@@ -520,7 +522,7 @@ export async function invoiceJobs(s: SalesScope, jobIds: readonly string[], send
       const invoiceId = created.data as string;
       if (work) {
         try {
-          await addLoggedWork(s, invoiceId, job.id, work.rateId, timeZone);
+          await addLoggedWork(s, invoiceId, job.id, work.rateId, timeZone, clock?.country);
         } catch (e) {
           // Not sent without it: the draft is there to finish by hand.
           results.push({ job_id: job.id, number: job.number, ...(month && { month }), ok: false, invoice_id: invoiceId, error: `Its logged work couldn't be added (${e instanceof Error ? e.message : "try again"}). The invoice is in Drafts.` });
@@ -566,10 +568,10 @@ export async function loggedWork(db: Db, companyId: string, jobId: string) {
  * logged work starts out ticked (core workLines): the hours at `rateId` (else the first item sold by
  * the hour; none without one), and the materials that have a price.
  */
-async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, rateId: string | undefined, timeZone: string) {
+async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, rateId: string | undefined, timeZone: string, country?: string | null) {
   const work = await loggedWork(s.db, s.companyId, jobId);
   const rate = work.rates.find((r) => r.id === rateId) ?? work.rates[0] ?? null;
-  const lines = workLines({ hours: rate ? work.hours : [], rate, materials: work.materials.filter((m) => m.unit_price !== null), timeZone });
+  const lines = workLines({ hours: rate ? work.hours : [], rate, materials: work.materials.filter((m) => m.unit_price !== null), timeZone, country });
   if (!lines.length) return;
   const sort = Math.max(0, ...must(await s.db.from("invoice_line_items").select("sort").eq("invoice_id", invoiceId)).map((l) => l.sort));
   must(await s.db.from("invoice_line_items").insert(lines.map((l, i) => ({ ...l, company_id: s.companyId, invoice_id: invoiceId, sort: sort + i + 1 }))).select("id"));
@@ -580,7 +582,7 @@ async function addLoggedWork(s: SalesScope, invoiceId: string, jobId: string, ra
  * while autopay is charging it or will try the card again (its own notice already went).
  */
 export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[]) {
-  const company = must(await s.db.from("companies").select("name, currency, timezone").eq("id", s.companyId).maybeSingle());
+  const company = must(await s.db.from("companies").select("name, currency, timezone, country").eq("id", s.companyId).maybeSingle());
   const today = localDate(new Date(), company.timezone || "UTC");
   const invoices = must(
     await s.db
@@ -613,10 +615,10 @@ export async function remindInvoices(s: SalesScope, invoiceIds: readonly string[
       skipped.push({ number: invoice.number, reason: autopay.get(invoice.id) === "charging" ? "It's being charged automatically" : "Autopay will try the card again" });
       continue;
     }
-    const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(Number(invoice.balance_due));
+    const amount = new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(Number(invoice.balance_due));
     // An early reminder says when it's due; once that day has passed, when it was.
     const due = invoice.due_on
-      ? `${invoice.due_on < today ? "was" : "is"} due ${new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}`
+      ? `${invoice.due_on < today ? "was" : "is"} due ${new Date(`${invoice.due_on}T12:00:00Z`).toLocaleDateString(dateTag(company.country), { month: "long", day: "numeric", timeZone: "UTC" })}`
       : null;
     try {
       const result = await deliver(s, "invoice", invoice, {

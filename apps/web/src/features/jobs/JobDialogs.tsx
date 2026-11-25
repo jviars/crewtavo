@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { choose, confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -391,7 +392,7 @@ export function JobDetailsDialog({ job, onClose, onSaved }: { job: JobRecord; on
           <div className="form-grid">
             <Field label="PO number" optional><input className="input" value={f.po_number} onChange={set("po_number")} maxLength={60} /></Field>
             <Field label="Permit number" optional><input className="input" value={f.permit_number} onChange={set("permit_number")} maxLength={60} /></Field>
-            <Field label="Retainage %" hint="Held back from each invoice until the work is accepted." error={retainage >= 0 && retainage <= 100 ? null : "Enter 0 to 100."}><input className="input" inputMode="decimal" value={f.retainage_pct} onChange={(e) => setF({ ...f, retainage_pct: e.target.value.replace(/[^0-9.]/g, "") })} /></Field>
+            <Field label="Retainage %" hint="Held back from each invoice until the work is accepted." error={retainage >= 0 && retainage <= 100 ? null : "Enter 0 to 100."}><DecimalInput className="input" inputMode="decimal" value={f.retainage_pct} onChange={(e) => setF({ ...f, retainage_pct: e.target.value.replace(/[^0-9.]/g, "") })} /></Field>
             <Field label="Warranty until" optional><input className="input" type="date" value={f.warranty_until} onChange={set("warranty_until")} /></Field>
           </div>
         </details>
@@ -501,7 +502,7 @@ export function InvoiceJobDialog({ job, onClose, onCreated }: { job: InvoiceJob;
             error={overLimit ? `That's more than the ${formatMoneyCents(leftToBill)} left to bill.` : null}
             hint={kind === "progress" && mode === "percent" && amount > 0 ? `${formatMoneyCents(amount)}` : undefined}
           >
-            <input className="input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ""))} placeholder={kind === "progress" && mode === "percent" ? "25" : "500.00"} required autoFocus />
+            <DecimalInput className="input" inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ""))} placeholder={kind === "progress" && mode === "percent" ? "25" : "500.00"} required autoFocus />
           </Field>
         )}
         <FormError error={create.error} />

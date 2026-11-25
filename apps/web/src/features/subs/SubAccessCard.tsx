@@ -24,6 +24,7 @@ import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { newPhoneWay } from "./newPhone";
 import { signInPhoneNote } from "./signInCountries";
@@ -111,7 +112,7 @@ export function SubAccessCard({ sub }: { sub: Sub }) {
     <Section title="Sign-in" action={more}>
       <div className={styles.access}>
         <div className={styles.accessState}>
-          {a && <StatusPill label={subAccessText(a, session.company.timezone)} tone={a.state === "none" ? "muted" : a.state === "invited" || a.shared ? "info" : "good"} />}
+          {a && <StatusPill label={subAccessText(a, session.company.timezone, companyCountry())} tone={a.state === "none" ? "muted" : a.state === "invited" || a.shared ? "info" : "good"} />}
           {access.isPending && <Skeleton width={90} height={12} />}
         </div>
         {access.error && !a ? (

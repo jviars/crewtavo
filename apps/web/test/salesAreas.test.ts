@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { onSiteReason } from "../src/features/roofing/flow/MeasureOnSite";
-import { parseZips, zipKey } from "../src/features/settings/salesAreas";
+import { areaWords, parseZips, zipKey } from "../src/features/settings/salesAreas";
 
 describe("sales area zips", () => {
   it("keeps a zip the way the database matches it", () => {
@@ -26,5 +26,15 @@ describe("why a roof is measured on site", () => {
     expect(onSiteReason("Trees cover the roof", " back half under the oaks ")).toBe("Trees cover the roof. back half under the oaks");
     expect(onSiteReason("Something else", "Solar panels hide the ridge")).toBe("Solar panels hide the ridge");
     expect(onSiteReason("Something else", "  ")).toBe("");
+  });
+});
+
+describe("how an area's codes are explained", () => {
+  it("in the words and examples of the business's country", () => {
+    expect(areaWords("US").note).toBe("Put in whole zip codes, or the first digits for a wider area: 462 covers every zip that starts with 462, and 46201 still goes to whoever has it.");
+    expect(areaWords(null)).toEqual(areaWords("US"));
+    // A UK district is whole (private.postal_in_area): the example says so.
+    expect(areaWords("GB").note).toContain("SW1 covers SW1A 1AA but not SW10 1AA");
+    expect([areaWords("GB").code, areaWords("CA").code, areaWords("NZ").code]).toEqual(["postcode", "postal code", "postal code"]);
   });
 });

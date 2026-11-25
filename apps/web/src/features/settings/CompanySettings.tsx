@@ -1,11 +1,13 @@
 import { TIPS_LAW_NOTE } from "@crewtavo/core/autopay";
+import { addressLabels, businessCountry, countryChoices, REGION_MAX } from "@crewtavo/core/countries";
 import { LATE_FEE_LAW_NOTE, lateFeeSettings, minimumCharge, type LateFee } from "@crewtavo/core/billing";
 import { BREAK_PAY_HINTS, BREAK_PAY_LABELS, breakPay, type BreakPay } from "@crewtavo/core/breaks";
 import { CLOCK_MODE_HINTS, CLOCK_MODE_LABELS, clockMode, type ClockMode } from "@crewtavo/core/clock";
 import { FT_PER_M } from "@crewtavo/core/geo";
 import { GEOFENCE_MODE_HINTS, GEOFENCE_MODE_LABELS, GEOFENCE_NOTE, GEOFENCE_RADIUS, geofence, geofenceRadius, type GeofenceMode } from "@crewtavo/core/geofence";
 import { completesWhenVisitsDone } from "@crewtavo/core/jobBilling";
-import { taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { countryTaxName, TAX_NAME_MAX, TAX_NUMBER_MAX, taxNumberLabel, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { regionNeeded } from "@crewtavo/core/postcards";
 import { PRESETS } from "@crewtavo/core/presets";
 import { PRIVACY_URL_MAX, privacyUrlTyped } from "@crewtavo/core/privacyPolicy";
 import { workdays } from "@crewtavo/core/slots";
@@ -13,12 +15,13 @@ import { arrivalWindowMin } from "@crewtavo/core/time";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Section } from "@/components/ui/Section";
 import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api, supabase, unwrap } from "@/lib/api";
-import { CURRENCIES, timeZoneChoices } from "@/lib/format";
+import { clockText, CURRENCIES, timeZoneChoices } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { CompanyLogo } from "./CompanyLogo";
@@ -40,6 +43,12 @@ const BRAND_COLORS = [
   { value: "#be123c", name: "Red" }, { value: "#6d28d9", name: "Purple" }, { value: "#0f766e", name: "Teal" }, { value: "#1f2937", name: "Charcoal" },
 ];
 
+/** The tax rate box: "Sales tax" for a tax that's just "Tax" (in the US, as it always was), else its name ("VAT", "GST/HST"). */
+const taxBoxLabel = (f: Record<string, string>) => {
+  const name = f.tax_name?.trim() || countryTaxName(f.country);
+  return name === "Tax" ? "Sales tax" : name;
+};
+
 export function CompanySettings() {
   const session = useSession();
   const { company } = session;
@@ -47,7 +56,7 @@ export function CompanySettings() {
   const details = useQuery({
     queryKey: ["company", company.id],
     queryFn: async () => {
-      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
+      const [row, settings] = await Promise.all([supabase().from("companies").select("name, slug, phone, email, website, address, timezone, currency, country, trade_preset").eq("id", company.id).single(), loadSettings(company.id)]);
       return { ...unwrap(row), settings };
     },
   });
@@ -64,7 +73,8 @@ export function CompanySettings() {
       name: d.name, phone: d.phone ?? "", email: d.email ?? "", website: d.website ?? "", trade: d.trade_preset,
       privacy_url: typeof s.privacy_url === "string" ? s.privacy_url : "",
       line1: a.line1 ?? "", city: a.city ?? "", region: a.region ?? "", postal_code: a.postal_code ?? "",
-      timezone: d.timezone, currency: d.currency, payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
+      timezone: d.timezone, currency: d.currency, country: businessCountry(d), payment_terms_days: String(s.payment_terms_days ?? 30), default_tax_rate: String(taxPercent(s.default_tax_rate ?? 0)),
+      tax_name: typeof s.tax_name === "string" ? s.tax_name : "", tax_number: typeof s.tax_number === "string" ? s.tax_number : "",
       quote_valid_days: String(s.quote_valid_days ?? 30), hours_start: s.working_hours?.start ?? "07:00", hours_end: s.working_hours?.end ?? "18:00",
       workdays: workdays(s).join(","),
       arrival_window_min: String(arrivalWindowMin(s)),
@@ -90,7 +100,7 @@ export function CompanySettings() {
       const v = f!;
       // Kept to 0.0001%, as quotes and invoices keep it (8.875% stays 8.875%).
       const tax = taxRateFromPercent(v.default_tax_rate);
-      if (!(Number(v.default_tax_rate) >= 0 && tax < 1)) throw new Error("Sales tax must be between 0 and 100%.");
+      if (!(Number(v.default_tax_rate) >= 0 && tax < 1)) throw new Error(`${taxBoxLabel(v)} must be between 0 and 100%.`);
       if (v.hours_end <= v.hours_start) throw new Error("The workday has to end after it starts.");
       if (!v.workdays) throw new Error("Pick at least one workday.");
       if (v.website && !/^https?:\/\//.test(v.website)) v.website = `https://${v.website}`;
@@ -111,8 +121,10 @@ export function CompanySettings() {
       const oldAddress = (details.data?.address ?? {}) as Record<string, string>;
       let depot = previous.depot ?? null;
       let located: boolean | null = null;
-      if (address.line1 && (address.line1 !== oldAddress.line1 || address.city !== oldAddress.city || !depot)) {
-        const hit = await api.post<{ found: boolean; lat?: number; lng?: number; source?: string }>("/geocode", { address: [address.line1, address.city, address.region, address.postal_code].filter(Boolean).join(", ") }).catch(() => ({ found: false }) as { found: boolean; lat?: number; lng?: number; source?: string });
+      // Looked up in the country being saved with it, again when only the country changed.
+      const movedCountry = Boolean(details.data) && v.country !== businessCountry(details.data!);
+      if (address.line1 && (address.line1 !== oldAddress.line1 || address.city !== oldAddress.city || !depot || movedCountry)) {
+        const hit = await api.post<{ found: boolean; lat?: number; lng?: number; source?: string }>("/geocode", { address: [address.line1, address.city, address.region, address.postal_code].filter(Boolean).join(", "), country: v.country }).catch(() => ({ found: false }) as { found: boolean; lat?: number; lng?: number; source?: string });
         located = hit.found;
         // With the geocoder that found it, as the server keeps for every spot on the map.
         depot = hit.found ? { lat: hit.lat, lng: hit.lng, source: hit.source } : null;
@@ -122,6 +134,9 @@ export function CompanySettings() {
       const settings = {
         payment_terms_days: Math.max(0, Math.round(Number(v.payment_terms_days) || 0)),
         default_tax_rate: tax,
+        // What quotes and invoices call the tax (empty: the country's name for it, core taxName) and the business's number for it.
+        tax_name: v.tax_name.trim().replace(/\s+/g, " ") || null,
+        tax_number: v.tax_number.trim().replace(/\s+/g, " ") || null,
         quote_valid_days: Math.max(1, Math.round(Number(v.quote_valid_days) || 30)),
         working_hours: { start: v.hours_start, end: v.hours_end, days: v.workdays.split(",").map(Number) },
         arrival_window_min: Number(v.arrival_window_min),
@@ -143,7 +158,7 @@ export function CompanySettings() {
       unwrap(
         await supabase()
           .from("companies")
-          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, currency: v.currency, address, ...(v.trade in PRESETS ? { trade_preset: v.trade } : {}) })
+          .update({ name: v.name.trim(), phone: v.phone.trim() || null, email: v.email.trim() || null, website: v.website.trim() || null, timezone: v.timezone, currency: v.currency, country: v.country, address, ...(v.trade in PRESETS ? { trade_preset: v.trade } : {}) })
           .eq("id", company.id),
       );
       unwrap(await supabase().rpc("merge_company_settings", { p_company: company.id, p_settings: settings as never }));
@@ -164,6 +179,8 @@ export function CompanySettings() {
   const logo = ((details.data?.settings ?? {}) as Record<string, any>).branding?.logo ?? null;
   const days = f.workdays ? f.workdays.split(",").map(Number) : [];
   const ownColor = !BRAND_COLORS.some((c) => c.value === f.color);
+  // The shop address in the words of the country picked below, as it changes.
+  const words = addressLabels(f.country);
 
   return (
     <>
@@ -197,18 +214,23 @@ export function CompanySettings() {
         </div>
       </Section>
       <Section level={3} title="Shop address">
-        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city, state and ZIP.</p>
+        <p className="set-note">Your postal address. It's shown at the bottom of marketing emails, which can't go out without a street or PO box, city{regionNeeded(f.country) ? `, ${words.regionInText}` : ""} and {words.postalCodeInText}.</p>
         <div className="set-grid">
           <Field label="Street" className="set-full"><input className="input" value={f.line1} onChange={set("line1")} maxLength={200} /></Field>
           <div className="set-grid set-grid-3 set-full">
             <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} /></Field>
-            <Field label="State / Province"><input className="input" value={f.region} onChange={set("region")} maxLength={20} /></Field>
-            <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+            <Field label={words.region} optional={words.regionOptional}><input className="input" value={f.region} onChange={set("region")} maxLength={REGION_MAX} /></Field>
+            <Field label={words.postalCode}><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
           </div>
         </div>
       </Section>
       <Section level={3} title="Defaults">
         <div className="set-grid">
+          <Field label="Country" hint="Where you work. It decides how addresses are found on the map, how phone numbers are read, and whether subs are asked for US tax forms (W-9, 1099).">
+            <Select className="select" value={f.country} onChange={set("country")}>
+              {countryChoices().map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Time zone">
             <Select className="select" value={f.timezone} onChange={set("timezone")}>
               {timeZoneChoices(f.timezone).map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
@@ -220,8 +242,14 @@ export function CompanySettings() {
               {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code} · {c.name}</option>)}
             </Select>
           </Field>
-          <Field label={<>Sales tax<span className="sr-only"> (%)</span></>}>
-            <Suffix unit="%"><input className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+          <Field label={<>{taxBoxLabel(f)}<span className="sr-only"> (%)</span></>}>
+            <Suffix unit="%"><DecimalInput className="input" inputMode="decimal" value={f.default_tax_rate} onChange={(e) => setF({ ...f, default_tax_rate: e.target.value.replace(/[^0-9.]/g, "") })} /></Suffix>
+          </Field>
+          <Field label="Tax name" optional hint={`What quotes and invoices call it, like VAT or GST/HST. Empty: ${countryTaxName(f.country)}.`}>
+            <input className="input" value={f.tax_name} onChange={set("tax_name")} maxLength={TAX_NAME_MAX} placeholder={countryTaxName(f.country)} />
+          </Field>
+          <Field label={taxNumberLabel(f.tax_name.trim() || countryTaxName(f.country))} optional hint="Your registration number for it, printed with your details on quotes and invoices.">
+            <input className="input" value={f.tax_number} onChange={set("tax_number")} maxLength={TAX_NUMBER_MAX} />
           </Field>
           <Field label={<>Invoice due after<span className="sr-only"> (days)</span></>} hint="0 means due on receipt. A client can have their own, on their page.">
             <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.payment_terms_days} onChange={set("payment_terms_days")} /></Suffix>
@@ -230,7 +258,7 @@ export function CompanySettings() {
             <Suffix unit="days"><NumberInput className="input" min={1} max={365} value={f.quote_valid_days} onChange={set("quote_valid_days")} /></Suffix>
           </Field>
           <Field label="Minimum charge" optional hint="An invoice under it gets a Minimum charge line that makes up the difference.">
-            <input className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
+            <DecimalInput className="input" inputMode="decimal" value={f.minimum_charge} placeholder="Off" onChange={(e) => setF({ ...f, minimum_charge: e.target.value.replace(/[^0-9.]/g, "") })} />
           </Field>
           <Field label="Late fee" className="set-full" hint={f.late_fee === "off" ? "Added once to an invoice still unpaid after its due date." : `Added once, if it's still unpaid that many days after it's due. Late fees aren't taxed. You can take one off an invoice, or turn them off for it, on the invoice. ${LATE_FEE_LAW_NOTE}`}>
             <Select className="select set-narrow" value={f.late_fee} onChange={set("late_fee")}>
@@ -242,7 +270,7 @@ export function CompanySettings() {
           {f.late_fee !== "off" && (
             <>
               <Field label={f.late_fee === "percent" ? "Late fee (%)" : "Late fee amount"}>
-                <input className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
+                <DecimalInput className="input" inputMode="decimal" value={f.late_fee_amount} onChange={(e) => setF({ ...f, late_fee_amount: e.target.value.replace(/[^0-9.]/g, "") })} required />
               </Field>
               <Field label={<>Days after the due date<span className="sr-only"> (days)</span></>}>
                 <Suffix unit="days"><NumberInput className="input" min={0} max={365} value={f.late_fee_days} onChange={set("late_fee_days")} /></Suffix>
@@ -278,7 +306,7 @@ export function CompanySettings() {
             </div>
             <span className="hint">Find a time and clients moving a visit online only get these days.</span>
           </div>
-          <Field label="Arrival window" className="set-full" hint="What clients are told in their portal and reminders, like “between 9:00 AM and 11:00 AM”.">
+          <Field label="Arrival window" className="set-full" hint={`What clients are told in their portal and reminders, like “between ${clockText(9, 0, { minutes: true })} and ${clockText(11, 0, { minutes: true })}”.`}>
             <Select className="select set-narrow" value={f.arrival_window_min} onChange={set("arrival_window_min")}>
               <option value="0">None: the start time</option>
               {[30, 60, 120, 180, 240].map((m) => <option key={m} value={m}>{m < 60 ? `${m} minutes` : `${m / 60} hour${m > 60 ? "s" : ""}`}</option>)}

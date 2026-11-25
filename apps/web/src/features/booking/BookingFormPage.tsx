@@ -1,15 +1,19 @@
 /** Public booking / request form: /book/:company/:form (?embed=1 inside an iframe; see embed.ts). No account needed. */
+import { addressLabels } from "@crewtavo/core/countries";
 import { textDisclosure } from "@crewtavo/core/marketing";
+import { monthFirst } from "@crewtavo/core/regional";
 import { slotLabel, slotTime, type OpenSlot } from "@crewtavo/core/slots";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { companyCountry, dateLocale, setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { fileSize, isAbort, PLAN_MAX_BYTES, TooLargeError, uploadToLink } from "../plans/plans";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "../public/ClientKit";
@@ -38,9 +42,15 @@ interface Week { from: string; to: string; first: string; last: string; slots: O
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const visitLength = (minutes: number) => (minutes < 60 ? `${minutes} minutes` : minutes % 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : minutes === 60 ? "an hour" : `${minutes / 60} hours`);
 /** A calendar date ("2026-11-27") in words, the same wherever the reader is. */
-const dateWords = (date: string, options: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", { ...options, timeZone: "UTC" });
-/** A week's dates as the picker heads them: "Nov 24 – 30", or "Nov 28 – Dec 4" across a month's end. */
-export const weekWords = (from: string, to: string) => `${dateWords(from, { month: "short", day: "numeric" })} – ${from.slice(0, 7) === to.slice(0, 7) ? Number(to.slice(8)) : dateWords(to, { month: "short", day: "numeric" })}`;
+const dateWords = (date: string, options: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale(), { ...options, timeZone: "UTC" });
+/**
+ * A week's dates as the picker heads them: "Nov 24 – 30", or "Nov 28 – Dec 4" across a month's end;
+ * "24 – 30 Nov" and "28 Nov – 4 Dec" where the day comes first.
+ */
+export const weekWords = (from: string, to: string) =>
+  monthFirst(companyCountry())
+    ? `${dateWords(from, { month: "short", day: "numeric" })} – ${from.slice(0, 7) === to.slice(0, 7) ? Number(to.slice(8)) : dateWords(to, { month: "short", day: "numeric" })}`
+    : `${from.slice(0, 7) === to.slice(0, 7) ? Number(from.slice(8)) : dateWords(from, { month: "short", day: "numeric" })} – ${dateWords(to, { month: "short", day: "numeric" })}`;
 
 interface Question {
   key: string;
@@ -51,7 +61,7 @@ interface Question {
 }
 interface FormView {
   /** `texts`: the business can text, so the phone box says what giving a number agrees to. */
-  company: { name: string; phone: string | null; texts?: boolean; privacy_url?: string | null; logo?: string | null; color?: string | null };
+  company: { name: string; phone: string | null; country?: string | null; texts?: boolean; privacy_url?: string | null; logo?: string | null; color?: string | null };
   form: { name: string; kind: string; questions: Question[] };
   booking?: Booking;
 }
@@ -91,6 +101,8 @@ export function BookingFormPage() {
     (q) => q.required && (isFileQuestion(q) ? !files[q.key]?.length : q.type === "multi_choice" ? !(answers[q.key] as string[] | undefined)?.length : !String(answers[q.key] ?? "").trim()),
   );
   const noContact = !contact.email.trim() && !contact.phone.trim();
+  // The address boxes are called what they are where the business is.
+  const words = addressLabels(view.data?.company.country);
   // The time picked, on a form that offers times. With nothing open online it's sent as a plain request.
   const booking = view.data?.booking;
   const [time, setTime] = useState<OpenSlot | null>(null);
@@ -98,6 +110,9 @@ export function BookingFormPage() {
   const [turnedAway, setTurnedAway] = useState(0);
   const noTime = Boolean(booking) && !time && !noneOpen;
 
+  // Phone boxes, dates and times as the business's country writes them; there's no session here to
+  // say it. Set as the page draws, so its first drawing is already right.
+  if (view.data) setCountry({ country: view.data.company.country });
   useEffect(() => {
     if (view.data) document.title = `${view.data.form.name} · ${view.data.company.name}`;
   }, [view.data]);
@@ -224,7 +239,7 @@ export function BookingFormPage() {
               <Field label="Service address" requiredMessage={ADDRESS_NEEDED} error={touched && contact.line1.trim().length < 3 ? ADDRESS_NEEDED : null}><input className="input" value={contact.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="street-address" /></Field>
               <div className={cx(k.grid2, k.pair)}>
                 <Field label="City"><input className="input" value={contact.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-                <Field label="ZIP / Postal code"><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
+                <Field label={words.postalCode}><input className="input" value={contact.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
               </div>
             </Part>
             {questions.length > 0 && (
@@ -240,7 +255,7 @@ export function BookingFormPage() {
             )}
             {booking && (
               <div className={k.part}>
-                <TimePicker path={path} booking={booking} postalCode={contact.postal_code} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
+                <TimePicker path={path} booking={booking} postalCode={contact.postal_code} postalWord={words.postalCodeInText} picked={time} onPick={setTime} onNoneOpen={setNoneOpen} invalid={touched && noTime} refreshed={turnedAway} />
               </div>
             )}
             {promo.offer ? (
@@ -295,7 +310,7 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
 
 /** When a booked visit is, as the form offered it, in the business's time zone. */
 function bookedWhen(sent: Booked, booking: Booking) {
-  return slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min);
+  return slotLabel({ date: new Date(sent.starts_at).toLocaleDateString("en-CA", { timeZone: booking.timezone }), starts_at: sent.starts_at }, booking.timezone, booking.window_min, companyCountry());
 }
 
 /** After a time was picked: whether it's booked or waiting on the business, and how they'll hear. */
@@ -320,7 +335,7 @@ function CalendarLink({ text }: { text: string }) {
  * postal code is in when the form has a service area, so nobody outside it is offered a time.
  * `refreshed` changes when a send was turned away, and brings the openings as they are now.
  */
-function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, invalid, refreshed }: { path: string; booking: Booking; postalCode: string; picked: OpenSlot | null; onPick: (slot: OpenSlot | null) => void; onNoneOpen: (none: boolean) => void; invalid: boolean; refreshed: number }) {
+function TimePicker({ path, booking, postalCode, postalWord, picked, onPick, onNoneOpen, invalid, refreshed }: { path: string; booking: Booking; postalCode: string; postalWord: string; picked: OpenSlot | null; onPick: (slot: OpenSlot | null) => void; onNoneOpen: (none: boolean) => void; invalid: boolean; refreshed: number }) {
   // Asked for once they stop typing, not at every letter.
   const [postal, setPostal] = useState(postalCode.trim());
   useEffect(() => {
@@ -355,13 +370,13 @@ function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, inv
   useEffect(() => {
     if (picked && week.isSuccess && !week.isPlaceholderData && week.data.from <= picked.date && picked.date <= week.data.to && !slots.some((s) => s.starts_at === picked.starts_at)) onPick(null);
   }, [week.data]);
-  const dayName = (date: string) => slotLabel({ date, starts_at: null }, booking.timezone);
+  const dayName = (date: string) => slotLabel({ date, starts_at: null }, booking.timezone, 0, companyCountry());
   return (
     <fieldset className="field" data-invalid={invalid || undefined} style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 10 }}>
       <legend className={k.legend}>{booking.needs_ok ? "Pick a time you'd like" : "Pick a time"}</legend>
       <p className={k.note}>{booking.window_min ? "We arrive within the window you pick." : `Set aside about ${visitLength(booking.minutes)}.`} Times are in {booking.timezone_label}.</p>
       {waiting ? (
-        <p className={k.note}>Enter your ZIP / postal code above to see the times we have open.</p>
+        <p className={k.note}>Enter your {postalWord} above to see the times we have open.</p>
       ) : week.isPending ? (
         <Skeleton height={140} radius={14} />
       ) : outside ? (
@@ -391,17 +406,17 @@ function TimePicker({ path, booking, postalCode, picked, onPick, onNoneOpen, inv
               <div className={k.slots} role="group" aria-label={booking.window_min ? "Arrival window" : "Time"}>
                 {slots.filter((s) => s.date === shownDay).map((s) => (
                   <button key={s.starts_at!} type="button" className={k.slot} aria-pressed={picked?.starts_at === s.starts_at} onClick={() => onPick(picked?.starts_at === s.starts_at ? null : s)}>
-                    {slotTime(s.starts_at!, booking.timezone, booking.window_min)}
+                    {slotTime(s.starts_at!, booking.timezone, booking.window_min, companyCountry())}
                   </button>
                 ))}
               </div>
             </>
           )}
-          {picked && <p className={k.picked} role="status">{booking.needs_ok ? "You're asking for" : "You picked"} <b>{slotLabel(picked, booking.timezone, booking.window_min)}</b>.</p>}
+          {picked && <p className={k.picked} role="status">{booking.needs_ok ? "You're asking for" : "You picked"} <b>{slotLabel(picked, booking.timezone, booking.window_min, companyCountry())}</b>.</p>}
         </>
       )}
       {invalid && !waiting && !week.isError && <span className="field-error" role="alert">Pick a time for your visit.</span>}
-      {invalid && waiting && <span className="field-error" role="alert">Enter your ZIP / postal code, then pick a time.</span>}
+      {invalid && waiting && <span className="field-error" role="alert">Enter your {postalWord}, then pick a time.</span>}
     </fieldset>
   );
 }
@@ -491,7 +506,7 @@ export function QuestionField({ q, value, invalid, onChange }: { q: Question; va
     case "long_text":
       return <Field label={label} error={error}><textarea className="textarea" value={String(value ?? "")} maxLength={4000} onChange={(e) => onChange(e.target.value)} aria-invalid={invalid} /></Field>;
     case "number":
-      return <Field label={label} error={error}><input className="input" inputMode="decimal" value={String(value ?? "")} onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={invalid} /></Field>;
+      return <Field label={label} error={error}><DecimalInput className="input" inputMode="decimal" value={String(value ?? "")} onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={invalid} /></Field>;
     case "yes_no":
     case "choice":
     case "multi_choice": {

@@ -9,6 +9,7 @@ import { ROOF_EDGES, type RoofEdge } from "@crewtavo/core/geo";
 import { ROOF_EDGE_COLORS, suggestedWaste } from "@crewtavo/core/roofing";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Icon } from "@/components/ui/Icon";
 import { formatNumber } from "@/lib/format";
 
@@ -133,7 +134,7 @@ export function RoofSteps({
             <div className="roof-waste">
               <label>
                 <span>Waste</span>
-                <input className="input input-sm" inputMode="decimal" value={waste} onChange={(e) => onWaste(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Waste %" />
+                <DecimalInput className="input input-sm" inputMode="decimal" value={waste} onChange={(e) => onWaste(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Waste %" />
                 <span>%</span>
               </label>
               {Number(waste || 0) !== suggested && (

@@ -7,9 +7,9 @@
  */
 import { isLivePay, isSquareUnit, jobPayMethodLabel, jobPayStatusLabel, payLineAmount } from "@crewtavo/core/jobPay";
 import { toUnits } from "@crewtavo/core/money";
-import { PAPERWORK_REQUIREMENTS } from "@crewtavo/core/subs";
+import { paperworkRequirements } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { addDaysIso, dateIn, formatDate, formatMoneyCents, moneyCurrency } from "@/lib/format";
+import { addDaysIso, companyCountry, dateIn, dateLocale, formatDate, formatMoneyCents, moneyCurrency } from "@/lib/format";
 import type { PaperworkRow } from "./paperwork";
 
 // ---------------------------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import type { PaperworkRow } from "./paperwork";
 /** "$75.00", or "$0.4500" for a rate kept to 4 places (per square foot of sealcoat). */
 export function formatRate(rate: number | string): string {
   const n = Number(rate);
-  return n.toLocaleString("en-US", { style: "currency", currency: moneyCurrency(), minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return n.toLocaleString("en-US", { style: "currency", currency: moneyCurrency(), currencyDisplay: "narrowSymbol", minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 /** "per square", "per day", "per job", "each", "per lf". */
@@ -343,12 +343,12 @@ const REQUIREMENT_WORDS: Record<string, string> = { w9: "W-9", liability: "liabi
 /**
  * Before or while a sub works a job: anything missing, run out, or ending before their last day on
  * it, in a sentence. Only ever a warning: the office can still give them the work (the owner's
- * decision). Null when their paperwork is fine for it.
+ * decision). Null when their paperwork is fine for it. A business outside the US asks for no W-9.
  */
-export function payPaperworkWarning(statuses: ReadonlyArray<Pick<PaperworkRow, "requirement" | "state" | "expires_on">>, lastDay: string | null, today: string): string | null {
+export function payPaperworkWarning(statuses: ReadonlyArray<Pick<PaperworkRow, "requirement" | "state" | "expires_on">>, lastDay: string | null, today: string, country = companyCountry()): string | null {
   const gaps: string[] = [];
   let insurance = false;
-  for (const req of PAPERWORK_REQUIREMENTS) {
+  for (const req of paperworkRequirements(country)) {
     const s = statuses.find((x) => x.requirement === req.key);
     const words = REQUIREMENT_WORDS[req.key] ?? req.label;
     const state = s?.state ?? "missing";
@@ -429,7 +429,7 @@ export function auditPresets(today: string) {
 export function workDays(dates: readonly string[]): string {
   if (!dates.length) return "";
   const oneYear = new Set(dates.map((d) => d.slice(0, 4))).size === 1;
-  const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: oneYear ? undefined : "numeric", timeZone: "UTC" });
+  const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: oneYear ? undefined : "numeric", timeZone: "UTC" });
   return dates.length > 6 ? `${fmt(dates[0]!)} to ${fmt(dates.at(-1)!)} (${dates.length} days)` : dates.map(fmt).join(", ");
 }
 

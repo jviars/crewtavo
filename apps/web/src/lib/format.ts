@@ -1,3 +1,5 @@
+import { businessCountry } from "@crewtavo/core/countries";
+import { clockStyle, dateTag, weekStartsSunday, type ClockStyle } from "@crewtavo/core/regional";
 import { taxPercent } from "@crewtavo/core/money";
 import { intlLocale, t } from "./i18n";
 
@@ -9,7 +11,8 @@ let currency = "USD";
 /**
  * Numbers, dates and money in the app's language: "en-US", or "es-US" for Spanish (US-style
  * numbers and money with Spanish words: "jue, 15 de oct", "9:20 a.m."). Money's formatters are
- * made once per currency and language.
+ * made once per currency and language. Money shows the symbol people there write: "$" for Canadian
+ * or Australian dollars too (not "CA$", "A$"), "R" for rand, "£", "€".
  */
 const moneyFormats = new Map<string, { money: Intl.NumberFormat; moneyCents: Intl.NumberFormat; compact: Intl.NumberFormat }>();
 function formats() {
@@ -17,9 +20,9 @@ function formats() {
   let found = moneyFormats.get(`${tag}|${currency}`);
   if (!found) {
     found = {
-      money: new Intl.NumberFormat(tag, { style: "currency", currency, maximumFractionDigits: 0 }),
-      moneyCents: new Intl.NumberFormat(tag, { style: "currency", currency }),
-      compact: new Intl.NumberFormat(tag, { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 }),
+      money: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }),
+      moneyCents: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol" }),
+      compact: new Intl.NumberFormat(tag, { style: "currency", currency, currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 }),
     };
     moneyFormats.set(`${tag}|${currency}`, found);
   }
@@ -41,6 +44,64 @@ export function setCurrency(code: string | null | undefined) {
 /** The currency money shows in: "USD", "CAD". */
 export const moneyCurrency = () => currency;
 
+/**
+ * The symbol before an amount typed in a money box, as money shows it: "$" (for Canadian and
+ * Australian dollars too), "£", "€", "R". The business's currency unless another is given.
+ */
+export function currencySymbol(code: string = currency): string {
+  try {
+    const parts = new Intl.NumberFormat("en-US", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value ?? "$";
+  } catch {
+    return "$";
+  }
+}
+
+let country = "US";
+
+/** The business's country (companies.country, or the guess from its time zone), which the session sets. */
+export function setCountry(company: { country?: string | null; timezone?: string | null } | null | undefined) {
+  country = company ? businessCountry(company) : "US";
+}
+
+/** Where the business works: "US", "CA", "GB" (core countries.ts). For code outside React; a screen can read the session's company. */
+export const companyCountry = () => country;
+
+/**
+ * The Intl tag dates and times are shown in: the business's country's way in the app's language
+ * (core regional.ts dateTag), "en-GB" for "16 Oct 2026, 14:05", "en-US" for "Oct 16, 2026, 2:05 PM".
+ * Numbers and money stay in intlLocale(), the language's own.
+ */
+export const dateLocale = () => {
+  // The screen's language as intlLocale() has it (Spanish only on the screens that are, English in a
+  // downloaded file), in the business's country's way.
+  const tag = intlLocale();
+  return dateTag(country, tag.startsWith("es") ? "es" : "en");
+};
+
+/** "07:05" on a 24-hour clock, as clockText writes it (some browsers' Intl writes "7:05"); "7:05 AM" on a 12-hour one. */
+const hourDigits = (): "2-digit" | "numeric" => (!dateLocale().startsWith("es") && clockStyle(country) === "24" ? "2-digit" : "numeric");
+
+/**
+ * dateLocale() for words that are only in English, such as an office dialog that also opens on a
+ * screen in Spanish: the business's country's way, in English whatever the screen.
+ */
+export const englishDateLocale = () => dateTag(country);
+
+/**
+ * A time of day from its hour and minute, as the business's country keeps time (core regional.ts
+ * clockStyle), for labels built from a time rather than a moment: "7 AM" and "1:30 PM" in the US
+ * ("7:00 AM" with `minutes`), "7 a.m." in Canada and on a screen in Spanish, "7 am" in Australia,
+ * "07:00" and "13:30" on a 24-hour clock.
+ */
+export function clockText(hour: number, minute = 0, { minutes = false, style }: { minutes?: boolean; style?: ClockStyle } = {}): string {
+  const clock = style ?? (dateLocale().startsWith("es") ? "a.m." : clockStyle(country));
+  const mm = String(minute).padStart(2, "0");
+  if (clock === "24") return `${String(hour % 24).padStart(2, "0")}:${mm}`;
+  const [am, pm] = clock === "AM" ? ["AM", "PM"] : clock === "a.m." ? ["a.m.", "p.m."] : ["am", "pm"];
+  return `${hour % 12 || 12}${minute || minutes ? `:${mm}` : ""} ${hour % 24 < 12 ? am : pm}`;
+}
+
 
 export const formatMoney = (n: number | null | undefined) => formats().money.format(n ?? 0);
 export const formatMoneyCents = (n: number | null | undefined) => formats().moneyCents.format(n ?? 0);
@@ -49,11 +110,11 @@ export const formatMoneyCompact = (n: number | null | undefined) => (Math.abs(n 
 
 /** "Thu, Oct 15" */
 export const formatDay = (value: string | Date) =>
-  new Date(value).toLocaleDateString(intlLocale(), { weekday: "short", month: "short", day: "numeric" });
+  new Date(value).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
 
 /** "7:20 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatTime = (value: string | Date, timeZone?: string) =>
-  new Date(String(value).replace(" ", "T")).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit", timeZone });
+  new Date(String(value).replace(" ", "T")).toLocaleTimeString(dateLocale(), { hour: hourDigits(), minute: "2-digit", timeZone });
 
 export const formatNumber = (n: number, digits = 0) =>
   n.toLocaleString(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -64,11 +125,11 @@ export const formatTaxRate = (rate: number | string | null | undefined) =>
 
 /** "Oct 16, 2026" */
 export const formatDate = (value: string | Date | null | undefined) =>
-  value ? new Date(String(value).length === 10 ? `${value}T12:00:00` : value).toLocaleDateString(intlLocale(), { month: "short", day: "numeric", year: "numeric" }) : "—";
+  value ? new Date(String(value).length === 10 ? `${value}T12:00:00` : value).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" }) : "—";
 
 /** "Thu, Oct 16, 7:00 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatDateTime = (value: string | Date, timeZone?: string) =>
-  new Date(value).toLocaleString(intlLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
+  new Date(value).toLocaleString(dateLocale(), { weekday: "short", month: "short", day: "numeric", hour: hourDigits(), minute: "2-digit", timeZone });
 
 /** "3 days ago", "in 2 hours" */
 export function timeAgo(value: string | Date): string {
@@ -81,7 +142,7 @@ export function timeAgo(value: string | Date): string {
 
 /** "Thursday", "jueves": a weekday's name in the app's language (0 is Sunday). */
 export const weekdayName = (day: number, width: "long" | "short" = "long") =>
-  new Date(Date.UTC(2026, 0, 4 + day, 12)).toLocaleDateString(intlLocale(), { weekday: width, timeZone: "UTC" });
+  new Date(Date.UTC(2026, 0, 4 + day, 12)).toLocaleDateString(dateLocale(), { weekday: width, timeZone: "UTC" });
 
 const US_ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"];
 // For browsers that can't list every zone.
@@ -108,6 +169,13 @@ export const addDaysIso = (date: string, days: number) => {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+/**
+ * The first day (YYYY-MM-DD) of the week `date` (YYYY-MM-DD) is in, as the business's country hangs
+ * its calendar (core regional.ts weekStartsSunday): its Sunday in the US and Canada, its Monday in
+ * the UK. For "this week" in a list; the schedule's and pay's weeks start Monday everywhere.
+ */
+export const weekStartOf = (date: string) => addDaysIso(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + (weekStartsSunday(country) ? 0 : 6)) % 7));
 
 /** One-line address from a property row. */
 export const addressLine = (p: { line1?: string | null; city?: string | null; region?: string | null; postal_code?: string | null } | null | undefined) =>

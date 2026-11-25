@@ -3,9 +3,11 @@ import { snapshotLines } from "../src/estimates";
 import {
   chosenTotals,
   countsOn,
+  countryTaxName,
   CURRENCIES,
   currencyOffered,
   inOptionBase,
+  moneyPrefix,
   lineTotal,
   optionBaseTotal,
   optionLines,
@@ -13,6 +15,10 @@ import {
   optionTierOrder,
   optionTotals,
   quoteTotals,
+  taxLineLabel,
+  taxName,
+  taxNumber,
+  taxNumberLabel,
   taxPercent,
   taxRateFromPercent,
   toCents,
@@ -306,5 +312,43 @@ describe("currencies a business can pick", () => {
   it("are the only ones offered, in either case", () => {
     expect(["USD", "cad", "Eur"].map(currencyOffered)).toEqual([true, true, true]);
     expect(["JPY", "KWD", "XXX", "dollars", "", null, undefined].map(currencyOffered)).toEqual([false, false, false, false, false, false, false]);
+  });
+
+  it("are written with the symbol people there write, as the screens show them", () => {
+    expect(CURRENCIES.map((c) => moneyPrefix(c.code))).toEqual(["$", "$", "$", "$", "£", "€", "R "]);
+    // The same symbol Intl's narrowSymbol gives (with a plain space after the R, as a text carries it).
+    const narrow = (code: string) => new Intl.NumberFormat("en-US", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(1).find((p) => p.type === "currency")!.value;
+    for (const { code } of CURRENCIES) expect(moneyPrefix(code).trim(), code).toBe(narrow(code));
+    expect([moneyPrefix("gbp"), moneyPrefix(null), moneyPrefix("JPY")]).toEqual(["£", "$", "$"]);
+  });
+});
+
+describe("the tax on quotes and invoices", () => {
+  it("is called what the business calls it, else what its country does", () => {
+    expect([countryTaxName("US"), countryTaxName("GB"), countryTaxName("CA"), countryTaxName("AU"), countryTaxName(null)]).toEqual(["Tax", "VAT", "GST/HST", "Tax", "Tax"]);
+    expect(taxName({}, "GB")).toBe("VAT");
+    expect(taxName({ tax_name: "  HST " }, "CA")).toBe("HST");
+    expect(taxName({ tax_name: "   " }, "CA")).toBe("GST/HST");
+    expect(taxName({ tax_name: 5 }, "US")).toBe("Tax");
+    expect(taxName(null, "US")).toBe("Tax");
+    expect(taxName({ tax_name: "A very long name for a tax indeed" }, "US")).toHaveLength(20);
+  });
+
+  it("has the business's number for it, when it gave one", () => {
+    expect(taxNumber({ tax_number: " GB123456789 " })).toBe("GB123456789");
+    expect([taxNumber({ tax_number: "" }), taxNumber({}), taxNumber(null), taxNumber({ tax_number: 123 })]).toEqual([null, null, null, null]);
+  });
+
+  it("calls the number after the tax when the tax has a short name in capitals", () => {
+    expect(["VAT", "GST/HST", "GST", "HST", "GST/QST", "TVA"].map(taxNumberLabel)).toEqual(["VAT number", "GST/HST number", "GST number", "HST number", "GST/QST number", "TVA number"]);
+    expect(["Tax", "Sales tax", "MwSt", "vat", ""].map(taxNumberLabel)).toEqual(["Tax number", "Tax number", "Tax number", "Tax number", "Tax number"]);
+  });
+
+  it("says its rate in the totals when it's above 0", () => {
+    expect(taxLineLabel("VAT", 0.2)).toBe("VAT (20%)");
+    expect(taxLineLabel("Tax", 0.08875)).toBe("Tax (8.875%)");
+    expect(taxLineLabel("GST/HST", "0.130000")).toBe("GST/HST (13%)");
+    expect(taxLineLabel("Tax", 0.0825)).toBe("Tax (8.25%)");
+    expect([taxLineLabel("VAT", 0), taxLineLabel("VAT", null), taxLineLabel("VAT", undefined), taxLineLabel("VAT", "")]).toEqual(["VAT", "VAT", "VAT", "VAT"]);
   });
 });

@@ -8,7 +8,7 @@
  */
 import { isSiteAdjustment, marginPct, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
 import { countsOn, lineTotal, optionTotals, quoteTotals, toCents, type Amount, type TotalsPromo } from "@crewtavo/core/money";
-import { formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
+import { dateLocale, formatMoney, formatMoneyCents, formatNumber } from "@/lib/format";
 import { formulaValue } from "../../paving/data";
 import { layersOf, roofServiceKind } from "../data";
 import type { EstimateLine, EstimateQuote, EstimateService } from "./types";
@@ -683,11 +683,11 @@ export function threadItems<N extends ThreadEntry, P extends ThreadEntry>(notes:
 export function whenText(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
   const day = (d: Date) => d.toLocaleDateString("en-CA", { timeZone });
-  const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  const time = at.toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit", timeZone });
   if (day(at) === day(now)) return `today at ${time}`;
   if (day(at) === day(new Date(now.getTime() - 86_400_000))) return `yesterday at ${time}`;
   const sameYear = at.toLocaleDateString("en-US", { year: "numeric", timeZone }) === now.toLocaleDateString("en-US", { year: "numeric", timeZone });
-  return `${at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: sameYear ? undefined : "numeric", timeZone })} at ${time}`;
+  return `${at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: sameYear ? undefined : "numeric", timeZone })} at ${time}`;
 }
 
 /** The first name, for "Notes for Mike" and "Dana never sees these". */

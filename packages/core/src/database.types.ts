@@ -780,14 +780,14 @@ isOneToOne: false
                   ]
                 },"companies": {
                   Row: {
-                    "address": NonNullable<Json>,"created_at": string,"currency": string,"email": string | null,"id": string,"name": string,"phone": string | null,"settings": NonNullable<Json>,"slug": string,"timezone": string,"trade_preset": string,"updated_at": string,"website": string | null
+                    "address": NonNullable<Json>,"country": string,"created_at": string,"currency": string,"email": string | null,"id": string,"name": string,"phone": string | null,"settings": NonNullable<Json>,"slug": string,"timezone": string,"trade_preset": string,"updated_at": string,"website": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: NonNullable<Json>,"created_at"?: string,"currency"?: string,"email"?: string | null,"id"?: string,"name": string,"phone"?: string | null,"settings"?: NonNullable<Json>,"slug": string,"timezone"?: string,"trade_preset"?: string,"updated_at"?: string,"website"?: string | null
+                    "address"?: NonNullable<Json>,"country"?: string,"created_at"?: string,"currency"?: string,"email"?: string | null,"id"?: string,"name": string,"phone"?: string | null,"settings"?: NonNullable<Json>,"slug": string,"timezone"?: string,"trade_preset"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Update: {
-                    "address"?: NonNullable<Json>,"created_at"?: string,"currency"?: string,"email"?: string | null,"id"?: string,"name"?: string,"phone"?: string | null,"settings"?: NonNullable<Json>,"slug"?: string,"timezone"?: string,"trade_preset"?: string,"updated_at"?: string,"website"?: string | null
+                    "address"?: NonNullable<Json>,"country"?: string,"created_at"?: string,"currency"?: string,"email"?: string | null,"id"?: string,"name"?: string,"phone"?: string | null,"settings"?: NonNullable<Json>,"slug"?: string,"timezone"?: string,"trade_preset"?: string,"updated_at"?: string,"website"?: string | null
                   }
                   Relationships: [
                     
@@ -3754,6 +3754,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"upload_links": {
+                  Row: {
+                    "company_id": string,"created_at": string,"expires_at": string,"kind": string,"max_bytes": number,"path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"created_at"?: string,"expires_at": string,"kind": string,"max_bytes": number,"path": string
+                  }
+                  Update: {
+                    "company_id"?: string,"created_at"?: string,"expires_at"?: string,"kind"?: string,"max_bytes"?: number,"path"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "upload_links_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"user_signatures": {
                   Row: {
                     "company_id": string,"created_at": string,"image": string,"updated_at": string,"user_id": string
@@ -4652,7 +4672,7 @@ isOneToOne: false
                            },
 "company_basics":
 { Args: { "p_company": string }; Returns: {
-              "currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
+              "country": string,"currency": string,"id": string,"logo": string,"name": string,"phone": string,"settings": Json,"timezone": string
             }[]
                            },
 "company_settings":
@@ -4779,6 +4799,11 @@ isOneToOne: false
                            },
 "expire_sub_offers":
 { Args: Record<PropertyKey, never>; Returns: number
+                           },
+"expired_upload_links":
+{ Args: { "p_limit"?: number }; Returns: {
+              "company_id": string,"links": number,"paths": (string)[]
+            }[]
                            },
 "finish_automation_run":
 { Args: { "p_error"?: string,"p_id": number,"p_result": Json,"p_status": string,"p_token": string }; Returns: boolean
@@ -5230,6 +5255,14 @@ isOneToOne: false
 { Args: { "p_company": string }; Returns: {
               "discounted": number,"promo_code_id": string,"uses": number
             }[]
+                           },
+"properties_to_find":
+{ Args: { "p_after"?: string,"p_limit"?: number }; Returns: {
+              "city": string,"company_id": string,"country": string,"id": string,"line1": string,"line2": string,"postal_code": string,"region": string
+            }[]
+                           },
+"property_found":
+{ Args: { "p_lat"?: number,"p_lng"?: number,"p_property": string,"p_source"?: string }; Returns: boolean
                            },
 "put_quote_package":
 { Args: { "p_lines": Json,"p_package": string,"p_quote": string,"p_replace"?: boolean }; Returns: boolean

@@ -19,7 +19,7 @@ type Settings = Record<string, any>;
 /** The company, with its settings as the person reads them (settingsAs: the money ones are the office's and sales'). */
 async function current(ctx: ToolContext) {
   const [company, settings] = await Promise.all([
-    one(ctx.db.from("companies").select("name, phone, email, website, address, timezone").eq("id", ctx.companyId).maybeSingle(), "The company"),
+    one(ctx.db.from("companies").select("name, phone, email, website, address, timezone, country").eq("id", ctx.companyId).maybeSingle(), "The company"),
     settingsAs(ctx.db, ctx.companyId),
   ]);
   return { ...company, settings };
@@ -114,7 +114,7 @@ export const companyTools = {
       let located: boolean | null = null;
       const oldAddress = (c.address ?? {}) as Record<string, string>;
       if (a.address?.line1 && (a.address.line1 !== oldAddress.line1 || a.address.city !== oldAddress.city || !depot)) {
-        const hit = await geocodeAddress([a.address.line1, a.address.city, a.address.region, a.address.postal_code].filter(Boolean).join(", ")).catch(() => null);
+        const hit = await geocodeAddress([a.address.line1, a.address.city, a.address.region, a.address.postal_code].filter(Boolean).join(", "), { country: c.country }).catch(() => null);
         located = Boolean(hit);
         depot = hit ? { lat: hit.lat, lng: hit.lng, source: hit.source } : null;
       }

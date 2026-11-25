@@ -5,6 +5,7 @@
  * may be for its type, how it reads, and which show where. Carrying values from a quote to its job
  * and invoice is the database's (20261103000700_custom_fields.sql), so every way they're made does it.
  */
+import { dateTag } from "./regional";
 
 export const CUSTOM_FIELD_RECORDS = ["client", "property", "job", "quote", "invoice"] as const;
 export type CustomFieldRecord = (typeof CUSTOM_FIELD_RECORDS)[number];
@@ -45,19 +46,26 @@ export function customFieldKey(label: string, taken: readonly string[]): string 
 const YES = /^(yes|y|true|1|x|on)$/i;
 const NO = /^(no|n|false|0|off)$/i;
 
-/** "2026-03-04", or "3/4/2026" as a spreadsheet writes it, as YYYY-MM-DD; null when it isn't a real day. */
-function isoDay(text: string): string | null {
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
-  const iso = us ? `${us[3]}-${us[1]!.padStart(2, "0")}-${us[2]!.padStart(2, "0")}` : /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
-  return iso && new Date(`${iso}T00:00:00Z`).toISOString().slice(0, 10) === iso ? iso : null;
+/**
+ * "2026-03-04", or "3/4/2026" as a spreadsheet writes it, as YYYY-MM-DD; null when it isn't a real
+ * day. "3/4/2026" is March 4, or 3 April with `dayFirst`, as a spreadsheet in the UK writes it.
+ */
+function isoDay(text: string, dayFirst = false): string | null {
+  const slashed = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text);
+  const [month, day] = slashed ? (dayFirst ? [slashed[2]!, slashed[1]!] : [slashed[1]!, slashed[2]!]) : [];
+  const iso = slashed ? `${slashed[3]}-${month!.padStart(2, "0")}-${day!.padStart(2, "0")}` : /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+  // A month past 12 ("16/10/2026" read month first) is no day at all, rather than an error.
+  const at = iso ? new Date(`${iso}T00:00:00Z`) : null;
+  return at && !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === iso ? iso : null;
 }
 
 /**
  * A value for a field, checked against its type: the value to keep, null to clear it, or why it
- * can't be. Text is trimmed; a number can be written "1,200"; a date is YYYY-MM-DD (or 3/4/2026);
- * a choice is one of the field's, in any case; yes/no is true/false or "yes"/"no".
+ * can't be. Text is trimmed; a number can be written "1,200"; a date is YYYY-MM-DD (or 3/4/2026,
+ * the day first with `dayFirst`); a choice is one of the field's, in any case; yes/no is true/false
+ * or "yes"/"no".
  */
-export function checkCustomValue(field: CustomFieldDef, raw: unknown): { value: CustomValue | null } | { error: string } {
+export function checkCustomValue(field: CustomFieldDef, raw: unknown, { dayFirst = false }: { dayFirst?: boolean } = {}): { value: CustomValue | null } | { error: string } {
   if (raw === null || raw === undefined) return { value: null };
   const text = typeof raw === "string" ? raw.trim() : typeof raw === "number" || typeof raw === "boolean" ? String(raw) : null;
   if (text === null) return { error: `${field.label} can't be that.` };
@@ -68,7 +76,7 @@ export function checkCustomValue(field: CustomFieldDef, raw: unknown): { value: 
       return Number.isFinite(n) && Math.abs(n) < 1e15 ? { value: n } : { error: `${field.label} needs a number.` };
     }
     case "date": {
-      const day = isoDay(text);
+      const day = isoDay(text, dayFirst);
       return day ? { value: day } : { error: `${field.label} needs a date.` };
     }
     case "choice": {
@@ -117,13 +125,17 @@ export function saveCustomDrafts(fields: readonly CustomFieldDef[], current: unk
   return mergeCustomValues(fields, current, Object.fromEntries(changed));
 }
 
-/** How a value reads: "Yes", "1,200", "Mar 4, 2026", or its text. A value from before its field's type changed reads as it was typed. */
-export function customValueText(field: Pick<CustomFieldDef, "type">, value: unknown): string {
+/**
+ * How a value reads: "Yes", "1,200", "Mar 4, 2026" (a date the way the business's `country` writes
+ * it, "4 Mar 2026" in the UK), or its text. A value from before its field's type changed reads as it
+ * was typed.
+ */
+export function customValueText(field: Pick<CustomFieldDef, "type">, value: unknown, country?: string | null): string {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return field.type === "number" ? value.toLocaleString("en-US", { maximumFractionDigits: 6 }) : String(value);
   if (typeof value !== "string") return "";
   const day = field.type === "date" ? isoDay(value) : null;
-  return day ? new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : value;
+  return day ? new Date(`${day}T00:00:00Z`).toLocaleDateString(dateTag(country), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : value;
 }
 
 /** A value as a form edits it: text for every type, with yes/no as "yes", "no" or "" (not set). */
@@ -141,11 +153,11 @@ export function customFieldsFor(fields: readonly CustomFieldDef[], where: Custom
     .map(({ field }) => field);
 }
 
-/** The fields with a value on a record, as they read there (customFieldsFor). Empty ones are left out. */
-export function shownCustomFields(fields: readonly CustomFieldDef[], raw: unknown, where: CustomFieldPlace = "record"): ShownField[] {
+/** The fields with a value on a record, as they read there (customFieldsFor), dates as the business's `country` writes them. Empty ones are left out. */
+export function shownCustomFields(fields: readonly CustomFieldDef[], raw: unknown, where: CustomFieldPlace = "record", country?: string | null): ShownField[] {
   const values = customValues(raw);
   return customFieldsFor(fields, where).flatMap((f) => {
-    const text = customValueText(f, values[f.key]).trim();
+    const text = customValueText(f, values[f.key], country).trim();
     return text ? [{ key: f.key, label: f.label, text }] : [];
   });
 }

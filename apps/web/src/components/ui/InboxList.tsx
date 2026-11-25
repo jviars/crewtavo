@@ -15,7 +15,7 @@
 import { createContext, Fragment, useContext, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { copyText } from "@/lib/clipboard";
-import { formatDateTime } from "@/lib/format";
+import { dateLocale, formatDateTime } from "@/lib/format";
 import { intlLocale, t } from "@/lib/i18n";
 import { initials } from "./Avatar";
 import { cx } from "./Button";
@@ -273,7 +273,7 @@ export function shortAge(value: string | Date, now = Date.now()): string {
   if (days < 7) return unit(days, "day");
   if (days < 35) return unit(Math.floor(days / 7), "week");
   const sameYear = then.getFullYear() === new Date(now).getFullYear();
-  return then.toLocaleDateString(intlLocale(), sameYear ? { month: "short", day: "numeric" } : { month: "short", year: "numeric" });
+  return then.toLocaleDateString(dateLocale(), sameYear ? { month: "short", day: "numeric" } : { month: "short", year: "numeric" });
 }
 
 /**

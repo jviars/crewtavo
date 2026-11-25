@@ -2,7 +2,7 @@
  * The businesses the company hires for jobs, whether their W-9 and insurance are on file and current,
  * and what they're owed. Year-end totals and the workers' comp audit are a click away.
  */
-import { subSettings } from "@crewtavo/core/subs";
+import { subSettings, usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -17,6 +17,7 @@ import { InboxPageSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { searchTerm, supabase, unwrap } from "@/lib/api";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { OwedCard } from "./OwedCard";
@@ -48,6 +49,8 @@ export function SubsPage() {
 
 function SubsList() {
   const session = useSession();
+  // The year-end totals are for 1099s, and the W-9 is asked for: a US business's (core usesIrsForms).
+  const irs = usesIrsForms(companyCountry());
   const { company } = session;
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -105,7 +108,7 @@ function SubsList() {
         title="Subcontractors"
         actions={
           <>
-            {all.length > 0 && <Link className="btn hide-mobile" to="/subs/1099"><Icon name="file" size={16} />Year-end totals</Link>}
+            {all.length > 0 && irs && <Link className="btn hide-mobile" to="/subs/1099"><Icon name="file" size={16} />Year-end totals</Link>}
             {all.length > 0 && <Link className="btn hide-mobile" to="/subs/workers-comp"><Icon name="clipboard" size={16} />Workers' comp audit</Link>}
             {/* On a phone the two reports are one More sheet, not two round icons that look alike. */}
             {all.length > 0 && (
@@ -113,7 +116,7 @@ function SubsList() {
                 title="Subcontractors"
                 triggerClassName={cx("btn btn-icon", styles.phoneOnly)}
                 items={[
-                  { label: "Year-end totals", icon: "file", onSelect: () => navigate("/subs/1099") },
+                  ...(irs ? [{ label: "Year-end totals", icon: "file" as const, onSelect: () => navigate("/subs/1099") }] : []),
                   { label: "Workers' comp audit", icon: "clipboard", onSelect: () => navigate("/subs/workers-comp") },
                 ]}
               />
@@ -145,7 +148,7 @@ function SubsList() {
         ) : all.length === 0 ? (
           // Add a sub is the page header's green button, so it isn't repeated here.
           <EmptyState icon="users" title="Keep your subs' paperwork in one place">
-            Add the crews you hire for jobs and keep their W-9 and insurance certificates current. Up-to-date certificates can save you real money at your workers' comp audit.
+            Add the crews you hire for jobs and keep their {irs ? "W-9 and insurance certificates" : "insurance certificates"} current. Up-to-date certificates can save you real money at your workers' comp audit.
           </EmptyState>
         ) : rows.length === 0 ? (
           term ? (

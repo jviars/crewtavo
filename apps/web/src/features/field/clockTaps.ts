@@ -9,7 +9,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { VisitStatusChange } from "./fieldActions";
 import type { ClockPlace, TimerCategory } from "./fieldData";
-import { intlLocale, msg, t } from "@/lib/i18n";
+import { msg, t } from "@/lib/i18n";
+import { dateLocale } from "@/lib/format";
 
 /** What each kind of clock is called (fieldData exports it as CATEGORY_LABELS): shown with t(). */
 export const CLOCK_LABELS: Record<TimerCategory, string> = { visit: msg("On a visit"), assessment: msg("Assessment"), drive: msg("Driving"), shop: msg("Shop time"), break: msg("On break"), other: msg("Other work") };
@@ -155,7 +156,7 @@ export function showClockTap(queryClient: QueryClient, tap: ClockTap) {
 }
 
 /** "2:15 PM" on the phone's own clock, for saying which tap is meant. */
-const tappedAt = (at: string) => new Date(at).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" });
+const tappedAt = (at: string) => new Date(at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" });
 
 /** What a clock tap's confirmation says once the server has it (a toast: no closing period). None when it lost (clockLost says that). */
 export function clockSaved(result: { lost: readonly string[] } | undefined, change: ClockChange, options: { day?: boolean; nameOf?: (id: string) => string } = {}): string | null {

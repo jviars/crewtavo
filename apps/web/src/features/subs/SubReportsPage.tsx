@@ -2,10 +2,11 @@
  * What subs were paid, for the people who check it: each sub's total for a calendar year with who
  * needs a 1099-NEC (the bookkeeper's list), and the workers' comp audit for a policy period (the
  * auditor's). Both are worked out by the database and the API (services/jobPay.ts), and download
- * as CSV. No tax ID numbers anywhere: they stay on the W-9.
+ * as CSV. No tax ID numbers anywhere: they stay on the W-9. The 1099 is a US business's: elsewhere
+ * the year-end totals aren't offered (core usesIrsForms).
  */
 import { certificateText, coverageLabel, jobPayStatusLabel, wcPartNote, type WcCertificate } from "@crewtavo/core/jobPay";
-import { taxClassificationLabel } from "@crewtavo/core/subs";
+import { taxClassificationLabel, usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
@@ -19,7 +20,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { FilterTabs } from "@/components/ui/Toolbar";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
-import { formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, formatMoneyCents, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { auditPresets, coverageTone, defaultYear, thresholdText, workDays, yearChoices } from "./pay";
 import { handlesSubPay, useWcAudit, useYearTotals } from "./payData";
@@ -34,7 +35,21 @@ const download = (path: string) => api.get<{ filename: string; csv: string }>(pa
 export function YearEndPage() {
   const session = useSession();
   if (!handlesSubPay(session)) return <NoAccess title="Year-end totals" />;
+  if (!usesIrsForms(companyCountry())) return <NotHere />;
   return <YearEnd />;
+}
+
+/** Opened by its address by a business outside the US, which has no 1099s to send. */
+function NotHere() {
+  useDocumentTitle("Year-end totals");
+  return (
+    <>
+      <BackLink to="/subs">Subcontractors</BackLink>
+      <EmptyState icon="dollar" title="Year-end totals are for 1099s">
+        They're what a US business sends its subs at the end of the year. What you paid each sub is on their page, under Pay.
+      </EmptyState>
+    </>
+  );
 }
 
 function YearEnd() {
@@ -204,7 +219,7 @@ function WorkersComp() {
                           <StatusPill label={coverageLabel(r.coverage)} tone={coverageTone(r.coverage)} />
                           {r.coverage === "partly" && <div className="muted small tabular">{formatMoneyCents(Number(r.uncovered_amount))} not covered</div>}
                         </td>
-                        <td className="small" style={{ minWidth: 200 }}>{docs.length ? docs.map((c) => <div key={c.id}>{certificateText(c)}</div>) : <span className="muted">None for these days</span>}</td>
+                        <td className="small" style={{ minWidth: 200 }}>{docs.length ? docs.map((c) => <div key={c.id}>{certificateText(c, companyCountry())}</div>) : <span className="muted">None for these days</span>}</td>
                       </tr>
                     );
                   })}

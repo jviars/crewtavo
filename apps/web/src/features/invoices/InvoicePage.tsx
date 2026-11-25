@@ -1,8 +1,9 @@
+import { businessCountry } from "@crewtavo/core/countries";
 import { autopayDueText, autopaySettings, methodLabel } from "@crewtavo/core/autopay";
 import { lateFeeAmount, lateFeeCouldApply, lateFeeNotice, lateFeeOn, lateFeeSettings } from "@crewtavo/core/billing";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import type { TablesUpdate } from "@crewtavo/core/database";
-import { lineTotal, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
+import { lineTotal, taxName, taxPercent, taxRateFromPercent } from "@crewtavo/core/money";
 import { givenBackWords, goneInvoiceWords } from "@crewtavo/core/promos";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
@@ -11,6 +12,7 @@ import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { ClientPreview } from "@/components/ui/ClientPreview";
 import { Button } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -26,7 +28,7 @@ import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { addDaysIso, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
+import { addDaysIso, companyCountry, currencySymbol, formatDate, formatMoneyCents, formatTaxRate, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -67,6 +69,8 @@ export function InvoicePage() {
 function InvoicePageScreen() {
   const { id = "" } = useParams();
   const session = useSession();
+  // What the business's documents call the tax ("VAT" in the UK), as they print it.
+  const tax = taxName(session.company.settings, businessCountry(session.company));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<null | "send" | "payment" | "work" | "edit">(null);
@@ -479,11 +483,11 @@ function InvoicePageScreen() {
                 />
                 <ReferralCredits invoice={inv} onChanged={refresh} />
                 <div className="line">
-                  <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `Tax ${editable ? "" : `(${formatTaxRate(inv.tax_rate)})`}`}</span>
+                  <span>{taxExempt ? `Tax exempt${inv.client?.tax_exempt_note ? ` · ${inv.client.tax_exempt_note}` : ""}` : `${tax}${editable ? "" : ` (${formatTaxRate(inv.tax_rate)})`}`}</span>
                   {/* A tax-exempt client is never charged tax: the database keeps the rate at 0. */}
                   {editable && !taxExempt ? <MoneyInput percent label="Tax rate" value={taxPercent(inv.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} /> : <AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} />}
                 </div>
-                {editable && !taxExempt && <div className="line"><span>Tax amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
+                {editable && !taxExempt && <div className="line"><span>{tax} amount</span><AnimatedNumber value={Number(inv.tax_amount)} format={MONEY_CENTS} /></div>}
                 <div className="line" data-total=""><span>Total</span><AnimatedNumber value={Number(inv.total)} format={MONEY_CENTS} /></div>
                 {Number(inv.retainage_amount) > 0 && <div className="line"><span>Retainage held ({Number(inv.retainage_pct)}%)</span><span>−<AnimatedNumber value={Number(inv.retainage_amount)} format={MONEY_CENTS} /></span></div>}
                 {paid !== 0 && <div className="line"><span>Paid</span><span>−<AnimatedNumber value={paid} format={MONEY_CENTS} /></span></div>}
@@ -557,7 +561,7 @@ function InvoicePageScreen() {
           {(charge?.status === "waiting" || onNewCard) && charge && (
             <div className="callout callout-info">
               <Icon name="card" size={16} />
-              <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone)}.`}</div>
+              <div className="grow">{charge.approved_at ? `Charging ${card} in the next few minutes.` : `Charged automatically to ${card} ${autopayDueText(charge.due_at, session.company.timezone, undefined, companyCountry())}.`}</div>
             </div>
           )}
           {bankNote && <div className="callout callout-info"><Icon name="clock" size={16} /><div className="grow">{bankNote}</div></div>}
@@ -588,7 +592,7 @@ function InvoicePageScreen() {
               <Icon name="card" size={16} />
               <div className="grow">
                 {charge.status === "failed"
-                  ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone)}.`
+                  ? `Autopay failed${charge.last_error ? `: ${clause(charge.last_error)}` : ""}. ${clientName} was sent the Pay link and a way to update their card. We'll try again ${autopayDueText(charge.due_at, session.company.timezone, undefined, companyCountry())}.`
                   : `Autopay needs ${clientName}: ${needsClientReason(charge)}.`}
               </div>
               <Button size="sm" icon="send" onClick={() => setDialog("send")}>Send a reminder</Button>
@@ -778,7 +782,7 @@ function InvoicePaper({ invoice, lateFeeNote }: { invoice: DocumentInvoice & { c
           <DocumentSheet
             template={contractTemplate(template, contract)}
             company={letterhead.data ?? documentCompany(session.company)}
-            data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf") }, { timeZone: session.company.timezone, contract, lateFeeNote })}
+            data={invoiceDocument({ ...invoice, pdf_fields: shownCustomFields(fields, invoice.custom_fields, "pdf", companyCountry()) }, { timeZone: session.company.timezone, contract, lateFeeNote })}
           />
         </div>
       ) : (
@@ -887,10 +891,10 @@ function PaymentDialog({ invoice, bank, onClose, onSaved }: { invoice: { id: str
       >
         <div className="form-grid">
           <Field label="Amount" requiredMessage="Enter the amount you received." error={tooMuch ? `More than the ${formatMoneyCents(invoice.balance)} balance.` : null}>
-            <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
+            <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
           </Field>
           <Field label="Tip" optional>
-            <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={tip} onChange={(e) => setTip(e.target.value.replace(/[^0-9.]/g, ""))} /></span>
+            <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={tip} onChange={(e) => setTip(e.target.value.replace(/[^0-9.]/g, ""))} /></span>
           </Field>
           <Field label="Method">
             <Select className="select" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
@@ -957,7 +961,7 @@ function RefundDialog({ invoice, payment, left, onClose, onSaved }: { invoice: {
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
           <Field label="Amount" requiredMessage="Enter the amount you gave back." error={tooMuch ? `More than ${limit}.` : null}>
-            <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
+            <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
           </Field>
           <Field label="Refunded on"><input className="input" type="date" value={date} max={todayIn(session.company.timezone)} onChange={(e) => setDate(e.target.value)} required /></Field>
         </div>
@@ -1017,7 +1021,7 @@ function StripeRefundDialog({ invoice, payment, left, onClose, onSaved }: { invo
     <Dialog open onClose={onClose} title="Refund payment" description={`The money goes back to their ${payment.method === "ach" ? "bank account" : "card"}. Stripe keeps its fee.`}>
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <Field label="Amount" hint={`Up to ${formatMoneyCents(left)}`} requiredMessage="Enter the amount to refund." error={tooMuch ? `More than the ${formatMoneyCents(left)} left to refund.` : null}>
-          <span className="input-group"><span className="addon">$</span><input className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
+          <span className="input-group"><span className="addon">{currencySymbol()}</span><DecimalInput className="input" style={{ paddingLeft: 22 }} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-invalid={tooMuch || undefined} required /></span>
         </Field>
         <div className="stack-sm">
           <label className="checkbox"><input type="checkbox" checked={writeOff} onChange={(e) => setWriteOff(e.target.checked)} /> Take it off the invoice too</label>

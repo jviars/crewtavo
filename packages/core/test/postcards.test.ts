@@ -9,12 +9,16 @@ import {
   frontResolutionWarning,
   POSTCARD_SIZES,
   frontHtml,
+  hasPostalAddress,
   leftOutLine,
   mailable,
   mailingAddress,
   messageProblem,
   POSTCARD_SIZE_INFO,
   postcardMessage,
+  postcardsMailHere,
+  postcardsUsOnly,
+  regionNeeded,
   usStateCode,
 } from "../src/postcards";
 
@@ -80,6 +84,25 @@ describe("where a postcard goes", () => {
     expect(leftOutLine({ archived: 1, opted_out: 3, no_address: 8, outside_us: 0 })).toBe("12 left out: 8 with no complete mailing address, 3 opted out of marketing, 1 archived");
     expect(leftOutLine({ outside_us: 2 })).toBe("2 left out: 2 with an address outside the US");
     expect(leftOutLine({ archived: 0 })).toBeNull();
+  });
+});
+
+describe("a company's postal address under a marketing email", () => {
+  it("needs its region in the US and Canada, and not where addresses leave it out", () => {
+    expect([regionNeeded("US"), regionNeeded("CA"), regionNeeded(null), regionNeeded("GB"), regionNeeded("IE"), regionNeeded("AU")]).toEqual([true, true, true, false, false, false]);
+    const leeds = { line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" };
+    expect(hasPostalAddress(leeds, "GB")).toBe(true);
+    expect(hasPostalAddress(leeds, "CA")).toBe(false);
+    expect(hasPostalAddress(leeds)).toBe(false);
+    expect(hasPostalAddress({ ...leeds, city: "" }, "GB")).toBe(false);
+  });
+});
+
+describe("where postcards are mailed", () => {
+  it("in the US only, which a business elsewhere is told", () => {
+    expect([postcardsMailHere("US"), postcardsMailHere(null), postcardsMailHere("CA"), postcardsMailHere("GB")]).toEqual([true, true, false, false]);
+    expect(postcardsUsOnly("CA")).toMatch(/^Postcards are mailed in the US only: .*Your business is in Canada\.$/);
+    expect(postcardsUsOnly("GB")).toMatch(/Your business is in the United Kingdom\.$/);
   });
 });
 

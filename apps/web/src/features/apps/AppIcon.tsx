@@ -22,6 +22,7 @@ import sveltiaLogo from "@/assets/apps/sveltia.svg";
 import twilioLogo from "@/assets/apps/twilio.svg";
 import zohoLogo from "@/assets/apps/zoho.svg";
 import { APP_INFO, categoryName, infoFor, type AppRow } from "./catalog";
+import { dateLocale } from "@/lib/format";
 
 /** The apps built into Crewtavo, each with the icon its screen has in the menu (components/shell/nav.ts). */
 export const OWN_ICONS: Record<string, IconName> = {
@@ -77,7 +78,7 @@ export function AppIcon({ id, name, size = "md" }: { id: string; name: string; s
     const now = new Date();
     return (
       <span className="app-icon app-icon-date" data-size={size} aria-hidden="true">
-        <span>{now.toLocaleDateString("en-US", { weekday: "short" })}</span>
+        <span>{now.toLocaleDateString(dateLocale(), { weekday: "short" })}</span>
         <strong>{now.getDate()}</strong>
       </span>
     );

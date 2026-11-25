@@ -11,6 +11,7 @@ import { useParams } from "react-router-dom";
 import { Button, cx } from "@/components/ui/Button";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { setCountry } from "@/lib/format";
 import { linkToken } from "@/lib/linkToken";
 import { publicFetch } from "@/lib/publicApi";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "./ClientKit";
@@ -20,8 +21,8 @@ import { asksForEndDate, endDateProblem, greeting, kindsFor, needsEndDate, neede
 import { getLocale, msg, t } from "@/lib/i18n";
 
 interface PaperworkView {
-  /** `color`: the business's brand color, when the server sends it (else the kit's navy). */
-  company: { name: string; logo: string | null; color?: string | null };
+  /** `color`: the business's brand color, when the server sends it (else the kit's navy); `country`, for its dates. */
+  company: { name: string; logo: string | null; color?: string | null; country?: string | null };
   sub: { name: string };
   needed: Array<{ requirement: string; label: string; state: "missing" | "expiring" | "expired"; expires_on: string | null }>;
   waiting: string[];
@@ -55,6 +56,8 @@ export function PaperworkPage() {
   const [failed, setFailed] = useState<Record<string, string>>({});
   const [sent, setSent] = useState<string[]>([]);
   const data = view.data;
+  // No session here: dates ("Ends 16 Oct 2026") are written the business's way from the page itself.
+  if (data) setCountry({ country: data.company.country });
 
   useEffect(() => {
     if (data) document.title = t("Paperwork for {company}", { company: data.company.name });
@@ -74,8 +77,11 @@ export function PaperworkPage() {
   };
 
   // Something else to send: a required document that isn't asked for (to send a newer one early), a license, anything.
+  // Only what the business takes: no W-9 outside the US (the kinds the server lists).
   const extras = [
-    ...Object.keys(REQUIREMENT_LABELS).map((key) => ({ key, label: REQUIREMENT_LABELS[key]!, kinds: kindsFor(key) })),
+    ...Object.keys(REQUIREMENT_LABELS)
+      .filter((key) => !data || kindsFor(key).some((kind) => data.kinds.some((k) => k.key === kind)))
+      .map((key) => ({ key, label: REQUIREMENT_LABELS[key]!, kinds: kindsFor(key) })),
     { key: "license", label: kindLabel("license"), kinds: ["license"] },
     { key: "other", label: t("Other document"), kinds: ["other"] },
   ].filter((e) => !list.some((i) => i.key === e.key));

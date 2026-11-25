@@ -1,7 +1,15 @@
 /** Small checks and formatting for what people type into contact fields (components/ui/Field.tsx uses them too). */
+import { companyCountry } from "./format";
 
 /** Just the digits of a phone number: "(540) 555-0123" -> "5405550123". */
 export const phoneDigits = (value: string) => value.replace(/\D/g, "");
+
+/**
+ * Phone numbers are written the North American way, 10 digits with the area code: the business is
+ * in the US or Canada (lib/format.ts companyCountry). Elsewhere numbers have other lengths and
+ * layouts, and are left as typed.
+ */
+export const northAmericanPhones = () => ["US", "CA"].includes(companyCountry());
 
 /** An email with a name, an @ and a domain with a dot in it: "sam@acme.co" but not "sam@acme". */
 export const isCompleteEmail = (value: string) => /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(value.trim());
@@ -19,8 +27,11 @@ function layoutPhone(digits: string): string {
  * International numbers ("+44…"), numbers with a leading 1 or more than 10 digits, and anything with
  * words or an extension in it ("ext. 12", "cell") are left as typed. A separator is only added once a
  * digit follows it, and backspacing over one removes the digit before it, so deleting never fights back.
+ * Only for a business in the US or Canada (northAmericanPhones): elsewhere a 10-digit number isn't
+ * a US one ("02 9876 5432"), so every number is left as typed.
  */
 export function formatPhoneTyping(value: string): string {
+  if (!northAmericanPhones()) return value;
   const trimmed = value.trimStart();
   if (trimmed.startsWith("+") || /[^\d\s().-]/.test(value)) return value;
   const digits = phoneDigits(value);

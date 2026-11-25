@@ -1,5 +1,6 @@
 /** Figures for the trends on Home (this month against last) and Invoices (now against 30 days ago). Pure functions, so they're unit tested. */
 import { addDays, localDate } from "@crewtavo/core/time";
+import { dateLocale } from "./format";
 
 export interface TrendPayment {
   amount: number | string;
@@ -14,7 +15,7 @@ export interface TrendInvoice {
   balance_due: number | string;
 }
 
-const shortDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const shortDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone: "UTC" });
 
 /**
  * Money collected so far this month, day by day, beside the same days of last month. `today` is the

@@ -1,5 +1,6 @@
 /** Public config, the signed-in user, onboarding (company + trade preset), the license and team invites. */
 import { ADMINS, adminLevel, currencyOffered, emailKey, getPreset, isPlaceholderEmail, isSubLogin, isTimeZoneName, memberPermissions, OFFICE, PERMISSIONS, presetCustomFields, presetSummaries, presetWeatherRules, ROLE_LABELS, seesPayRates, ROLES, settingsFor, signInPhone, STAFF, subSettings, TERMS_VERSION, WITH_SUBS, type Permission, type Role, type TradePreset } from "@crewtavo/core";
+import { countryCode, countryFor } from "@crewtavo/core/countries";
 import { LOCALES } from "@crewtavo/core/i18n";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -96,7 +97,7 @@ account.get("/me", requireUser, async (c) => {
     db.from("profiles").select("user_id, email, full_name, phone, avatar_url, color, locale").eq("user_id", userId).maybeSingle(),
     db
       .from("memberships")
-      .select("company_id, role, role_id, subcontractor_id, company:companies(id, name, slug, trade_preset, timezone, currency, address, phone)")
+      .select("company_id, role, role_id, subcontractor_id, company:companies(id, name, slug, trade_preset, timezone, currency, country, address, phone)")
       .eq("user_id", userId)
       .eq("active", true),
     adminClient(c.env).from("memberships").select("company_id, role").eq("user_id", userId),
@@ -278,6 +279,9 @@ account.post("/companies", requireUser, async (c) => {
       // Only the ones Settings → Company and sign-up offer (core CURRENCIES): Stripe is sent every
       // amount in cents, so a currency without them, like JPY, would be charged 100 times too much.
       currency: z.string().refine(currencyOffered, "Pick a currency from the list, like USD.").default("USD"),
+      // Where the business works (core countries.ts); a page from before it was asked sends none,
+      // and gets the guess from the time zone, as the sign-up page makes it.
+      country: z.string().refine((code) => countryCode(code) !== null, "Pick a country from the list.").optional(),
       terms_version: z.string().max(40).optional(),
     }),
   );
@@ -308,11 +312,13 @@ account.post("/companies", requireUser, async (c) => {
     p_timezone: body.timezone,
   });
   if (error) throw dbError(error);
-  // create_company makes every business in US dollars; if this fails, the owner can change it in Settings → Company.
+  // create_company makes every business in the US, in US dollars; if this fails, the owner can change
+  // them in Settings → Company.
   const currency = body.currency.toUpperCase();
-  if (currency !== "USD") {
-    const set = await db.from("companies").update({ currency }).eq("id", companyId as string);
-    if (set.error) console.error("Couldn't set the currency", set.error.message);
+  const country = countryCode(body.country) ?? countryFor(body.timezone);
+  if (currency !== "USD" || country !== "US") {
+    const set = await db.from("companies").update({ ...(currency !== "USD" && { currency }), ...(country !== "US" && { country }) }).eq("id", companyId as string);
+    if (set.error) console.error("Couldn't set the currency and country", set.error.message);
   }
   await applyPreset(db, adminClient(c.env), companyId as string, preset);
   // Where texting is connected (a business this new has no Twilio account of its own yet, so the

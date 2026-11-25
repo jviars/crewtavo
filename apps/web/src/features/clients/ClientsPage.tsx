@@ -19,7 +19,7 @@ import { FilterMenu, FilterTabs, SearchField, SortMenu, Toolbar } from "@/compon
 import { api, supabase, textFilter, unwrap } from "@/lib/api";
 import { inChunks, reportBulk } from "@/lib/bulk";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { addDaysIso, dateIn, todayIn } from "@/lib/format";
+import { dateIn, todayIn, weekStartOf } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { everyRow, firstRows } from "@/lib/paging";
 import { can, hasRole, useSession } from "@/lib/session";
@@ -98,7 +98,7 @@ export const nameLetter = (name: string) => {
  */
 export function groupClients(rows: readonly ClientRow[], sort: SortKey, timeZone: string): Group[] {
   const today = todayIn(timeZone);
-  const weekStart = addDaysIso(today, -new Date(`${today}T12:00:00Z`).getUTCDay());
+  const weekStart = weekStartOf(today);
   const monthStart = `${today.slice(0, 8)}01`;
   const groups = new Map<string, Group>();
   for (const c of rows) {
