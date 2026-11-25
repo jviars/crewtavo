@@ -1417,10 +1417,9 @@ p.measure-quiet { margin: 0; }
 .measure-tap-slow { flex: 1 1 100%; display: flex; gap: 6px; align-items: flex-start; padding-top: 7px; border-top: 1px solid var(--divider); font-size: var(--fs-12); color: var(--text-2); }
 .measure-tap-slow > svg { flex: none; margin-top: 1px; color: var(--warning); }
 /* What a tool does next: a dark pill over the dock, the same in either theme so it reads on any photo. */
-.measure-hint { position: absolute; left: 50%; bottom: 84px; z-index: 2; transform: translateX(-50%); width: max-content; max-width: calc(100% - 120px); padding: 7px 14px; border-radius: var(--radius-pill); background: rgb(17 17 16 / 0.84); color: #fff; font-size: var(--fs-13); font-weight: 500; text-align: center; box-shadow: 0 6px 16px -8px rgb(0 0 0 / 0.5); pointer-events: none; animation: fade-in var(--dur); }
 /* While a shape is drawn: what it is and its size so far, how to finish it, then Undo corner, Finish and stop. */
 .measure-drawbar { position: absolute; left: 50%; bottom: 84px; z-index: 4; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; width: max-content; max-width: calc(100% - 24px); padding: 8px 8px 8px 14px; border-radius: 12px; background: rgb(15 26 30 / 0.93); color: #fff; box-shadow: 0 10px 28px -10px rgb(0 0 0 / 0.6); animation: fade-in var(--dur); }
-.measure-stage[data-google] :is(.measure-drawbar, .measure-hint) { bottom: 104px; }
+.measure-stage[data-google] .measure-drawbar { bottom: 104px; }
 .measure-drawbar-text { display: grid; gap: 1px; min-width: 0; margin-right: 6px; }
 .measure-drawbar-what { display: flex; align-items: center; gap: 7px; font-size: var(--fs-14); white-space: nowrap; }
 .measure-drawbar-what strong { font-weight: 600; }
@@ -1612,7 +1611,7 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
   .measure-stage[data-extended] .measure-imagery { top: var(--t); }
   .measure-stage[data-extended] .measure-dock { bottom: calc(16px + var(--b)); }
   .measure-stage[data-extended] .measure-mapstack { bottom: calc(38px + var(--b)); }
-  .measure-stage[data-extended] :is(.measure-hint, .measure-drawbar) { bottom: calc(84px + var(--b)); }
+  .measure-stage[data-extended] .measure-drawbar { bottom: calc(84px + var(--b)); }
   .measure-stage[data-extended] > .measure-panel { padding-top: var(--t); padding-right: env(safe-area-inset-right); padding-bottom: var(--b); }
   .measure-stage[data-extended] > .measure-panel-show { top: var(--t); right: var(--r); }
   .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { bottom: var(--b); }
@@ -1635,7 +1634,7 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
     .measure-map .maplibregl-ctrl-bottom-left { bottom: 74px; }
     .measure-map .maplibregl-ctrl-bottom-right { bottom: 74px; }
     .measure-mapstack { bottom: 112px; }
-    .measure-hint, .measure-drawbar { left: 12px; transform: none; max-width: calc(100% - 76px); }
+    .measure-drawbar { left: 12px; transform: none; max-width: calc(100% - 76px); }
   }
 }
 /* A short screen (a phone held sideways): the tools without their words, so they fit. Each keeps its name. */
@@ -1954,15 +1953,12 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-stage[data-extended] > .measure-searchbar { top: calc(var(--top) + 54px); left: var(--left); right: var(--right); width: auto; }
   .measure-stage[data-extended] .measure-searchbar .address-search > .input { height: 44px; border-radius: 12px; font-size: var(--fs-16); }
   .measure-stage[data-extended] > .measure-find-error { top: calc(var(--top) + 104px); left: var(--left); right: var(--right); }
-  /* Over the map's top, under the bar: a banner, the hint, the shape picked. */
-  .measure-stage[data-extended] :is(.measure-banner, .measure-hint) { top: calc(var(--top) + 54px); bottom: auto; left: var(--left); right: var(--right); transform: none; width: auto; max-width: none; border-radius: 14px; }
+  /* Over the map's top, under the bar: a banner. */
+  .measure-stage[data-extended] .measure-banner { top: calc(var(--top) + 54px); bottom: auto; left: var(--left); right: var(--right); transform: none; width: auto; max-width: none; border-radius: 14px; }
   /* The shape picked: its card in the sheet's place, so the shape itself stays in view over it. */
   .measure-stage[data-extended]:has(.measure-card) { --sheet: calc(296px + var(--bottom)); }
   .measure-stage[data-extended]:has(.measure-card) > .measure-panel { display: none; }
   .measure-stage[data-extended] .measure-card { top: auto; bottom: 0; left: 0; right: 0; z-index: 7; width: auto; max-width: none; height: var(--sheet); overflow-y: auto; padding: 16px 20px calc(14px + var(--bottom)); border: 0; border-radius: 20px 20px 0 0; box-shadow: 0 -10px 30px -12px rgb(15 42 53 / 0.38); }
-  /* The hint over the dock's row of buttons, clear of the scale and credits at the top. */
-  .measure-stage[data-extended] .measure-hint { top: auto; bottom: calc(var(--sheet) + 64px); font-size: var(--fs-14); }
-  .measure-stage[data-extended] .measure-banner ~ .measure-hint { display: none; }
   .measure-stage[data-extended] .measure-legend { left: var(--left); bottom: calc(var(--sheet) + 64px); }
   /* MapLibre's scale and credits, and Google's, under the bar, where nothing else sits. */
   .measure-stage[data-extended] :is(.maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right) { top: calc(var(--top) + 52px); bottom: auto; }
