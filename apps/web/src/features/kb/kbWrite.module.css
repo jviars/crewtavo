@@ -6,7 +6,7 @@
 /* ---------- The guide editor ---------- */
 /* It fills the page under the top bar: its own bar, then the page being written beside its settings. */
 :global(.content):has(> .editor) { padding: 0; gap: 0; max-width: none; }
-.editor { --bar-h: 52px; --rte-top: calc(var(--topbar-height) + var(--bar-h)); display: flex; flex-direction: column; min-height: calc(100dvh - var(--topbar-height)); }
+.editor { --bar-h: 52px; --rte-top: calc(var(--topbar-height) + var(--bar-h)); display: flex; flex-direction: column; min-height: calc(100dvh - var(--page-top)); }
 
 /* The bar: back, whether it's saved, then what saving does and the one green button; the settings switch last. */
 .bar { position: sticky; top: var(--topbar-height); z-index: 4; display: flex; align-items: center; gap: 4px; height: var(--bar-h); padding: 0 12px 0 10px; border-bottom: 1px solid var(--divider); background: var(--page); }
