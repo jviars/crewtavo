@@ -131,7 +131,7 @@ function savedHouseNumbers(): boolean {
 const touchScreen = () => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
 const typing = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
-function hintFor(tool: Tool, drawing: Shape | null, selected: boolean, shapes: number, touch: boolean) {
+function hintFor(tool: Tool, drawing: Shape | null, selected: boolean, shapes: number, touch: boolean): string | null {
   const tap = touch ? "Tap" : "Click";
   switch (tool) {
     case "polygon":
@@ -149,7 +149,8 @@ function hintFor(tool: Tool, drawing: Shape | null, selected: boolean, shapes: n
     case "point":
       return `${tap} each item to count it.`;
     default:
-      return selected ? "Drag a corner to move it. Drag a small middle dot to add a corner." : shapes ? `${tap} a shape to change or delete it.` : "Nothing to edit yet. Pick Area, Line or Count to start.";
+      // Nothing drawn yet: no hint, the dock and the panel already say how to start.
+      return selected ? "Drag a corner to move it. Drag a small middle dot to add a corner." : shapes ? `${tap} a shape to change or delete it.` : null;
   }
 }
 
@@ -1449,6 +1450,13 @@ export function MeasurePage() {
   const drawColor = drawItem?.color ?? (activeEdge ? ROOF_EDGE_COLORS[activeEdge] : tool === "cutout" ? "#ef4444" : null);
   const drawSwatch = drawColor && <span className="paving-swatch" data-geometry={tool === "linestring" ? "line" : tool === "point" ? "count" : "area"} style={{ "--swatch": drawColor } as React.CSSProperties} aria-hidden="true" />;
   const drawSoFar = drawing ? `${formatShapeValue(drawing.kind, drawing.value) || (drawing.kind === "Length" ? "0 ft" : "0 sq ft")} so far` : "";
+  // The line over the dock when nothing's being drawn: what the item or tool does, or how to pick a shape.
+  const mapHint =
+    activeItem && !drawing && tool !== "select"
+      ? `${activeItem.name}: ${activeItem.hint}`
+      : activeEdge && !drawing && tool === "linestring"
+        ? `${EDGE_NAMES[activeEdge]}: draw along ${EDGE_HINTS[activeEdge]}. ${touch ? "Double-tap" : "Double-click"} to finish each one.`
+        : hintFor(tool, drawing, Boolean(selected), shapes.length, touch);
   const drawBar = drawing && tool !== "point" && (
     <div className="measure-drawbar" role="status" aria-live="polite">
       <div className="measure-drawbar-text">
@@ -1719,9 +1727,7 @@ export function MeasurePage() {
                 )}
                 {pickedRow
                   ? shapeCard(pickedRow)
-                  : !aligning && !tap.item && (drawBar || (
-                    <div className="measure-hint" role="status" aria-live="polite">{activeItem && !drawing && tool !== "select" ? `${activeItem.name}: ${activeItem.hint}` : activeEdge && !drawing && tool === "linestring" ? `${EDGE_NAMES[activeEdge]}: draw along ${EDGE_HINTS[activeEdge]}. ${touch ? "Double-tap" : "Double-click"} to finish each one.` : hintFor(tool, drawing, Boolean(selected), shapes.length, touch)}</div>
-                  ))}
+                  : !aligning && !tap.item && (drawBar || (mapHint && <div className="measure-hint" role="status" aria-live="polite">{mapHint}</div>))}
                 {capturing && <div className="measure-capturing" role="status"><span className="spinner" style={{ width: 16, height: 16 }} /> Saving a picture of the drawing…</div>}
                 {center && center.zoom < 12 && !shapes.length && !banner && !aligning && (
                   <div className="measure-zoom-note">Search an address or zoom in to the property to start measuring.</div>
