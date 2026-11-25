@@ -445,6 +445,21 @@ export function DemoBar() {
   const owner = session.role === "owner";
   const left = useTimeLeft();
   const tour = useDemoTour();
+  // Pages as tall as the window take the bar off too (--page-top in base.css), however many lines it wraps to.
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const root = document.documentElement.style;
+    const measure = () => root.setProperty("--demo-bar-height", `${el.offsetHeight}px`);
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => {
+      watch.disconnect();
+      root.removeProperty("--demo-bar-height");
+    };
+  }, []);
 
   async function switchTo(as: "owner" | "crew") {
     setBusy("switch");
@@ -498,7 +513,7 @@ export function DemoBar() {
 
   // On a phone the buttons are their icons, so the bar stays one line under the status bar.
   return (
-    <div className={styles.bar} role="region" aria-label={t("Demo")}>
+    <div ref={bar} className={styles.bar} role="region" aria-label={t("Demo")}>
       <span className={styles.label}>
         <span className={styles.tag}>{t("Demo")}</span>
         <span className={styles.who}>

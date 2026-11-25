@@ -71,6 +71,9 @@ img, svg { flex-shrink: 0; }
  * bar's measures and the 30px logo are the live app's. They're the shell's own and win over tokens.css's.
  */
 :root { --sidebar-width: 228px; --topbar-height: 60px; --mobile-nav-height: 56px; }
+/* What sits above a page: the top bar, and in the public demo its bar too (--demo-bar-height, which
+   the demo bar sets). Pages as tall as the window (Measure, Team chat, the website builder) take it off. */
+:root { --page-top: calc(var(--topbar-height) + var(--demo-bar-height, 0px)); }
 .shell { min-height: 100vh; display: flex; }
 .sidebar {
   width: var(--sidebar-width); flex: none; background: var(--ground); border-right: 1px solid var(--ground-border);

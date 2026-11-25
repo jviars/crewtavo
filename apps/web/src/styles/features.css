@@ -698,8 +698,8 @@
 
 /* ---------- Message center ---------- */
 /* Conversations as inbox rows on the left (B-Inbox.dc.html), the open one on the right on a hairline, no boxes. */
-.inbox { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); height: calc(100dvh - var(--topbar-height) - 140px); min-height: 460px; border-top: 1px solid var(--divider); }
-.messages-page:has(> .callout) .inbox { height: calc(100dvh - var(--topbar-height) - 210px); }
+.inbox { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); height: calc(100dvh - var(--page-top) - 140px); min-height: 460px; border-top: 1px solid var(--divider); }
+.messages-page:has(> .callout) .inbox { height: calc(100dvh - var(--page-top) - 210px); }
 .inbox-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 14px 16px 0 0; border-right: 1px solid var(--divider); }
 .inbox-list > .search-field { width: 100%; flex: none; }
 .inbox-list > .tabs { flex: none; align-self: flex-start; }
@@ -1496,7 +1496,7 @@ html.map-extended, html.map-extended body { overflow: hidden; overscroll-behavio
 .measure-panel > .card > .paving-group { margin-inline: -8px; padding-inline: 0; }
 
 @media (min-width: 901px) {
-  .measure-page { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-height)); min-height: 560px; }
+  .measure-page { display: flex; flex-direction: column; height: calc(100dvh - var(--page-top)); min-height: 560px; }
   .measure-head { flex: none; padding: 18px max(28px, env(safe-area-inset-right)) 16px 28px; }
   /* The map, and the panel beside it on a hairline (the map's own column ends where the panel starts). */
   .measure-stage { --panel-room: 0px; position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr); border-top: 1px solid var(--divider); background: var(--fill-2); }
@@ -1863,7 +1863,7 @@ button.material-result:focus-visible { outline: 2px solid var(--green); outline-
   .measure-searchbar > .imagery-button > :is(.imagery-button-label, svg:last-child) { display: none; }
   .measure-searchbar .imagery-button-count { position: absolute; top: -2px; right: -2px; box-shadow: 0 0 0 2px var(--m-group); background: var(--solid); color: var(--on-solid); }
   .measure-find-error { padding: 0 4px; }
-  .measure-stage > .measure-map-wrap { height: max(340px, calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - 260px)); overflow: hidden; border-radius: 16px; }
+  .measure-stage > .measure-map-wrap { height: max(340px, calc(100dvh - var(--page-top) - var(--mobile-nav-height) - 260px)); overflow: hidden; border-radius: 16px; }
   .measure-stage > .measure-map-error { border-radius: 16px; background: var(--m-card); }
   .measure-rail { top: 10px; left: 10px; padding: 3px; border-radius: 14px; }
   .measure-tool { width: 44px; min-height: 44px; padding: 0; }

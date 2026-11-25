@@ -4,7 +4,7 @@
  * the channel list and a conversation are separate screens, and the member list is a bottom sheet.
  */
 
-.layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100dvh - var(--topbar-height)); background: var(--page); overflow: hidden; }
+.layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100dvh - var(--page-top)); background: var(--page); overflow: hidden; }
 .layout[data-members] { grid-template-columns: 220px minmax(0, 1fr) 200px; }
 /* Chat is off, or couldn't load: said in the middle of the screen. */
 .off { padding: 40px 24px; }
@@ -301,7 +301,7 @@ a.jobCard:hover { border-color: var(--border-strong); background: var(--fill); c
 
 /* ---------- Phones: the list and a conversation are separate screens (Mobile-Team.dc.html) ---------- */
 @media (max-width: 900px) {
-  .layout, .layout[data-members] { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
+  .layout, .layout[data-members] { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - var(--page-top) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
   /* An open conversation has no top bar over it (base.css), so it takes that height too. */
   .layout[data-view="channel"] { height: calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
   .layout[data-view="channel"] .side { display: none; }

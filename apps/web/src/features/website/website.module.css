@@ -2,7 +2,7 @@
    above it. On a phone the bottom tabs take their share. */
 
 .page {
-  display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-height));
+  display: flex; flex-direction: column; height: calc(100dvh - var(--page-top));
   border-top: 1px solid var(--divider); background: var(--page);
 }
 .bar { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 6px 10px 6px 16px; border-bottom: 1px solid var(--divider); color: var(--text-2); }
@@ -19,7 +19,7 @@
   .bar { min-height: 52px; padding: 4px 8px 4px 16px; }
   /* Reload and Open at a thumb's size. */
   .bar :global(.btn) { height: 44px; min-width: 44px; }
-  .page { height: calc(100dvh - var(--topbar-height) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
+  .page { height: calc(100dvh - var(--page-top) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
 }
 @media (max-width: 600px) {
   .cms { display: none; }
