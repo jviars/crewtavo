@@ -8,13 +8,16 @@
  * stall per STALL_WIDTH_FT and the painted lines between them, STALL_LINE_FT each.
  */
 import type { Section } from "./geo";
+import { lawnItem } from "./lawn";
 
-export type PavingGeometry = "area" | "line" | "count";
+/** "cutout": drawn with Cut out, so it comes out of the areas under it (a lawn's beds, lawn.ts). */
+export type PavingGeometry = "area" | "line" | "count" | "cutout";
 
+/** A takeoff item: paving's, or a lawn's (lawn.ts). */
 export interface PavingItem {
   id: string;
   name: string;
-  group: PavingGroup;
+  group: string;
   geometry: PavingGeometry;
   /** On the map, in the legend and on the takeoff sheet. Bright enough to read on asphalt. */
   color: string;
@@ -57,12 +60,14 @@ export const PAVING_ITEMS: readonly PavingItem[] = [
 
 const BY_ID = new Map(PAVING_ITEMS.map((item) => [item.id, item]));
 export const pavingItem = (id: unknown): PavingItem | null => (typeof id === "string" ? BY_ID.get(id) ?? null : null);
+/** A paving or lawn item, by its id. */
+export const takeoffItem = (id: unknown): PavingItem | null => pavingItem(id) ?? lawnItem(id);
 
 /** Whether an item can be drawn as this kind of shape (an area item on an area, and so on). */
 export function itemFits(id: unknown, kind: Section["kind"]): boolean {
-  const item = pavingItem(id);
+  const item = takeoffItem(id);
   if (!item) return false;
-  return item.geometry === "area" ? kind === "Area" : item.geometry === "line" ? kind === "Length" : kind === "Count";
+  return item.geometry === "area" ? kind === "Area" : item.geometry === "cutout" ? kind === "Cutout" : item.geometry === "line" ? kind === "Length" : kind === "Count";
 }
 
 /** Stalls along a stall row of this length: one per 9 ft, rounded. */
@@ -158,11 +163,12 @@ export function pavingQuantities(sections: readonly Section[]): Record<PavingVar
 
 /** One item's total, the way the takeoff shows it: sq ft, feet, or a count (stall rows count stalls). */
 export function itemTotal(sections: readonly Section[], id: string): { value: number; unit: "sq ft" | "ft" | "ea" } {
-  const item = pavingItem(id);
+  const item = takeoffItem(id);
   const mine = sections.filter((s) => s.item === id);
   if (id === "stall_row") return { value: mine.reduce((t, s) => t + stallsAlong(Number(s.value)), 0), unit: "ea" };
-  const value = round2(mine.reduce((t, s) => t + Number(s.value), 0));
-  return { value, unit: item?.geometry === "area" ? "sq ft" : item?.geometry === "line" ? "ft" : "ea" };
+  // A cutout item (a lawn's bed) counts whole, not only the part it took out of the lawn.
+  const value = round2(mine.reduce((t, s) => t + Number(item?.geometry === "cutout" ? s.uncut_value ?? s.value : s.value), 0));
+  return { value, unit: item?.geometry === "area" || item?.geometry === "cutout" ? "sq ft" : item?.geometry === "line" ? "ft" : "ea" };
 }
 
 /** Whether a drawing is a paving takeoff: any shape marked as a paving item. */

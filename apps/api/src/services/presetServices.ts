@@ -9,12 +9,13 @@ import { getPreset, presetCustomFields } from "@crewtavo/core";
 import { dbError, must } from "../lib/http";
 import type { Db } from "../lib/supabase";
 
-export async function addMissingServices(db: Db, companyId: string, presetId: string): Promise<string[]> {
+/** `only`: just these of the preset's services (lawn's add-ons), not the whole list. */
+export async function addMissingServices(db: Db, companyId: string, presetId: string, only?: readonly string[]): Promise<string[]> {
   const preset = getPreset(presetId);
   const existing = new Set(must(await db.from("services").select("name").eq("company_id", companyId)).map((s) => s.name.trim().toLowerCase()));
   const formulas = new Map(preset.formulas.map((f) => [f.name, f]));
   const sortFrom = must(await db.from("services").select("sort").eq("company_id", companyId).order("sort", { ascending: false }).limit(1)).at(0)?.sort ?? 0;
-  const missing = preset.services.filter((s) => !existing.has(s.name.toLowerCase()));
+  const missing = preset.services.filter((s) => !existing.has(s.name.toLowerCase()) && (!only || only.includes(s.name)));
   if (missing.length) {
     const { error } = await db.from("services").insert(
       missing.map((s, i) => {
@@ -36,6 +37,28 @@ export async function addMissingServices(db: Db, companyId: string, presetId: st
     if (error) throw dbError(error);
   }
   return missing.map((s) => s.name);
+}
+
+/**
+ * The preset's formula for these services where the price list has them without one (a lawn
+ * business's "Mulch install" from before it priced from beds). Never over a formula someone set.
+ */
+export async function fillMissingFormulas(db: Db, companyId: string, presetId: string, names: readonly string[]): Promise<string[]> {
+  const preset = getPreset(presetId);
+  const formulas = new Map(preset.formulas.map((f) => [f.name, f]));
+  const wanted = new Map(preset.services.filter((s) => names.includes(s.name) && s.formula_name).map((s) => [s.name.toLowerCase(), s]));
+  const bare = must(await db.from("services").select("id, name").eq("company_id", companyId).is("formula", null));
+  const filled: string[] = [];
+  for (const row of bare) {
+    const s = wanted.get(row.name.trim().toLowerCase());
+    const formula = s?.formula_name ? formulas.get(s.formula_name) : undefined;
+    if (!s || !formula) continue;
+    const change = { formula: formula.formula, formula_target: formula.sets ?? "quantity", ...(s.default_depth_in != null ? { default_depth_in: s.default_depth_in } : {}) };
+    const { error } = await db.from("services").update(change).eq("id", row.id).is("formula", null);
+    if (error) throw dbError(error);
+    filled.push(row.name);
+  }
+  return filled;
 }
 
 /**

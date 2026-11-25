@@ -3,6 +3,7 @@
  * a picture of each for the iPad's site visit (the business's own photo, else a drawing of it).
  */
 import { usesDepth } from "@crewtavo/core/formulas";
+import { LAWN_SAMPLE, LAWN_VARIABLE_NAMES, LAWN_VARIABLES } from "@crewtavo/core/lawn";
 import { PAVING_SAMPLE, PAVING_VARIABLE_NAMES, PAVING_VARIABLES } from "@crewtavo/core/paving";
 import { ROOFING_SAMPLE, ROOFING_VARIABLE_NAMES, ROOFING_VARIABLES } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -37,7 +38,7 @@ export function itemDepth(text: string): number | null | undefined {
   return Number.isFinite(depth) && depth > 0 && depth <= 48 ? Math.round(depth * 100) / 100 : undefined;
 }
 
-const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20, ...ROOFING_SAMPLE, ...PAVING_SAMPLE };
+const SAMPLE = { area_sqft: 1000, area_sqyd: 111.1, length_ft: 100, count: 4, depth_in: 2, pitch_factor: 1.12, waste: 0.1, waste_pct: 10, eave_ft: 120, rake_ft: 80, ridge_ft: 40, hip_ft: 0, valley_ft: 20, ...LAWN_SAMPLE, ...ROOFING_SAMPLE, ...PAVING_SAMPLE };
 
 export function PriceList() {
   const session = useSession();
@@ -180,6 +181,10 @@ export function PriceList() {
           <summary>How formulas work</summary>
           <div className={styles.helpBody}>
             <p>A formula fills in the quantity from a map measurement, for example <code>area_sqft * 1.1</code>. One that uses only the area also prices a line on a job or a quote from a size you type there. You can use area_sqft (square feet), area_sqyd (square yards), length_ft (feet), count, depth_in (inches), pitch_factor and waste, and for roofs eave_ft, rake_ft, ridge_ft, hip_ft and valley_ft (feet of lines marked as those edges on the map).</p>
+            <p>Lawns add the ground's slope and what's marked on the map as lawn items. For example, <code>max(45, area_sqft / 1000 * 4.5) * (1 + steep_pct / 100) + trees * 2</code> doubles the price of the steep part and adds $2 a tree:</p>
+            <ul>
+              {LAWN_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {LAWN_VARIABLES[name]}</li>)}
+            </ul>
             <p>Roofs add their surface and squares, each section at its own pitch:</p>
             <ul>
               {ROOFING_VARIABLE_NAMES.map((name) => <li key={name}><code>{name}</code> {ROOFING_VARIABLES[name]}</li>)}

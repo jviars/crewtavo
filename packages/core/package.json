@@ -7,6 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./geo": "./src/geo.ts",
+    "./elevation": "./src/elevation.ts",
+    "./lawn": "./src/lawn.ts",
     "./paving": "./src/paving.ts",
     "./presets": "./src/presets.ts",
     "./roofPlanes": "./src/roofPlanes.ts",

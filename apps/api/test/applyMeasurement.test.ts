@@ -176,3 +176,26 @@ describe("a depth for each line that uses one", () => {
     expect(state.writes.filter((w) => w.table === "quote_line_items")).toEqual([]);
   });
 });
+
+describe("pricing a lawn by its slope and trees", () => {
+  const MOW = "00000000-0000-4000-8000-0000000000f1";
+  // A flat 6,000 sq ft front lawn and a 4,000 sq ft back hill, a quarter of it steeper than 3:1.
+  const lawn = (back: Record<string, number> | null) => {
+    const area = (label: string, value: number, slope: Record<string, number> | null) => ({ feature_id: label, kind: "Area", label, value, unit: "sq ft", ...(slope ? { slope } : {}) });
+    state.measurement = { total_area_sqft: 10000, total_area_sqyd: 1111.11, total_length_ft: 0, sections: [area("Front", 6000, { mean_pct: 4, steep_pct: 0 }), area("Back", 4000, back), { feature_id: "t", kind: "Count", label: "Tree 1", value: 1, unit: "ea", item: "tree" }], roof_pitch: null, waste_pct: 0 };
+    state.lines = [{ id: MOW, name: "Weekly mow", formula: "max(45, area_sqft / 1000 * 4.5) * (1 + steep_pct / 100) + slope_pct + trees * 2", service: { formula_target: "unit_price", default_depth_in: null } }];
+  };
+
+  it("weights the slope by lawn size, and says so when a lawn has none", async () => {
+    lawn({ mean_pct: 20, steep_pct: 25 });
+    let res = await post(`/quotes/${QUOTE}/apply-measurement`, { measurement_id: MEASUREMENT });
+    // $45 for 10,000 sq ft, 10% of it steep, a dollar per point of average slope (10.4) and $2 for the tree.
+    expect((await res.json()).lines).toEqual([{ id: MOW, name: "Weekly mow", field: "unit_price", value: 61.9 }]);
+
+    lawn(null);
+    state.writes = [];
+    res = await post(`/quotes/${QUOTE}/apply-measurement`, { measurement_id: MEASUREMENT });
+    expect((await res.json()).lines[0].error).toMatch(/no slope reading/);
+    expect(state.writes.filter((w) => w.table === "quote_line_items")).toEqual([]);
+  });
+});

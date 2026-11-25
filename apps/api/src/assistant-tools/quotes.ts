@@ -37,7 +37,7 @@ const quoteLine = z.object({
 
 async function quoteLines(ctx: ToolContext, quoteId: string, lines: ReadonlyArray<z.infer<typeof quoteLine>>) {
   const ids = [...new Set(lines.flatMap((l) => (l.service_id ? [l.service_id] : [])))];
-  const services = ids.length ? await rows(ctx.db.from("services").select("id, name, description, unit, unit_price, unit_cost, taxable").in("id", ids).eq("company_id", ctx.companyId)) : [];
+  const services = ids.length ? await rows(ctx.db.from("services").select("id, name, description, unit, unit_price, unit_cost, taxable, formula").in("id", ids).eq("company_id", ctx.companyId)) : [];
   const byId = new Map(services.map((s) => [s.id, s]));
   return lines.map((l, i) => {
     const s = l.service_id ? byId.get(l.service_id) : undefined;
@@ -54,6 +54,8 @@ async function quoteLines(ctx: ToolContext, quoteId: string, lines: ReadonlyArra
       unit_price: l.unit_price ?? Number(s!.unit_price),
       unit_cost: s?.unit_cost ?? null,
       taxable: l.taxable ?? s?.taxable ?? true,
+      // As the quote screen does, so a drawing can price it (fill_quote_from_measurement).
+      formula: s?.formula ?? null,
       // A group's lines are add-ons the client picks one of (the Client Hub's choice), with the first
       // picked; an add-on of its own starts out not chosen.
       optional: l.optional || Boolean(l.option_group),

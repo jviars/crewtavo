@@ -53,7 +53,7 @@ export interface Section {
   depth_in?: number | null;
   pitch?: string | null;
   manual_override: boolean;
-  /** An area's size before cutouts took some out (only when they did). */
+  /** An area's size before cutouts took some out (only when they did); a cutout's whole size, when only part of it is over an area. */
   uncut_value?: number;
   /** A line along a roof edge. */
   edge?: RoofEdge | null;
@@ -61,6 +61,32 @@ export interface Section {
   plan_value?: number;
   /** What the shape is in a paving takeoff (asphalt, a stall row...): PAVING_ITEMS in paving.ts. */
   item?: string | null;
+  /** The ground's slope under an area (a lawn), read from USGS elevation where it has some. */
+  slope?: GroundSlope;
+}
+
+/** The ground under an area: its average grade, and how much of it is steeper than 3:1 (33%), in percent. */
+export interface GroundSlope {
+  mean_pct: number;
+  steep_pct: number;
+  /** Picked by hand where none could be read (SLOPE_CHOICES in lawn.ts), not read from elevation. */
+  picked?: "flat" | "hilly" | "steep";
+  /** Read from Google's elevation (outside the US), not USGS's. */
+  from?: "google";
+}
+
+/** A shape's saved slope, or null when it isn't one. It's read in the browser, so it's checked here. */
+function groundSlope(value: unknown): GroundSlope | null {
+  if (!value || typeof value !== "object") return null;
+  const { mean_pct, steep_pct, picked, from } = value as Record<string, unknown>;
+  const fits = (n: unknown, max: number): n is number => typeof n === "number" && n >= 0 && n <= max;
+  if (!fits(mean_pct, 10_000) || !fits(steep_pct, 100)) return null;
+  return {
+    mean_pct,
+    steep_pct,
+    ...(picked === "flat" || picked === "hilly" || picked === "steep" ? { picked } : {}),
+    ...(from === "google" ? { from } : {}),
+  };
 }
 
 export interface MeasurementSummary {
@@ -287,8 +313,8 @@ export interface SummaryOptions {
  * Per-shape values and totals for a FeatureCollection. Feature properties understood: label,
  * depth_in, pitch, manual_value (overrides the computed value, for shapes measured on site),
  * cutout (true: an area taken out of the areas under it), edge (a line along a roof edge, see
- * ROOF_EDGES) and item (what it is in a paving takeoff, see PAVING_ITEMS; kept only on a shape it
- * fits). Cutouts come off every area they cover, and lines along a rake, hip or valley are
+ * ROOF_EDGES), item (what it is in a paving takeoff, see PAVING_ITEMS; kept only on a shape it
+ * fits) and slope (an area's GroundSlope; one that doesn't read is left off). Cutouts come off every area they cover, and lines along a rake, hip or valley are
  * stretched by their pitch. Throws RangeError, with a message to show, for a shape whose points or
  * value aren't numbers.
  */
@@ -341,6 +367,7 @@ export function summarizeFeatureCollection(collection: FeatureCollection, option
     const edge = kind === "Length" && isRoofEdge(props.edge) ? props.edge : null;
     // A pitch still being typed counts as flat here; pitchProblem() is what refuses it.
     const stretch = edge && !hasManual ? clip(() => edgeFactor(edge, pitch?.trim() || options.pitch)) ?? 1 : 1;
+    const slope = kind === "Area" ? groundSlope(props.slope) : null;
 
     const section: Section = {
       feature_id: String(feature.id ?? index),
@@ -354,6 +381,7 @@ export function summarizeFeatureCollection(collection: FeatureCollection, option
       ...(edge ? { edge } : {}),
       ...(stretch !== 1 ? { plan_value: round2(value) } : {}),
       ...(itemFits(props.item, kind) ? { item: props.item as string } : {}),
+      ...(slope ? { slope } : {}),
     };
     sections.push(section);
     if (kind === "Area" && !hasManual) areas.push({ section, geometry, sqft: value });
@@ -373,7 +401,10 @@ export function summarizeFeatureCollection(collection: FeatureCollection, option
     const under = areas.length ? clip(() => polygonClipping.union(toClip(areas[0].geometry), ...areas.slice(1).map((a) => toClip(a.geometry)))) : null;
     for (const c of cutouts) {
       const taken = under && clip(() => polygonClipping.intersection(toClip(c.geometry), under));
+      const whole = c.section.value;
       c.section.value = round2(taken ? sqmToSqft(multiAreaM2(taken)) : 0);
+      // A lawn's bed is priced whole, on the lawn or not (lawnQuantities).
+      if (c.section.value < whole - 0.005) c.section.uncut_value = whole;
     }
   }
 

@@ -7,6 +7,7 @@
 import { marginPct } from "@crewtavo/core/estimates";
 import { evaluateFormula, formulaVariables, usesDepth, type FormulaVariable } from "@crewtavo/core/formulas";
 import { drawingPitchFactor, edgeLengths, type Section } from "@crewtavo/core/geo";
+import { lawnQuantities } from "@crewtavo/core/lawn";
 import { countsOn, lineTotal, optionTotals, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { isPavingTakeoff, pavingQuantities } from "@crewtavo/core/paving";
 import { getPreset } from "@crewtavo/core/presets";
@@ -79,6 +80,7 @@ export function takeoffVariables(m: TakeoffRow, depthIn: number | null): Record<
     ridge_ft: edges.ridge,
     hip_ft: edges.hip,
     valley_ft: edges.valley,
+    ...lawnQuantities(sections),
     ...pavingQuantities(sections),
     ...savedRoofingQuantities(sections, m.roof_pitch, Number(m.waste_pct)),
   };

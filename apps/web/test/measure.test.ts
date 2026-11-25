@@ -93,6 +93,14 @@ describe("the takeoff list", () => {
     expect(groups.find((g) => g.title === "Counts")?.total).toBe("1");
   });
 
+  it("puts a lawn's beds, edging and counts under Lawn items, and calls its areas the lawn", () => {
+    // "f" is a bed (a cutout), "c" edging, "e" a tree; the rest stay plain.
+    const groups = groupRows(rows, { f: "bed", c: "edging", e: "tree" }, {}, false, "sqft", true);
+    expect(groups.map((g) => g.title)).toEqual(["Lawn items", "Lawn", "Lines"]);
+    expect(groups[0].entries.map((e) => ("item" in e ? e.item.id : null))).toEqual(["bed", "edging", "tree"]);
+    expect(groups.find((g) => g.title === "Lawn")?.total).toBe("1,500 sq ft");
+  });
+
   it("puts a roof's lines under their edges, and its areas as sections, in square yards when asked", () => {
     const groups = groupRows(rows, {}, { c: "ridge" }, true, "sqyd");
     expect(groups.map((g) => [g.title, g.total])).toEqual([

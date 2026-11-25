@@ -1,11 +1,11 @@
-import { getPreset } from "@crewtavo/core";
+import { getPreset, LAWN_ADD_ONS } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { checkFalKey, DETECT_TARGETS, detect, falProblem } from "../src/integrations/fal";
 import { encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
-// that eq, in and not filter, with insert and upsert adding rows. fal.ai is a fake fetch that keeps
+// that eq, in, is and not filter, with insert and upsert adding rows and update changing them. fal.ai is a fake fetch that keeps
 // what it was sent.
 type Row = Record<string, unknown>;
 const state = vi.hoisted(() => ({ tables: {} as Record<string, Row[]>, rpcs: [] as Array<[string, unknown]> }));
@@ -15,6 +15,7 @@ vi.mock("../src/lib/supabase", () => {
     rpc: async (name: string, args: unknown) => (state.rpcs.push([name, args]), { data: true, error: null }),
     from: (table: string) => {
       const filters: Array<(row: Row) => boolean> = [];
+      let change: Row | null = null;
       const rows = () => (state.tables[table] ?? []).filter((row) => filters.every((keep) => keep(row)));
       const add = (list: Row | Row[]) => {
         state.tables[table] = [...(state.tables[table] ?? []), ...[list].flat()];
@@ -27,11 +28,16 @@ vi.mock("../src/lib/supabase", () => {
         eq: (column: string, value: unknown) => (filters.push((row) => row[column] === value), builder),
         neq: (column: string, value: unknown) => (filters.push((row) => row[column] !== value), builder),
         in: (column: string, values: unknown[]) => (filters.push((row) => values.includes(row[column])), builder),
+        is: (column: string, value: unknown) => (filters.push((row) => (row[column] ?? null) === value), builder),
         not: () => builder,
         insert: add,
         upsert: add,
+        update: (next: Row) => ((change = next), builder),
         maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-        then: (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve({ data: rows(), error: null }).then(resolve, reject),
+        then: (resolve: (r: unknown) => unknown, reject: (e: unknown) => unknown) => {
+          if (change) for (const row of rows()) Object.assign(row, change);
+          return Promise.resolve({ data: change ? null : rows(), error: null }).then(resolve, reject);
+        },
       };
       return builder;
     },
@@ -153,6 +159,26 @@ describe("paving price book", () => {
     expect(added).toEqual(standard.filter((name) => name !== "Sealcoat"));
     const crack = state.tables.services.find((s) => s.name === "Hot-pour crack seal");
     expect(crack).toMatchObject({ formula: "crack_ft", unit: "ft", unit_cost: 0.85, category: "Sealcoat and repair" });
+  });
+});
+
+describe("lawn add-ons", () => {
+  it("adds only the lawn add-ons a price list doesn't have, priced from the lawn's items and slope", async () => {
+    await paver();
+    // One from before mulch priced from beds, and one someone gave a formula of their own.
+    state.tables.services.push({ id: "mulch", company_id: PAVER, name: "Mulch install", sort: 1 }, { id: "edging", company_id: PAVER, name: "Bed edging", sort: 2, formula: "length_ft" });
+    const res = await send("/lawn/services", {});
+    expect(res.status).toBe(200);
+    const { added, filled } = (await res.json()) as { added: string[]; filled: string[] };
+    expect(added).toEqual(["Steep slope mowing", "Trim around trees", "Trim around obstacles"]);
+    expect(filled).toEqual(["Mulch install"]);
+    expect(state.tables.services.find((s) => s.id === "mulch")).toMatchObject({ formula: "ceil(bed_sqft * depth_in / 12 / 27)", default_depth_in: 3 });
+    expect(state.tables.services.find((s) => s.id === "edging")).toMatchObject({ formula: "length_ft" });
+    expect(LAWN_ADD_ONS).toEqual(expect.arrayContaining([...added, ...filled, "Bed edging"]));
+    expect(state.tables.services.find((s) => s.name === "Trim around trees")).toMatchObject({ formula: "trees", unit: "tree" });
+    expect(state.tables.services.find((s) => s.name === "Steep slope mowing")).toMatchObject({ formula_target: "unit_price" });
+    // Not the rest of the lawn starter list.
+    expect(state.tables.services.some((s) => s.name === "Weekly mow")).toBe(false);
   });
 });
 

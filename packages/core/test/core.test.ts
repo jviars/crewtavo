@@ -27,6 +27,7 @@ import {
   fieldsFor,
   triggerDef,
   drawingPitchFactor,
+  drawingSlope,
   drawingSquares,
   edgeLengths,
   hipFactor,
@@ -76,6 +77,10 @@ import {
   scheduleSettings,
   sqmToSqft,
   summarizeFeatureCollection,
+  lawnQuantities,
+  LAWN_ADD_ONS,
+  LAWN_VARIABLE_NAMES,
+  itemFits,
   validateFormula,
   usesDepth,
   weatherRisks,
@@ -180,6 +185,78 @@ describe("geo", () => {
     // A hole drawn as a hole works the same, and cutOut() hands back the yard with a hole for the map.
     expect(cutOut(yard, [house])[0]).toHaveLength(2);
     expect(cutOut(yard, [])).toEqual([[RECT]]);
+  });
+
+  it("keeps each lawn's slope and weights the drawing's by area", () => {
+    const lawn = (slope: unknown, coordinates = [RECT]) => ({ type: "Feature" as const, properties: { slope }, geometry: { type: "Polygon", coordinates } });
+    const half = RECT.map((p) => [p[0], RECT[0][1] + (p[1] - RECT[0][1]) / 2]); // half the size
+    const both = summarizeFeatureCollection({ type: "FeatureCollection", features: [lawn({ mean_pct: 4, steep_pct: 0 }), lawn({ mean_pct: 16, steep_pct: 30 }, [half])] });
+    expect(both.sections[0].slope).toEqual({ mean_pct: 4, steep_pct: 0 });
+    // Twice the area counts twice as much.
+    expect(drawingSlope(both)).toEqual({ slope_pct: 8, steep_pct: 10 });
+    // A slope that doesn't read is dropped, and with one lawn unread the drawing has none yet.
+    for (const bad of [{ mean_pct: -1, steep_pct: 0 }, { mean_pct: 4, steep_pct: 101 }, { mean_pct: "4", steep_pct: 0 }, "steep", null]) {
+      const one = summarizeFeatureCollection({ type: "FeatureCollection", features: [lawn({ mean_pct: 4, steep_pct: 0 }), lawn(bad)] });
+      expect(one.sections[1].slope).toBeUndefined();
+      expect(drawingSlope(one)).toEqual({ slope_pct: null, steep_pct: null });
+    }
+    // Only areas carry one.
+    const line = summarizeFeatureCollection({ type: "FeatureCollection", features: [{ type: "Feature", properties: { slope: { mean_pct: 4, steep_pct: 0 } }, geometry: { type: "LineString", coordinates: RECT.slice(0, 2) } }] });
+    expect(line.sections[0].slope).toBeUndefined();
+    expect(FORMULA_VARIABLES).toEqual(expect.arrayContaining(["slope_pct", "steep_pct"]));
+  });
+
+  it("counts a lawn's beds, edging, trees and obstacles", () => {
+    const inset = RECT.map((p) => [RECT[0][0] + (p[0] - RECT[0][0]) / 4 + DLNG / 4, RECT[0][1] + (p[1] - RECT[0][1]) / 4 + DLAT / 4]);
+    const shape = (item: string | null, geometry: { type: string; coordinates: unknown }) => ({ type: "Feature" as const, properties: item ? { item } : {}, geometry });
+    const point = { type: "Point", coordinates: RECT[0] };
+    const yard = summarizeFeatureCollection({
+      type: "FeatureCollection",
+      features: [
+        shape(null, { type: "Polygon", coordinates: [RECT] }),
+        // A bed is a cutout: it comes out of the mowed lawn and counts for mulch.
+        { ...shape("bed", { type: "Polygon", coordinates: [inset] }), properties: { item: "bed", cutout: true } },
+        shape("edging", { type: "LineString", coordinates: RECT.slice(0, 2) }),
+        shape("tree", point), shape("tree", point), shape("obstacle", point),
+        // A count that's no lawn item isn't a tree.
+        shape(null, point),
+      ],
+    });
+    const [lawn, bed, edging] = yard.sections;
+    expect(bed.item).toBe("bed");
+    expect(lawn.value / lawn.uncut_value!).toBeCloseTo(1 - 1 / 16, 3);
+    const quantities = lawnQuantities(yard.sections);
+    expect(quantities).toMatchObject({ bed_sqft: bed.value, edging_ft: edging.value, trees: 2, obstacles: 1, slope_pct: null });
+    expect(quantities.bed_sqft).toBeGreaterThan(0);
+    // A lawn item only sticks to its kind of shape: a tree isn't a line.
+    expect(itemFits("tree", "Length")).toBe(false);
+    expect(itemFits("bed", "Area")).toBe(false);
+    expect(itemFits("bed", "Cutout")).toBe(true);
+    expect(FORMULA_VARIABLES).toEqual(expect.arrayContaining(["bed_sqft", "edging_ft", "trees", "obstacles"]));
+
+    // A bed that isn't over the lawn takes nothing out of it, and still counts whole for mulch.
+    const apart = summarizeFeatureCollection({
+      type: "FeatureCollection",
+      features: [shape(null, { type: "Polygon", coordinates: [inset] }), { ...shape("bed", { type: "Polygon", coordinates: [RECT] }), properties: { item: "bed", cutout: true } }],
+    });
+    const off = apart.sections[1];
+    expect(off.value).toBeLessThan(off.uncut_value!);
+    expect(lawnQuantities(apart.sections).bed_sqft).toBe(off.uncut_value);
+  });
+
+  it("says plainly when a drawing has no slope to price by", () => {
+    expect(() => evaluateFormula("area_sqft * (1 + steep_pct / 100)", { area_sqft: 1000, steep_pct: null })).toThrow("no slope reading");
+    expect(() => evaluateFormula("area_sqft * pitch_factor", { area_sqft: 1000, pitch_factor: null })).toThrow('"pitch_factor" has no value yet');
+  });
+
+  it("starts a lawn business with add-ons priced from its lawn items and slope", () => {
+    const lawn = PRESETS.lawn_exterior;
+    const formulas = new Map(lawn.formulas.map((f) => [f.name, f.formula]));
+    for (const name of LAWN_ADD_ONS) {
+      const formula = formulas.get(lawn.services.find((s) => s.name === name)?.formula_name ?? "");
+      expect(formula, name).toBeTruthy();
+      expect([...formulaVariables(formula!)].some((v) => (LAWN_VARIABLE_NAMES as string[]).includes(v)), name).toBe(true);
+    }
   });
 
   it("works out squares with a pitch for each roof section", () => {

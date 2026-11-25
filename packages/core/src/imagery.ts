@@ -109,11 +109,13 @@ export interface MapKeys {
 }
 
 /**
- * companies.settings.maps: the keys, what Measure opens on for the team ("auto" or a source), and
+ * companies.settings.maps: the keys, what Measure opens on for the team ("auto" or a source),
  * whether address boxes suggest places from Google (with the company's own Google key) instead of
- * OpenStreetMap.
+ * OpenStreetMap, and whether a lawn's slope comes from Google's elevation outside the US.
  */
 export interface MapSettings extends MapKeys {
   default_imagery?: string | null;
   google_places?: boolean | null;
+  /** A lawn's slope from Google's elevation where USGS has none (outside the US), with the company's own key. */
+  google_elevation?: boolean | null;
 }

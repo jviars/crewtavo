@@ -10,6 +10,7 @@ import { guideTools } from "./guides";
 import { invoiceTools } from "./invoices";
 import { jobTools } from "./jobs";
 import { marketingTools } from "./marketing";
+import { measurementTools } from "./measurements";
 import { payTools } from "./pay";
 import { priceTools } from "./prices";
 import { propertyEquipmentTools } from "./propertyEquipment";
@@ -31,6 +32,7 @@ export const TOOLS: Record<string, AnyTool> = {
   ...scheduleTools,
   ...reportTools,
   ...quoteTools,
+  ...measurementTools,
   ...invoiceTools,
   ...teamTools,
   ...timeTools,

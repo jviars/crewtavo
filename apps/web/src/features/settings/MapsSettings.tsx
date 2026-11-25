@@ -3,8 +3,9 @@
  * from Esri (free account) or Google adds sharp imagery worldwide; it's checked before it's saved,
  * and kept in the company's settings (settings.maps), since it's a browser key the whole team's map
  * uses anyway. With the company's own Google key, Auto starts on Google satellite, and address boxes
- * can suggest places from Google instead of OpenStreetMap (settings.maps.google_places, checked with
- * Google before it's turned on). What Measure opens on for the team is kept there too (each person
+ * can suggest places from Google instead of OpenStreetMap (settings.maps.google_places), and a lawn's
+ * slope can come from Google's elevation outside the US (settings.maps.google_elevation), each
+ * checked with Google before it's turned on. What Measure opens on for the team is kept there too (each person
  * can pick their own in Settings → Profile).
  */
 import { STATE_IMAGERY, type MapKeys, type MapSettings } from "@crewtavo/core/imagery";
@@ -23,6 +24,7 @@ import { ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useSession } from "@/lib/session";
+import { checkGoogleElevation } from "../measure/googleElevation";
 import { checkGooglePlaces } from "../measure/googlePlaces";
 import { SwitchRow } from "./SettingsKit";
 import { AUTO_NAME, checkEsriKey, checkGoogleKey, choiceName, DEFAULT_CHOICES, googleFirst, imageryUsable, mapKeys, teamDefault, type ImageryChoice } from "../measure/imagery";
@@ -59,14 +61,16 @@ export function MapsSettings() {
         const problem = provider === "esri" ? await checkEsriKey(key) : await checkGoogleKey(key);
         if (problem) throw new Error(problem);
       }
-      // A new Google key keeps Google's address suggestions only if it can give them.
+      // A new Google key keeps Google's address suggestions and slope only if it can give them.
       const placesProblem = provider === "google" && key && maps.google_places ? await checkGooglePlaces(key) : null;
-      await writeMaps({ [FIELD[provider]]: key, ...(placesProblem ? { google_places: false } : {}) });
-      return { provider, key, placesProblem };
+      const elevationProblem = provider === "google" && key && maps.google_elevation ? await checkGoogleElevation(key) : null;
+      await writeMaps({ [FIELD[provider]]: key, ...(placesProblem ? { google_places: false } : {}), ...(elevationProblem ? { google_elevation: false } : {}) });
+      return { provider, key, placesProblem, elevationProblem };
     },
-    onSuccess: ({ provider, key, placesProblem }) => {
+    onSuccess: ({ provider, key, placesProblem, elevationProblem }) => {
       saved();
       if (placesProblem) toast.error("Google imagery is ready, but address suggestions are back on OpenStreetMap", { description: placesProblem });
+      else if (elevationProblem) toast.error("Google imagery is ready, but slope from Google is off", { description: elevationProblem });
       else if (key) toast.success(`${provider === "esri" ? "Esri" : "Google"} imagery is ready`, { description: provider === "google" ? "Auto on Measure starts with it now. You can also have address boxes suggest places from Google, below." : "Pick it from the Imagery button on Measure, or make it the team's default above." });
       else toast.success("Key removed");
     },
@@ -87,6 +91,24 @@ export function MapsSettings() {
     onSuccess: (on) => {
       saved();
       toast.success(on ? "Addresses are suggested from Google now" : "Addresses are suggested from OpenStreetMap again");
+    },
+  });
+  // A lawn's slope from Google outside the US, once the key is shown to give heights.
+  const elevation = useMutation({
+    meta: { inline: true },
+    mutationFn: async (on: boolean) => {
+      const key = maps.google_key;
+      if (on) {
+        if (!key) throw new Error("Add a Google key first.");
+        const problem = await checkGoogleElevation(key);
+        if (problem) throw new Error(problem);
+      }
+      await writeMaps({ google_elevation: on });
+      return on;
+    },
+    onSuccess: (on) => {
+      saved();
+      toast.success(on ? "Lawns outside the US get their slope from Google now" : "Slope comes from USGS only again, in the US");
     },
   });
   // The team's map saves as it's picked, and says so beside the menu.
@@ -174,7 +196,7 @@ export function MapsSettings() {
         intro="Google's satellite imagery, worldwide, and Auto on Measure starts with it. Google needs a billing account on the project; its Map Tiles API includes 100,000 tiles a month at no charge."
         steps={[
           <>In the <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer">Google Cloud console</a>, pick or create a project with billing turned on.</>,
-          <>Under <strong>APIs &amp; Services</strong>, enable the <strong>Map Tiles API</strong>. For address suggestions from Google too, also enable <strong>Places API (New)</strong>.</>,
+          <>Under <strong>APIs &amp; Services</strong>, enable the <strong>Map Tiles API</strong>. For address suggestions from Google too, also enable <strong>Places API (New)</strong>; for a lawn's slope outside the US, the <strong>Maps JavaScript API</strong> and the <strong>Elevation API</strong>.</>,
           <>Create an API key. Restrict it to those APIs and to the website <code>{location.origin}/*</code>.</>,
           <>Paste the key below.</>,
         ]}
@@ -198,6 +220,17 @@ export function MapsSettings() {
               onChange={(on) => places.mutate(on)}
             >
               <FormError error={places.error} />
+            </SwitchRow>
+            <SwitchRow
+              label="Slope from Google outside the US"
+              hint={elevation.isPending && elevation.variables
+                ? "Checking the key with Google…"
+                : "In the US a lawn's slope comes from USGS, free. Elsewhere, Measure asks Google for heights over each lawn while it shows Google satellite, as Google's terms ask. Needs the Maps JavaScript API and the Elevation API on this key; Google includes a free monthly allowance, then bills each request."}
+              checked={elevation.isPending ? Boolean(elevation.variables) : Boolean(maps.google_elevation)}
+              disabled={elevation.isPending}
+              onChange={(on) => elevation.mutate(on)}
+            >
+              <FormError error={elevation.error} />
             </SwitchRow>
           </div>
         )}

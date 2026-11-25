@@ -9,6 +9,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapKeys } from "@crewtavo/core/imagery";
 import { cutOut, lineLengthM, mergePolygons, mToFt, polygonAreaM2, sqmToSqft, type Feature, type Position } from "@crewtavo/core/geo";
 import { PAVING_ITEMS } from "@crewtavo/core/paving";
+import { LAWN_ITEMS } from "@crewtavo/core/lawn";
 import maplibregl, { type GeoJSONSource, type ImageSource, type LayerSpecification, type Map as MapLibreMap, type Marker, type StyleSpecification } from "maplibre-gl";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import {
@@ -207,12 +208,12 @@ export function shapeValue(geometry: Feature["geometry"]): number {
 export function defaultNames(shapes: Array<Pick<Shape, "id" | "kind"> & { edge?: string | null; itemName?: string | null }>): Record<string, string> {
   const seen: Record<string, number> = {};
   return Object.fromEntries(shapes.map((s) => {
-    const word = s.itemName && s.kind !== "Cutout" ? s.itemName : s.kind === "Length" && s.edge ? s.edge[0].toUpperCase() + s.edge.slice(1) : s.kind === "Length" ? "Line" : s.kind;
+    const word = s.itemName ? s.itemName : s.kind === "Length" && s.edge ? s.edge[0].toUpperCase() + s.edge.slice(1) : s.kind === "Length" ? "Line" : s.kind;
     seen[word] = (seen[word] ?? 0) + 1;
     return [s.id, `${word} ${seen[word]}`];
   }));
 }
-const MADE_UP = new RegExp(`^(Area|Cutout|Line|Length|Count|Eave|Rake|Ridge|Hip|Valley|${PAVING_ITEMS.map((i) => i.name).join("|")}) \\d+$`);
+const MADE_UP = new RegExp(`^(Area|Cutout|Line|Length|Count|Eave|Rake|Ridge|Hip|Valley|${[...PAVING_ITEMS, ...LAWN_ITEMS].map((i) => i.name).join("|")}) \\d+$`);
 /** A name we made up rather than one someone typed (so reopening a drawing renumbers it). */
 export const isDefaultName = (name: string) => MADE_UP.test(name.trim());
 

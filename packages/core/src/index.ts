@@ -34,6 +34,8 @@ export * from "./money";
 export * from "./notifications";
 export * from "./pay";
 export * from "./phone";
+export * from "./elevation";
+export * from "./lawn";
 export * from "./paving";
 export * from "./presets";
 export * from "./privacy";

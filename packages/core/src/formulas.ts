@@ -9,6 +9,7 @@
  * tighter than unary minus, so -2 ** 2 is -4.
  */
 
+import { LAWN_VARIABLE_NAMES } from "./lawn";
 import { PAVING_VARIABLE_NAMES } from "./paving";
 import { ROOFING_VARIABLE_NAMES } from "./roofing";
 
@@ -24,6 +25,8 @@ export const FORMULA_VARIABLES = [
   "area_sqft", "area_sqyd", "length_ft", "count", "depth_in", "pitch_factor", "waste", "waste_pct",
   // Lines marked as roof edges, at true length (ROOF_EDGES in geo.ts).
   "eave_ft", "rake_ft", "ridge_ft", "hip_ft", "valley_ft",
+  // A lawn's slope, beds, edging, trees and obstacles (LAWN_VARIABLES in lawn.ts).
+  ...LAWN_VARIABLE_NAMES,
   // A roof's surface and squares, with and without waste (ROOFING_VARIABLES in roofing.ts).
   ...ROOFING_VARIABLE_NAMES,
   // A paving takeoff's items: asphalt_sqft, stripe_ft, stalls and the rest (PAVING_VARIABLES in paving.ts).
@@ -168,6 +171,10 @@ function parse(source: string): Node {
   return tree;
 }
 
+/** Values that are missing for a reason the office can act on, and what to tell them. */
+const NO_SLOPE = "This drawing has no slope reading (elevation is read in the US, or from Google where it's turned on). In Measure, pick the lawn's slope (Flat, Hilly or Steep) on its card, or set this line by hand.";
+const NO_VALUE: Record<string, string> = { slope_pct: NO_SLOPE, steep_pct: NO_SLOPE };
+
 function evalNode(node: Node, vars: Record<string, number | null | undefined>): number {
   switch (node.type) {
     case "num":
@@ -175,7 +182,7 @@ function evalNode(node: Node, vars: Record<string, number | null | undefined>): 
     case "var": {
       if (!Object.hasOwn(vars, node.name)) fail(`Unknown value "${node.name}"`);
       const value = vars[node.name];
-      if (value === null || value === undefined || Number.isNaN(Number(value))) fail(`"${node.name}" has no value yet`);
+      if (value === null || value === undefined || Number.isNaN(Number(value))) fail(NO_VALUE[node.name] ?? `"${node.name}" has no value yet`);
       return Number(value);
     }
     case "unary": {

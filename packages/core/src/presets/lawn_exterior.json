@@ -39,10 +39,40 @@
       "formula_name": "Overseeding price"
     },
     {
+      "name": "Steep slope mowing",
+      "unit": "visit",
+      "unit_price": 15,
+      "unit_cost": 8,
+      "formula_name": "Steep slope extra per visit"
+    },
+    {
+      "name": "Trim around trees",
+      "unit": "tree",
+      "unit_price": 2,
+      "unit_cost": 1,
+      "formula_name": "Trees on the lawn"
+    },
+    {
+      "name": "Trim around obstacles",
+      "unit": "ea",
+      "unit_price": 3,
+      "unit_cost": 1.5,
+      "formula_name": "Obstacles on the lawn"
+    },
+    {
+      "name": "Bed edging",
+      "unit": "ft",
+      "unit_price": 1.5,
+      "unit_cost": 0.6,
+      "formula_name": "Edging length"
+    },
+    {
       "name": "Mulch install",
       "unit": "cu yd",
       "unit_price": 95,
-      "unit_cost": 45
+      "unit_cost": 45,
+      "formula_name": "Mulch in beds",
+      "default_depth_in": 3
     },
     {
       "name": "Hedge and shrub trimming",
@@ -141,6 +171,27 @@
       "name": "Overseeding price",
       "formula": "max(110, area_sqft / 1000 * 25)",
       "sets": "unit_price"
+    },
+    {
+      "name": "Steep slope extra per visit",
+      "formula": "area_sqft / 1000 * 4.5 * steep_pct / 100",
+      "sets": "unit_price"
+    },
+    {
+      "name": "Trees on the lawn",
+      "formula": "trees"
+    },
+    {
+      "name": "Obstacles on the lawn",
+      "formula": "obstacles"
+    },
+    {
+      "name": "Edging length",
+      "formula": "edging_ft"
+    },
+    {
+      "name": "Mulch in beds",
+      "formula": "ceil(bed_sqft * depth_in / 12 / 27)"
     }
   ],
   "checklists": [
@@ -219,8 +270,8 @@
   ],
   "intake_forms": [
     {
-      "name": "Instant price: Gutter cleaning",
-      "slug": "instant-price-gutter-cleaning",
+      "name": "Book online: Gutter cleaning",
+      "slug": "book-online-gutter-cleaning",
       "kind": "booking",
       "requires_approval": false,
       "lead_time_days": 2,

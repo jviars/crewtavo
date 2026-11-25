@@ -12,8 +12,10 @@
  */
 import { addressLabels } from "@crewtavo/core/countries";
 import { inBounds, stateImagery, stateImageryAt, type StateImagery } from "@crewtavo/core/imagery";
-import { drawingSquares, edgeLengths, isPitch, isRoofEdge, lineLengthM, mToFt, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type Position, type RoofEdge } from "@crewtavo/core/geo";
-import { itemFits, PAVING_ITEMS, pavingItem, pavingQuantities, stallsAlong, type PavingItem } from "@crewtavo/core/paving";
+import { drawingSquares, edgeLengths, isPitch, isRoofEdge, lineLengthM, mToFt, normalizePitch, pitchFactor, pitchProblem, ROOF_EDGES, summarizeFeatureCollection, type Feature, type GroundSlope, type Position, type RoofEdge } from "@crewtavo/core/geo";
+import { readSlope } from "@crewtavo/core/elevation";
+import { drawingSlope, LAWN_ITEMS, LAWN_OFFER_TRADES, LAWN_TRADES, lawnItem, lawnQuantities, pickedSlope, SLOPE_CHOICE_IDS, SLOPE_CHOICES, type SlopeChoice } from "@crewtavo/core/lawn";
+import { itemFits, PAVING_ITEMS, pavingItem, pavingQuantities, stallsAlong, takeoffItem, type PavingItem } from "@crewtavo/core/paving";
 import { isReportRoof, REPORT_PROVIDER, ROOF_EDGE_COLORS } from "@crewtavo/core/roofing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -48,7 +50,9 @@ import { useTooLarge } from "../plans/UploadLimit";
 import { isRoofingCompany } from "../roofing/data";
 import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
 import { FindPaving } from "./FindPaving";
-import { formatItemTotal, ItemSwatch, itemEntries, type AreaUnit } from "./PavingItems";
+import { googleElevationKey, readGoogleSlope } from "./googleElevation";
+import { LawnAddOns } from "./LawnItems";
+import { formatItemTotal, ItemSwatch, itemEntries, LAWN_MENU, PAVING_MENU, type AreaUnit, type ItemGroup } from "./PavingItems";
 import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
 import { EDGE_HINTS, RoofSteps } from "./RoofSteps";
 import type { SheetInfo } from "./takeoffSheet";
@@ -78,6 +82,12 @@ interface Found { found: boolean; lat?: number; lng?: number; formatted?: string
 /** The totals as formatNumber writes them, rolling to each new value as shapes are drawn. */
 const WHOLE = { maximumFractionDigits: 0 };
 const TENTHS = { minimumFractionDigits: 1, maximumFractionDigits: 1 };
+/**
+ * A lawn's slope (readSlope, or readGoogleSlope outside the US) and the outline it was read for: SAVED
+ * came with the drawing. No `reading` yet: still reading. `google`: Google was asked too.
+ */
+interface SlopeEntry { key: string; reading?: GroundSlope | null; failed?: boolean; google?: boolean }
+const SAVED = "saved";
 
 /** A pitch the way it's saved ("6/12" for 6-12), or as typed while it doesn't read yet. */
 const tidyPitch = (pitch: string) => (pitch.trim() && isPitch(pitch) ? normalizePitch(pitch) : pitch.trim());
@@ -95,6 +105,15 @@ function savedOverlays(): OverlayId[] {
     return list.filter((o): o is OverlayId => o in OVERLAYS);
   } catch {
     return [];
+  }
+}
+// Lawn tools for a business that isn't lawn care: on once someone opens Lawn, and kept on in this browser.
+const LAWN_KEY = "crewtavo.measureLawn";
+function savedLawn(): boolean {
+  try {
+    return localStorage.getItem(LAWN_KEY) === "on";
+  } catch {
+    return false;
   }
 }
 // House numbers stay on (or off) between visits too.
@@ -195,6 +214,8 @@ export function MeasurePage() {
   // A shape's measured value as it was saved (a roof typed in from a report is made of these): kept
   // through a save, so opening such a measurement here and saving it doesn't lose its numbers.
   const [measured, setMeasured] = useState<Record<string, number>>({});
+  const [slopes, setSlopes] = useState<Record<string, SlopeEntry>>({});
+  const slopesReading = useRef(new Set<string>());
   const [activeItem, setActiveItem] = useState<PavingItem | null>(null);
   // A roof edge picked to draw (RoofSteps.tsx): new lines become that edge.
   const [activeEdge, setActiveEdge] = useState<RoofEdge | null>(null);
@@ -214,6 +235,15 @@ export function MeasurePage() {
   const [choice, setChoice] = useState<ImageryChoice | null>(null);
   const [imagery, setImagery] = useState<ImageryId | null>(null);
   const [overlays, setOverlays] = useState<OverlayId[]>(savedOverlays);
+  const [lawnOn, setLawnOn] = useState(savedLawn);
+  const showLawn = (on: boolean) => {
+    setLawnOn(on);
+    try {
+      localStorage.setItem(LAWN_KEY, on ? "on" : "off");
+    } catch {
+      /* remembered for this visit only */
+    }
+  };
   const [resolveTick, setResolveTick] = useState(0);
   // Sources that stopped answering, and until when Auto leaves them alone.
   const down = useRef(new Map<ImageryId, number>());
@@ -338,7 +368,7 @@ export function MeasurePage() {
   // ----- What's drawn ---------------------------------------------------------------------------
   // Typed in from a report (roofing/flow/RoofReport.tsx), not drawn here: its shapes only carry the report's numbers.
   const fromReport = isReportRoof(context.data?.measurement);
-  const names = useMemo(() => defaultNames(shapes.map((s) => ({ ...s, edge: edges[s.id], itemName: itemFits(items[s.id], s.kind) ? pavingItem(items[s.id])?.name : null }))), [shapes, edges, items]);
+  const names = useMemo(() => defaultNames(shapes.map((s) => ({ ...s, edge: edges[s.id], itemName: itemFits(items[s.id], s.kind) ? takeoffItem(items[s.id])?.name : null }))), [shapes, edges, items]);
   const nameOf = (id: string) => labels[id]?.trim() || names[id] || "this shape";
   // Unnamed shapes are saved as "Area 1", "Line 1", so the client sees the same names as the map.
   // Roof sections and the edges that run up the roof carry the pitch they're measured at.
@@ -360,10 +390,11 @@ export function MeasurePage() {
             ...(itemFits(items[s.id], s.kind) ? { item: items[s.id] } : {}),
             ...(fromOsm.includes(s.id) ? { source: "openstreetmap" } : {}),
             ...(measured[s.id] != null && s.kind !== "Cutout" ? { manual_value: measured[s.id] } : {}),
+            ...(s.kind === "Area" && slopes[s.id]?.reading ? { slope: slopes[s.id].reading } : {}),
           },
         };
       }),
-    [shapes, labels, names, depth, pitch, pitches, edges, items, fromOsm, measured],
+    [shapes, labels, names, depth, pitch, pitches, edges, items, fromOsm, measured, slopes],
   );
   // Same math the server uses on save (packages/core), so live numbers match stored ones.
   const summary = useMemo(() => summarizeFeatureCollection({ type: "FeatureCollection", features }, { pitch }), [features, pitch]);
@@ -383,12 +414,62 @@ export function MeasurePage() {
   const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
   const mapValues = useMemo(() => Object.fromEntries(summary.sections.map((s) => [s.feature_id, s.value])), [summary]);
   // Paving: the items panel shows with Paving installed, for a takeoff opened from Paving, or a drawing with items.
-  const paving = featureOn(company.settings, "paving_app") || params.has("paving") || Object.keys(items).length > 0;
+  const paving = featureOn(company.settings, "paving_app") || params.has("paving") || Object.values(items).some((i) => pavingItem(i));
+  // Lawns: lawn items in the dock and the list, and each area's ground slope from USGS (readSlope), for
+  // a lawn care business, a drawing with lawn items or a slope, and anyone who opens Lawn under the
+  // list. The slope is read once the drawing settles and again when the area or a cutout changes; one
+  // opened with the drawing keeps what was saved.
+  const lawnTrade = LAWN_TRADES.has(company.trade_preset ?? "");
+  const lawnDrawing = Object.values(items).some((i) => lawnItem(i)) || summary.sections.some((s) => s.slope);
+  const lawn = !roofing && (lawnTrade || lawnDrawing || lawnOn);
+  const slopeKeys = useMemo(() => {
+    const cuts = JSON.stringify(shapes.filter((s) => s.kind === "Cutout").map((s) => s.geometry));
+    return Object.fromEntries(shapes.filter((s) => s.kind === "Area").map((s) => [s.id, JSON.stringify(s.geometry) + cuts]));
+  }, [shapes]);
+  // Outside the US, with slope from Google turned on (Settings > Maps): Google's heights, asked only
+  // while the map shows Google satellite, as Google's terms want.
+  const googleSlopeKey = imagery === "google" ? googleElevationKey(company.settings) : null;
+  useEffect(() => {
+    if (!lawn) return;
+    // A lawn opened with the drawing, or picked by hand, keeps its slope through a change; one USGS
+    // had nothing for is asked of Google once Google satellite shows.
+    const changed = Object.entries(slopeKeys).filter(([id, key]) => slopes[id]?.key !== key || (googleSlopeKey && slopes[id]?.reading === null && !slopes[id]?.google));
+    if (changed.length) setSlopes((all) => ({ ...all, ...Object.fromEntries(changed.map(([id, key]) => [id, all[id]?.key === SAVED || all[id]?.reading?.picked ? { ...all[id], key } : { key }])) }));
+  }, [lawn, slopeKeys, slopes, googleSlopeKey]);
+  useEffect(() => {
+    const waiting = Object.entries(slopes).filter(([id, e]) => e.reading === undefined && !e.failed && slopeKeys[id] === e.key && !slopesReading.current.has(e.key));
+    if (!waiting.length) return;
+    const timer = setTimeout(() => {
+      const cutouts = shapes.flatMap((s) => (s.kind === "Cutout" && s.geometry ? [s.geometry] : []));
+      for (const [id, { key }] of waiting) {
+        const area = shapes.find((s) => s.id === id)?.geometry;
+        if (!area) continue;
+        slopesReading.current.add(key);
+        const done = (entry: SlopeEntry) => {
+          slopesReading.current.delete(key);
+          setSlopes((all) => (all[id]?.key === key ? { ...all, [id]: entry } : all));
+        };
+        const google = googleSlopeKey;
+        const asked = google ? { google: true } : {};
+        readSlope(area, cutouts)
+          .then((reading) => (reading === null && google ? readGoogleSlope(google, area, cutouts) : reading))
+          .then((reading) => done({ key, reading, ...asked }), () => done({ key, failed: true, ...asked }));
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [slopes, slopeKeys, shapes, googleSlopeKey]);
+  const groundSlope = drawingSlope(summary);
+  const bedSqft = lawn ? Number(lawnQuantities(summary.sections).bed_sqft) : 0;
+  const bedYards = (bedSqft * depthIn) / 12 / 27;
+  // The items a shape can be: a lawn's, paving's, or both.
+  const itemGroups: ItemGroup[] = [...(lawn ? LAWN_MENU : []), ...(paving ? PAVING_MENU : [])];
+  const itemGeometry = (kind: Shape["kind"]) => (kind === "Area" ? "area" : kind === "Cutout" ? "cutout" : kind === "Length" ? "line" : "count");
+  const hasItemsFor = (kind: Shape["kind"]) => itemGroups.some((g) => g.items.some((i) => i.geometry === itemGeometry(kind)));
   // Paving items and roof edges show in their own colors, the ones the legend and the sheet use.
   const mapColors = useMemo(
     () => ({
       ...Object.fromEntries(Object.entries(edges).map(([id, edge]) => [id, ROOF_EDGE_COLORS[edge]])),
-      ...Object.fromEntries(Object.entries(items).flatMap(([id, item]) => (pavingItem(item) ? [[id, pavingItem(item)!.color]] : []))),
+      ...Object.fromEntries(Object.entries(items).flatMap(([id, item]) => (takeoffItem(item) ? [[id, takeoffItem(item)!.color]] : []))),
     }),
     [items, edges],
   );
@@ -396,7 +477,7 @@ export function MeasurePage() {
     () => Object.fromEntries(summary.sections.flatMap((s) => (s.item === "stall_row" ? [[s.feature_id, `${stallsAlong(s.value)} stalls`]] : []))),
     [summary],
   );
-  const signature = JSON.stringify([shapes.map((s) => [s.kind, s.geometry]), shapes.map((s) => labels[s.id] ?? ""), title, depth, pitch, waste, pitches, edges, items, fromOsm]);
+  const signature = JSON.stringify([shapes.map((s) => [s.kind, s.geometry]), shapes.map((s) => labels[s.id] ?? ""), title, depth, pitch, waste, pitches, edges, items, fromOsm, shapes.map((s) => slopes[s.id]?.reading ?? null)]);
   const shapesDirty = shapes.length > 0 && signature !== savedSignature;
   // A reopened drawing starts out saved.
   useEffect(() => {
@@ -426,10 +507,14 @@ export function MeasurePage() {
       return typeof own === "string" && own && tidyPitch(own) !== roofPitch ? [[id, own]] : [];
     })));
     setEdges(Object.fromEntries(ids.flatMap((id, i) => (isRoofEdge(kept[i]?.properties?.edge) ? [[id, kept[i]!.properties!.edge as RoofEdge]] : []))));
-    setItems(Object.fromEntries(ids.flatMap((id, i) => (pavingItem(kept[i]?.properties?.item) ? [[id, String(kept[i]!.properties!.item)]] : []))));
+    setItems(Object.fromEntries(ids.flatMap((id, i) => (takeoffItem(kept[i]?.properties?.item) ? [[id, String(kept[i]!.properties!.item)]] : []))));
     setMeasured(Object.fromEntries(ids.flatMap((id, i) => {
       const value = kept[i]?.properties?.manual_value;
       return typeof value === "number" && value >= 0 ? [[id, value]] : [];
+    })));
+    setSlopes(Object.fromEntries(ids.flatMap((id, i) => {
+      const slope = kept[i]?.properties?.slope;
+      return slope && typeof slope === "object" ? [[id, { key: SAVED, reading: slope as GroundSlope }]] : [];
     })));
     ids.forEach((id) => knownIds.current.add(id));
     setFromOsm(ids.filter((_, i) => kept[i]?.properties?.source === "openstreetmap"));
@@ -684,13 +769,13 @@ export function MeasurePage() {
     setEdges(({ [id]: _, ...rest }) => (edge ? { ...rest, [id]: edge } : rest));
   const setItem = (id: string, item: string) =>
     setItems(({ [id]: _, ...rest }) => (item ? { ...rest, [id]: item } : rest));
-  /** Draw a paving item: its tool, and new shapes become it. Null goes back to plain shapes. */
+  /** Draw a paving or lawn item: its tool, and new shapes become it. Null goes back to plain shapes. */
   const pickItem = (item: PavingItem | null) => {
     tap.stop();
     setActiveEdge(null);
     setActiveItem(item);
     if (!item) return;
-    const next: Tool = item.geometry === "area" ? "polygon" : item.geometry === "line" ? "linestring" : "point";
+    const next: Tool = item.geometry === "area" ? "polygon" : item.geometry === "cutout" ? "cutout" : item.geometry === "line" ? "linestring" : "point";
     setTool(next);
     mapRef.current?.setTool(next);
     setSelected(null);
@@ -906,9 +991,20 @@ export function MeasurePage() {
     const credit = [imageryCredit(pictureOn), overlays.length && pictureOn !== "terrain" ? ELEVATION_CREDIT : null, shapes.some((sh) => fromOsm.includes(sh.id)) ? OSM_BUILDINGS_CREDIT : null].filter(Boolean).join(" · ");
     const cut = summary.sections.reduce((t, s) => (s.kind === "Cutout" ? t + s.value : t), 0);
     const cutRow = cut > 0 ? [{ color: "#ef4444", label: "Cut out", value: `−${formatNumber(cut)} sq ft`, shape: "area" as const }] : [];
-    const itemRows = PAVING_ITEMS.filter((item) => summary.sections.some((s) => s.item === item.id)).map((item) => ({ color: item.color, label: item.name, value: formatItemTotal(summary.sections, item), shape: item.geometry }));
+    const rowsFor = (catalog: readonly PavingItem[]) => catalog.filter((item) => summary.sections.some((s) => s.item === item.id)).map((item) => ({ color: item.color, label: item.name, value: formatItemTotal(summary.sections, item), shape: item.geometry === "cutout" ? ("area" as const) : item.geometry }));
+    const itemRows = rowsFor(PAVING_ITEMS);
+    const lawnRows = rowsFor(LAWN_ITEMS);
     let legend;
     if (itemRows.length) legend = [...itemRows, ...cutRow];
+    else if (lawnRows.length) {
+      // A lawn: its size and slope, its items, and what else was cut out (the house, the drive), not the beds again.
+      const other = summary.sections.reduce((t, s) => (s.kind === "Cutout" && !s.item ? t + s.value : t), 0);
+      legend = [
+        { color: "#22c55e", label: groundSlope.slope_pct === null ? "Lawn" : `Lawn, ${formatNumber(groundSlope.slope_pct, 0)}% slope`, value: `${formatNumber(summary.total_area_sqft)} sq ft`, shape: "area" as const },
+        ...lawnRows,
+        ...(other > 0 ? [{ color: "#ef4444", label: "Cut out", value: `−${formatNumber(other)} sq ft`, shape: "area" as const }] : []),
+      ];
+    }
     else if (squares !== null) {
       // A roof: its squares, each section at its pitch, and the edges in their colors.
       const areas = summary.sections.filter((s) => s.kind === "Area");
@@ -1025,6 +1121,41 @@ export function MeasurePage() {
   const p = ctx?.property;
   const rows = summary.sections.map((s, i) => ({ id: s.feature_id, kind: s.kind, value: s.value, unit: s.unit, color: shapes[i]?.color ?? "#999" }));
   const counts = rows.filter((r) => r.kind === "Count").length;
+  const lawnAreas = rows.filter((r) => r.kind === "Area");
+  /** A lawn's slope as its row (`always` false: only with more than one lawn) and its card say it. */
+  const shapeSlope = (id: string, always: boolean): React.ReactNode => {
+    const entry = slopes[id];
+    const slope = sections.get(id)?.slope;
+    if (!lawn || !entry) return null;
+    if (entry.failed) return <button type="button" className="link-btn" onClick={() => setSlopes((all) => ({ ...all, [id]: { key: slopeKeys[id] } }))}>Slope didn't load. Try again</button>;
+    if (entry.reading === undefined) return "Reading the slope…";
+    if (entry.reading === null) return always ? "No slope reading here" : "No slope reading here: pick one in its menu";
+    if (slope?.picked) return `${SLOPE_CHOICES[slope.picked].label}, picked by hand`;
+    return (always || lawnAreas.length > 1) && slope ? `${formatNumber(slope.mean_pct, 0)}% slope, ${formatNumber(slope.steep_pct, 0)}% steep${slope.from === "google" ? " (Google)" : ""}` : null;
+  };
+  /** A lawn's slope picked by hand where none could be read, or null to clear it. */
+  const pickSlope = (id: string, choice: SlopeChoice | null) =>
+    setSlopes((all) => ({ ...all, [id]: choice ? { key: slopeKeys[id], reading: pickedSlope(choice) } : { key: slopeKeys[id], reading: null, google: true } }));
+  const canPickSlope = (id: string) => lawn && Boolean(slopes[id]) && (Boolean(slopes[id].failed) || slopes[id].reading === null || Boolean(slopes[id].reading?.picked));
+  const slopeEntries = (id: string): MenuEntry[] => {
+    const picked = slopes[id]?.reading?.picked;
+    return [
+      ...SLOPE_CHOICE_IDS.map((c): MenuEntry => ({ label: SLOPE_CHOICES[c].label, description: SLOPE_CHOICES[c].hint, checked: picked === c, onSelect: () => pickSlope(id, c) })),
+      ...(picked ? [{ separator: true } as MenuEntry, { label: "Clear it", onSelect: () => pickSlope(id, null) }] : []),
+    ];
+  };
+  // The totals' Slope: the drawing's, or why there's none yet.
+  const slopeNote = !lawnAreas.length
+    ? "Draw the lawn"
+    : lawnAreas.some((r) => slopes[r.id]?.failed)
+      ? "Didn't load"
+      : lawnAreas.some((r) => slopes[r.id] && slopes[r.id].reading === undefined)
+        ? "Reading…"
+        : lawnAreas.some((r) => slopes[r.id]?.reading === null)
+          ? "US only"
+          : groundSlope.steep_pct !== null
+            ? `${formatNumber(groundSlope.steep_pct, 0)}% steep`
+            : "";
   const cutTotal = summary.sections.reduce((t, s) => (s.kind === "Cutout" ? t + s.value : t), 0);
   // Each roof section at the pitch it's measured at, for the squares line and the breakdown.
   const roofSections = summary.sections.filter((s) => s.kind === "Area").map((s) => ({ id: s.feature_id, label: nameOf(s.feature_id), sqft: s.value, pitch: tidyPitch(s.pitch ?? "") || tidyPitch(pitch) }));
@@ -1095,13 +1226,12 @@ export function MeasurePage() {
   const shapeMenu = (row: (typeof rows)[number]): MenuEntry[] => {
     const edge = edges[row.id];
     const at = (pitches[row.id] ?? "") || pitch;
-    const geometry = row.kind === "Area" ? "area" : row.kind === "Length" ? "line" : row.kind === "Count" ? "count" : null;
-    const item = itemFits(items[row.id], row.kind) ? pavingItem(items[row.id]) : null;
+    const item = itemFits(items[row.id], row.kind) ? takeoffItem(items[row.id]) : null;
     const entries: MenuEntry[] = [
       { label: "Show it on the map", icon: "pointer", onSelect: () => showShape(row.id) },
     ];
-    if (paving && geometry && row.kind !== "Cutout") {
-      entries.push({ label: "Takeoff item", icon: "paving", end: item?.name ?? "None", items: itemEntries({ current: item?.id ?? null, geometry, none: "No takeoff item", onPick: (i) => setItem(row.id, i?.id ?? "") }) });
+    if (hasItemsFor(row.kind)) {
+      entries.push({ label: paving ? "Takeoff item" : "Lawn item", icon: paving ? "paving" : "mower", end: item?.name ?? "None", items: itemEntries({ current: item?.id ?? null, geometry: itemGeometry(row.kind), groups: itemGroups, none: paving ? "No takeoff item" : "Not a lawn item", onPick: (i) => setItem(row.id, i?.id ?? "") }) });
     }
     if (roofing && row.kind === "Length") {
       entries.push({
@@ -1115,6 +1245,10 @@ export function MeasurePage() {
       });
     }
     if (roofing && (row.kind === "Area" || slopedEdge(edge))) entries.push({ label: "Pitch", icon: "pitch", end: at.trim() ? pitchLabel(at) : "Not set", onSelect: () => setPitchFor(row.id) });
+    if (row.kind === "Area" && canPickSlope(row.id)) {
+      const picked = slopes[row.id]?.reading?.picked;
+      entries.push({ label: "Slope", icon: "pitch", end: picked ? SLOPE_CHOICES[picked].label : "Not read", items: slopeEntries(row.id) });
+    }
     if (row.kind === "Area" || row.kind === "Cutout") {
       entries.push(
         row.kind === "Cutout"
@@ -1133,9 +1267,10 @@ export function MeasurePage() {
     const own = pitches[row.id] ?? "";
     const at = own || pitch;
     const showPitch = roofing && (row.kind === "Area" || slopedEdge(edge));
-    const item = paving && itemFits(items[row.id], row.kind) ? pavingItem(items[row.id]) : null;
+    const item = (paving || lawn) && itemFits(items[row.id], row.kind) ? takeoffItem(items[row.id]) : null;
     return [
       !nested && item?.name,
+      row.kind === "Area" && shapeSlope(row.id, false),
       section?.item === "stall_row" && `${stallsAlong(section.value)} stalls`,
       row.kind === "Area" && section?.uncut_value !== undefined && `${formatNumber(section.uncut_value)} sq ft before cutouts`,
       row.kind === "Cutout" && (row.value > 0 ? "Left out of the areas under it" : "Not over an area, so nothing comes off"),
@@ -1181,14 +1316,13 @@ export function MeasurePage() {
     const name = nameOf(row.id);
     const edge = edges[row.id];
     const section = sections.get(row.id);
-    const geometry = row.kind === "Area" ? "area" : row.kind === "Length" ? "line" : row.kind === "Count" ? "count" : null;
-    const item = paving && itemFits(items[row.id], row.kind) ? pavingItem(items[row.id]) : null;
+    const item = itemFits(items[row.id], row.kind) ? takeoffItem(items[row.id]) : null;
     const shape = shapes.find((s) => s.id === row.id);
     const ring = shape?.geometry?.type === "Polygon" ? (shape.geometry.coordinates as Position[][])[0] : null;
     const at = (pitches[row.id] ?? "") || pitch;
     const note =
       row.kind === "Area"
-        ? [`${formatNumber(row.value / 9, 1)} sq yd`, ring && `${formatNumber(mToFt(lineLengthM(ring)))} ft around`, section?.uncut_value !== undefined && `${formatNumber(section.uncut_value)} before cutouts`]
+        ? [`${formatNumber(row.value / 9, 1)} sq yd`, ring && `${formatNumber(mToFt(lineLengthM(ring)))} ft around`, section?.uncut_value !== undefined && `${formatNumber(section.uncut_value)} before cutouts`, shapeSlope(row.id, true)]
         : row.kind === "Cutout"
           ? [row.value > 0 ? "Left out of the areas under it" : "Not over an area, so nothing comes off"]
           : row.kind === "Length"
@@ -1203,12 +1337,12 @@ export function MeasurePage() {
         </div>
         <div className="measure-card-size num">{shapeSize(row)}</div>
         <MetaLine className="measure-card-note" parts={note} />
-        {paving && geometry && row.kind !== "Cutout" && (
+        {hasItemsFor(row.kind) && (
           <div className="measure-card-row">
             <span>Item</span>
             <Menu
-              items={itemEntries({ current: item?.id ?? null, geometry, none: "No takeoff item", onPick: (i) => setItem(row.id, i?.id ?? "") })}
-              label={`Takeoff item for ${name}: ${item?.name ?? "none"}. Change it`}
+              items={itemEntries({ current: item?.id ?? null, geometry: itemGeometry(row.kind), groups: itemGroups, none: paving ? "No takeoff item" : "Not a lawn item", onPick: (i) => setItem(row.id, i?.id ?? "") })}
+              label={`${paving ? "Takeoff" : "Lawn"} item for ${name}: ${item?.name ?? "none"}. Change it`}
               title={name}
               triggerClassName="measure-card-pick"
               trigger={<>{item && <ItemSwatch item={item} />}<span>{item?.name ?? "None"}</span><Icon name="chevronDown" size={14} /></>}
@@ -1224,6 +1358,18 @@ export function MeasurePage() {
               title={name}
               triggerClassName="measure-card-pick"
               trigger={<>{edge && <span className="paving-swatch" data-geometry="line" style={{ "--swatch": ROOF_EDGE_COLORS[edge] } as React.CSSProperties} />}<span>{edge ? EDGE_NAMES[edge] : "None"}</span><Icon name="chevronDown" size={14} /></>}
+            />
+          </div>
+        )}
+        {row.kind === "Area" && canPickSlope(row.id) && (
+          <div className="measure-card-row">
+            <span>Slope</span>
+            <Menu
+              items={slopeEntries(row.id)}
+              label={`Slope for ${name}: ${slopes[row.id]?.reading?.picked ? SLOPE_CHOICES[slopes[row.id].reading!.picked!].label : "not read"}. Pick it`}
+              title={name}
+              triggerClassName="measure-card-pick"
+              trigger={<><span>{slopes[row.id]?.reading?.picked ? SLOPE_CHOICES[slopes[row.id].reading!.picked!].label : "Pick it"}</span><Icon name="chevronDown" size={14} /></>}
             />
           </div>
         )}
@@ -1265,10 +1411,10 @@ export function MeasurePage() {
   // Every drawing tool, in one dock at the foot of the map.
   const dock = (
     <div className="measure-dock" role="toolbar" aria-label="Drawing tools">
-      {paving && (
+      {itemGroups.length > 0 && (
         <>
           <Menu
-            items={itemEntries({ current: activeItem?.id ?? null, search: itemSearch, none: "Plain shapes, no takeoff item", onPick: pickItem })}
+            items={itemEntries({ current: activeItem?.id ?? null, search: itemSearch, groups: itemGroups, none: paving ? "Plain shapes, no takeoff item" : "Plain shapes, no lawn item", onPick: pickItem })}
             search={{ value: itemSearch, onChange: setItemSearch, placeholder: "Find an item", label: "Find an item" }}
             label={`Next shape: ${activeItem?.name ?? "a plain shape"}. Change the takeoff item`}
             title="Next shape"
@@ -1276,7 +1422,7 @@ export function MeasurePage() {
             triggerClassName="measure-dock-item"
             trigger={
               <>
-                {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name="paving" size={16} />}
+                {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={16} />}
                 <span className="measure-dock-item-text"><span>Next shape</span><strong>{activeItem?.name ?? "Plain"}</strong></span>
                 <Icon name="chevronDown" size={14} />
               </>
@@ -1358,12 +1504,33 @@ export function MeasurePage() {
     <details key="depth" className="measure-extra" open={Boolean(depth) && !depthIn}>
       <summary>
         <Icon name="ruler" size={17} />
-        <span className="measure-extra-text"><strong>Depth</strong><span>{depthIn > 0 ? `${depthIn} in · ${formatNumber(cubicYards, 1)} cu yd${paving ? ` · ${formatNumber(asphaltTons, 1)} tons of asphalt` : ""}` : "For mulch, gravel and asphalt"}</span></span>
+        <span className="measure-extra-text"><strong>Depth</strong><span>{depthIn > 0 ? `${depthIn} in · ${bedSqft > 0 ? `${formatNumber(bedYards, 1)} cu yd of mulch in beds` : `${formatNumber(cubicYards, 1)} cu yd`}${paving ? ` · ${formatNumber(asphaltTons, 1)} tons of asphalt` : ""}` : "For mulch, gravel and asphalt"}</span></span>
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
         <Field label="Depth (in)"><DecimalInput className="input" inputMode="decimal" value={depth} onChange={(e) => setDepth(e.target.value.replace(/[^0-9.]/g, ""))} placeholder="2" style={{ maxWidth: 120 }} /></Field>
-        {depthIn > 0 && summary.total_area_sqft > 0 && <p className="measure-quiet">{formatNumber(cubicYards, 1)} cu yd at {depthIn}". Asphalt, about {formatNumber(asphaltTons, 1)} tons at 110 lb per sq yd per inch.</p>}
+        {depthIn > 0 && summary.total_area_sqft > 0 && (
+          <p className="measure-quiet">
+            {bedSqft > 0
+              ? `${formatNumber(bedYards, 1)} cu yd of mulch for ${formatNumber(bedSqft)} sq ft of beds at ${depthIn}".`
+              : lawn
+                ? `${formatNumber(cubicYards, 1)} cu yd at ${depthIn}".`
+                : `${formatNumber(cubicYards, 1)} cu yd at ${depthIn}". Asphalt, about ${formatNumber(asphaltTons, 1)} tons at 110 lb per sq yd per inch.`}
+          </p>
+        )}
+      </div>
+    </details>
+  );
+  const lawnCard = (
+    <details key="lawn" className="measure-extra" open={lawn} onToggle={(e) => { if (!lawnTrade && !lawnDrawing) showLawn(e.currentTarget.open); }}>
+      <summary>
+        <Icon name="mower" size={17} />
+        <span className="measure-extra-text"><strong>Lawn</strong><span>{lawn && groundSlope.slope_pct !== null ? `${formatNumber(groundSlope.slope_pct, 0)}% slope · ${formatNumber(groundSlope.steep_pct ?? 0, 0)}% steep` : "Beds, edging, trees and the ground's slope"}</span></span>
+        <Icon name="chevronDown" size={16} />
+      </summary>
+      <div className="measure-extra-body">
+        <p className="measure-quiet">Mark beds, edging, trees and obstacles with Next shape {phone ? "above" : "under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
+        <LawnAddOns />
       </div>
     </details>
   );
@@ -1592,6 +1759,12 @@ export function MeasurePage() {
                     <span className="measure-fig-value"><AnimatedNumber value={squares} format={TENTHS} /></span>
                     <span className="measure-fig-note">{roofPitches.length > 1 ? "mixed" : roofPitches[0] ? pitchLabel(roofPitches[0]) : "flat"}, {waste || 0}% waste</span>
                   </div>
+                ) : lawn ? (
+                  <div className="measure-fig">
+                    <span className="measure-fig-label">Slope</span>
+                    <span className="measure-fig-value">{groundSlope.slope_pct === null ? "–" : <><AnimatedNumber value={groundSlope.slope_pct} format={WHOLE} /><small>%</small></>}</span>
+                    {slopeNote && <span className="measure-fig-note">{slopeNote}</span>}
+                  </div>
                 ) : (
                   <div className="measure-fig">
                     <span className="measure-fig-label">Count</span>
@@ -1607,7 +1780,7 @@ export function MeasurePage() {
                   Nothing drawn yet. Pick <strong>Area</strong>, <strong>Line</strong> or <strong>Count</strong> {phone ? "above" : "under the map"}, then {touch ? "tap" : "click"} each corner. <strong>Cut out</strong> leaves the house or a bed out of an area.
                 </p>
               ) : (
-                <TakeoffList rows={rows} sections={summary.sections} items={items} edges={edges} roofing={roofing} unit={unit} selected={selected} row={shapeRow} />
+                <TakeoffList rows={rows} sections={summary.sections} items={items} edges={edges} roofing={roofing} lawn={lawn} unit={unit} selected={selected} row={shapeRow} />
               )}
             </div>
 
@@ -1617,8 +1790,11 @@ export function MeasurePage() {
             )}
 
             <div className="measure-extras">
+              {lawnTrade && !roofing && lawnCard}
               {depthCard}
               {!roofSteps && roofCard}
+              {/* Where it was when opened, so it doesn't jump: a business of another type's way in. */}
+              {!lawnTrade && (lawn || (!roofing && !paving && LAWN_OFFER_TRADES.has(company.trade_preset || "general"))) && lawnCard}
               {planShown && (
                 <details className="measure-extra" open={Boolean(plan.shown || plan.sending)}>
                   <summary>

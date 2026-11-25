@@ -26,6 +26,7 @@ import {
   type MapSettings,
   type StateImagery,
 } from "@crewtavo/core/imagery";
+import { DEP_SERVICE, STEEP_GRADE, US_BOX } from "@crewtavo/core/elevation";
 import type { RasterSourceSpecification } from "maplibre-gl";
 
 /** "naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street", or "state:VA". */
@@ -343,12 +344,10 @@ export async function checkGoogleKey(key: string): Promise<string | null> {
 // ---------------------------------------------------------------------------------------------
 
 export const ELEVATION_CREDIT = "Elevation courtesy of the U.S. Geological Survey (3D Elevation Program)";
-const DEP = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage";
+const DEP = `${DEP_SERVICE}/exportImage`;
 // 512px tiles: USGS draws each one on its own, so bigger tiles mean fewer seams between them.
 const depTiles = (rule: object, format: "jpg" | "png") =>
   `${DEP}?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=${format}&transparent=true&renderingRule=${encodeURIComponent(JSON.stringify(rule))}&f=image`;
-/** 3DEP covers the US and its territories; nothing is asked for outside this box. */
-const US_BOX: [number, number, number, number] = [-179.5, 17.5, -64.5, 71.5];
 const depSource = (tiles: string, attribution: string): RasterSourceSpecification =>
   // Drawn on request from about 1 m elevation, so it stays sharp up close.
   ({ type: "raster", tiles: [tiles], tileSize: 512, minzoom: 10, maxzoom: 20, bounds: US_BOX, attribution });
@@ -358,7 +357,7 @@ export const SLOPE_CLASSES = [
   { upTo: 2, color: "#60a5fa", label: "Flat, under 2%", note: "water can sit" },
   { upTo: 5, color: "#4ade80", label: "2–5%", note: "gentle" },
   { upTo: 10, color: "#facc15", label: "5–10%", note: "noticeable" },
-  { upTo: 33.3, color: "#fb923c", label: "10–33%", note: "steep" },
+  { upTo: STEEP_GRADE, color: "#fb923c", label: "10–33%", note: "hilly" },
   { upTo: Infinity, color: "#ef4444", label: "Over 33%", note: "steeper than 3:1, hard to mow" },
 ] as const;
 

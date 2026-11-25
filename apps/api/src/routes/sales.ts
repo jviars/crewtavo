@@ -5,29 +5,25 @@
  */
 import {
   ADMINS,
-  drawingSquares,
+  LAWN_ADD_ONS,
   evaluateFormula,
   FormulaError,
-  normalizePitch,
   OFFICE,
-  pitchProblem,
   SALES,
   seesInvoices,
-  summarizeFeatureCollection,
   validateFormula,
-  type FeatureCollection,
-  type MeasurementSummary,
 } from "@crewtavo/core";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
-import { appUrl, asJson, dbError, HttpError, isoDate, must, param, readJson, requireEnv, uuid } from "../lib/http";
+import { appUrl, dbError, HttpError, isoDate, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { clientLink } from "../lib/links";
 import { noAssistants } from "../lib/noAssistants";
 import { roofSegments } from "../services/external";
-import { applyMeasurement } from "../services/measurements";
+import { applyMeasurement, saveMeasurement } from "../services/measurements";
+import { addMissingServices, fillMissingFormulas } from "../services/presetServices";
 import { draftQuote, setQuoteAi } from "../services/quoteDrafts";
 import { SITE_PRICE_SET, sitePriceSet } from "../services/roofPackages";
 import { BATCH_JOBS, convertQuote, invoiceJobs, quoteFromRequest, remindInvoices, sendChoicesOf, sendInvoice, sendQuote, sendSchema, TEMPLATE_NOT_SENT, TOO_MANY_JOBS, type SalesScope } from "../services/sales";
@@ -246,42 +242,17 @@ sales.post("/measurements", requireUser, requireCompany([...SALES, "crew_lead"])
   if (body.snapshot_path && !new RegExp(`^${c.var.companyId}/measurements/[0-9a-f-]{36}\\.(jpg|png)$`).test(body.snapshot_path)) {
     throw new HttpError(400, "That map picture isn't one of this company's.");
   }
-  // Totals always come from the shapes, recomputed here; nothing the browser computed is trusted.
-  // Cutouts come off the areas under them, and each roof section can have its own pitch.
-  let summary: MeasurementSummary;
-  try {
-    summary = summarizeFeatureCollection(body.geojson as FeatureCollection, { pitch: body.roof_pitch });
-  } catch (error) {
-    if (error instanceof RangeError) throw new HttpError(400, error.message);
-    throw error;
-  }
-  const problem = pitchProblem(summary, body.roof_pitch);
-  if (problem) throw new HttpError(400, problem);
-  const raw = drawingSquares(summary, body.roof_pitch, body.waste_pct);
-  const squares = raw === null ? null : Math.round(raw * 100) / 100;
-  // As much as the columns hold: under a trillion square feet or feet, a hundred million squares.
-  if (summary.total_area_sqft >= 1e12 || summary.total_length_ft >= 1e12 || (squares ?? 0) >= 1e8) {
-    throw new HttpError(400, "This measurement is too large to save. Check the shapes and measured values.");
-  }
-  const { id, view, ...fields } = body;
-  const row = {
-    ...fields,
-    // Written the one way ("4/12" for 4-12 or 4:12), so the quote and the client read the same.
-    roof_pitch: fields.roof_pitch ? normalizePitch(fields.roof_pitch) : fields.roof_pitch,
-    ...(view ? { view: asJson(view) } : {}),
-    geojson: asJson(fields.geojson),
-    company_id: c.var.companyId,
-    sections: asJson(summary.sections),
-    total_area_sqft: summary.total_area_sqft,
-    total_area_sqyd: summary.total_area_sqyd,
-    total_length_ft: summary.total_length_ft,
-    roofing_squares: squares,
-  };
-  const result = id
-    ? await c.var.db.from("measurements").update(row).eq("id", id).eq("company_id", c.var.companyId).select("id").maybeSingle()
-    : await c.var.db.from("measurements").insert(row).select("id").single();
-  const saved = must(result, "Measurement not found.");
-  return c.json({ id: saved.id, ...summary, roofing_squares: squares }, id ? 200 : 201);
+  const saved = await saveMeasurement(c.var.db, c.var.companyId, body);
+  return c.json({ id: saved.id, ...saved.summary, roofing_squares: saved.squares }, body.id ? 200 : 201);
+});
+
+/**
+ * The lawn add-ons a price list is missing (matched by name): trees, obstacles, edging, steep ground
+ * and mulch from beds. One it has without a formula gets the add-on's formula.
+ */
+sales.post("/lawn/services", requireUser, requireCompany(ADMINS, "settings"), async (c) => {
+  const filled = await fillMissingFormulas(c.var.db, c.var.companyId, "lawn_exterior", LAWN_ADD_ONS);
+  return c.json({ added: await addMissingServices(c.var.db, c.var.companyId, "lawn_exterior", LAWN_ADD_ONS), filled });
 });
 
 sales.post("/formulas/evaluate", requireUser, requireCompany(), async (c) => {
