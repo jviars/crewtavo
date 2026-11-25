@@ -40,7 +40,8 @@ let loading: Promise<Sam> | null = null;
 export type Progress = (loaded: number, total: number) => void;
 
 async function modelBytes(url: string, progress: Progress, done: { loaded: number; total: number }): Promise<Uint8Array> {
-  const cache = await caches.open(CACHE).catch(() => null);
+  // Browsers only keep a cache for HTTPS pages (and localhost): at a plain http:// address it downloads each visit.
+  const cache = typeof caches === "undefined" ? null : await caches.open(CACHE).catch(() => null);
   const cached = await cache?.match(url);
   const res = cached ?? (await fetch(url));
   if (!res.ok) throw new Error("Couldn't download the paving model. Check the internet connection and try again.");
@@ -110,7 +111,7 @@ async function load(device: "gpu" | "cpu", progress: Progress): Promise<Sam> {
 /** The model, loaded once per page (downloaded once per browser), on the graphics card when it can be. */
 export function loadSam(progress: Progress = () => {}): Promise<Sam> {
   loading ??= (async (): Promise<Sam> => {
-    void caches.delete("crewtavo-models-v1").catch(() => {}); // SlimSAM, which this replaced
+    if (typeof caches !== "undefined") void caches.delete("crewtavo-models-v1").catch(() => {}); // SlimSAM, which this replaced
     // On the processor it still works, just slower, and the banner says so (TapOutline.tsx).
     if (!(await hasWebGpu())) return { ...(await load("cpu", progress)), slow: "no-webgpu" };
     try {

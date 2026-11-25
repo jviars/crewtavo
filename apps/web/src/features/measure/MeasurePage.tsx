@@ -43,7 +43,7 @@ import { AddressSearch, type ClientSuggestion, type PlaceSuggestion } from "./Ad
 import { boxAround, buildingAt, buildingsIn, BuildingsError, buildingsOn, OSM_BUILDINGS_CREDIT } from "./buildings";
 import { ShareDrawing, type DrawingRow } from "./drawings";
 import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, imageryUsable, isImageryId, mapKeys, openingImagery, OVERLAYS, probeImagery, resolveAuto, setMyDefault, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
-import { ImageryPicker } from "./ImageryPicker";
+import { imageryMenu, ImageryPicker, type ImageryPickerProps } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
 import { useTooLarge } from "../plans/UploadLimit";
@@ -697,6 +697,7 @@ export function MeasurePage() {
     goTo({ lat: s.lat, lng: s.lng, zoom: s.kind === "address" ? 19 : s.kind === "street" ? 17 : 15, country: s.country, place }, s.from === "google");
   };
   const locate = () => {
+    if (!window.isSecureContext) return toast.error("Browsers only share your location with HTTPS pages. Open Crewtavo at its https:// address, or search for the address.");
     if (!navigator.geolocation) return toast.error("This browser can't share its location. Search for the address instead.");
     navigator.geolocation.getCurrentPosition(
       (p) => mapRef.current?.jumpTo(p.coords.longitude, p.coords.latitude, 19),
@@ -1175,6 +1176,52 @@ export function MeasurePage() {
   const bannerOnMap = wide || extend.extended;
   // A phone's Measure is the map, full screen: its own bar over the top, the panel as a sheet.
   const phone = !wide && extend.extended;
+  // The sheet follows a finger on its head: up for the whole panel, down for the totals. A tap on the handle still switches.
+  const pull = useRef<{ pointer: number; y: number; from: number; moved: boolean } | null>(null);
+  const pulled = useRef(false);
+  const sheetPull = {
+    onPointerDown(e: React.PointerEvent<HTMLElement>) {
+      if (e.button !== 0 || (e.target as Element).closest("button:not(.measure-sheet-grab), a, input, select, textarea")) return;
+      const panel = e.currentTarget.closest<HTMLElement>(".measure-panel");
+      if (panel) pull.current = { pointer: e.pointerId, y: e.clientY, from: panel.offsetHeight, moved: false };
+    },
+    onPointerMove(e: React.PointerEvent<HTMLElement>) {
+      const p = pull.current;
+      const panel = e.currentTarget.closest<HTMLElement>(".measure-panel");
+      if (!p || p.pointer !== e.pointerId || !panel) return;
+      const dy = e.clientY - p.y;
+      if (!p.moved) {
+        if (Math.abs(dy) < 6) return;
+        p.moved = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        panel.dataset.pulling = "";
+      }
+      panel.style.height = `${Math.min(window.innerHeight - 70, Math.max(120, p.from - dy))}px`;
+    },
+    onPointerUp(e: React.PointerEvent<HTMLElement>) {
+      const p = pull.current;
+      pull.current = null;
+      if (!p?.moved) return;
+      const panel = e.currentTarget.closest<HTMLElement>(".measure-panel");
+      if (panel) {
+        panel.style.height = "";
+        delete panel.dataset.pulling;
+      }
+      // The handle's click follows its pointer up: this was a pull, not a tap.
+      pulled.current = true;
+      setTimeout(() => (pulled.current = false), 0);
+      const dy = e.clientY - p.y;
+      if (Math.abs(dy) > 40) setSheetOpen(dy < 0);
+    },
+    onPointerCancel(e: React.PointerEvent<HTMLElement>) {
+      pull.current = null;
+      const panel = e.currentTarget.closest<HTMLElement>(".measure-panel");
+      if (panel) {
+        panel.style.height = "";
+        delete panel.dataset.pulling;
+      }
+    },
+  };
   const panelName = roofSteps ? "Roof" : paving ? "Takeoff" : "Measurement";
   const ready = mapState === "ready";
   const drawingTool = tool !== "select" && !aligning && !tap.item;
@@ -1192,10 +1239,16 @@ export function MeasurePage() {
           !saved && <button key="unpick" type="button" className="link-btn" onClick={unpick}>Not for this client</button>,
         ]
       : undefined;
+  const imageryProps: ImageryPickerProps | null = imagery
+    ? { choice: choice ?? "auto", opening, showing: imagery, center, keys, isAdmin, streetMap, streetNames, houseNumbers, overlays, onPick: (next) => chooseImagery(next), onMakeDefault: makeDefault, onStreetNames: setStreetNames, onHouseNumbers: showHouseNumbers, onOverlay: toggleOverlay }
+    : null;
+  // A phone's bar has no room for the Imagery button: its choices are a sub menu of ⋯.
+  const phoneImagery = phone && imageryProps ? imageryMenu(imageryProps) : null;
   const more: MenuEntry[] = [
+    ...(phoneImagery ? [{ label: "Imagery", icon: "layers", end: phoneImagery.label, items: phoneImagery.items } satisfies MenuEntry, { separator: true } satisfies MenuEntry] : []),
     { label: "How to measure", icon: "help", kbd: "?", onSelect: () => setHelp(true) },
     { label: "Show all shapes", icon: "eye", kbd: "F", onSelect: () => mapRef.current?.fitShapes(), hidden: !shapes.length || !ready },
-    { label: "Go to where I am", icon: "navigation", onSelect: locate, hidden: !ready },
+    { label: "Go to where I am", icon: "navigation", onSelect: locate, hidden: !ready || phone },
     { separator: true },
     { label: "Clear every shape", icon: "trash", danger: true, onSelect: () => void clearAll(), hidden: !shapes.length },
   ];
@@ -1411,26 +1464,31 @@ export function MeasurePage() {
     </div>
   );
 
-  // Every drawing tool, in one dock at the foot of the map.
+  /** What the next shape is (a takeoff or lawn item, or plain), as a menu on whatever `trigger` is. */
+  const itemMenu = (triggerClassName: string, trigger: React.ReactNode) => (
+    <Menu
+      items={itemEntries({ current: activeItem?.id ?? null, search: itemSearch, groups: itemGroups, none: paving ? "Plain shapes, no takeoff item" : "Plain shapes, no lawn item", onPick: pickItem })}
+      search={{ value: itemSearch, onChange: setItemSearch, placeholder: "Find an item", label: "Find an item" }}
+      label={`Next shape: ${activeItem?.name ?? "a plain shape"}. Change the takeoff item`}
+      title="Next shape"
+      align="start"
+      triggerClassName={triggerClassName}
+      trigger={trigger}
+    />
+  );
+  // Every drawing tool, in one dock at the foot of the map. A phone picks the item on its drawing buttons, once a tool's chosen.
   const dock = (
     <div className="measure-dock" role="toolbar" aria-label="Drawing tools">
-      {itemGroups.length > 0 && (
+      {itemGroups.length > 0 && !phone && (
         <>
-          <Menu
-            items={itemEntries({ current: activeItem?.id ?? null, search: itemSearch, groups: itemGroups, none: paving ? "Plain shapes, no takeoff item" : "Plain shapes, no lawn item", onPick: pickItem })}
-            search={{ value: itemSearch, onChange: setItemSearch, placeholder: "Find an item", label: "Find an item" }}
-            label={`Next shape: ${activeItem?.name ?? "a plain shape"}. Change the takeoff item`}
-            title="Next shape"
-            align="start"
-            triggerClassName="measure-dock-item"
-            trigger={
-              <>
-                {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={16} />}
-                <span className="measure-dock-item-text"><span>Next shape</span><strong>{activeItem?.name ?? "Plain"}</strong></span>
-                <Icon name="chevronDown" size={14} />
-              </>
-            }
-          />
+          {itemMenu(
+            "measure-dock-item",
+            <>
+              {activeItem ? <ItemSwatch item={activeItem} /> : <Icon name={paving ? "paving" : "mower"} size={16} />}
+              <span className="measure-dock-item-text"><span>Next shape</span><strong>{activeItem?.name ?? "Plain"}</strong></span>
+              <Icon name="chevronDown" size={14} />
+            </>,
+          )}
           <span className="measure-dock-sep measure-dock-item-sep" aria-hidden="true" />
         </>
       )}
@@ -1532,7 +1590,7 @@ export function MeasurePage() {
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
-        <p className="measure-quiet"><strong>Find</strong> outlines the lawn: put a box round the yard. Mark beds, edging, trees and obstacles with Next shape {phone ? "above" : "under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
+        <p className="measure-quiet"><strong>Find</strong> outlines the lawn: put a box round the yard. Mark beds, edging, trees and obstacles {phone ? "by picking Area, Line or Count, then tapping its name" : "with Next shape under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
         <LawnAddOns />
       </div>
     </details>
@@ -1580,9 +1638,7 @@ export function MeasurePage() {
               <span className="measure-topbar-status" data-state={savedClean ? "saved" : dirty ? "dirty" : undefined}>{status ?? (p ? addressLine(p) : "Not saved yet")}</span>
             </div>
             <button type="button" className="measure-round" aria-label="Search an address or client" aria-pressed={searchOpen} onClick={() => setSearchOpen(!searchOpen)}><Icon name="search" size={19} /></button>
-            {imagery && (
-              <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} houseNumbers={houseNumbers} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onHouseNumbers={showHouseNumbers} onOverlay={toggleOverlay} />
-            )}
+            <button type="button" className="measure-round" aria-label="Go to where I am" disabled={!ready} onClick={locate}><Icon name="navigation" size={19} /></button>
             <Menu items={more} title={title || "Measure"} triggerClassName="measure-round" />
           </div>
         )}
@@ -1608,9 +1664,7 @@ export function MeasurePage() {
           </div>
         ) : (
           <div className="measure-map-wrap">
-            {imagery && !phone && <div className="measure-imagery">
-              <ImageryPicker choice={choice ?? "auto"} opening={opening} showing={imagery} center={center} keys={keys} isAdmin={isAdmin} streetMap={streetMap} streetNames={streetNames} houseNumbers={houseNumbers} overlays={overlays} onPick={(next) => chooseImagery(next)} onMakeDefault={makeDefault} onStreetNames={setStreetNames} onHouseNumbers={showHouseNumbers} onOverlay={toggleOverlay} />
-            </div>}
+            {imageryProps && !phone && <div className="measure-imagery"><ImageryPicker {...imageryProps} /></div>}
             {mapState === "loading" && (
               <div className="measure-map-skeleton" aria-label="Loading map"><Skeleton height="100%" radius={0} /><span className="measure-map-loading"><span className="spinner" style={{ width: 14, height: 14 }} />Loading imagery…</span></div>
             )}
@@ -1650,7 +1704,7 @@ export function MeasurePage() {
                   </div>
                   <div className="measure-mapgroup">
                     {shapes.length > 0 && <button type="button" className="measure-round-btn" onClick={() => mapRef.current?.fitShapes()} aria-label="Show all shapes" title={touch ? "Show all shapes" : "Show all shapes (F)"}><Icon name="eye" size={17} /></button>}
-                    <button type="button" className="measure-round-btn" onClick={locate} aria-label="Go to where I am" title="Go to where I am"><Icon name="navigation" size={17} /></button>
+                    {!phone && <button type="button" className="measure-round-btn" onClick={locate} aria-label="Go to where I am" title="Go to where I am"><Icon name="navigation" size={17} /></button>}
                     {extend.available && wide && (
                       <button type="button" className="measure-round-btn" onClick={() => extend.setExtended(!extend.extended)} title={extend.extended ? "Back to the page" : "Fill the screen with the map"} aria-label="Full-screen map" aria-pressed={extend.extended}>
                         <Icon name={extend.extended ? "minimize" : "maximize"} size={17} />
@@ -1674,7 +1728,13 @@ export function MeasurePage() {
                   <>
                     <span className="measure-crosshair" aria-hidden="true" />
                     <div className="measure-touch" role="group" aria-label="Place points">
-                      <div className="measure-touch-head">{drawSwatch}<strong>{drawWhat}</strong><span className="num">{drawSoFar}</span></div>
+                      <div className="measure-touch-head">
+                        {/* What it's drawn as: tap to make it a bed, a tree, asphalt... (not mid-shape, which a new tool would drop). */}
+                        {itemGroups.length > 0 && !drawing && !activeEdge
+                          ? itemMenu("measure-touch-item", <>{drawSwatch}<strong>{drawItem ? drawWhat : `Plain ${drawWhat.toLowerCase()}`}</strong><Icon name="chevronDown" size={15} /></>)
+                          : <>{drawSwatch}<strong>{drawWhat}</strong></>}
+                        <span className="num">{drawSoFar}</span>
+                      </div>
                       <p className="measure-touch-note" role="status" aria-live="polite">
                         {tool === "point" ? "Move the map to put the cross on each one, then tap Add count." : drawing ? "Move the map to the next corner and tap Add point. Tap the first corner, or Finish, to close it." : "Move the map to put the cross on the first corner, then tap Add point."}
                       </p>
@@ -1701,8 +1761,8 @@ export function MeasurePage() {
         {ready && !bannerOnMap && mapBanner}
         <aside className="measure-panel" aria-label={panelName}>
           <div className="measure-panel-scroll">
-            <div className="measure-panel-head">
-              {phone && <button type="button" className="measure-sheet-grab" aria-label={sheetOpen ? "Show less of the panel" : "Show the whole panel"} aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)} />}
+            <div className="measure-panel-head" {...(phone ? sheetPull : {})}>
+              {phone && <button type="button" className="measure-sheet-grab" aria-label={sheetOpen ? "Show less of the panel" : "Show the whole panel"} aria-expanded={sheetOpen} onClick={() => (pulled.current ? (pulled.current = false) : setSheetOpen(!sheetOpen))} />}
               <h2>{panelName}</h2>
               {(paving || rows.some((r) => r.kind === "Area")) && !roofSteps && (
                 <div className="segmented measure-unit" role="group" aria-label="Show areas in">

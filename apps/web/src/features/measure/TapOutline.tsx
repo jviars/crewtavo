@@ -504,8 +504,13 @@ export function padBox(points: Array<[number, number] | number[]>, width: number
   return [Math.max(0, x0 - m), Math.max(0, y0 - m), Math.min(width, x1 + m), Math.min(height, y1 + m)];
 }
 
-/** What to say when the browser has no WebGPU, here and in the Find paving dialog. */
-const SLOW_NO_WEBGPU = "This browser can't run the model on the graphics card (it doesn't offer WebGPU), so it runs on the processor: each new view or box takes about 10 seconds instead of under one. Chrome, Edge and Safari 26 are fast.";
+/** What to say when the model can't use the graphics card. Browsers only offer WebGPU to HTTPS pages (and localhost). */
+const slowNote = (slow: "no-webgpu" | "gpu-failed") =>
+  slow === "gpu-failed"
+    ? "The graphics card wouldn't run the model, so it's on the processor: about 10 seconds for each new view or box."
+    : window.isSecureContext
+      ? "This browser has no WebGPU, so the model runs on the processor: about 10 seconds for each new view or box. Chrome, Edge and Safari 26 are fast."
+      : "This page isn't on HTTPS, so the browser keeps the model off the graphics card: about 10 seconds for each new view or box. Open Crewtavo at its https:// address to make it fast.";
 
 /** Over the map while tap to outline is on: what it's doing, what taps do, and Done. */
 export function TapBanner({ tap, choices }: { tap: TapOutline; choices: TapChoice[] }) {
@@ -559,7 +564,7 @@ export function TapBanner({ tap, choices }: { tap: TapOutline; choices: TapChoic
       {tap.slow && (
         <span className="measure-tap-slow" role="note">
           <Icon name="alert" size={14} />
-          <span>{tap.slow === "no-webgpu" ? SLOW_NO_WEBGPU : "The graphics card wouldn't run the model, so it's running on the processor instead: each new view or box takes about 10 seconds, where the graphics card takes under one."}</span>
+          <span>{slowNote(tap.slow)}</span>
         </span>
       )}
     </div>

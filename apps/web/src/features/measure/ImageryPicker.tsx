@@ -4,7 +4,8 @@
  * to choose yourself, then what lies on top (slope, contours, street names, house numbers) in a sub
  * menu. A state's sharper imagery is listed when the map is over that state; Esri and Google say how
  * to turn them on when there's no key. What Measure opens on is marked Default, and whatever's picked
- * can become this person's default. It's the app's Menu, so a phone gets it as a bottom sheet.
+ * can become this person's default. It's the app's Menu, so a phone gets it as a bottom sheet; on a
+ * phone's full-screen map it's a sub menu of the map's ⋯ menu instead of a button (imageryMenu).
  */
 import { STATE_IMAGERY, stateImageryAt } from "@crewtavo/core/imagery";
 import { useState } from "react";
@@ -17,9 +18,7 @@ import {
 } from "./imagery";
 import { Select } from "@/components/ui/Select";
 
-export function ImageryPicker({
-  choice, opening, showing, center, keys, isAdmin, streetMap, streetNames, houseNumbers, overlays, onPick, onMakeDefault, onStreetNames, onHouseNumbers, onOverlay,
-}: {
+export interface ImageryPickerProps {
   choice: ImageryChoice;
   /** What Measure opens on for this person (their default, the team's, or Auto). */
   opening: ImageryChoice;
@@ -38,7 +37,12 @@ export function ImageryPicker({
   onStreetNames: (show: boolean) => void;
   onHouseNumbers: (show: boolean) => void;
   onOverlay: (id: OverlayId, on: boolean) => void;
-}) {
+}
+
+/** The imagery choices as menu entries, with the name of what's showing and a note for the menu's foot. */
+export function imageryMenu({
+  choice, opening, showing, center, keys, isAdmin, streetMap, streetNames, houseNumbers, overlays, onPick, onMakeDefault, onStreetNames, onHouseNumbers, onOverlay,
+}: ImageryPickerProps): { items: MenuEntry[]; label: string; note: string | null } {
   const here = center ? stateImageryAt(center.lng, center.lat) : [];
   const now = showing ? imageryInfo(showing) : null;
   const tags = (value: ImageryChoice) => (value === opening ? "Default" : undefined);
@@ -99,19 +103,24 @@ export function ImageryPicker({
     },
   ];
   const label = choice === "auto" ? (now ? `${AUTO_NAME} · ${now.name}` : AUTO_NAME) : now?.name ?? imageryInfo(choice).name;
+  const note = here.length ? null : `Sharper state imagery is listed here when the map is over one of these: ${STATE_IMAGERY.map((s) => s.state).join(", ")}.`;
+  return { items, label, note };
+}
 
+export function ImageryPicker(props: ImageryPickerProps) {
+  const { items, label, note } = imageryMenu(props);
   return (
     <Menu
       items={items}
       label={`Imagery: ${label}`}
       title="Imagery"
       triggerClassName="btn btn-sm btn-ghost imagery-button"
-      footer={here.length ? undefined : { text: <span className="imagery-foot">Sharper state imagery is listed here when the map is over one of these: {STATE_IMAGERY.map((s) => s.state).join(", ")}.</span> }}
+      footer={note ? { text: <span className="imagery-foot">{note}</span> } : undefined}
       trigger={
         <>
           <Icon name="layers" size={15} />
           <span className="imagery-button-label">{label}</span>
-          {overlays.length > 0 && <span className="imagery-button-count">{overlays.length}</span>}
+          {props.overlays.length > 0 && <span className="imagery-button-count">{props.overlays.length}</span>}
           <Icon name="chevronDown" size={14} />
         </>
       }
