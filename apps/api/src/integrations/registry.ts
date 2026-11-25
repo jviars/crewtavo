@@ -223,7 +223,7 @@ export const CATALOG: CatalogEntry[] = [
     id: "fal",
     name: "fal.ai",
     category: "AI",
-    description: "Find paving on the aerial in one tap: asphalt, concrete and stalls outlined for you, with your own fal.ai account.",
+    description: "Find everything on the aerial in one tap: asphalt, concrete and stalls, or a lawn with its trees and play sets, with your own fal.ai account.",
     auth: "api_key",
     docs: "https://crewtavo.com/docs/connections/fal/",
     available: () => true,

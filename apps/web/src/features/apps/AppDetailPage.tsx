@@ -640,7 +640,7 @@ function uninstallBody(app: AppRow, counts: { calendars: number; teamPlans?: boo
   }
   if (app.id === "abc_supply") return `Estimates stop getting prices from ABC, and your ABC app's keys are removed from Crewtavo. The materials in your price list and the prices already on estimates stay. ${again}`;
   if (app.id === "lob") return `Postcard campaigns stop, including any being mailed now, and your Lob key is removed from Crewtavo. Cards Lob already made are still mailed. ${again}`;
-  if (app.id === "fal") return `Find paving stops working, and your fal.ai key is removed from Crewtavo. Shapes it already found stay on your drawings. ${again}`;
+  if (app.id === "fal") return `Find everything in view stops working, and your fal.ai key is removed from Crewtavo. Shapes it already found stay on your drawings. ${again}`;
   if (app.category === "AI") {
     const parts = [];
     if (hasAccount(app)) parts.push(`Your ${app.id === "chatgpt" ? "OpenAI" : "Anthropic"} key is removed, so Crewtavo's AI stops using it.`);
@@ -802,7 +802,7 @@ export function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) 
     <p className={kit.note}>
       {app.id === "anthropic" ? "Crewtavo's writing help, answers from your guides and receipt reading use this key when you add one. " : null}
       {openai && !openaiSteps ? <>Crewtavo's writing help, answers from your guides and receipt reading use this key. <a href={OPENAI_BILLING} target="_blank" rel="noreferrer">Check your OpenAI credit</a>. </> : null}
-      {fal && !falSteps ? <>Find paving is on the measuring map, next to the takeoff items. <a href={FAL_BILLING} target="_blank" rel="noreferrer">Check your fal.ai credit</a>. </> : null}
+      {fal && !falSteps ? <>Find everything in view is in Measure, in the panel beside the map. <a href={FAL_BILLING} target="_blank" rel="noreferrer">Check your fal.ai credit</a>. </> : null}
       {stripe ? "Crewtavo adds the webhook it needs to your Stripe account. " : null}
       {app.status === "connected" && app.account_label && (!stripe || app.stripe?.own) ? `Saved: ${app.account_label}.` : "It's stored encrypted and never shown again."}
       {stripe && app.stripe?.own ? <> To switch keys, <a href={STRIPE_NEW_KEY} target="_blank" rel="noreferrer">get a new one from Stripe</a>.</> : null}
@@ -828,7 +828,7 @@ export function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) 
       )}
       {falSteps && (
         <>
-          <p className={kit.note}>About two minutes. fal.ai bills you directly: Find paving costs about half a cent for each thing it looks for, so $5 of credit covers hundreds of lots.</p>
+          <p className={kit.note}>About two minutes. fal.ai bills you directly: Find everything in view costs about half a cent for each thing it looks for, so $5 of credit covers hundreds of lots and lawns.</p>
           <Steps>
             <Step>
               <span>Open fal.ai and sign in with Google or GitHub (or make an account).</span>

@@ -178,7 +178,7 @@ account.get("/me", requireUser, async (c) => {
         ai_connected: staff && (withAiKey.has(m.company_id) || plans.some((p) => p.company_id === m.company_id && p.problem !== "sign_in")),
         // Their own ChatGPT plan is answering what they ask (nothing in its way): pages say so.
         chatgpt_plan: staff && plans.some((p) => p.company_id === m.company_id && !p.problem),
-        // Apps → fal.ai: Find paving on the measuring map.
+        // Apps → fal.ai: Find everything in view on the measuring map.
         fal_connected: staff && withFal.has(m.company_id),
         terms_accepted: agreed.has(m.company_id),
         // Only the owner is asked to connect Railway at sign-in.

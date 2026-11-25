@@ -1,7 +1,10 @@
 /**
- * Tap to outline: Find paving for free. SAM 2.1 runs in this browser (samLocal.ts) and outlines the
- * pavement under a tap, or inside a box dragged around a lot, as an area of the chosen takeoff item.
- * There's no account or key, and the aerial isn't sent anywhere.
+ * Tap to outline: Find for free, for paving and lawns. SAM 2.1 runs in this browser (samLocal.ts) and
+ * outlines the pavement or grass under a tap, or inside a box dragged around a lot or yard, as an area
+ * of the chosen takeoff item (a lawn is a plain area, with the shade under its trees kept in: lawnShape).
+ * There's no account or key, and the aerial isn't sent anywhere. The model outlines what's tapped or
+ * boxed; it can't be asked for trees or play sets by name, which is what fal.ai's SAM 3 adds
+ * (FindInView.tsx).
  *
  * - A single tap is ambiguous to the model (this aisle, this lot, or all the pavement around), and a
  *   box isn't. So where OpenStreetMap has the lot mapped, a tap on it asks about the lot's box.
@@ -35,6 +38,13 @@ import { decode, embed, hasWebGpu, loadSam, pickMask, SAM_GRID, SAM_SIZE, type E
 
 /** What a tap can outline: the takeoff items that are areas. */
 export const TAP_ITEMS = PAVING_ITEMS.filter((i) => i.geometry === "area");
+/** A lawn: what a tap outlines on a lawn drawing. Not a takeoff item: a plain area is the lawn. */
+export const LAWN_TAP = "lawn";
+/** What the banner offers to outline as: a lawn, or the paving items. */
+export interface TapChoice { id: string; name: string }
+/** How the banner and its messages say what's outlined: grass in a yard, or pavement in a lot. */
+const wordsFor = (item: string | null) =>
+  item === LAWN_TAP ? { surface: "grass", place: "yard", leaveOut: "a bed, a patio, the drive" } : { surface: "pavement", place: "lot", leaveOut: "an island, a building, parked cars" };
 /** Items a whole mapped lot is the likely answer for (a patch or a sidewalk inside one isn't). */
 const LOT_ITEMS = new Set(["asphalt", "sealcoat", "gravel"]);
 /** Too small to be worth a shape, in square feet. */
@@ -107,6 +117,15 @@ export function tidy(polygons: Polygons): Polygons {
 export function withoutScraps(polygons: Polygons): Polygons {
   const biggest = Math.max(0, ...polygons.map((p) => sqft([p[0]])));
   return polygons.filter((p) => sqft([p[0]]) >= biggest * 0.03);
+}
+
+/**
+ * A lawn as the aerial shows it, made into the lawn that's mowed: the gaps the model leaves in the
+ * grass filled (tree canopy and shade over it, which still get mowed), then the buildings on it cut
+ * out. Free (a tap or a box) and fal.ai (FindInView.tsx) both shape lawns this way.
+ */
+export function lawnShape(polygons: Polygons, buildings: Position[][][]): Guess {
+  return withoutBuildings(polygons.map((p) => [p[0]]), buildings);
 }
 
 /** A guess with the buildings on it cut out, and whether that changed it (for the OpenStreetMap credit). */
@@ -254,7 +273,7 @@ export function useTapOutline({
   };
 
   /** The model's guesses for a prompt, as map polygons without the buildings, smallest first. */
-  const guessesFor = async (p: Picture, prompt: Prompt, { seed, prefer, lot }: { seed: [number, number] | null; prefer: "biggest" | "surest"; lot: boolean }): Promise<{ guesses: Guess[]; index: number }> => {
+  const guessesFor = async (p: Picture, prompt: Prompt, { seed, prefer, lot, lawn }: { seed: [number, number] | null; prefer: "biggest" | "surest"; lot: boolean; lawn: boolean }): Promise<{ guesses: Guess[]; index: number }> => {
     const { view, embedding } = p;
     const { width, height } = view.canvas;
     const [gx, gy] = [SAM_GRID / width, SAM_GRID / height];
@@ -271,7 +290,7 @@ export function useTapOutline({
           rings = rings.filter((r) => ringArea(r[0]) >= biggest * 0.05);
         }
         const polygons = rings.map((rs) => rs.map((r) => r.map(([x, y]) => view.at(x / gx, y / gy))));
-        const guess = withoutBuildings(tidy(polygons), buildings);
+        const guess = lawn ? lawnShape(tidy(polygons), buildings) : withoutBuildings(tidy(polygons), buildings);
         return { ...guess, polygons: withoutScraps(tidy(guess.polygons)), score: answers.scores[i] };
       })
       .map((g) => ({ ...g, area: areaOf(g.polygons) }))
@@ -284,7 +303,9 @@ export function useTapOutline({
       if (prev && g.area - prev.area < prev.area * 0.03) kept[kept.length - 1] = g.score > prev.score ? g : prev;
       else kept.push(g);
     }
-    const index = pickMask(kept.map((g) => ({ cells: g.area, score: g.score })), { prefer });
+    // A box round a yard means all the grass in it. The model is least sure of that guess on a lawn
+    // (shade and trees break it up), so it starts there anyway; Smaller is a click away.
+    const index = lawn && !seed ? kept.length - 1 : pickMask(kept.map((g) => ({ cells: g.area, score: g.score })), { prefer });
     return { guesses: kept.map(({ polygons, osm }) => ({ polygons, osm })), index };
   };
 
@@ -359,8 +380,8 @@ export function useTapOutline({
         }
       }
       // Taking out asks what the thing under the tap is (an island, a row of cars), so the surest guess.
-      const { guesses, index } = await guessesFor(p, { points: [{ x, y, positive: true }], box }, { seed: [x, y], prefer: kind === "add" ? "biggest" : "surest", lot: kind === "add" && LOT_ITEMS.has(as) });
-      if (index < 0) return void toast.info("Nothing to outline there. Tap the middle of the pavement, or drag a box around the lot.");
+      const { guesses, index } = await guessesFor(p, { points: [{ x, y, positive: true }], box }, { seed: [x, y], prefer: kind === "add" ? "biggest" : "surest", lot: kind === "add" && LOT_ITEMS.has(as), lawn: as === LAWN_TAP });
+      if (index < 0) return void toast.info(`Nothing to outline there. Tap the middle of the ${wordsFor(as).surface}, or drag a box around the ${wordsFor(as).place}.`);
       const pins = [...(base?.pins ?? []), { at, out: kind === "out" }];
       apply({ base, kind, guesses, index, item: base?.item ?? as, pins }, index);
     });
@@ -376,8 +397,8 @@ export function useTapOutline({
       // Read close up: the box and a margin round it, so the model sees where the lot ends.
       const p = await crop(padBounds([Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])], 0.12), null);
       const box = padBox([p.view.px(a), p.view.px(b)], p.view.canvas.width, p.view.canvas.height, 0);
-      const { guesses, index } = await guessesFor(p, { points: [], box }, { seed: null, prefer: "biggest", lot: LOT_ITEMS.has(as) });
-      if (index < 0) return void toast.info("Nothing to outline in that box. Drag it around the pavement, a little bigger than the lot.");
+      const { guesses, index } = await guessesFor(p, { points: [], box }, { seed: null, prefer: "biggest", lot: LOT_ITEMS.has(as), lawn: as === LAWN_TAP });
+      if (index < 0) return void toast.info(`Nothing to outline in that box. Drag it around the ${wordsFor(as).surface}, a little bigger than the ${wordsFor(as).place}.`);
       const base = current();
       apply({ base, kind: "add", guesses, index, item: base?.item ?? as, pins: base?.pins ?? [] }, index);
       // Next, taps add to it or take out of it.
@@ -392,7 +413,7 @@ export function useTapOutline({
       () => !busy.current && setStatus("ready"),
       (error) => {
         setStatus("ready");
-        toast.error(error instanceof Error ? error.message : "Couldn't get the paving model ready. Try again.");
+        toast.error(error instanceof Error ? error.message : "Couldn't get the outlining model ready. Try again.");
       },
     );
   }, []);
@@ -487,8 +508,11 @@ export function padBox(points: Array<[number, number] | number[]>, width: number
 const SLOW_NO_WEBGPU = "This browser can't run the model on the graphics card (it doesn't offer WebGPU), so it runs on the processor: each new view or box takes about 10 seconds instead of under one. Chrome, Edge and Safari 26 are fast.";
 
 /** Over the map while tap to outline is on: what it's doing, what taps do, and Done. */
-export function TapBanner({ tap }: { tap: TapOutline }) {
+export function TapBanner({ tap, choices }: { tap: TapOutline; choices: TapChoice[] }) {
   if (!tap.item) return null;
+  const { surface, place, leaveOut } = wordsFor(tap.item);
+  // One thing to outline (a lawn business's lawn): no menu, and no "as".
+  const as = choices.length > 1 ? " as" : "";
   const mb = (bytes: number) => (bytes / 1_000_000).toFixed(1);
   const { status, progress, mode, active } = tap;
   const ready = status === "ready";
@@ -498,30 +522,30 @@ export function TapBanner({ tap }: { tap: TapOutline }) {
       {ready ? <Icon name="sparkle" size={16} /> : <span className="spinner" style={{ width: 16, height: 16 }} />}
       <span className="grow">
         {status === "loading"
-          ? <>Getting the free paving model{progress?.total ? `: ${mb(progress.loaded)} of ${mb(progress.total)} MB` : ""}. It downloads once, then stays in this browser.</>
+          ? <>Getting the free outlining model{progress?.total ? `: ${mb(progress.loaded)} of ${mb(progress.total)} MB` : ""}. It downloads once, then stays in this browser.</>
           : status === "reading"
             ? "Reading the aerial in view…"
             : status === "working"
               ? "Outlining…"
               : boxed
-                ? <><strong>Drag the corners</strong> to fit the lot, then press <strong>Outline</strong>.</>
+                ? <><strong>Drag the corners</strong> to fit the {place}, then press <strong>Outline</strong>.</>
                 : mode === "box"
-                  ? <><strong>Click two corners</strong> of a box around the lot to outline it as</>
+                  ? <><strong>Click two corners</strong> of a box around the {place} to outline it{as}</>
                   : mode === "out"
-                    ? <><strong>Tap what to leave out</strong> of this outline: an island, a building, parked cars</>
+                    ? <><strong>Tap what to leave out</strong> of this outline: {leaveOut}</>
                     : active
-                      ? <><strong>Tap more</strong> to add to this outline, as</>
-                      : <><strong>Tap the pavement</strong> to outline it as</>}
+                      ? <><strong>Tap more</strong> to add to this outline{as ? ", as" : ""}</>
+                      : <><strong>Tap the {surface}</strong> to outline it{as}</>}
       </span>
-      {mode !== "out" && (
+      {mode !== "out" && choices.length > 1 && (
         <Select className="select measure-edge" value={tap.item} onChange={(e) => tap.setItem(e.target.value)} aria-label="Outline as">
-          {TAP_ITEMS.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          {choices.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
         </Select>
       )}
       <div className="segmented measure-tap-modes" role="group" aria-label="What taps do">
         <button type="button" aria-pressed={mode === "add"} onClick={() => tap.setMode("add")} title="Tap to outline, or to add to the outline">Add</button>
         <button type="button" aria-pressed={mode === "out"} onClick={() => tap.setMode("out")} disabled={!active} title="Tap to take something out of the outline (or Alt-tap)">Take out</button>
-        <button type="button" aria-pressed={mode === "box"} onClick={() => tap.setMode("box")} title="Put a box round a lot, then press Outline">Box</button>
+        <button type="button" aria-pressed={mode === "box"} onClick={() => tap.setMode("box")} title={`Put a box round the ${place}, then press Outline`}>Box</button>
       </div>
       {boxed && <Button size="sm" onClick={tap.clearBox} disabled={!ready} title="Take the box away to put another">Clear box</Button>}
       {tap.resize && mode !== "box" && (

@@ -49,14 +49,14 @@ import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type Measure
 import { useTooLarge } from "../plans/UploadLimit";
 import { isRoofingCompany } from "../roofing/data";
 import { isSavedPlan, LineUpBanner, PlanCard, usePlanOnMap } from "./PlanOnMap";
-import { FindPaving } from "./FindPaving";
+import { FindInView } from "./FindInView";
 import { googleElevationKey, readGoogleSlope } from "./googleElevation";
 import { LawnAddOns } from "./LawnItems";
 import { formatItemTotal, ItemSwatch, itemEntries, LAWN_MENU, PAVING_MENU, type AreaUnit, type ItemGroup } from "./PavingItems";
 import { MeasurePitch, PitchPicker, pitchLabel, riseOf, STEEP_FROM } from "./RoofPitch";
 import { EDGE_HINTS, RoofSteps } from "./RoofSteps";
 import type { SheetInfo } from "./takeoffSheet";
-import { TAP_ITEMS, TapBanner, useTapOutline } from "./TapOutline";
+import { LAWN_TAP, TAP_ITEMS, TapBanner, useTapOutline, type TapChoice } from "./TapOutline";
 import { TakeoffList } from "./TakeoffList";
 import { loadSettings } from "@/lib/companySettings";
 
@@ -805,10 +805,10 @@ export function MeasurePage() {
     setShapes(next);
     setDrawing(inProgress);
   };
-  /** Shapes Find paving added, as the items it found them as (`osm` when OpenStreetMap's buildings shaped them). */
+  /** Shapes Find added, as the items it found them as (a lawn is a plain area; `osm` when OpenStreetMap's buildings shaped them). */
   const addFound = (ids: string[], item: string, osm = false) => {
     ids.forEach((id) => knownIds.current.add(id));
-    setItems((list) => ({ ...list, ...Object.fromEntries(ids.map((id) => [id, item])) }));
+    if (takeoffItem(item)) setItems((list) => ({ ...list, ...Object.fromEntries(ids.map((id) => [id, item])) }));
     if (osm) setFromOsm((list) => [...list, ...ids]);
   };
   const setShapePitch = (id: string, value: string) =>
@@ -890,7 +890,7 @@ export function MeasurePage() {
       const next = TOOLS.find((t) => t.key.toLowerCase() === e.key.toLowerCase());
       if (next) pickTool(next.tool);
       else if (e.key.toLowerCase() === "f") mapRef.current?.fitShapes();
-      else if (e.key.toLowerCase() === "b" && paving) startFind();
+      else if (e.key.toLowerCase() === "b" && (paving || lawn)) startFind();
       else if ((e.key === "Delete" || e.key === "Backspace") && selected) {
         e.preventDefault();
         removeSelected();
@@ -937,13 +937,13 @@ export function MeasurePage() {
           ? { to: `/clients/${ctx.property.client.id}`, label: ctx.property.client.display_name }
           : null;
 
-  /** The best free imagery here, for pictures Google's terms don't allow (the saved one, Find paving). */
+  /** The best free imagery here, for pictures Google's terms don't allow (the saved one, Find). */
   const freePicture = async (): Promise<ImageryId> => {
     if (!center) return "naip";
     const now = Date.now();
     return (await resolveAuto(center.lng, center.lat, 19, { esri_key: null, google_key: null }, (source) => probe(source, center.lng, center.lat), (source) => (down.current.get(source) ?? 0) > now)).id;
   };
-  // Tap to outline (TapOutline.tsx): the free way to find paving. Lining up a plan takes the taps.
+  // Tap to outline (TapOutline.tsx): the free way to find paving or a lawn. Lining up a plan takes the taps.
   // Done (or Esc) goes over to Select, so the outline's corners can be fixed and a click doesn't start
   // a shape by mistake.
   const editShapes = () => {
@@ -956,12 +956,15 @@ export function MeasurePage() {
     if (aligning) tap.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aligning]);
-  /** Find paving: a box round a lot, then Outline, as the item picked (if it's an area) or asphalt. */
+  /** What Find outlines: a lawn, the paving items that are areas, or both. */
+  const findChoices: TapChoice[] = [...(lawn ? [{ id: LAWN_TAP, name: "Lawn" }] : []), ...(paving ? TAP_ITEMS : [])];
+  /** Find: a box round a lot or a yard, then Outline, as the paving item picked (if it's an area), else a lawn for a lawn business or asphalt. */
   const startFind = () => {
-    if (imagery === "street" || imagery === "terrain") return void toast.info("Switch to aerial imagery first: Find paving needs a photo of the lot.");
+    if (!findChoices.length) return;
+    if (imagery === "street" || imagery === "terrain") return void toast.info(`Switch to aerial imagery first: Find needs a photo of the ${paving && !lawn ? "lot" : "yard"}.`);
     setSelected(null);
     if (tap.item) return void tap.setMode("box");
-    tap.start(activeItem && TAP_ITEMS.some((i) => i.id === activeItem.id) ? activeItem.id : "asphalt");
+    tap.start(activeItem && findChoices.some((i) => i.id === activeItem.id) ? activeItem.id : lawn && (lawnTrade || !paving) ? LAWN_TAP : "asphalt");
   };
   // A new paving takeoff opens on Find paving: the box is the quickest way to measure a lot.
   const hasSaved = Boolean(((context.data?.measurement?.geojson ?? null) as { features?: unknown[] } | null)?.features?.length);
@@ -1168,7 +1171,7 @@ export function MeasurePage() {
   const savedClean = !dirty && Boolean(saved);
   // What the map needs from you (sharper imagery, tap to outline, lining up a plan): over the map,
   // or on a phone's page right under it, where it doesn't cover the map it's about.
-  const mapBanner = aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />;
+  const mapBanner = aligning ? <LineUpBanner plan={plan} /> : tap.item ? <TapBanner tap={tap} choices={findChoices} /> : banner && <ImageryBanner banner={banner} keys={keys} isAdmin={isAdmin} streetMap={streetMap} onUse={chooseImagery} onDismiss={(key) => { setDismissed((d) => [...d, key]); setBanner(null); }} onRetry={() => { probes.current.clear(); setBanner(null); setImageryRevision((n) => n + 1); }} />;
   const bannerOnMap = wide || extend.extended;
   // A phone's Measure is the map, full screen: its own bar over the top, the panel as a sheet.
   const phone = !wide && extend.extended;
@@ -1448,10 +1451,10 @@ export function MeasurePage() {
           ))}
         </div>
       )}
-      {paving && (
+      {(paving || lawn) && (
         <>
           <span className="measure-dock-sep" aria-hidden="true" />
-          <button type="button" className="measure-tool measure-tool-find" aria-pressed={Boolean(tap.item)} onClick={startFind} title={touch ? "Find paving: put a box round a lot, then press Outline" : "Find paving (B): put a box round a lot, then press Outline"}>
+          <button type="button" className="measure-tool measure-tool-find" aria-pressed={Boolean(tap.item)} onClick={startFind} title={`${!lawn ? "Find paving" : !paving ? "Find lawn" : "Find"}${touch ? "" : " (B)"}: put a box round ${!lawn ? "a lot" : !paving ? "the yard" : "a lot or yard"}, then press Outline`}>
             <Icon name="sparkle" size={18} />
             <span>Find</span>
           </button>
@@ -1529,7 +1532,7 @@ export function MeasurePage() {
         <Icon name="chevronDown" size={16} />
       </summary>
       <div className="measure-extra-body">
-        <p className="measure-quiet">Mark beds, edging, trees and obstacles with Next shape {phone ? "above" : "under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
+        <p className="measure-quiet"><strong>Find</strong> outlines the lawn: put a box round the yard. Mark beds, edging, trees and obstacles with Next shape {phone ? "above" : "under the map"}. Each prices on its own, and so does the slope: read from USGS (US) or Google (if it's on in Settings), or picked on the lawn's card.</p>
         <LawnAddOns />
       </div>
     </details>
@@ -1814,8 +1817,8 @@ export function MeasurePage() {
                   <button type="button" className="link-btn" disabled={Boolean(finding)} onClick={cutBuildings}>{finding === "cut" ? "Finding…" : "Run"}</button>
                 </div>
               )}
-              {paving && (
-                <FindPaving
+              {(paving || lawn) && (
+                <FindInView
                   map={mapRef}
                   ready={ready && !aligning && !tap.item}
                   connected={Boolean(session.config.features.findPaving)}
@@ -1823,6 +1826,9 @@ export function MeasurePage() {
                   imagery={imagery}
                   pictureImagery={freePicture}
                   zoom={center?.zoom ?? 0}
+                  paving={paving}
+                  lawn={lawn}
+                  lawns={shapes.filter((s) => s.kind === "Area" && s.geometry?.type === "Polygon" && !pavingItem(items[s.id])).map((s) => s.geometry!.coordinates as Position[][])}
                   onFound={addFound}
                 />
               )}

@@ -5,7 +5,7 @@ import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from
 import { lotAt } from "../src/features/measure/buildings";
 import { contours, guessPolygons, opened } from "../src/features/measure/maskOutline";
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
-import { combine, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
+import { combine, lawnShape, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
 import { currentStep, estimateSums, formulaValue, groupProjects, pavesAsphalt, projectGroup, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
 import { lineDestination } from "../src/features/roofing/estimate/rows";
@@ -193,6 +193,16 @@ describe("adding to and taking out of an outline", () => {
     expect(cut.osm).toBe(true);
     expect(polygonAreaM2(cut.polygons[0])).toBeLessThan(polygonAreaM2(lot));
     expect(withoutBuildings([lot], [[square(-79.2, 37.4, 0.0002)]]).osm).toBe(false);
+  });
+
+  it("keeps the shade under a lawn's trees in the lawn, and cuts the house out", () => {
+    const canopy = square(-79.1826, 37.3624, 0.0002); // a tree the model left out of the grass
+    const house = [square(-79.1822, 37.3628, 0.0002)];
+    const shaded = lawnShape([[lot[0], canopy]], []);
+    expect(shaded).toEqual({ polygons: [[lot[0]]], osm: false });
+    const cut = lawnShape([[lot[0], canopy]], [house]);
+    expect(cut.osm).toBe(true);
+    expect(polygonAreaM2(cut.polygons[0])).toBeCloseTo(polygonAreaM2(lot) - polygonAreaM2(house), -1);
   });
 
   it("drops scraps and car-sized holes", () => {

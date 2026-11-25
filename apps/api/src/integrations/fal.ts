@@ -1,8 +1,8 @@
 /**
  * fal.ai: runs Meta's Segment Anything 3 (SAM 3) for a business, on its own fal.ai account and key
- * (Apps → fal.ai), to find pavement and stalls on an aerial picture. The picture goes to fal and
+ * (Apps → fal.ai), to find pavement and stalls, or a lawn with its trees and play sets, on an aerial picture. The picture goes to fal and
  * the masks come back in the same answer (sync_mode: data URIs), so nothing is kept at fal's end
- * for us to fetch. Each request costs the business half a cent (fal's price, October 2026).
+ * for us to fetch. Each target is one request, half a cent to the business (fal's price, October 2026).
  */
 import { HttpError } from "../lib/http";
 
@@ -10,11 +10,15 @@ export const SAM3_ENDPOINT = "fal-ai/sam-3/image";
 const RUN_URL = `https://fal.run/${SAM3_ENDPOINT}`;
 const PRICING_URL = `https://api.fal.ai/v1/models/pricing?endpoint_id=${encodeURIComponent(SAM3_ENDPOINT)}`;
 
-/** What Find paving looks for, and the words SAM 3 is given for each. */
+/** What Find everything in view looks for, and the words SAM 3 is given for each. */
 export const DETECT_TARGETS = {
   asphalt: { prompt: "asphalt pavement", masks: 12 },
   concrete: { prompt: "concrete sidewalk", masks: 16 },
   stalls: { prompt: "parking space", masks: 32 },
+  lawn: { prompt: "grass lawn", masks: 8 },
+  trees: { prompt: "tree", masks: 40 },
+  trampolines: { prompt: "trampoline", masks: 6 },
+  playsets: { prompt: "playground equipment", masks: 6 },
 } as const;
 export type DetectTarget = keyof typeof DETECT_TARGETS;
 
@@ -34,7 +38,7 @@ export function falProblem(status: number, body: string): string {
   if (status === 403) return "fal.ai refused the key. Check that it's an API key with access to models, then paste it again.";
   if (status === 429) return "fal.ai is busy right now. Try again in a minute.";
   if (status === 422 || status === 400) return "fal.ai couldn't read the map picture. Zoom in a little and try again.";
-  return "fal.ai had a problem finding paving. Try again in a minute.";
+  return "fal.ai had a problem looking at the aerial. Try again in a minute.";
 }
 
 /** Checks a key with fal.ai's price list, which costs nothing. Returns a sentence to show, or null when it works. */

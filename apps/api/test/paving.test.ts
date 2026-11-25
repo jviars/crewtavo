@@ -127,6 +127,15 @@ describe("fal.ai", () => {
     expect(fal.mock.calls.every(([url, init]) => String(url).startsWith("https://fal.run/") && (init?.headers as Record<string, string>).Authorization === "Key uniform:own-key")).toBe(true);
   });
 
+  it("finds a lawn, its trees and its play sets in one run", async () => {
+    await paver({ falKey: "uniform:own-key" });
+    fal.mockImplementation(async () => Response.json({ masks: [{ url: MASK }], scores: [0.7] }));
+    const res = await send("/paving/detect", { image: IMAGE, targets: ["lawn", "trees", "trampolines", "playsets"] });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { results: Array<{ target: string }> }).results.map((r) => r.target)).toEqual(["lawn", "trees", "trampolines", "playsets"]);
+    expect(fal.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).prompt)).toEqual(["grass lawn", "tree", "trampoline", "playground equipment"]);
+  });
+
   it("refuses a picture that isn't one", async () => {
     await paver({ falKey: "uniform:own-key" });
     const res = await send("/paving/detect", { image: "https://example.com/lot.jpg", targets: ["asphalt"] });
