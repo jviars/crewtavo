@@ -21,7 +21,7 @@ export function pastedName(name: string, type: string, now: Date): string | null
   const ext = name.match(/\.([a-z]+)$/i)?.[1]?.toLowerCase() ?? type.match(/^image\/([a-z]+)/i)?.[1]?.toLowerCase().replace("jpeg", "jpg") ?? "png";
   // A colon can't be in a file name on Windows, or shows as a slash on a Mac.
   const time = now.toLocaleTimeString(englishDateLocale(), { hour: "numeric", minute: "2-digit" }).replace(":", ".");
-  return `Pasted picture ${formatDate(now)} ${time}.${ext}`;
+  return `Pasted picture ${formatDate(now)} ${time.replace(/\.$/, "")}.${ext}`;
 }
 
 function typing(target: EventTarget | null): boolean {

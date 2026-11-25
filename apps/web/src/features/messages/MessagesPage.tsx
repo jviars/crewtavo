@@ -13,7 +13,7 @@ import { InboxGroup, InboxList } from "@/components/ui/InboxList";
 import { InboxSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { ApiError, api, searchTerm, supabase, unwrap } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { dateLocale, formatDateTime } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
@@ -138,7 +138,7 @@ const dayLabel = (iso: string) => {
   const yesterday = new Date(Date.now() - 86_400_000);
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  return d.toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 };
 
 function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) {
@@ -202,7 +202,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
                   <Icon name={ICON[m.channel] ?? "messages"} size={12} />
                   {note ? "Internal note" : m.channel === "email" ? "Email" : m.channel === "sms" ? "Text" : "Call"}
                   {from && <> from {from}</>}
-                  {sent.to && <span title={sent.toFull ?? undefined}> to {sent.to}</span>} · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span>
+                  {sent.to && <span title={sent.toFull ?? undefined}> to {sent.to}</span>} · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span>
                   {m.status === "failed" && <span className="text-danger strong">· Not delivered</span>}
                   {sent.missed && <span className="text-danger">· Didn't reach {sent.missed}</span>}
                 </span>

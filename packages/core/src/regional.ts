@@ -40,8 +40,15 @@ export function dateTag(country: string | null | undefined, language: string = "
   return own[country] ?? "en-GB";
 }
 
-/** Whether the week starts on Sunday (the US, Canada and others that hang the calendar that way) or on Monday. */
-export const weekStartsSunday = (country: string | null | undefined) => !country || ["US", "CA", "PH", "MX", "BR", "JP", "IL", "PR"].includes(country);
+/** Where calendars start the week on Sunday (CLDR's week data): the US and its territories, Canada, Mexico, Japan, South Africa, India and others. */
+const SUNDAY_FIRST = new Set([
+  "AG", "AS", "BD", "BR", "BS", "BT", "BW", "BZ", "CA", "CO", "DM", "DO", "ET", "GT", "GU", "HK", "HN", "ID", "IL", "IN", "JM", "JP",
+  "KE", "KH", "KR", "LA", "MH", "MM", "MO", "MT", "MX", "MZ", "NI", "NP", "PA", "PE", "PH", "PK", "PR", "PT", "PY", "SA", "SG", "SV",
+  "TH", "TT", "TW", "UM", "US", "VE", "VI", "WS", "YE", "ZA", "ZW",
+]);
+
+/** Whether the week starts on Sunday, as in the US and Canada, or on Monday, as in the UK; a business with no country is taken to be in the US. */
+export const weekStartsSunday = (country: string | null | undefined) => !country || SUNDAY_FIRST.has(country);
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];

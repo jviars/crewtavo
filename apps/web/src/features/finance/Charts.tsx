@@ -24,7 +24,8 @@ export { Change, changeDelta } from "./change";
 export function axisDates(buckets: Bucket[], count = 4): Array<{ at: number; label: string }> {
   const n = buckets.length;
   if (!n) return [];
-  const months = n > 1 && buckets[0]!.label.length <= 3 && !/\d/.test(buckets[0]!.label);
+  // Month buckets are keyed by their month (range.ts bucketsFor), whatever their label: "Sept" in the UK.
+  const months = n > 1 && /^\d{4}-\d{2}$/.test(buckets[0]!.key);
   const spansYears = buckets[0]!.from.slice(0, 4) !== buckets[n - 1]!.to.slice(0, 4);
   const word = (b: Bucket, last: boolean) => {
     if (months) return spansYears && (last || b === buckets[0]) ? `${b.label} ${(last ? b.to : b.from).slice(0, 4)}` : b.label;

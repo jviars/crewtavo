@@ -137,7 +137,9 @@ export const clock = (minutes: number) => clockText(Math.floor(minutes / 60) % 2
  * (features.css), so its time is never cut off.
  */
 export function TimeRange({ start, end }: { start: string; end?: string | null }) {
-  const [, time = start, meridiem = ""] = /^(.*?)(\s*(?:[AP]M|[ap]\.m\.|[ap]m))$/.exec(start) ?? [];
+  // Spanish screens keep their own "a.m." whole on each time, as they always have.
+  const ending = getLocale() === "es" ? /^(.*?)(\s*[AP]M)$/ : /^(.*?)(\s*(?:[AP]M|[ap]\.m\.|[ap]m))$/;
+  const [, time = start, meridiem = ""] = ending.exec(start) ?? [];
   const shared = Boolean(end && meridiem && end.endsWith(meridiem.trim()));
   return (
     <>

@@ -110,10 +110,11 @@ export function BookingFormPage() {
   const [turnedAway, setTurnedAway] = useState(0);
   const noTime = Boolean(booking) && !time && !noneOpen;
 
+  // Phone boxes, dates and times as the business's country writes them; there's no session here to
+  // say it. Set as the page draws, so its first drawing is already right.
+  if (view.data) setCountry({ country: view.data.company.country });
   useEffect(() => {
     if (view.data) document.title = `${view.data.form.name} · ${view.data.company.name}`;
-    // Phone boxes read numbers as the business's country writes them (lib/validate.ts); there's no session here to say it.
-    if (view.data) setCountry({ country: view.data.company.country });
   }, [view.data]);
 
   const submit = useMutation({

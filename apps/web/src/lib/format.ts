@@ -79,6 +79,9 @@ export const dateLocale = () => {
   return dateTag(country, tag.startsWith("es") ? "es" : "en");
 };
 
+/** "07:05" on a 24-hour clock, as clockText writes it (some browsers' Intl writes "7:05"); "7:05 AM" on a 12-hour one. */
+const hourDigits = (): "2-digit" | "numeric" => (!dateLocale().startsWith("es") && clockStyle(country) === "24" ? "2-digit" : "numeric");
+
 /**
  * dateLocale() for words that are only in English, such as an office dialog that also opens on a
  * screen in Spanish: the business's country's way, in English whatever the screen.
@@ -111,7 +114,7 @@ export const formatDay = (value: string | Date) =>
 
 /** "7:20 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatTime = (value: string | Date, timeZone?: string) =>
-  new Date(String(value).replace(" ", "T")).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit", timeZone });
+  new Date(String(value).replace(" ", "T")).toLocaleTimeString(dateLocale(), { hour: hourDigits(), minute: "2-digit", timeZone });
 
 export const formatNumber = (n: number, digits = 0) =>
   n.toLocaleString(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -126,7 +129,7 @@ export const formatDate = (value: string | Date | null | undefined) =>
 
 /** "Thu, Oct 16, 7:00 AM", in `timeZone` when given (the company's), otherwise the browser's. */
 export const formatDateTime = (value: string | Date, timeZone?: string) =>
-  new Date(value).toLocaleString(dateLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone });
+  new Date(value).toLocaleString(dateLocale(), { weekday: "short", month: "short", day: "numeric", hour: hourDigits(), minute: "2-digit", timeZone });
 
 /** "3 days ago", "in 2 hours" */
 export function timeAgo(value: string | Date): string {

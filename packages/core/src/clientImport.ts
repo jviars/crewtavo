@@ -108,12 +108,30 @@ export function customColumns(headers: readonly string[], mapping: ImportMapping
   return { matched, others };
 }
 
+/**
+ * Whether a column's dates are written day first ("16/10/2026"), going by the column itself: day
+ * first when a date in it can only be read that way, month first when one can only be read the other
+ * way ("10/16/2026"), and `fallback` (the business's country's way) when every date in it could be
+ * either, or it says both. A file made in another country is read the way it's written.
+ */
+export function columnDayFirst(cells: readonly string[], fallback: boolean): boolean {
+  let day = false;
+  let month = false;
+  for (const cell of cells) {
+    const m = /^\s*(\d{1,2})\/(\d{1,2})\/\d{4}\s*$/.exec(cell ?? "");
+    if (!m) continue;
+    if (Number(m[1]) > 12) day = true;
+    if (Number(m[2]) > 12) month = true;
+  }
+  return day !== month ? day : fallback;
+}
+
 /** A row's values for one kind of record's custom fields; a cell that doesn't fit its field is left out. */
-function customCells(row: readonly string[], columns: readonly ImportCustomColumn[], record: ImportCustomColumn["record"], dayFirst: boolean): Record<string, CustomValue> {
+function customCells(row: readonly string[], columns: readonly ImportCustomColumn[], record: ImportCustomColumn["record"], dayFirst: (column: number) => boolean): Record<string, CustomValue> {
   const values: Record<string, CustomValue> = {};
   for (const c of columns) {
     if (c.record !== record) continue;
-    const checked = checkCustomValue(c.field, row[c.column] ?? "", { dayFirst });
+    const checked = checkCustomValue(c.field, row[c.column] ?? "", { dayFirst: dayFirst(c.column) });
     if ("value" in checked && checked.value !== null) values[c.field.key] = checked.value;
   }
   return values;
@@ -155,11 +173,14 @@ function billingAsProperty(clients: Iterable<ImportClient>) {
 
 /**
  * Spreadsheet rows (without the header) as clients, with the columns mapped, and `custom` columns
- * filling custom fields; `dayFirst` reads a date like "3/4/2026" as 3 April, for a business where the
+ * filling custom fields. A date column is read the way it's written (columnDayFirst); one that could
+ * be either way is read day first with `dayFirst` ("3/4/2026" is 3 April), for a business where the
  * day comes first.
  */
 export function toClients(rows: string[][], mapping: ImportMapping, custom: readonly ImportCustomColumn[] = [], { dayFirst = false }: { dayFirst?: boolean } = {}): ImportClient[] {
   const get = (row: string[], key: ImportTargetKey) => (mapping[key] === undefined ? "" : (row[mapping[key]!] ?? "").trim());
+  const orders = new Map(custom.filter((c) => c.field.type === "date").map((c) => [c.column, columnDayFirst(rows.map((r) => r[c.column] ?? ""), dayFirst)]));
+  const dayFirstOf = (column: number) => orders.get(column) ?? dayFirst;
   const clients = new Map<string, ImportClient>();
   for (const row of rows) {
     const display = get(row, "display_name") || [get(row, "first_name"), get(row, "last_name")].filter(Boolean).join(" ") || get(row, "company_name");
@@ -188,8 +209,8 @@ export function toClients(rows: string[][], mapping: ImportMapping, custom: read
       clients.set(key, client);
     }
     // The first row with a value for a field gives it.
-    client.custom_fields = { ...customCells(row, custom, "client", dayFirst), ...client.custom_fields };
-    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null, custom_fields: customCells(row, custom, "property", dayFirst) });
+    client.custom_fields = { ...customCells(row, custom, "client", dayFirstOf), ...client.custom_fields };
+    addProperty(client, { label: get(row, "label") || null, line1: get(row, "line1"), line2: get(row, "line2") || null, city: get(row, "city") || null, region: get(row, "region") || null, postal_code: get(row, "postal_code") || null, custom_fields: customCells(row, custom, "property", dayFirstOf) });
   }
   billingAsProperty(clients.values());
   return [...clients.values()];

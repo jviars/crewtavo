@@ -15,7 +15,7 @@ import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { InboxGroup } from "@/components/ui/InboxList";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
+import { dateLocale, formatDateTime } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { ConversationRow } from "./ConversationRow";
@@ -112,7 +112,7 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
       </div>
       <div className="thread-body">
         {rows.map((m) => {
-          const day = new Date(m.created_at).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+          const day = new Date(m.created_at).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
           const showDay = day !== lastDay;
           lastDay = day;
           return (
@@ -120,7 +120,7 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
               {showDay && <span className="thread-day">{day}</span>}
               <div className="msg">
                 <div className="msg-bubble">{m.body}</div>
-                <span className="msg-meta"><Icon name="messages" size={12} />Text · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span></span>
+                <span className="msg-meta"><Icon name="messages" size={12} />Text · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span></span>
               </div>
             </Fragment>
           );
