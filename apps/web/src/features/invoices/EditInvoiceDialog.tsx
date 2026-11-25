@@ -7,6 +7,7 @@
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { FormError } from "@/components/ui/Field";
 import { supabase, unwrap } from "@/lib/api";
@@ -86,7 +87,7 @@ export function EditInvoiceDialog({ invoice, onClose, onSaved }: { invoice: { id
                 </label>
                 <label className="field" style={{ width: 84 }}>
                   <span className="small">Qty</span>
-                  <input className="input" inputMode="decimal" value={row.quantity} onChange={(e) => change(row.key, { quantity: decimal(e.target.value) })} aria-label={`Line ${index + 1} quantity`} />
+                  <DecimalInput className="input" inputMode="decimal" value={row.quantity} onChange={(e) => change(row.key, { quantity: decimal(e.target.value) })} aria-label={`Line ${index + 1} quantity`} />
                 </label>
                 <label className="field" style={{ width: 84 }}>
                   <span className="small">Unit</span>
@@ -94,7 +95,7 @@ export function EditInvoiceDialog({ invoice, onClose, onSaved }: { invoice: { id
                 </label>
                 <label className="field" style={{ width: 120 }}>
                   <span className="small">Price</span>
-                  <input className="input" inputMode="decimal" value={row.unit_price} placeholder="0.00" onChange={(e) => change(row.key, { unit_price: decimal(e.target.value, true) })} aria-label={`Line ${index + 1} price`} />
+                  <DecimalInput className="input" inputMode="decimal" value={row.unit_price} placeholder="0.00" onChange={(e) => change(row.key, { unit_price: decimal(e.target.value, true) })} aria-label={`Line ${index + 1} price`} />
                 </label>
                 <Button icon="trash" variant="ghost" aria-label={`Remove line ${index + 1}`} title="Remove this line" onClick={() => setRows((list) => list.filter((r) => r.key !== row.key))} />
               </div>

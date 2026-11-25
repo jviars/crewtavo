@@ -20,6 +20,7 @@ import { Link } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { Button, cx, Spinner } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -31,7 +32,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill, statusText } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap } from "@/lib/api";
-import { dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, currencySymbol, dateIn, formatDate, formatMoneyCents, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { can, hasRole, useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "../subs/MarkPaidDialog";
@@ -585,7 +586,7 @@ function PayDialog({ pay, job, visits, payees, onClose, onOfferElsewhere }: {
           </div>
         )}
         {pay.status === "offered" && recorded.length > 0 && (
-          <p className={styles.hint}>Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office")).join(" ")}</p>
+          <p className={styles.hint}>Noted on the offer when it went out: {recorded.map((i) => insuranceWarningText(i, "office", companyCountry())).join(" ")}</p>
         )}
 
         <div className={styles.group} role="group" aria-label="Lines">
@@ -739,12 +740,12 @@ function LineRow({ line, editable, draft, note, saving, onDraft, onSave, onUncha
         {problem && <span className="field-error" role="alert">{problem}</span>}
       </span>
       <span className={styles.qty}>
-        <input className="input input-sm tabular" inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${line.description}`} aria-invalid={problem?.includes("quantity") || undefined} onChange={(e) => onDraft({ ...d, quantity: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
+        <DecimalInput className="input input-sm tabular" inputMode="decimal" value={d.quantity} aria-label={`Quantity for ${line.description}`} aria-invalid={problem?.includes("quantity") || undefined} onChange={(e) => onDraft({ ...d, quantity: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
         <span>{quantityWords(Number(d.quantity) || 0, unit).replace(/^[\d.,]+ /, "")}</span>
       </span>
       <span className={cx("input-group", styles.rate)}>
-        <span className="addon">$</span>
-        <input className="input input-sm tabular" style={{ paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${line.description}`} aria-invalid={problem?.includes("rate") || undefined} onChange={(e) => onDraft({ ...d, rate: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
+        <span className="addon">{currencySymbol()}</span>
+        <DecimalInput className="input input-sm tabular" style={{ paddingLeft: 22 }} inputMode="decimal" value={d.rate} aria-label={`Rate for ${line.description}`} aria-invalid={problem?.includes("rate") || undefined} onChange={(e) => onDraft({ ...d, rate: e.target.value.replace(/[^0-9.]/g, "") })} onKeyDown={onKey} />
       </span>
       <span className={styles.amount}>{saving ? <Skeleton width={60} style={{ marginLeft: "auto" }} /> : amount === null ? null : formatMoneyCents(amount)}</span>
       <Button className={styles.remove} size="sm" variant="ghost" icon="trash" aria-label={`Remove ${line.description}`} onClick={onRemove} />

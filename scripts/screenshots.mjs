@@ -110,7 +110,7 @@ await office.evaluate(() => localStorage.setItem("crewtavo.measureHelpSeen", "1"
 await office.getByRole("link", { name: "Edit the takeoff" }).click();
 await office.waitForURL(/\/measure\?/);
 await office.getByRole("status").filter({ hasText: "Saved" }).first().waitFor();
-await office.locator(".measure-tool", { hasText: "Edit" }).click(); // so no drawing hint covers the map
+await office.locator(".measure-tool", { hasText: "Select" }).click(); // so no drawing hint covers the map
 await office.waitForTimeout(3000); // aerial tiles
 await shot(office, "measure");
 if (noPicture) {

@@ -4,7 +4,8 @@
  * width reaches the paper's edges, with no browser header or footer (Safari's can't be turned off).
  *
  * It draws what EstimateDocument draws, from the same data and helpers. Sizes are in the CSS px of
- * EstimateDocument's 816 × 1056 px page, turned into points by px(), so the two look the same.
+ * EstimateDocument's 816 × 1056 px page (793.7 × 1122.5 on A4, the paper outside the US and Canada),
+ * turned into points by px(), so the two look the same.
  * react-pdf decides the pages itself: the letterhead on the first, the running header on the rest,
  * the footer and "Page 2 of 3" on every one.
  *
@@ -13,14 +14,15 @@
  * two look alike.
  */
 import { companySignatureLabel, documentColor, letterheadSrc, ownLetterhead, printsFullSheet, type LetterheadPicture, type TemplateSettings } from "@crewtavo/core/documents";
+import { dateTag } from "@crewtavo/core/regional";
 import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import type { Style } from "@react-pdf/types";
 import type { ComponentProps, ReactNode } from "react";
 // The pages' own measurements, words and contract blocks (apps/web), so the PDF is drawn as they are.
 import { contractBlocks, type ContractBlock } from "../../../web/src/lib/html";
-import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, PAGE_WIDTH } from "../../../web/src/features/documents/paper";
+import { BODY_INSET, BODY_PAD_BOTTOM, BODY_PAD_TOP, PAGE_MARGIN, sheetOf } from "../../../web/src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "../../../web/src/features/documents/types";
-import { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "../../../web/src/features/documents/words";
+import { initials, inkOn, licenseLine, quantityLabel, readableOnWhite, taxLine, taxNumberLine, websiteLabel } from "../../../web/src/features/documents/words";
 import { richText } from "./richText";
 
 /** A picture as it goes in the PDF (a PNG or JPEG's bytes), with its size in pixels. */
@@ -44,6 +46,8 @@ export interface DocumentPdfProps {
   currency: string;
   /** Where the person printing is ("America/New_York"): the day beside a signature is theirs, as on the page. */
   timeZone?: string;
+  /** Where the business is (companies.country): its dates are written that way, "22 October 2026" in the UK; the US's way without one. */
+  country?: string | null;
 }
 
 /** CSS px (96 an inch) in points (72). */
@@ -112,6 +116,30 @@ interface Look {
   /** Money in the business's currency, as the pages show it (lib/format formatMoneyCents). */
   money: Intl.NumberFormat;  /** The time zone the dates beside signatures are in. */
   timeZone?: string;
+  /** The Intl tag dates are written with: the business's country's (core regional dateTag). */
+  dateTag: string;
+}
+
+/**
+ * "2026-10-22" or a timestamp as "October 22, 2026", as the pages write a document's dates
+ * (documents/words.ts longDate, with the same options), the way the business's country writes them:
+ * "22 October 2026" in the UK.
+ */
+function longDate(value: string | null | undefined, look: Pick<Look, "dateTag">): string {
+  if (!value) return "";
+  const d = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(look.dateTag, { month: "long", day: "numeric", year: "numeric" });
+}
+
+/**
+ * "Oct 24, 2026" for the date beside a signature (documents/words.ts shortDate): a moment's day in
+ * the time zone of whoever is printing, a day ("2026-10-24") that day anywhere; "24 Oct 2026" in the UK.
+ */
+function shortDate(value: string | null | undefined, look: Pick<Look, "dateTag" | "timeZone">): string {
+  if (!value) return "";
+  const day = value.length === 10;
+  const d = new Date(day ? `${value}T12:00:00` : value);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(look.dateTag, { month: "short", day: "numeric", year: "numeric", ...(!day && look.timeZone && { timeZone: look.timeZone }) });
 }
 
 /** Where things sit on the sheet, in CSS px. */
@@ -130,9 +158,9 @@ interface Geometry {
 /** react-pdf's own line spacing, 1.2 of the size: the running header's and the footer's. */
 const PLAIN_LINE = 1.2;
 
-function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string): Geometry {
+function geometryOf(template: TemplateSettings, fullSheet: boolean, words: string, pageWidth: number): Geometry {
   const box = fullSheet ? 0 : PAGE_MARGIN;
-  const boxWidth = PAGE_WIDTH - 2 * box;
+  const boxWidth = pageWidth - 2 * box;
   const pad = fullSheet ? PAGE_MARGIN + BODY_INSET : BODY_INSET;
   const own = ownLetterhead(template);
   const line = 10.5 * PLAIN_LINE;
@@ -148,24 +176,26 @@ function geometryOf(template: TemplateSettings, fullSheet: boolean, words: strin
   return { fullSheet, box, boxWidth, pad, running, footer };
 }
 
-/** The business's currency, or US dollars when it isn't one. */
+/** The business's currency with the symbol people there write ("$" for Canadian dollars, "R" for rand), or US dollars when it isn't one. */
 function moneyIn(currency: string): Intl.NumberFormat {
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" });
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" });
   } catch {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
   }
 }
 
-export function DocumentPdf({ template, company, data, pictures, font, currency, timeZone }: DocumentPdfProps) {
+export function DocumentPdf({ template, company, data, pictures, font, currency, timeZone, country }: DocumentPdfProps) {
   const estimate = data.kind === "estimate";
   const kind = estimate ? "Estimate" : "Invoice";
   const color = documentColor(template, company.settings);
   const classic = template.font === "classic";
-  const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone };
+  const look: Look = { color, onColor: inkOn(color), textColor: readableOnWhite(color), font: classic ? ["Times-Roman", ...font] : font, minus: classic ? "-" : "−", money: moneyIn(currency), timeZone, dateTag: dateTag(country) };
   const own = ownLetterhead(template);
   const words = template.footer.trim();
-  const g = geometryOf(template, printsFullSheet(own), words);
+  // The business's paper: letter, or A4 outside the US and Canada (core paperSize).
+  const sheet = sheetOf(company.paper);
+  const g = geometryOf(template, printsFullSheet(own), words, sheet.width);
   // The body starts under the running header on every page; the first page's letterhead is pulled up into that room.
   const top = g.box + g.running + BODY_PAD_TOP;
   const bottom = g.box + g.footer + BODY_PAD_BOTTOM;
@@ -178,7 +208,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
 
   return (
     <Document title={data.number ? `${kind} ${data.number}` : kind} author={company.name} creator="Crewtavo" producer="Crewtavo">
-      <Page size="LETTER" style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
+      <Page size={company.paper === "a4" ? "A4" : "LETTER"} style={{ paddingTop: px(top), paddingBottom: px(bottom), paddingHorizontal: px(g.box + g.pad), fontFamily: look.font, color: INK }}>
         <RunningHeader company={company} kind={kind} number={data.number} g={g} />
         <Footer template={template} own={own.footer} picture={pic(own.footer && letterheadSrc(own.footer.path))} words={words} g={g} look={look} />
 
@@ -196,7 +226,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
         )}
         {options.length > 0 && <Options options={options} pictures={pictures} look={look} />}
         <Lines lines={data.lines} look={look} />
-        <Totals data={data} look={look} />
+        <Totals data={data} company={company} look={look} />
 
         {paragraphs(data.notes).map((text, i) => (
           <View key={`n${i}`} style={{ marginTop: px(i ? NOTES_LINE : GAP) }} minPresenceAhead={i ? 0 : px(40)}>
@@ -210,12 +240,12 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
           </T>
         ))}
 
-        {sections.map((section, n) => (!estimate || section.place !== "terms" ? <Section key={`s${n}`} section={section} pictures={pictures} timeZone={timeZone} /> : null))}
+        {sections.map((section, n) => (!estimate || section.place !== "terms" ? <Section key={`s${n}`} section={section} pictures={pictures} look={look} /> : null))}
 
         {signs && (
           <View wrap={false} style={{ marginTop: px(GAP) }}>
             {terms.length > 0 && <T size={11.5} style={{ color: TEXT_2, marginBottom: px(4) }}>By signing, you agree to this estimate and the terms on the pages that follow.</T>}
-            <Signatures template={template} company={company} signatures={data.signatures} pictures={pictures} timeZone={timeZone} />
+            <Signatures template={template} company={company} signatures={data.signatures} pictures={pictures} look={look} />
           </View>
         )}
         {terms.length > 0 && (
@@ -223,7 +253,7 @@ export function DocumentPdf({ template, company, data, pictures, font, currency,
             <T break minPresenceAhead={px(60)} size={17} lh={1.3} style={{ paddingBottom: px(8), borderBottomWidth: px(2), borderBottomColor: look.color, fontWeight: 700, color: look.textColor }}>
               Terms and conditions
             </T>
-            {terms.map((section) => <Section key={section.id} section={section} pictures={pictures} timeZone={timeZone} />)}
+            {terms.map((section) => <Section key={section.id} section={section} pictures={pictures} look={look} />)}
           </>
         )}
       </Page>
@@ -237,7 +267,7 @@ const eyebrow = (more: Style = {}): Style => ({ fontWeight: 700, letterSpacing: 
 /** "Bill to" and the client; the document's name, number and dates. */
 function Parties({ data, look }: { data: DocumentData; look: Look }) {
   const estimate = data.kind === "estimate";
-  const meta = [data.number != null && `No. ${data.number}`, data.date && longDate(data.date), estimate && data.validUntil && `Good until ${longDate(data.validUntil)}`, !estimate && data.dueOn && `Due ${longDate(data.dueOn)}`].filter(Boolean);
+  const meta = [data.number != null && `No. ${data.number}`, data.date && longDate(data.date, look), estimate && data.validUntil && `Good until ${longDate(data.validUntil, look)}`, !estimate && data.dueOn && `Due ${longDate(data.dueOn, look)}`].filter(Boolean);
   return (
     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
       <View style={{ flexShrink: 1, marginRight: px(24) }}>
@@ -295,12 +325,12 @@ function Lines({ lines, look }: { lines: DocumentLine[]; look: Look }) {
 }
 
 /** Subtotal down to the total, and on an invoice its payments and what's left. */
-function Totals({ data, look }: { data: DocumentData; look: Look }) {
+function Totals({ data, company, look }: { data: DocumentData; company: DocumentCompany; look: Look }) {
   const estimate = data.kind === "estimate";
   const rows: Array<{ label: string; value: string; grand?: boolean }> = [{ label: "Subtotal", value: money(data.subtotal, look) }];
   if (data.discount > 0) rows.push({ label: data.discountLabel || "Discount", value: `${look.minus}${money(data.discount, look)}` });
   for (const c of data.credits ?? []) rows.push({ label: c.label, value: `${look.minus}${money(c.amount, look)}` });
-  if (data.tax > 0) rows.push({ label: "Tax", value: money(data.tax, look) });
+  if (data.tax > 0) rows.push({ label: taxLine(company, data), value: money(data.tax, look) });
   if (data.taxExempt !== undefined) rows.push({ label: data.taxExempt ? `Tax exempt · ${data.taxExempt}` : "Tax exempt", value: money(0, look) });
   rows.push({ label: estimate && data.repeats ? "Total per visit" : "Total", value: money(data.total, look), grand: true });
   if (estimate && data.repeats) rows.push({ label: "How often", value: data.repeats });
@@ -362,7 +392,7 @@ const STRONG: Style = { fontWeight: 700, color: INK };
 type ContractRowBlock = Extract<ContractBlock, { kind: "row" }>;
 
 /** A contract section: its title, its paragraphs, lists, quotes and tables, and the box for the customer's initials. */
-function Section({ section, pictures, timeZone }: { section: DocumentSection; pictures: PdfPictures; timeZone?: string }) {
+function Section({ section, pictures, look }: { section: DocumentSection; pictures: PdfPictures; look: Look }) {
   // Read from its HTML in the browser that sent it (a server has no HTML parser): else its words alone.
   const blocks = section.blocks ?? contractBlocks(section.html);
   const title = section.title.trim();
@@ -411,7 +441,7 @@ function Section({ section, pictures, timeZone }: { section: DocumentSection; pi
     <View style={{ marginTop: px(TITLE_GAP) }}>
       {!!title && <T minPresenceAhead={px(40)} lh={1.4} style={STRONG}>{title}</T>}
       {out}
-      {section.initials && <Initials section={section} pictures={pictures} timeZone={timeZone} />}
+      {section.initials && <Initials section={section} pictures={pictures} look={look} />}
     </View>
   );
 }
@@ -419,12 +449,12 @@ function Section({ section, pictures, timeZone }: { section: DocumentSection; pi
 const PNG = /^data:image\/png;base64,/;
 
 /** The customer's initials on a section, or the box they go in. */
-function Initials({ section, pictures, timeZone }: { section: DocumentSection; pictures: PdfPictures; timeZone?: string }) {
+function Initials({ section, pictures, look }: { section: DocumentSection; pictures: PdfPictures; look: Look }) {
   const done = section.initialed && PNG.test(section.initialed.image) ? section.initialed : null;
   const picture = done ? pictures.get(done.image) ?? null : null;
   return (
     <View wrap={false} style={{ marginTop: px(CLAUSE_GAP), flexDirection: "row", justifyContent: "flex-end", alignItems: "flex-end" }}>
-      <T size={11} style={{ marginRight: px(10), color: TEXT_2 }}>Initials{done?.date ? ` · ${shortDate(done.date, timeZone)}` : ""}</T>
+      <T size={11} style={{ marginRight: px(10), color: TEXT_2 }}>Initials{done?.date ? ` · ${shortDate(done.date, look)}` : ""}</T>
       <View style={{ position: "relative", width: px(96), height: px(34), borderBottomWidth: px(1), borderBottomColor: INK }}>
         {picture && <Image src={picture.src} style={{ position: "absolute", left: px(6), bottom: px(-6), height: px(40), width: px(Math.min(84, (40 * picture.width) / picture.height)), objectFit: "contain" }} />}
       </View>
@@ -437,27 +467,27 @@ const signsAnything = (template: TemplateSettings, signatures: DocumentData["sig
   template.customer_signs || template.company_signs || Boolean(signatures?.customer?.image) || Boolean(signatures?.company?.image);
 
 /** The signature lines the template asks for, and any line someone already signed. */
-function Signatures({ template, company, signatures, pictures, timeZone }: { template: TemplateSettings; company: DocumentCompany; signatures: DocumentData["signatures"]; pictures: PdfPictures; timeZone?: string }) {
+function Signatures({ template, company, signatures, pictures, look }: { template: TemplateSettings; company: DocumentCompany; signatures: DocumentData["signatures"]; pictures: PdfPictures; look: Look }) {
   const customer = signatures?.customer ?? null;
   const business = signatures?.company ?? null;
   const showCustomer = template.customer_signs || Boolean(customer?.image);
   const showCompany = template.company_signs || Boolean(business?.image);
   return (
     <View style={{ flexDirection: "row", paddingTop: px(18) }}>
-      {showCustomer && <SignatureLine label={template.customer_label.trim() || "Customer"} signature={customer} dates={template.sign_dates} pictures={pictures} timeZone={timeZone} />}
+      {showCustomer && <SignatureLine label={template.customer_label.trim() || "Customer"} signature={customer} dates={template.sign_dates} pictures={pictures} look={look} />}
       {showCustomer && showCompany && <View style={{ width: px(36) }} />}
-      {showCompany && <SignatureLine label={companySignatureLabel(template, company.name)} signature={business} dates={template.sign_dates} pictures={pictures} timeZone={timeZone} />}
+      {showCompany && <SignatureLine label={companySignatureLabel(template, company.name)} signature={business} dates={template.sign_dates} pictures={pictures} look={look} />}
     </View>
   );
 }
 
-function SignatureLine({ label, signature, dates, pictures, timeZone }: { label: string; signature: DocumentSignature | null; dates: boolean; pictures: PdfPictures; timeZone?: string }) {
+function SignatureLine({ label, signature, dates, pictures, look }: { label: string; signature: DocumentSignature | null; dates: boolean; pictures: PdfPictures; look: Look }) {
   const picture = signature?.image ? pictures.get(signature.image) ?? null : null;
   return (
     <View style={{ flex: 1 }}>
       <View style={{ position: "relative", height: px(56), borderBottomWidth: px(1), borderBottomColor: INK }}>
         {picture && <Image src={picture.src} style={{ position: "absolute", left: 0, bottom: px(-10), height: px(64), width: px(Math.min(260, (64 * picture.width) / picture.height)), objectFit: "contain" }} />}
-        {dates && picture && signature?.date && <T size={12} style={{ position: "absolute", right: 0, bottom: px(5) }}>{shortDate(signature.date, timeZone)}</T>}
+        {dates && picture && signature?.date && <T size={12} style={{ position: "absolute", right: 0, bottom: px(5) }}>{shortDate(signature.date, look)}</T>}
       </View>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: px(6) }}>
         <T size={11} style={{ color: TEXT_2 }}>{label}</T>
@@ -521,6 +551,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
   const tagline = template.tagline.trim();
   const license = template.show_license && template.license.trim() ? licenseLine(template.license) : null;
   const insurer = template.show_insurer && template.insurer.trim() ? `Insured by ${template.insurer.trim()}` : null;
+  const taxId = taxNumberLine(company);
   const website = websiteLabel(company.website);
   const contact = [company.phone, company.email].filter(Boolean).join(" · ");
   const sheetTop = g.fullSheet ? px(PAGE_MARGIN) : 0;
@@ -533,11 +564,13 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
         <T size={24} lh={1.15} style={{ marginTop: px(6), fontWeight: 700, letterSpacing: px(0.24), color: look.textColor, textAlign: "center" }}>{company.name}</T>
         {!!tagline && <T size={12} style={{ marginTop: px(6), textTransform: "uppercase", letterSpacing: px(12 * 0.14), color: TEXT_2, textAlign: "center" }}>{tagline}</T>}
         {!!line && <T size={11.5} style={{ marginTop: px(6), paddingTop: px(4), color: TEXT_2, textAlign: "center" }}>{line}</T>}
-        {(license || insurer) && (
+        {(license || insurer || taxId) && (
           <T size={11.5} style={{ marginTop: px(6), color: TEXT_2, textAlign: "center" }}>
             {!!license && <Text style={{ color: INK, fontWeight: 600 }}>{license}</Text>}
-            {license && insurer && " · "}
+            {license && (insurer || taxId) && " · "}
             {insurer}
+            {insurer && taxId && " · "}
+            {taxId}
           </T>
         )}
         <View style={{ width: px(64), height: px(3), marginTop: px(14), borderRadius: px(2), backgroundColor: look.color }} />
@@ -554,6 +587,7 @@ function Letterhead({ template, company, logo, g, look }: { template: TemplateSe
       ))}
       {!!license && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: banner ? look.onColor : INK, fontWeight: banner ? 700 : 600 }}>{license}</T>}
       {!!insurer && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{insurer}</T>}
+      {!!taxId && <T size={11.5} lh={1.65} style={{ textAlign: "right", color: quiet }}>{taxId}</T>}
     </View>
   );
   const name = (

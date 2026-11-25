@@ -1,9 +1,11 @@
 /**
- * The words and colors of an estimate or invoice: the business's initials, its website and license
- * as they print, the colors that read on its paper, quantities and dates. Plain functions, so the
- * server's PDF (apps/api/src/pdf) draws them the same as the pages do; build.ts passes them on.
+ * The words and colors of an estimate or invoice: the business's initials, its website, license and
+ * tax number as they print, the tax's line in the totals, the colors that read on its paper,
+ * quantities and dates. Plain functions, so the server's PDF (apps/api/src/pdf) draws them the same
+ * as the pages do; build.ts passes them on.
  */
-import type { Amount } from "@crewtavo/core/money";
+import { taxLineLabel, taxNumberLabel, type Amount } from "@crewtavo/core/money";
+import { dateTag } from "@crewtavo/core/regional";
 
 /** "Ridgeline Roofing Co." -> "RR", for a business with no logo. */
 export function initials(name: string): string {
@@ -16,6 +18,13 @@ export const websiteLabel = (url: string | null | undefined) => (url ?? "").trim
 
 /** The license line: "License #RC-104882", unless they typed the word themselves. */
 export const licenseLine = (license: string) => (/^lic/i.test(license.trim()) ? license.trim() : `License ${license.trim()}`);
+
+/** The business's tax number as it prints with its details: "VAT number GB123456789", "GST/HST number 123456789 RT0001". Null without one. */
+export const taxNumberLine = (company: { taxName?: string; taxNumber?: string | null }) =>
+  company.taxNumber?.trim() ? `${taxNumberLabel(company.taxName?.trim() || "Tax")} ${company.taxNumber.trim()}` : null;
+
+/** The tax's line in the totals: its name and rate, "VAT (20%)", "Tax (8.875%)" (core taxLineLabel). */
+export const taxLine = (company: { taxName?: string }, data: { taxRate?: number | null }) => taxLineLabel(company.taxName?.trim() || "Tax", data.taxRate);
 
 // ---------------------------------------------------------------------------------------------
 // Colors on paper
@@ -85,20 +94,24 @@ export function quantityLabel(quantity: Amount, unit: string | null | undefined)
   return `${number} ${plural(short)}`;
 }
 
-/** "2026-10-22" or a timestamp -> "October 22, 2026". */
-export function longDate(value: string | null | undefined): string {
+/**
+ * "2026-10-22" or a timestamp -> "October 22, 2026", or "22 October 2026" for a business in a country
+ * that writes the day first (`country`, core regional.ts dateTag); the US's way without one.
+ */
+export function longDate(value: string | null | undefined, country?: string | null): string {
   if (!value) return "";
   const d = new Date(value.length === 10 ? `${value}T12:00:00` : value);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(dateTag(country), { month: "long", day: "numeric", year: "numeric" });
 }
 
 /**
- * "2026-10-24T18:14:00Z" -> "Oct 24, 2026", for the date beside a signature: a moment's day where
- * it's read, or in `timeZone` (the server's PDF says whose). A day ("2026-10-24") is that day anywhere.
+ * "2026-10-24T18:14:00Z" -> "Oct 24, 2026" ("24 Oct 2026" where the day comes first: `country`), for
+ * the date beside a signature: a moment's day where it's read, or in `timeZone` (the server's PDF says
+ * whose). A day ("2026-10-24") is that day anywhere.
  */
-export function shortDate(value: string | null | undefined, timeZone?: string): string {
+export function shortDate(value: string | null | undefined, timeZone?: string, country?: string | null): string {
   if (!value) return "";
   const day = value.length === 10;
   const d = new Date(day ? `${value}T12:00:00` : value);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", ...(!day && timeZone && { timeZone }) });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(dateTag(country), { month: "short", day: "numeric", year: "numeric", ...(!day && timeZone && { timeZone }) });
 }

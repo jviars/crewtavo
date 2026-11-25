@@ -1,3 +1,4 @@
+import { businessCountry } from "@crewtavo/core/countries";
 import { isStaff, type Permission } from "@crewtavo/core/roles";
 import { can, hasRole, type Session } from "@/lib/session";
 import type { IconName } from "../ui/Icon";
@@ -14,6 +15,7 @@ export interface NavItem {
   also?: string[]; // other screens that count as this section (highlighted in the sidebar)
   keywords?: string; // other words people search for it by
   feature?: "team_chat" | "website" | "careers" | "drive" | "marketing" | "paving_app" | "roofing_app" | "snow_app"; // only while the business has this app on (Apps)
+  countries?: string[]; // only for a business in one of these countries (companies.country, core countries.ts businessCountry)
   foot?: boolean; // kept with Settings at the sidebar's foot, in view however long the list is
   go?: string; // G then this key opens it from anywhere (shown in search beside it)
 }
@@ -76,7 +78,7 @@ export const OTHER_SCREENS: NavItem[] = [
   // Every file deleted in Crewtavo waits here, for the whole team, whether or not Drive is installed.
   { to: "/drive/trash", label: msg("Trash"), icon: "trash", keywords: "deleted files removed photos restore undo undelete recycle bin get back" },
   { to: "/clients/duplicates", label: msg("Possible duplicates"), icon: "users", roles: ["admin", "office"], perm: "invoices", keywords: "duplicate clients merge combine same email phone address" },
-  { to: "/subs/1099", label: msg("Year-end totals"), icon: "dollar", roles: ["admin", "office"], perm: "subs", keywords: "1099 nec subcontractors subs paid this year tax report" },
+  { to: "/subs/1099", label: msg("Year-end totals"), icon: "dollar", roles: ["admin", "office"], perm: "subs", countries: ["US"], keywords: "1099 nec subcontractors subs paid this year tax report" },
   { to: "/subs/workers-comp", label: msg("Workers' comp audit"), icon: "clipboard", roles: ["admin", "office"], perm: "subs", keywords: "workers comp compensation audit subcontractors subs insurance report csv" },
   { to: "/roofing/catalog", label: msg("Roofing catalog"), icon: "truck", roles: ["admin", "office", "estimator"], perm: "sales", feature: "roofing_app", keywords: "abc supply materials catalog shingles products prices branch" },
   { to: "/chat/settings", label: msg("Chat settings"), icon: "chat", roles: ["admin"], feature: "team_chat", keywords: "team chat channels roles who can see post manage" },
@@ -183,10 +185,14 @@ export function saveFoldedGroups(userId: string, folded: string[]) {
 }
 
 /** Whether a person sees a navigation item. */
-export function navVisible(session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null } }, item: NavItem): boolean {
+export function navVisible(
+  session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null; country?: string | null; timezone?: string | null } },
+  item: NavItem,
+): boolean {
   // A sub sees only what's listed for them by name: everything else is the team's.
   if (session.role === "subcontractor") return Boolean(item.only?.includes("subcontractor"));
   if (item.feature && !featureOn(session.company?.settings, item.feature)) return false;
+  if (item.countries && !item.countries.includes(businessCountry(session.company))) return false;
   if (item.only) return item.only.includes(session.role);
   if (session.role === "owner") return true;
   if (item.roles && !item.roles.includes(session.role)) return false;

@@ -319,6 +319,7 @@ export default {
   "Needed": "Falta",
   "Waiting for the office to check": "Esperando que la oficina lo revise",
   "What {company} needs on file from you: your W-9, and your liability and workers' comp insurance.": "Lo que {company} necesita tener de ti: tu W-9 y tus seguros de responsabilidad civil y de compensación laboral.",
+  "What {company} needs on file from you: your liability and workers' comp insurance.": "Lo que {company} necesita tener de ti: tus seguros de responsabilidad civil y de compensación laboral.",
   "Loading your paperwork": "Cargando tus documentos",
   "Send it": "Enviarlo",
   "Send another": "Enviar otro",

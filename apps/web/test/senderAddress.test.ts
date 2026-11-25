@@ -15,11 +15,14 @@ describe("a campaign's composer", () => {
 
   it("only says the address is added at the bottom when the company has one", () => {
     expect(composer).toContain('hasAddress ? "Your address and an unsubscribe link are added at the bottom." : "An unsubscribe link is added at the bottom. Your address goes there too, once it\'s filled in."');
-    expect(composer).toContain("const hasAddress = hasPostalAddress(session.company.address);");
+    expect(composer).toContain("const hasAddress = hasPostalAddress(session.company.address, businessCountry(session.company));");
     // As the session has a company that skipped it, and one that didn't.
     expect(hasPostalAddress(null)).toBe(false);
     expect(hasPostalAddress({ line1: "1 Main St" })).toBe(false);
     expect(hasPostalAddress({ line1: "PO Box 12", city: "Radford", region: "VA", postal_code: "24141" })).toBe(true);
+    // Read as addresses are written where the business is: a UK one needs no county.
+    expect(hasPostalAddress({ line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" }, "GB")).toBe(true);
+    expect(hasPostalAddress({ line1: "12 High Street", city: "Leeds", postal_code: "LS1 4AP" }, "US")).toBe(false);
   });
 
   it("holds Send and Send test until there's an address, and says where to add it", () => {
@@ -33,7 +36,7 @@ describe("Marketing", () => {
   it("says which emails aren't going out for want of an address, with a link to Settings → Company for those who can add it", () => {
     expect(source("../src/features/marketing/MarketingPage.tsx")).toContain('<SenderAddressNote what="campaigns, review asks and referral asks by email won\'t go out" />');
     const note = source("../src/features/marketing/SenderAddress.tsx");
-    expect(note).toContain("if (hasPostalAddress(session.company.address)) return null;");
+    expect(note).toContain("if (hasPostalAddress(session.company.address, businessCountry(session.company))) return null;");
     expect(note).toContain("Marketing emails have to show your company's postal address, and it isn't filled in yet, so {what}.");
     expect(note).toContain('<Link to="/settings?tab=company" className="strong">Add it in Settings → Company</Link> (a PO box is fine).');
   });

@@ -108,7 +108,16 @@ describe("the standard storm prices", () => {
 
 describe("words and sources", () => {
   it("writes a time of day the way people say it", () => {
-    expect(["07:00:00", "13:30", "00:00", "12:05:00"].map(clockText)).toEqual(["7 AM", "1:30 PM", "12 AM", "12:05 PM"]);
+    expect(["07:00:00", "13:30", "00:00", "12:05:00"].map((time) => clockText(time))).toEqual(["7 AM", "1:30 PM", "12 AM", "12:05 PM"]);
+  });
+  it("writes it the way the business's country keeps time, a US business's as it always was", () => {
+    const times = ["07:00:00", "13:30", "00:00", "12:05:00"];
+    expect(times.map((time) => clockText(time, "US"))).toEqual(["7 AM", "1:30 PM", "12 AM", "12:05 PM"]);
+    expect(times.map((time) => clockText(time, "CA"))).toEqual(["7 a.m.", "1:30 p.m.", "12 a.m.", "12:05 p.m."]);
+    expect(times.map((time) => clockText(time, "AU"))).toEqual(["7 am", "1:30 pm", "12 am", "12:05 pm"]);
+    expect(times.map((time) => clockText(time, "GB"))).toEqual(["07:00", "13:30", "00:00", "12:05"]);
+    expect(snowNotices([plaza], [], [], "tomorrow", "GB")[0]!.body).toBe("Maple Plaza – 1 Maple Way: 8 in from 6pm tonight through tomorrow, trigger 2 in, 3 pushes, clear by 07:00");
+    expect(iceNotices([{ name: "First Bank", risk: { kind: "ice", at: "2026-01-15T22:00" }, people: ["sam"] }], [], "2026-01-15T18:00", "GB")[0]!.body).toBe("First Bank: freezing rain around 22:00 tonight");
   });
   it("starts every business on the National Weather Service", () => {
     expect([weatherSourceOf(null), weatherSourceOf({ weather_source: "open_meteo" }), weatherSourceOf({ weather_source: "made-up" })]).toEqual(["nws", "open_meteo", "nws"]);

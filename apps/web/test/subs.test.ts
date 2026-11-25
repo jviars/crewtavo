@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAV_GROUPS, navVisible } from "../src/components/shell/nav";
+import { NAV_GROUPS, navVisible, OTHER_SCREENS } from "../src/components/shell/nav";
 import {
   documentTitle,
   endDateProblem,
@@ -58,6 +58,14 @@ describe("subcontractor paperwork chips", () => {
     expect(bySub.get("s1")!.map((r) => [r.requirement, r.state])).toEqual([["w9", "ok"], ["liability", "missing"], ["workers_comp", "ok"]]);
     expect(bySub.get("s2")!.map((r) => r.state)).toEqual(["missing", "expired", "missing"]);
     expect(inOrder([]).map((r) => paperworkChip(r).label)).toEqual(["Missing", "Missing", "Missing"]);
+  });
+
+  it("leaves out the W-9 for a business outside the US, though the view has its row", () => {
+    const rows = [row("w9", "missing"), row("liability", "ok"), row("workers_comp", "ok")];
+    expect(paperworkBySub(rows, "GB").get("s1")!.map((r) => r.requirement)).toEqual(["liability", "workers_comp"]);
+    expect(needsAttention(paperworkBySub(rows, "CA").get("s1")!)).toBe(false);
+    expect(needsAttention(paperworkBySub(rows, "US").get("s1")!)).toBe(true);
+    expect(inOrder([], "AU").map((r) => r.requirement)).toEqual(["liability", "workers_comp"]);
   });
 
   it("warns about insurance, never the W-9, and never stops anything", () => {
@@ -137,5 +145,17 @@ describe("Subcontractors in the menu", () => {
     expect(navVisible(person("estimator", ["subs"]), SUBS)).toBe(false);
     expect(navVisible(person("crew_lead", ["subs"]), SUBS)).toBe(false);
     expect(navVisible(person("field_crew", []), SUBS)).toBe(false);
+  });
+
+  it("offers the year-end totals, which are for 1099s, to a US business only (in search)", () => {
+    const YEAR_END = OTHER_SCREENS.find((item) => item.to === "/subs/1099")!;
+    const WORKERS_COMP = OTHER_SCREENS.find((item) => item.to === "/subs/workers-comp")!;
+    const owner = (company: { country?: string; timezone?: string }) => ({ role: "owner", permissions: [], company: { settings: {}, ...company } });
+    expect(navVisible(owner({ country: "US" }), YEAR_END)).toBe(true);
+    expect(navVisible(owner({}), YEAR_END)).toBe(true);
+    expect(navVisible(owner({ country: "GB" }), YEAR_END)).toBe(false);
+    expect(navVisible(owner({ country: "CA" }), YEAR_END)).toBe(false);
+    expect(navVisible({ role: "admin", permissions: ["subs"], company: { settings: {}, timezone: "Europe/London" } }, YEAR_END)).toBe(false);
+    expect(navVisible(owner({ country: "GB" }), WORKERS_COMP)).toBe(true);
   });
 });

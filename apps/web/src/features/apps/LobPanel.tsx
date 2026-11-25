@@ -3,8 +3,11 @@
  * (Marketing → Campaigns). Step by step to find the secret key in Lob's dashboard; the key is
  * checked with Lob before it's kept (encrypted, never shown again). Once connected, whether it's a
  * test key, which makes cards Lob never prints or mails, or a live one, which mails them and costs
- * money, is said first and plainly.
+ * money, is said first and plainly. A business outside the US is told first that the cards are
+ * mailed in the US only (core postcardsUsOnly); it can still connect, for a US address of its own.
  */
+import { businessCountry } from "@crewtavo/core/countries";
+import { postcardsMailHere, postcardsUsOnly } from "@crewtavo/core/postcards";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -13,6 +16,7 @@ import { FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import type { AppRow } from "./catalog";
 import { Step, Steps, kit } from "./PanelKit";
 
@@ -37,6 +41,18 @@ export function LobMode({ mode }: { mode: "test" | "live" | null | undefined }) 
   );
 }
 
+/** For a business outside the US: what Lob mails, and where. Nothing for one in the US. */
+export function PostcardsUsOnly() {
+  const country = businessCountry(useSession().company);
+  if (postcardsMailHere(country)) return null;
+  return (
+    <div className="callout callout-info" role="note">
+      <Icon name="info" size={16} />
+      <div className="grow">{postcardsUsOnly(country)}</div>
+    </div>
+  );
+}
+
 export function LobPanel({ app, onChanged }: { app: AppRow; onChanged: () => void }) {
   const connected = app.status !== "disconnected";
   const [key, setKey] = useState("");
@@ -53,6 +69,7 @@ export function LobPanel({ app, onChanged }: { app: AppRow; onChanged: () => voi
   const kind = /^live_/.test(typed) ? "live" : /^test_/.test(typed) ? "test" : null;
   return (
     <>
+      <PostcardsUsOnly />
       {connected && <LobMode mode={app.lob?.mode} />}
       <Section className={kit.panel} id="app-setup" title={connected ? "Lob key" : "Connect your Lob account"}>
         <p className={kit.note}>

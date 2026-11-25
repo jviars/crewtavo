@@ -15,6 +15,7 @@ import {
   type AutomatedForm,
   type AutomatedKey,
 } from "@crewtavo/core/campaigns";
+import { dateLocale } from "@/lib/format";
 
 export interface AutomatedRuleRow {
   id: string;
@@ -114,7 +115,7 @@ export function sampleVars(key: AutomatedKey, who: { name: string; email: string
     total: "$1,250.00",
     address: "12 Oak Street",
     status: key === "close_quotes" ? "Awaiting response" : key === "win_back" ? "Lost" : "Active",
-    last_visit: last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+    last_visit: last.toLocaleDateString(dateLocale(), { month: "long", day: "numeric", year: "numeric" }),
     link: origin,
   };
 }

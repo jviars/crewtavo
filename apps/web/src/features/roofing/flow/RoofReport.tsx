@@ -10,6 +10,7 @@ import { suggestedWaste, REPORT_PROVIDER, REPORT_TITLE, reportPitch, roofReportC
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
@@ -114,7 +115,7 @@ function RoofReportDialog({ quote, takeoff, onClose }: { quote: { id: string; pr
       <form onSubmit={(e: FormEvent) => { e.preventDefault(); save.mutate(); }}>
         <div className="form-grid">
           <Field label={draft.by === "squares" ? "Roof size, in squares" : "Roof size, in square feet"} hint="The roof's surface, before waste." requiredMessage="Enter the roof's size.">
-            <input className="input" inputMode="decimal" value={draft.size} onChange={(e) => setDraft({ ...draft, size: numeric(e.target.value) })} required autoFocus />
+            <DecimalInput className="input" inputMode="decimal" value={draft.size} onChange={(e) => setDraft({ ...draft, size: numeric(e.target.value) })} required autoFocus />
           </Field>
           <Field label="The report gives it in">
             <Select className="select" value={draft.by} onChange={(e) => setDraft({ ...draft, by: e.target.value as ReportDraft["by"] })}>
@@ -126,11 +127,11 @@ function RoofReportDialog({ quote, takeoff, onClose }: { quote: { id: string; pr
             <input className="input" value={draft.pitch} maxLength={20} placeholder="6/12" onChange={(e) => setDraft({ ...draft, pitch: e.target.value })} required />
           </Field>
           <Field label="Waste (%)" optional hint="Left empty: 10%, or 15% with hips or valleys.">
-            <input className="input" inputMode="decimal" value={draft.waste} onChange={(e) => setDraft({ ...draft, waste: numeric(e.target.value) })} />
+            <DecimalInput className="input" inputMode="decimal" value={draft.waste} onChange={(e) => setDraft({ ...draft, waste: numeric(e.target.value) })} />
           </Field>
           {EDGES.map(([field, label]) => (
             <Field key={field} label={`${label} (ft)`} optional>
-              <input className="input" inputMode="decimal" value={draft.edges[field]} onChange={(e) => setDraft({ ...draft, edges: { ...draft.edges, [field]: numeric(e.target.value) } })} />
+              <DecimalInput className="input" inputMode="decimal" value={draft.edges[field]} onChange={(e) => setDraft({ ...draft, edges: { ...draft.edges, [field]: numeric(e.target.value) } })} />
             </Field>
           ))}
         </div>

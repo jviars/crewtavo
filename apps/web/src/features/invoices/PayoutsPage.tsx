@@ -16,8 +16,7 @@ import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { downloadCsv, toCsv } from "@/lib/csv";
 import { everyRow } from "@/lib/paging";
-import { addDaysIso, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
-import { intlLocale } from "@/lib/i18n";
+import { addDaysIso, dateLocale, formatDate, formatMoney, formatMoneyCents, todayIn } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { stripeFeesSince } from "./totals";
 import styles from "./invoices.module.css";
@@ -183,4 +182,4 @@ function PayoutsScreen() {
 
 /** "November", or "November 2025" from another year. */
 const monthName = (month: string, today: string) =>
-  new Date(`${month}-15T12:00:00`).toLocaleDateString(intlLocale(), month.slice(0, 4) === today.slice(0, 4) ? { month: "long" } : { month: "long", year: "numeric" });
+  new Date(`${month}-15T12:00:00`).toLocaleDateString(dateLocale(), month.slice(0, 4) === today.slice(0, 4) ? { month: "long" } : { month: "long", year: "numeric" });

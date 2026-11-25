@@ -8,7 +8,9 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@
 import { statusText } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { dateLocale } from "@/lib/format";
 
 export type Source = "photos" | "review" | "text";
 
@@ -104,8 +106,8 @@ export function pickedNote(problems: readonly PickedProblem[]): string | null {
 
 /** "Oct 30": the day of a photo's visit as written (a date, never moved by a time zone), or the day it was added in the company's time zone. */
 export function photoDay(photo: Pick<SharePhoto, "visit_on" | "created_at">, timeZone: string): string {
-  if (photo.visit_on) return new Date(`${photo.visit_on.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  return new Date(photo.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
+  if (photo.visit_on) return new Date(`${photo.visit_on.slice(0, 10)}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone: "UTC" });
+  return new Date(photo.created_at).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone });
 }
 
 export interface ShareReview {
@@ -223,13 +225,13 @@ export function networkChoices(state: SocialState, source: Source): Choice[] {
   ];
 }
 
-const dateWords = (at: Date, timeZone: string) => at.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone });
+const dateWords = (at: Date, timeZone: string) => at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone });
 
 /** "Posts Nov 2 at 10 AM", "Posted Nov 1", "Not scheduled": in the company's time zone, as an automatic post's notification says it. */
 export function whenWords(post: Pick<SocialPost, "status" | "scheduled_for" | "finished_at" | "cancelled_at" | "created_at">, timeZone: string, now = new Date()): string {
   if (post.status === "draft") return "Not scheduled";
   if (post.status === "posting") return "Posting now";
-  if (post.status === "scheduled" && post.scheduled_for) return `Posts ${autoPostWhen(new Date(post.scheduled_for), timeZone, now)}`;
+  if (post.status === "scheduled" && post.scheduled_for) return `Posts ${autoPostWhen(new Date(post.scheduled_for), timeZone, now, companyCountry())}`;
   const at = new Date(post.cancelled_at ?? post.finished_at ?? post.scheduled_for ?? post.created_at);
   if (post.status === "cancelled") return `Cancelled ${dateWords(at, timeZone)}`;
   if (post.status === "posted" || post.status === "partly_posted") return `Posted ${dateWords(at, timeZone)}`;

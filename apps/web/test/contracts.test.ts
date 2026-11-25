@@ -146,6 +146,18 @@ describe("the example sections", () => {
     expect(starterRows("paving", "co-1", 0).map((r) => r.title)).not.toContain("Hidden decking damage");
   });
 
+  it("leaves the FTC's right to cancel and its notice out for a business outside the US", () => {
+    const titles = starterRows("roofing_exteriors", "co-1", 0, null, "GB").map((r) => r.title);
+    expect(titles).toContain("Hidden decking damage");
+    expect(titles).not.toContain("Your right to cancel");
+    expect(titles).not.toContain("Notice of Cancellation");
+    expect(starterRows("roofing_exteriors", "co-1", 0, null, "US").map((r) => r.title)).toContain("Notice of Cancellation");
+    // A library without them isn't offered them again one at a time.
+    const library = starterRows("general", "co-1", 0, null, "CA");
+    expect(missingStarters(library, "general", null, "CA")).toEqual([]);
+    expect(missingStarters(library, "general", null, "US").map((s) => s.title)).toEqual(["Your right to cancel", "Notice of Cancellation"]);
+  });
+
   it("puts the right to cancel above the signatures, for the customer to initial", () => {
     const cancel = starterRows(null, "co-1", 0).find((r) => r.title === "Your right to cancel");
     expect(cancel).toMatchObject({ place: "signatures", initials: true });

@@ -11,13 +11,14 @@
  * as a signature on the Client Hub or the iPad does. The option math is core money.ts; options.ts has
  * the option records.
  */
+import { businessCountry } from "@crewtavo/core/countries";
 import { depositFor } from "@crewtavo/core/contracts";
 import { shownCustomFields } from "@crewtavo/core/customFields";
 import { usesDepth } from "@crewtavo/core/formulas";
 import type { Json, TablesUpdate } from "@crewtavo/core/database";
 import type { TemplateSettings } from "@crewtavo/core/documents";
 import { inRangeMode, sitePriceSet } from "@crewtavo/core/estimates";
-import { optionBaseTotal, optionTotals, taxPercent, taxRateFromPercent, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
+import { optionBaseTotal, optionTotals, taxName, taxPercent, taxRateFromPercent, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { isPackagePicturePath } from "@crewtavo/core/presets";
 import { quotePromoRule } from "@crewtavo/core/promos";
 import { parseRule } from "@crewtavo/core/recurrence";
@@ -28,6 +29,7 @@ import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
 import { ClientPreview } from "@/components/ui/ClientPreview";
 import { Button, cx } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, FormError } from "@/components/ui/Field";
 import { ActionBar, DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
@@ -42,7 +44,7 @@ import { PageError } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
 import { ApiError, errorMessage, isAuthError, isNetworkError, isRestarting } from "@/lib/errors";
-import { addressLine, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
+import { addressLine, companyCountry, currencySymbol, formatDate, formatMoney, formatMoneyCents, formatTaxRate, timeAgo, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { can, hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -324,7 +326,8 @@ export function paperDocument(input: {
 async function loadContract(companyId: string, input: QuoteContractInput): Promise<QuoteContract> {
   const ids = [...new Set([...input.template.sections, ...(input.option?.section_ids ?? []), ...(input.quote.section_ids ?? [])].map((s) => s.toLowerCase()))];
   const [company, library] = await Promise.all([
-    supabase().from("companies").select("name, phone, timezone").eq("id", companyId).single(),
+    // As the paper on screen reads it (documents/data.ts useContractCompany): the {Total} and {Date} it shows are the ones kept.
+    supabase().from("companies").select("name, phone, timezone, currency, country").eq("id", companyId).single(),
     // In the library's order, as the server reads it: an option's and the quote's sections print in it (core resolveSections).
     ids.length ? supabase().from("contract_sections").select("id, title, body, place, initials").eq("company_id", companyId).in("id", ids).order("sort").order("created_at").order("id") : null,
   ]);
@@ -381,6 +384,8 @@ export const quoteToSend = <Q extends object>(q: Q, options: readonly QuoteOptio
 export function QuotePage() {
   const { id = "" } = useParams();
   const session = useSession();
+  // What the business's documents call the tax ("VAT" in the UK), as they print it.
+  const tax = taxName(session.company.settings, businessCountry(session.company));
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<null | "send" | "exact" | "lost" | "template">(null);
@@ -686,7 +691,7 @@ export function QuotePage() {
         )}
         {/* A tax-exempt client's quote is kept at 0% by the database, so there's no rate to type. */}
         <div className="line">
-          <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : editable ? "Tax" : `Tax (${formatTaxRate(q.tax_rate)})`}</span>
+          <span>{taxExempt ? `Tax exempt${q.client?.tax_exempt_note ? ` · ${q.client.tax_exempt_note}` : ""}` : editable ? tax : `${tax} (${formatTaxRate(q.tax_rate)})`}</span>
           {editable && !taxExempt ? (
             <span className={styles.taxCell}>
               <MoneyInput percent label="Tax rate" width={84} value={taxPercent(q.tax_rate)} max={99.99} onSave={(v) => saveField({ tax_rate: taxRateFromPercent(v) })} onEdit={save.edited} onUnchanged={unchanged} />
@@ -711,7 +716,7 @@ export function QuotePage() {
             <span className={styles.deposit}>
               {/* A percent follows the total as lines change, and the option and add-ons the client picks. */}
               <span className="segmented" role="group" aria-label="Deposit as">
-                <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>$</button>
+                <button type="button" aria-pressed={!percentDeposit} title="An amount" onClick={() => percentDeposit && void saveField({ deposit_percent: null })}>{currencySymbol()}</button>
                 <button type="button" aria-pressed={percentDeposit} title="A percent of the total" onClick={() => !percentDeposit && void saveField({ deposit_percent: depositAsPercent(q.deposit_amount, q.total) })}>%</button>
               </span>
               {percentDeposit ? (
@@ -1059,7 +1064,7 @@ function QuotePaper({ quote: q, options, viewed, sheet, print }: { quote: QuoteR
     () =>
       ready
         ? paperDocument({
-            quote: { ...q, pdf_fields: shownCustomFields(fields, q.custom_fields, "pdf") },
+            quote: { ...q, pdf_fields: shownCustomFields(fields, q.custom_fields, "pdf", companyCountry()) },
             lines: q.lines,
             options,
             viewed,
@@ -1632,7 +1637,7 @@ function MeasurementsCard({ quoteId, propertyId, lat, lng, editable, onApplied }
             <p className="muted" style={{ margin: 0 }}>These lines work out their amount from a depth. Each starts with its price list item's own depth, or the drawing's. Check them, then fill the quantities.</p>
             {asking.lines.map((line, i) => (
               <Field key={line.id} label={`${line.name} (inches deep)`}>
-                <input
+                <DecimalInput
                   className="input"
                   inputMode="decimal"
                   value={line.depth}

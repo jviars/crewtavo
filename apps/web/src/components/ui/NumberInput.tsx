@@ -8,9 +8,15 @@
  * "Enter 365 or less." or "Use whole numbers." on submit, from its hidden number input. Only the
  * arrows and buttons keep within min and max. className and style go on the box; the rest on the
  * text field in it.
+ *
+ * A decimal comma is read as a point ("2,5" is 2.5) and a comma before three digits as a thousands
+ * separator ("1,250" is 1250), as lib/decimal decimalPoint reads them: onChange hears the number
+ * that way, and the box shows it so once it's left. Base UI's own reading, in US English, would
+ * take "2,5" for 2.
  */
 import { NumberField } from "@base-ui/react/number-field";
 import { useRef, type ChangeEventHandler, type InputHTMLAttributes, type KeyboardEvent } from "react";
+import { decimalPoint } from "@/lib/decimal";
 import { t } from "@/lib/i18n";
 import { changeEvent } from "./changeEvent";
 import { useFieldOnTrigger } from "./fieldLink";
@@ -49,6 +55,26 @@ export function numberKeyboard(step: number | string | undefined): "numeric" | "
   return Number.isInteger(n) ? "numeric" : "decimal";
 }
 
+/**
+ * What onChange hears as a number is typed or pasted in: the text as typed ("2.", "0.50", like a
+ * native number box's value while typing), with a decimal comma read as a point (decimalPoint), so
+ * "2,5" is "2.5" and "1,250" is "1250"; the number itself for the arrows and buttons. `details` is
+ * Base UI's: a paste's text is the box's with the pasted words where they go, as Base UI puts them,
+ * and the number Base UI read when that isn't a number on its own ("12 ft").
+ */
+export function heardText(next: number | null, details: { reason: string; event: Event }): string {
+  const box = details.event.target as HTMLInputElement | null;
+  if (details.reason === "input-change" && box) return decimalPoint(box.value);
+  if (details.reason === "input-paste" && box) {
+    const pasted = (details.event as ClipboardEvent).clipboardData?.getData("text/plain") ?? "";
+    const from = box.selectionStart ?? box.value.length;
+    const to = box.selectionEnd ?? from;
+    const text = decimalPoint(box.value.slice(0, from) + pasted + box.value.slice(to)).trim();
+    if (text !== "" && Number.isFinite(Number(text))) return text;
+  }
+  return next === null ? "" : String(next);
+}
+
 export function NumberInput({ value, onChange, min, max, step, steppers = true, decimals, className, style, id, name, required, disabled, readOnly, inputMode, ...inputProps }: NumberInputProps) {
   const emit = (text: string) => onChange?.(changeEvent<HTMLInputElement>(text, name, id));
   const shown = useRef<HTMLInputElement>(null);
@@ -68,9 +94,9 @@ export function NumberInput({ value, onChange, min, max, step, steppers = true, 
         // (MoneyInput) has already decided what to keep, so that's never passed on.
         if (details.event.type === "focusout" || details.event.type === "blur") return;
         tellField("input");
-        // What was typed, as typed ("2.", "0.50"), like a native number box's value while typing.
-        if (details.reason === "input-change") emit((details.event.target as HTMLInputElement).value);
-        else emit(next === null ? "" : String(next));
+        // What was typed, as typed ("2.", "0.50"), with a decimal comma read as a point. The box keeps
+        // showing it as typed; once it's left, it shows this, the value it's given back.
+        emit(heardText(next, details));
       }}
       min={readNumber(min) ?? undefined}
       max={readNumber(max) ?? undefined}

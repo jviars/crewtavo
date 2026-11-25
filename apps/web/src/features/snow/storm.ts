@@ -6,6 +6,7 @@
  */
 import { clockText, inchesText, snowPlan, type SnowPlan, type SnowRules } from "@crewtavo/core/snow";
 import type { Tone } from "@/components/ui/StatusPill";
+import { companyCountry } from "@/lib/format";
 
 /** The piles, in the order the office works them. */
 export const STORM_GROUPS = ["schedule", "check", "scheduled", "off"] as const;
@@ -47,7 +48,7 @@ export function triggersText(rules: SnowRules, noSalt = false): string {
 /** How soon a customer is cleared, short enough for a row's right edge: "Clear by 6 AM · first". Null when it's neither promised nor ranked. */
 export function clearText(clearBy: string | null, priority: number): string | null {
   const rank = priority === 1 ? "first" : priority === 3 ? "after the others" : null;
-  if (clearBy) return [`Clear by ${clockText(clearBy)}`, rank].filter(Boolean).join(" · ");
+  if (clearBy) return [`Clear by ${clockText(clearBy, companyCountry())}`, rank].filter(Boolean).join(" · ");
   return priority === 1 ? "First priority" : priority === 3 ? "After the others" : null;
 }
 
@@ -82,5 +83,5 @@ export function progressOf(visits: Array<{ status: string }>, clearBy: string | 
   const status = done === visits.length ? "completed" : (["in_progress", "en_route"].find((s) => visits.some((v) => v.status === s)) ?? "scheduled");
   const late = Boolean(clearBy) && status !== "completed" && clock >= clearBy!.slice(0, 5);
   const pushes = visits.length > 1 ? `${done} of ${visits.length} pushes done` : undefined;
-  return { status, late, note: late ? [`Due by ${clockText(clearBy!)}`, pushes].filter(Boolean).join(" · ") : pushes };
+  return { status, late, note: late ? [`Due by ${clockText(clearBy!, companyCountry())}`, pushes].filter(Boolean).join(" · ") : pushes };
 }

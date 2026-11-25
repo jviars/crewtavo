@@ -1,5 +1,6 @@
 /** Small clients for keyless or key-only public APIs: Google's Solar API and the free geocoders (US Census, OpenStreetMap). (Forecasts: services/forecast.ts.) */
 import { pitchFromDegrees, SQFT_PER_SQM } from "@crewtavo/core";
+import { countryCode } from "@crewtavo/core/countries";
 import { usStateCode } from "@crewtavo/core/postcards";
 
 /** Places this close share a forecast: about a kilometer, finer than the forecast itself. */
@@ -63,15 +64,35 @@ export interface GeocodeResult {
  */
 export type AddressLookup = GeocodeResult | "none" | "failed";
 
+/** Where to look an address up. */
+export interface LookupOptions {
+  /** Also outside the US: an address the Census doesn't know is looked up anywhere in OpenStreetMap. */
+  world?: boolean;
+  /**
+   * The country the address is in, an ISO code (the business's, or the property's): outside the US,
+   * only OpenStreetMap is asked, about that country, and only an answer there counts. With `world`
+   * as well, an address it doesn't know there is then looked up as above. The US, or none, is as
+   * before.
+   */
+  country?: string | null;
+}
+
 /**
  * Address -> coordinates, from the free US Census Bureau geocoder (US addresses only, no key). With
  * `world`, an address the Census doesn't know is looked up in OpenStreetMap (Photon, free, no key),
- * so the measuring map can find places outside the US. Only these two are asked: what they say can
- * be kept with the property and shown on any map.
+ * so the measuring map can find places outside the US; with another `country`, OpenStreetMap is
+ * asked first, about that country. Only these two are asked: what they say can be kept with the
+ * property and shown on any map.
  */
-export async function lookUpAddress(address: string, options: { world?: boolean } = {}): Promise<AddressLookup> {
+export async function lookUpAddress(address: string, options: LookupOptions = {}): Promise<AddressLookup> {
   const query = address.replace(/\s+/g, " ").trim();
   if (query.length < 5) return "none";
+  const country = countryCode(options.country);
+  if (country && country !== "US") {
+    // A spot kept with a property has to pinpoint it; the measuring map only needs to go there.
+    const there = await photon(query, country, !options.world);
+    if (there !== "none" || !options.world) return there;
+  }
   const params = new URLSearchParams({ address: query, benchmark: "Public_AR_Current", format: "json" });
   const res = await fetch(`https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?${params}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
   const body = res?.ok ? ((await res.json().catch(() => null)) as { result?: { addressMatches?: Array<{ matchedAddress: string; coordinates: { x: number; y: number } }> } } | null) : null;
@@ -84,7 +105,7 @@ export async function lookUpAddress(address: string, options: { world?: boolean 
 }
 
 /** Address -> coordinates (lookUpAddress). Null when nothing matched or the geocoder didn't answer. */
-export async function geocodeAddress(address: string, options: { world?: boolean } = {}): Promise<GeocodeResult | null> {
+export async function geocodeAddress(address: string, options: LookupOptions = {}): Promise<GeocodeResult | null> {
   const found = await lookUpAddress(address, options);
   return typeof found === "string" ? null : found;
 }
@@ -154,9 +175,30 @@ export async function suggestPlaces(text: string, near?: { lat: number; lng: num
   return places;
 }
 
-/** OpenStreetMap search through komoot's public Photon server (fair use, no key). */
-async function photon(query: string): Promise<AddressLookup> {
-  const res = await fetch(`https://photon.komoot.io/api/?${new URLSearchParams({ q: query, limit: "1" })}`, {
+const squash = (text: string) => text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/**
+ * Whether an answer says where the address is, rather than only its town or district: a house (it
+ * has a number), or a street in the address's own postcode (a UK postcode is a few dozen doors).
+ * OpenStreetMap often lacks the house numbers of British and Canadian streets, and a spot in the
+ * middle of town would be kept as the property's for its routes, weather and the clock at the
+ * property.
+ */
+export function pinpoints(p: Record<string, string | undefined>, query: string): boolean {
+  if (p.housenumber || p.type === "house") return true;
+  const street = p.type === "street" || p.osm_key === "highway";
+  return street && Boolean(p.postcode) && squash(query).includes(squash(p.postcode!));
+}
+
+/**
+ * OpenStreetMap search through komoot's public Photon server (fair use, no key). With a country,
+ * Photon is asked about that country only (its countrycode filter), and an answer from anywhere else
+ * is passed over all the same; `precise` passes over one that doesn't pinpoint the address too.
+ */
+async function photon(query: string, country?: string, precise = false): Promise<AddressLookup> {
+  const params = new URLSearchParams({ q: query, limit: country ? "3" : "1" });
+  if (country) params.set("countrycode", country);
+  const res = await fetch(`https://photon.komoot.io/api/?${params}`, {
     headers: { Accept: "application/json", "User-Agent": "Crewtavo (https://github.com/jviars/crewtavo)" },
     signal: AbortSignal.timeout(10_000),
   }).catch(() => null);
@@ -165,7 +207,9 @@ async function photon(query: string): Promise<AddressLookup> {
     features?: Array<{ geometry: { coordinates: [number, number] }; properties: Record<string, string | undefined> }>;
   } | null;
   if (!Array.isArray(body?.features)) return "failed";
-  const hit = body.features[0];
+  const hit = country
+    ? body.features.find((f) => f.properties?.countrycode?.toUpperCase() === country && (!precise || pinpoints(f.properties, query)))
+    : body.features[0];
   if (!hit) return "none";
   const p = hit.properties;
   const street = [p.housenumber, p.street].filter(Boolean).join(" ");

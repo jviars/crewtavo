@@ -7,6 +7,7 @@
 import { isUnpaidBreak, type BreakPay } from "./breaks";
 import { lineTotal } from "./money";
 import { lineParts } from "./paving";
+import { dateTag } from "./regional";
 import { addDays, zonedTimeToUtc } from "./time";
 
 export const REPORT_PRESETS = [
@@ -35,7 +36,7 @@ export interface ReportRange {
 }
 
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
-const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const shortDate = (d: string, country?: string | null) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateTag(country), { month: "short", day: "numeric", timeZone: "UTC" });
 /** A date's year and month (1–12) and day. */
 const parts = (d: string) => d.split("-").map(Number) as [number, number, number];
 
@@ -46,17 +47,18 @@ function calendarMonths(from: string, to: string): 1 | 3 | 12 | null {
   return ([1, 3, 12] as const).find((n) => (m - 1) % n === 0 && to === iso(y, m - 1 + n, 0)) ?? null;
 }
 
-/** A range that's a whole month, quarter or year, as it's said: "October 2026", "Q3 2026", "2025". Null for any other. */
-export function calendarWords(from: string, to: string): string | null {
+/** A range that's a whole month, quarter or year, as it's said where the business is: "October 2026", "Q3 2026", "2025". Null for any other. */
+export function calendarWords(from: string, to: string, country?: string | null): string | null {
   const months = calendarMonths(from, to);
   const [y, m] = parts(from);
   if (months === 12) return String(y);
   if (months === 3) return `Q${(m + 2) / 3} ${y}`;
-  if (months === 1) return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  if (months === 1) return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(dateTag(country), { month: "long", year: "numeric", timeZone: "UTC" });
   return null;
 }
 
-export function resolveRange(key: ReportPreset, today: string, tz: string, custom?: { from?: string | null; to?: string | null }): ReportRange {
+/** A report's dates; a custom range's label ("Oct 3 – Oct 9") is written the way the business's `country` writes dates. */
+export function resolveRange(key: ReportPreset, today: string, tz: string, custom?: { from?: string | null; to?: string | null }, country?: string | null): ReportRange {
   const [y, m] = today.split("-").map(Number) as [number, number];
   let from: string;
   let to = today;
@@ -100,7 +102,7 @@ export function resolveRange(key: ReportPreset, today: string, tz: string, custo
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1;
   return {
     key,
-    label: key === "custom" ? (calendarWords(from, to) ?? `${shortDate(from)} – ${shortDate(to)}`) : REPORT_PRESETS.find((p) => p.key === key)!.label,
+    label: key === "custom" ? (calendarWords(from, to, country) ?? `${shortDate(from, country)} – ${shortDate(to, country)}`) : REPORT_PRESETS.find((p) => p.key === key)!.label,
     from,
     to,
     start: zonedTimeToUtc(from, "00:00", tz).toISOString(),

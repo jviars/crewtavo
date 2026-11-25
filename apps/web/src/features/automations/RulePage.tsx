@@ -36,6 +36,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import { Button, useJustDone } from "@/components/ui/Button";
 import { confirm } from "@/components/ui/Confirm";
+import { DecimalInput } from "@/components/ui/DecimalInput";
 import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { DetailColumns, DetailHeader } from "@/components/ui/DetailPage";
@@ -46,6 +47,7 @@ import { DetailSkeleton } from "@/components/ui/Skeleton";
 import { NoAccess, PageError } from "@/components/ui/States";
 import { TagInput } from "@/components/ui/TagInput";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
+import { currencySymbol } from "@/lib/format";
 import { can, hasRole, useSession } from "@/lib/session";
 import { useClientTags } from "../clients/ClientForm";
 import styles from "./Automations.module.css";
@@ -467,7 +469,7 @@ function ConditionRow({ subject, value, invalid, onChange, onRemove }: { subject
           <span className="muted small">days</span>
         </span>
       ) : def.kind === "money" ? (
-        <span className="input-group" style={{ flex: "0 1 160px" }}><span className="addon">$</span><input className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={String(value.value ?? "")} aria-label="Amount" onChange={(e) => onChange({ ...value, value: e.target.value.replace(/[^0-9.]/g, "") })} /></span>
+        <span className="input-group" style={{ flex: "0 1 160px" }}><span className="addon">{currencySymbol()}</span><DecimalInput className="input" inputMode="decimal" style={{ paddingLeft: 22 }} value={String(value.value ?? "")} aria-label="Amount" onChange={(e) => onChange({ ...value, value: e.target.value.replace(/[^0-9.]/g, "") })} /></span>
       ) : (
         <input className="input" value={String(value.value ?? "")} aria-label="Value" maxLength={200} onChange={(e) => onChange({ ...value, value: e.target.value })} placeholder={def.field === "line_items" ? "e.g. sealcoat" : ""} />
       )}

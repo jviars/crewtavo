@@ -10,15 +10,16 @@
  * data.ts loads the library for the staff app; the Client Hub gets it with its link.
  */
 import { addressLines, contractValues, depositFor, fillIn, resolveSections, sectionsHash, type ContractInput, type ContractOption, type LibrarySection } from "@crewtavo/core/contracts";
-import { pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
+import { paperSize, pickTemplate, templateSettings, type TemplateSettings } from "@crewtavo/core/documents";
 import type { ClientChecklist } from "@crewtavo/core/forms";
 import { promoRuleWords } from "@crewtavo/core/promos";
-import { countsOn, lineTotal, optionBaseTotal, optionTierLabels, optionTotals, quoteTotals, scheduleAmounts, scheduleDueText, scheduleRows, toCents, type Amount, type OptionLine } from "@crewtavo/core/money";
+import { businessCountry } from "@crewtavo/core/countries";
+import { countsOn, lineTotal, optionBaseTotal, optionTierLabels, optionTotals, quoteTotals, scheduleAmounts, scheduleDueText, scheduleRows, taxName, taxNumber, toCents, type Amount, type OptionLine } from "@crewtavo/core/money";
 import { notIncludedText, SITE_ADJUSTMENT_NAME } from "@crewtavo/core/estimates";
 import { isPackagePicturePath, packagePictureSrc } from "@crewtavo/core/presets";
 import { isIsoDate } from "@crewtavo/core/time";
 import { logoUrl } from "@/lib/files";
-import { dateIn, formatDate, todayIn } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, todayIn } from "@/lib/format";
 import { escapeHtml } from "@/lib/html";
 import { scheduleText } from "../jobs/repeatText";
 import type { DocumentCompany, DocumentContract, DocumentData, DocumentLine, DocumentOption, DocumentSection, DocumentSignature } from "./types";
@@ -36,7 +37,7 @@ type Address = { line1?: string | null; line2?: string | null; city?: string | n
  */
 export { addressLines };
 
-export { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, websiteLabel } from "./words";
+export { initials, inkOn, licenseLine, longDate, quantityLabel, readableOnWhite, shortDate, taxLine, taxNumberLine, websiteLabel } from "./words";
 
 // ---------------------------------------------------------------------------------------------
 // A quote as a document
@@ -211,6 +212,8 @@ export interface DocumentQuote {
   message?: string | null;
   subtotal: Amount;
   discount_amount: Amount;
+  /** The rate its tax was worked out at, for "VAT (20%)" in the totals; left out, the tax's name alone. */
+  tax_rate?: Amount;
   tax_amount: Amount;
   total: Amount;
   deposit_amount?: Amount;
@@ -248,8 +251,11 @@ export function quoteSchedule(quote: Pick<DocumentQuote, "payment_schedule" | "a
   const kept = signed && quote.approval && typeof quote.approval === "object" ? scheduleRows((quote.approval as { payment_schedule?: unknown }).payment_schedule) : [];
   const rows = signed ? kept.map((r) => ({ ...r, amount: Number((r as { amount?: Amount }).amount ?? 0) })) : scheduleAmounts(scheduleRows(quote.payment_schedule), quote.total).rows;
   if (!rows.length) return null;
-  return rows.map((r, i) => ({ name: `Payment ${i + 1}`, due: scheduleDueText(r, shortDate), amount: r.amount }));
+  return rows.map((r, i) => ({ name: `Payment ${i + 1}`, due: scheduleDueText(r, (iso) => shortDate(iso, undefined, companyCountry())), amount: r.amount }));
 }
+
+/** The rate the tax was worked out at, when it's known: "VAT (20%)" in the totals. */
+const rateOf = (rate: Amount) => (rate === null || rate === undefined || String(rate).trim() === "" ? {} : { taxRate: Number(rate) });
 
 /** "Tax exempt" in the totals, for a tax-exempt client charged no tax (with their certificate number or note). */
 const exemption = (client: DocumentQuote["client"], tax: Amount) => (client?.tax_exempt && Number(tax ?? 0) === 0 ? { taxExempt: client.tax_exempt_note?.trim() || "" } : {});
@@ -395,6 +401,7 @@ export function quoteDocument(quote: DocumentQuote, lines: readonly DocumentQuot
     discount,
     discountLabel: discount > 0 && quote.promo?.code ? `Promo code ${quote.promo.code}${quote.promo.every_visit != null ? ` · ${promoRuleWords(quote.promo.every_visit)}` : ""}` : undefined,
     tax: Number(quote.tax_amount ?? 0),
+    ...rateOf(quote.tax_rate),
     ...exemption(quote.client, quote.tax_amount),
     total: Number(quote.total ?? 0),
     deposit: deposit > 0 ? deposit : null,
@@ -600,6 +607,8 @@ export interface DocumentInvoice {
   /** Referral credits: what the invoice takes of them (credit_amount), each with its note. */
   credit_amount?: Amount;
   credits?: ReadonlyArray<{ amount: Amount; note: string }> | null;
+  /** The rate its tax was worked out at, for "VAT (20%)" in the totals; left out (older servers), the tax's name alone. */
+  tax_rate?: Amount;
   tax_amount: Amount;
   total: Amount;
   retainage_amount: Amount;
@@ -672,6 +681,7 @@ export function invoiceDocument(inv: DocumentInvoice, extras: { timeZone: string
     discount,
     discountLabel: discount > 0 && inv.promo?.code ? `Promo code ${inv.promo.code}` : undefined,
     tax: Number(inv.tax_amount),
+    ...rateOf(inv.tax_rate),
     ...exemption(inv.client, inv.tax_amount),
     total: Number(inv.total),
     payments,
@@ -782,8 +792,21 @@ export const TRADE_SAMPLES: Record<string, DocumentData> = {
 /** The sample that looks like the business's own work. */
 export const sampleDocument = (trade: string | null | undefined) => (trade && TRADE_SAMPLES[trade]) || SAMPLE_GENERAL_DOCUMENT;
 
-/** A business as printed, from what the app already knows (session company, or a companies row). */
-export function documentCompany(row: { name: string; phone?: string | null; email?: string | null; website?: string | null; address?: unknown; settings?: unknown }): DocumentCompany {
+/**
+ * A business as printed, from what the app already knows (session company, or a companies row):
+ * with what its tax is called and its number for it (core taxName, from its settings and country),
+ * and the paper its documents are on (core paperSize).
+ */
+export function documentCompany(row: {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  address?: unknown;
+  settings?: unknown;
+  country?: string | null;
+  timezone?: string | null;
+}): DocumentCompany {
   return {
     name: row.name,
     phone: row.phone?.trim() || null,
@@ -792,5 +815,8 @@ export function documentCompany(row: { name: string; phone?: string | null; emai
     address: addressLines(row.address),
     logo: logoUrl(row.settings),
     settings: row.settings ?? {},
+    taxName: taxName(row.settings, businessCountry(row)),
+    taxNumber: taxNumber(row.settings),
+    paper: paperSize(businessCountry(row)),
   };
 }

@@ -35,6 +35,7 @@ import {
   type AskRule,
   type AskRuleKind,
 } from "@crewtavo/core/marketing";
+import { dateTag } from "@crewtavo/core/regional";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
@@ -81,7 +82,7 @@ async function sendTest(c: Ctx, d: { to?: string; subject: string; body: string;
   const me = must(await c.var.db.from("profiles").select("email, full_name").eq("user_id", c.var.userId).maybeSingle());
   const to = d.to ?? me.email;
   if (!to || !isEmail(to)) throw new HttpError(400, "Add an email address to send the test to.");
-  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, website, address, settings").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await adminClient(c.env).from("companies").select("name, phone, email, website, address, country, settings").eq("id", c.var.companyId).maybeSingle());
   // A test of a marketing email is held to what the real one is: no postal address, no email.
   const noAddress = d.marketing ? senderAddressProblem(company) : null;
   if (noAddress) throw new HttpError(400, noAddress);
@@ -248,16 +249,16 @@ marketing.post("/campaigns/automated/:key/test", requireUser, requireCompany(OFF
     c,
     z.object({ to: z.email().optional(), subject: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(20000), days: z.number().int().min(0).max(1000).optional() }),
   );
-  const company = must(await c.var.db.from("companies").select("timezone, currency").eq("id", c.var.companyId).maybeSingle());
+  const company = must(await c.var.db.from("companies").select("timezone, currency, country").eq("id", c.var.companyId).maybeSingle());
   const tz = company.timezone || "UTC";
   const lastVisit = addDays(localDate(new Date(), tz), -(body.days ?? campaign.days.default));
   const vars = {
     number: 1042,
     ...(key === "reengage" ? {} : { title: "Spring cleanup" }),
-    total: new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD" }).format(1250),
+    total: new Intl.NumberFormat("en-US", { style: "currency", currency: company.currency || "USD", currencyDisplay: "narrowSymbol" }).format(1250),
     address: "12 Oak Street",
     status: key === "close_quotes" ? "Awaiting response" : key === "win_back" ? "Lost" : "Active",
-    last_visit: new Date(`${lastVisit}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }),
+    last_visit: new Date(`${lastVisit}T12:00:00Z`).toLocaleDateString(dateTag(company.country), { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }),
   };
   return sendTest(c, { to: body.to, subject: body.subject, body: body.body, vars, marketing: campaign.marketing, button: linkButton(key) });
 });

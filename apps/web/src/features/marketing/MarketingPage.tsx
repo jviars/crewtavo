@@ -23,7 +23,7 @@ import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate, formatDateTime, formatMoneyCents, timeAgo } from "@/lib/format";
+import { dateLocale, formatDate, formatDateTime, formatMoneyCents, timeAgo } from "@/lib/format";
 import { useTabStrip } from "@/lib/tabStrip";
 import { can, hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
@@ -188,7 +188,7 @@ function Campaigns() {
   });
   const results = useCampaignResults();
   const create = useMutation({
-    mutationFn: async () => unwrap(await supabase().from("campaigns").insert({ company_id: session.company.id, name: `Campaign ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, audience: { statuses: ["active"] } }).select("id").single()),
+    mutationFn: async () => unwrap(await supabase().from("campaigns").insert({ company_id: session.company.id, name: `Campaign ${new Date().toLocaleDateString(dateLocale(), { month: "short", day: "numeric" })}`, audience: { statuses: ["active"] } }).select("id").single()),
     onSuccess: (c) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns", session.company.id] });
       navigate(`/marketing/campaigns/${c.id}`);

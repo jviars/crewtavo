@@ -596,6 +596,9 @@ describe("public submissions", () => {
     expect((await post("/public/forms/acme/quote", lead)).status).toBe(201);
     expect(ok.limits()).toEqual([["form:ip:203.0.113.9", 10, 3600], ["form:company:co-1", 100, 3600]]);
     expect(ok.made()).toEqual(["rpc/booking_form_client", "requests"]);
+    // Its new address is looked up in the background, in the country the property was saved in (here, as in the US).
+    await vi.waitFor(() => expect(ok.calls.find((c) => c.url.host === "geocoding.geo.census.gov")?.url.searchParams.get("address")).toBe("12 Main St, Radford, 24141"));
+    expect(ok.calls.find((c) => c.method === "GET" && c.path === "properties")?.url.searchParams.get("id")).toBe("eq.property-2");
 
     for (const full of [/^form:ip:/, /^form:company:/]) {
       const limited = database({ full });

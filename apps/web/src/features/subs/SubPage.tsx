@@ -1,6 +1,6 @@
 /** One sub: their W-9 and insurance with what's current, their other papers and history, their pay and rates, their details and their sign-in. */
 import { TRASH_DAYS } from "@crewtavo/core/drive";
-import { PAPERWORK_REQUIREMENTS, subDocumentLabel, taxClassificationLabel } from "@crewtavo/core/subs";
+import { paperworkRequirements, subDocumentLabel, taxClassificationLabel, usesIrsForms } from "@crewtavo/core/subs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -16,7 +16,7 @@ import { DetailSkeleton, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess, PageError } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addressLine, formatDate, todayIn } from "@/lib/format";
+import { addressLine, companyCountry, formatDate, todayIn } from "@/lib/format";
 import { useRememberRecent } from "@/lib/recent";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -97,7 +97,8 @@ function SubDetail() {
   const docs = documents.data ?? [];
   const current = docs.filter((d) => !d.superseded_at);
   const history = docs.filter((d) => d.superseded_at);
-  const others = current.filter((d) => d.kind === "license" || d.kind === "other");
+  // Outside the US a W-9 isn't asked for: one kept from before shows with the other papers.
+  const others = current.filter((d) => d.kind === "license" || d.kind === "other" || (d.kind === "w9" && !usesIrsForms(companyCountry())));
   // Turned-off subs have no rows in sub_paperwork; their documents still show.
   const statuses = inOrder(paperwork.data ?? []);
   const warning = s.active && paperwork.data ? insuranceWarning(statuses) : null;
@@ -182,7 +183,7 @@ function SubDetail() {
         <Section title="Paperwork">
           {paperwork.error && !paperwork.data && s.active && <ErrorState compact title="Couldn't load their paperwork's status" error={paperwork.error} onRetry={() => paperwork.refetch()} />}
           <ul className={styles.reqs} role="list">
-            {PAPERWORK_REQUIREMENTS.map((req) => {
+            {paperworkRequirements(companyCountry()).map((req) => {
               const status = statuses.find((p) => p.requirement === req.key)!;
               const mine = current.filter((d) => (req.kinds as readonly string[]).includes(d.kind));
               // The one that counts first.

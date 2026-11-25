@@ -79,7 +79,7 @@ export async function processCampaigns(env: Env, options: { campaignId?: string;
   // Filtered in the query, so companies with Marketing uninstalled don't fill the batch.
   let query = admin
     .from("campaigns")
-    .select("id, company_id, subject, body, company:companies!inner(name, email, phone, address, settings)")
+    .select("id, company_id, subject, body, company:companies!inner(name, email, phone, address, country, settings)")
     .eq("status", "sending")
     .eq("company.settings->marketing->>enabled", "true")
     .limit(5);
@@ -218,7 +218,7 @@ export async function requireCampaignsOn(env: Env, companyId: string) {
 
 /** A marketing email has to show the company's postal address: without a complete one, none is sent, started or tested. */
 export async function requireSenderAddress(db: Db, companyId: string) {
-  const company = must(await db.from("companies").select("address").eq("id", companyId).maybeSingle());
+  const company = must(await db.from("companies").select("address, country").eq("id", companyId).maybeSingle());
   const problem = senderAddressProblem(company);
   if (problem) throw new HttpError(400, problem);
 }

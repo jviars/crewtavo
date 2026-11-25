@@ -20,7 +20,7 @@ import { googlePlace, googlePlacesKey, googleSuggest } from "./googlePlaces";
 
 /** An address in a property's own boxes (a US state as its two letters), for a form to fill in. */
 export interface AddressParts { line1: string; city: string; region: string; postal_code: string }
-export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null; parts?: AddressParts }
+export interface ClientSuggestion { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; country?: string | null; lat: number | null; lng: number | null; parts?: AddressParts }
 export interface PlaceSuggestion {
   label: string;
   detail: string | null;

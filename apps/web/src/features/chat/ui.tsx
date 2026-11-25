@@ -1,5 +1,9 @@
 /** Small pieces chat screens share: role colors, avatars, names and time labels. */
+import { dateLocale } from "@/lib/format";
 import { browserOrSpanish, t } from "@/lib/i18n";
+
+/** Spanish where chat is in Spanish (browserOrSpanish), otherwise dates and times as the business's country writes them. */
+const chatLocale = () => browserOrSpanish() ?? dateLocale();
 import type { CSSProperties } from "react";
 import type { ChatColor } from "@crewtavo/core/chat";
 import { Icon } from "@/components/ui/Icon";
@@ -40,10 +44,10 @@ export function dayLabel(iso: string, now = new Date()): string {
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (sameDay(d, yesterday)) return t("Yesterday");
-  return d.toLocaleDateString(browserOrSpanish(), { weekday: "long", month: "long", day: "numeric", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
+  return d.toLocaleDateString(chatLocale(), { weekday: "long", month: "long", day: "numeric", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
 }
 
-export const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString(browserOrSpanish(), { hour: "numeric", minute: "2-digit" });
+export const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString(chatLocale(), { hour: "numeric", minute: "2-digit" });
 
 /** When a channel last spoke, as a phone's list says it: "1:52 PM" today, "Yesterday", "Mon" this week, then "Nov 3". */
 export function listTime(iso: string, now = new Date()): string {
@@ -53,8 +57,8 @@ export function listTime(iso: string, now = new Date()): string {
   yesterday.setDate(now.getDate() - 1);
   if (sameDay(d, yesterday)) return t("Yesterday");
   const days = (now.getTime() - d.getTime()) / 86_400_000;
-  if (days < 6) return d.toLocaleDateString(browserOrSpanish(), { weekday: "short" });
-  return d.toLocaleDateString(browserOrSpanish(), { month: "short", day: "numeric", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
+  if (days < 6) return d.toLocaleDateString(chatLocale(), { weekday: "short" });
+  return d.toLocaleDateString(chatLocale(), { month: "short", day: "numeric", ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }) });
 }
 export const shortTime = (iso: string) => timeLabel(iso).replace(/\s?([AP]M|[ap]\.\s?m\.)$/i, "");
 

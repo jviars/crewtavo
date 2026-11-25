@@ -111,7 +111,7 @@ export default {
   "Job offers, and what you're owed and paid": "Ofertas de trabajo, y lo que te deben y te pagan",
   "Other alerts": "Otros avisos",
   "Leads handed to you, and your company's automations, like a quote being approved": "Prospectos que te asignan, y las automatizaciones de tu empresa, como una cotización aprobada",
-  "When someone @mentions you or your role": "Cuando alguien te @menciona a ti o a tu rol",
+  "When someone @mentions you or your role, or replies to you": "Cuando alguien te @menciona a ti o a tu rol, o te responde",
   "Railway": "Railway",
   "Before the trial runs out, or when the bill goes over the plan, storage fills up or the nightly backup stops working": "Antes de que termine la prueba, o cuando la cuenta pasa del plan, el almacenamiento se llena o el respaldo de cada noche deja de funcionar",
   "When Google Business Profile needs signing in again or a location picked": "Cuando Google Business Profile necesita que vuelvas a iniciar sesión o que elijas una ubicación",

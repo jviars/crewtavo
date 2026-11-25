@@ -52,6 +52,27 @@ describe("client import", () => {
     expect(hoa!.properties.map((p) => p.custom_fields)).toEqual([{ gate_code: "4821", pool_volume: 12500 }, {}]);
   });
 
+  it("reads a date field's 3/4/2026 as March 4, or as 3 April for a business where the day comes first", () => {
+    const rows = parseCsv(["Client Name,Permit date", "Thames Gardens,3/4/2026"].join("\n"));
+    const mapping = guessMapping(rows[0]!);
+    const columns = customColumns(rows[0]!, mapping, { client: [{ key: "permit", label: "Permit date", type: "date" }], property: [] });
+    expect(toClients(rows.slice(1), mapping, columns.matched)[0]!.custom_fields).toEqual({ permit: "2026-03-04" });
+    expect(toClients(rows.slice(1), mapping, columns.matched, { dayFirst: true })[0]!.custom_fields).toEqual({ permit: "2026-04-03" });
+  });
+
+  it("reads each date column the way the file writes it, whatever the business's country", () => {
+    const rows = parseCsv(["Client Name,Permit date,Renewal", "Thames Gardens,3/4/2026,10/16/2026", "Leeds Lawns,16/10/2026,3/4/2026"].join("\n"));
+    const mapping = guessMapping(rows[0]!);
+    const columns = customColumns(rows[0]!, mapping, { client: [{ key: "permit", label: "Permit date", type: "date" }, { key: "renewal", label: "Renewal", type: "date" }], property: [] });
+    // "16/10/2026" says the permit column is day first; "10/16/2026" says the renewal column is month first.
+    for (const dayFirst of [false, true]) {
+      expect(toClients(rows.slice(1), mapping, columns.matched, { dayFirst }).map((c) => c.custom_fields)).toEqual([
+        { permit: "2026-04-03", renewal: "2026-10-16" },
+        { permit: "2026-10-16", renewal: "2026-03-04" },
+      ]);
+    }
+  });
+
   it("groups a properties export by client and skips repeats and nameless rows", () => {
     const clients = read(["Client Name,Client Email,Street 1,City", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Ln,Rocky Mount", "Meadowbrook HOA,board@hoa.test,75 Meadowbrook Lane,Rocky Mount", "Meadowbrook HOA,board@hoa.test,80 Pool Rd,Rocky Mount", ",x@y.test,1 Nowhere,Rocky Mount"].join("\n"));
     expect(clients).toHaveLength(1);

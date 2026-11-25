@@ -3,6 +3,8 @@
  * condition checks. Shared by the rule builder (web) and the engine that runs rules (API).
  */
 
+import { noDoubleStop } from "./regional";
+
 export type SubjectKind = "client" | "request" | "quote" | "job" | "visit" | "invoice";
 
 export interface TriggerDef {
@@ -512,11 +514,14 @@ export type TemplateVars = Record<string, string | number | null | undefined | R
 
 /** Replace {{path}} tokens; unknown or empty values become "". */
 export function renderTemplate(template: string, vars: TemplateVars): string {
-  return template.replace(/\{\{\s*([a-z_]+(?:\.[a-z_]+)?)\s*\}\}/gi, (_, path: string) => {
-    const [head, tail] = path.split(".");
-    const value = tail ? (vars[head] as Record<string, unknown> | undefined)?.[tail] : vars[head];
-    return value == null ? "" : String(value);
-  });
+  // A {{time}} that ends in "a.m." (Canada) before the template's own full stop has just the one.
+  return noDoubleStop(
+    template.replace(/\{\{\s*([a-z_]+(?:\.[a-z_]+)?)\s*\}\}/gi, (_, path: string) => {
+      const [head, tail] = path.split(".");
+      const value = tail ? (vars[head] as Record<string, unknown> | undefined)?.[tail] : vars[head];
+      return value == null ? "" : String(value);
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

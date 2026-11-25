@@ -49,6 +49,7 @@ import { daysSinceVisit, type AutomatedCampaign } from "@crewtavo/core/campaigns
 import { hidesExactPrice } from "@crewtavo/core/estimates";
 import { inTextQuietHours, marketingOn, REFERRAL_GAP_DAYS, REVIEW_GAP_DAYS, textQuietHoursEnd, textsOffReason } from "@crewtavo/core/marketing";
 import { clientRecipients, type Recipient } from "@crewtavo/core/recipients";
+import { dateTag } from "@crewtavo/core/regional";
 import { countsOn } from "@crewtavo/core/money";
 import type { Env } from "../env";
 import { companyAddress, companyFooter, firstName, isEmail, renderEmail } from "../lib/email";
@@ -91,6 +92,7 @@ interface CompanyInfo {
   trade_preset: string | null;
   settings: Record<string, unknown>;
   address: Record<string, string | undefined>;
+  country: string;
 }
 
 export interface RunContext {
@@ -137,25 +139,29 @@ export interface RunContext {
 const SUBJECTS: SubjectKind[] = ["client", "request", "quote", "job", "visit", "invoice"];
 
 export function money(amount: number | string | null | undefined, currency = "USD") {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(amount ?? 0));
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol" }).format(Number(amount ?? 0));
 }
 
-/** A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between 9:00 AM and 11:00 AM". */
-export function visitTime(startsAt: string, timeZone: string, windowMin = 0) {
-  const at = (ms: number) => new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+/**
+ * A visit's time as a client reads it: " at 9:00 AM", or with the business's arrival window " between
+ * 9:00 AM and 11:00 AM"; the way the business's country keeps time (" at 14:00" in the UK).
+ */
+export function visitTime(startsAt: string, timeZone: string, windowMin = 0, country?: string | null) {
+  const at = (ms: number) => new Date(ms).toLocaleTimeString(dateTag(country), { hour: "numeric", minute: "2-digit", timeZone });
   const start = new Date(startsAt).getTime();
   return windowMin ? ` between ${at(start)} and ${at(start + windowMin * 60_000)}` : ` at ${at(start)}`;
 }
 
 /**
  * A visit's day and time as a client reads them: "Tuesday, November 17" and " at 9:00 AM" (or the
- * arrival window). The time is empty for an anytime visit, and both for one with no day.
+ * arrival window), the way the business's country writes them ("Tuesday 17 November" in the UK).
+ * The time is empty for an anytime visit, and both for one with no day.
  */
-export function visitWhen(startsAt: string | null | undefined, scheduledOn: string | null | undefined, timeZone: string, windowMin = 0): { date: string; time: string } {
+export function visitWhen(startsAt: string | null | undefined, scheduledOn: string | null | undefined, timeZone: string, windowMin = 0, country?: string | null): { date: string; time: string } {
   const at = startsAt ?? (scheduledOn ? `${scheduledOn}T12:00:00Z` : null);
   return {
-    date: at ? new Date(at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: startsAt ? timeZone : "UTC" }) : "",
-    time: startsAt ? visitTime(startsAt, timeZone, windowMin) : "",
+    date: at ? new Date(at).toLocaleDateString(dateTag(country), { weekday: "long", month: "long", day: "numeric", timeZone: startsAt ? timeZone : "UTC" }) : "",
+    time: startsAt ? visitTime(startsAt, timeZone, windowMin, country) : "",
   };
 }
 
@@ -172,7 +178,7 @@ export interface GoneVisit {
 export function moneyRange(low: number | string | null | undefined, high: number | string | null | undefined, currency = "USD") {
   const ends = [Number(low ?? 0), Number(high ?? 0)];
   const digits = ends.every((n) => Number.isInteger(n)) ? 0 : 2;
-  const format = new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const format = new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits });
   return `${format.format(ends[0]!)} to ${format.format(ends[1]!)}`;
 }
 
@@ -242,7 +248,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
   if (!SUBJECTS.includes(subjectType as SubjectKind)) return null;
   const subject = subjectType as SubjectKind;
 
-  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address").eq("id", companyId).maybeSingle();
+  const { data: company } = await admin.from("companies").select("id, name, phone, email, website, timezone, currency, trade_preset, settings, address, country").eq("id", companyId).maybeSingle();
   if (!company) return null;
   const co = company as unknown as CompanyInfo;
   const fmt = (n: number | string | null | undefined) => money(n, co.currency || "USD");
@@ -362,7 +368,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       vars = {
         title: data.title,
         address: addressOf(rel.property),
-        ...visitWhen(data.starts_at, data.scheduled_on, co.timezone || "UTC", arrivalWindowMin(co.settings)),
+        ...visitWhen(data.starts_at, data.scheduled_on, co.timezone || "UTC", arrivalWindowMin(co.settings), co.country),
         eta: etaWords(data.eta_at),
       };
       visit = { status: data.status, scheduled_on: data.scheduled_on, starts_at: data.starts_at };
@@ -406,7 +412,7 @@ export async function loadContext(admin: Db, companyId: string, subjectType: str
       const tz = co.timezone || "UTC";
       const last = await lastVisit(admin, companyId, client.id);
       facts = { status: client.status, days_since_visit: last ? daysSinceVisit(last, new Date(), tz) : null, autopay: await clientOnAutopay(admin, co, client.id) };
-      vars = { title: client.display_name, last_visit: last ? last.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: tz }) : "" };
+      vars = { title: client.display_name, last_visit: last ? last.toLocaleDateString(dateTag(co.country), { month: "long", day: "numeric", year: "numeric", timeZone: tz }) : "" };
       label = client.display_name;
     }
   }
@@ -488,12 +494,12 @@ export async function withEvent(admin: Db, ctx: RunContext, trigger: string, act
   }
   if (trigger === "visit.reschedule_requested" || trigger === "visit.cancel_requested") {
     const { data: ask } = await admin.from("visit_change_requests").select("starts_at, scheduled_on, message, reason").eq("company_id", ctx.company.id).eq("id", text(event.request_id)).maybeSingle();
-    const when = ask?.scheduled_on ? slotLabel({ date: ask.scheduled_on, starts_at: ask.starts_at }, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings)) : "";
+    const when = ask?.scheduled_on ? slotLabel({ date: ask.scheduled_on, starts_at: ask.starts_at }, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings), ctx.company.country) : "";
     return { ...ctx, vars: { ...ctx.vars, change: { when, message: text(ask?.message), reason: text(ask?.reason) } } };
   }
   if (trigger === "visit.rescheduled" || trigger === "visit.cancelled") {
     const was = { scheduled_on: event.was_scheduled_on ? text(event.was_scheduled_on) : null, starts_at: event.was_starts_at ? text(event.was_starts_at) : null };
-    const when = visitWhen(was.starts_at, was.scheduled_on, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings));
+    const when = visitWhen(was.starts_at, was.scheduled_on, ctx.company.timezone || "UTC", arrivalWindowMin(ctx.company.settings), ctx.company.country);
     return { ...ctx, was, vars: trigger === "visit.cancelled" ? { ...ctx.vars, ...when } : { ...ctx.vars, old: when } };
   }
   return {
@@ -740,7 +746,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       const title = render(action.title, office) || ruleName;
       // A new request whose client picked a time online says so, whatever the rule's own words are:
       // "Booked online for Tue, Jan 14, 10:00 to 11:00 AM." or "Asked for ... It waits for your OK."
-      const picked = ctx.trigger === "request.created" && ctx.asked ? askedTimeLine(ctx.asked, ctx.company.timezone || "UTC") : null;
+      const picked = ctx.trigger === "request.created" && ctx.asked ? askedTimeLine(ctx.asked, ctx.company.timezone || "UTC", ctx.company.country) : null;
       const body = [render(action.body, office), picked].filter(Boolean).join("\n") || null;
       const { error: insertError } = await admin.from("notifications").insert(
         people.map((p) => ({ company_id: ctx.company.id, user_id: p.user_id, kind: ctx.subject, title: title.slice(0, 300), body, link: ctx.appPath })),

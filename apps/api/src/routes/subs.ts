@@ -13,7 +13,7 @@
  * sub in the link, and they answer with only the company's name and logo, the sub's business name
  * and what's still needed.
  */
-import { DISPATCH, endDateProblem, isSubDocumentKind, localDate, OFFICE, subDocumentLabel, SUB_DOCUMENT_EXPIRES, SUB_DOCUMENT_KINDS, type SubDocumentKind } from "@crewtavo/core";
+import { DISPATCH, endDateProblem, isSubDocumentKind, localDate, OFFICE, subDocumentKinds, subDocumentLabel, SUB_DOCUMENT_EXPIRES, type SubDocumentKind } from "@crewtavo/core";
 import { brandColor } from "@crewtavo/core/social";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -127,13 +127,15 @@ async function linkSub(c: Context<AppEnv>, limit: { kind: string; max: number })
 // What the page shows: who's asking (in their brand color), the sub's business name, and what's still needed.
 subs.get("/public/paperwork/:token", async (c) => {
   const { admin, sub, companyId } = await linkSub(c, { kind: "page", max: 60 });
-  const company = must(await admin.from("companies").select("name, settings").eq("id", companyId).maybeSingle(), EXPIRED);
+  const company = must(await admin.from("companies").select("name, settings, country").eq("id", companyId).maybeSingle(), EXPIRED);
   const paperwork = await subPaperwork(admin, companyId, sub.id);
   return c.json({
-    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings) },
+    // Its country: the page writes dates its way.
+    company: { name: company.name, logo: logoImage("", companyId, company.settings)?.src ?? null, color: brandColor(company.settings), country: company.country },
     sub: { name: sub.name },
     ...paperwork,
-    kinds: SUB_DOCUMENT_KINDS.map((k) => ({ key: k.key, label: k.label, expires: SUB_DOCUMENT_EXPIRES[k.key] })),
+    // What they can send: a W-9 only to a business in the US.
+    kinds: subDocumentKinds(company.country).map((k) => ({ key: k.key, label: k.label, expires: SUB_DOCUMENT_EXPIRES[k.key] })),
     max_bytes: UPLOAD_LIMIT,
   });
 });

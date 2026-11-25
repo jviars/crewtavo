@@ -1,3 +1,4 @@
+import { addressLabels, businessCountry, REGION_MAX } from "@crewtavo/core/countries";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
@@ -43,6 +44,7 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
   const near = shop?.lat != null && shop.lng != null ? { lat: shop.lat, lng: shop.lng } : null;
   const queryClient = useQueryClient();
   const isOffice = hasRole(session, "admin", "office");
+  const words = addressLabels(businessCountry(session.company));
   const [p, setP] = useState({
     label: property?.label ?? "",
     line1: property?.line1 ?? "",
@@ -109,8 +111,8 @@ export function PropertyDialog({ clientId, property, access, onClose }: { client
         <Field label="Apartment, suite or unit" optional><input className="input" value={p.line2} onChange={set("line2")} maxLength={100} /></Field>
         <div className="form-grid-3">
           <Field label="City"><input className="input" value={p.city} onChange={set("city")} maxLength={100} /></Field>
-          <Field label="State / Province"><input className="input" value={p.region} onChange={set("region")} maxLength={20} /></Field>
-          <Field label="ZIP / Postal code"><input className="input" value={p.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
+          <Field label={words.region} optional={words.regionOptional}><input className="input" value={p.region} onChange={set("region")} maxLength={REGION_MAX} /></Field>
+          <Field label={words.postalCode}><input className="input" value={p.postal_code} onChange={set("postal_code")} maxLength={12} /></Field>
         </div>
         {isOffice && (
           <div className="form-section">

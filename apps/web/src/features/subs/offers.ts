@@ -9,9 +9,9 @@
 import { isLivePay } from "@crewtavo/core/jobPay";
 import { isChangeOffer, moneyShort, respondByProblem } from "@crewtavo/core/subOffers";
 import { addDays, localDate, parseZonedTime, zonedTimeToUtc } from "@crewtavo/core/time";
-import { PAPERWORK_REQUIREMENTS } from "@crewtavo/core/subs";
+import { paperworkRequirements } from "@crewtavo/core/subs";
 import type { Tone } from "@/components/ui/StatusPill";
-import { dateIn, formatDate, formatDateTime } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, formatDateTime, moneyCurrency } from "@/lib/format";
 import { paperworkChip, type PaperworkRow } from "./paperwork";
 import { draftAmount, draftOf, payStatusLabel, payTone, readQuantity, readRate, type LineDraft, type PayAction, type Payee, type PayLine } from "./pay";
 
@@ -127,7 +127,7 @@ export function offerLine(p: OfferState, timeZone: string, now: Date = new Date(
   const when = (at: string | null | undefined) => (at ? formatDate(dateIn(at, timeZone)) : "");
   const reason = p.decline_reason ? ` "${p.decline_reason}"` : "";
   if (isChangeOffer(p)) {
-    const prices = `${moneyShort(p.total)} (agreed ${moneyShort(p.accepted_snapshot?.total)})`;
+    const prices = `${moneyShort(p.total, moneyCurrency())} (agreed ${moneyShort(p.accepted_snapshot?.total, moneyCurrency())})`;
     if (ranOut(p, now)) return `They didn't answer the new price of ${prices} in time, so the price they agreed stands.`;
     return `New price waiting: ${prices}. ${p.respond_by ? `They answer by ${formatDateTime(p.respond_by, timeZone)}.` : "No deadline."} If they say no, the agreed price stays.`;
   }
@@ -207,7 +207,7 @@ export const AGREE_CHANGE_LABEL = "Agree new price";
 export function agreeChangeConfirm(p: OfferState, name: string) {
   return {
     title: "Agree the new price for them?",
-    body: `This sets ${name}'s price to ${moneyShort(p.total)} (was ${moneyShort(p.accepted_snapshot?.total)}) without waiting for their answer. They're told.`,
+    body: `This sets ${name}'s price to ${moneyShort(p.total, moneyCurrency())} (was ${moneyShort(p.accepted_snapshot?.total, moneyCurrency())}) without waiting for their answer. They're told.`,
     confirmLabel: "Agree new price",
     cancelLabel: "Wait for them",
   };
@@ -219,7 +219,7 @@ export function withdrawConfirm(p: OfferState & { paid_amount?: number | string 
   return {
     title: change ? "Withdraw the new price?" : "Withdraw the offer?",
     body: change
-      ? `The price they agreed (${moneyShort(agreedAmount(p))}) stays, and ${name} is told.`
+      ? `The price they agreed (${moneyShort(agreedAmount(p), moneyCurrency())}) stays, and ${name} is told.`
       : `${name} is told it was withdrawn. To offer the job again, to them or someone else, add new pay.`,
     confirmLabel: "Withdraw",
     cancelLabel: "Keep it",
@@ -237,10 +237,10 @@ export const visitsForElsewhere = (covered: readonly string[], visits: ReadonlyA
 
 /**
  * A sub's paperwork in a few words for picking who gets a job: "Workers' comp expired, W-9
- * missing", or null when it's all in order. Only ever a warning.
+ * missing", or null when it's all in order. Only ever a warning. No W-9 outside the US.
  */
-export function paperworkWords(statuses: readonly PaperworkRow[]): string | null {
-  const words = PAPERWORK_REQUIREMENTS.flatMap((req) => {
+export function paperworkWords(statuses: readonly PaperworkRow[], country = companyCountry()): string | null {
+  const words = paperworkRequirements(country).flatMap((req) => {
     const s = statuses.find((x) => x.requirement === req.key) ?? { requirement: req.key, state: "missing", expires_on: null, days_left: null, verified: null };
     const chip = paperworkChip(s);
     return chip.tone === "good" ? [] : [`${req.label} ${chip.label.charAt(0).toLowerCase()}${chip.label.slice(1)}`];

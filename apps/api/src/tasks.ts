@@ -630,7 +630,7 @@ const SNOW_SITE_FIELDS =
 async function snowWatch(env: Env) {
   const admin = adminClient(env);
   const now = new Date();
-  const { data: companies, error } = await admin.from("companies").select("id, timezone, weather_source:settings->weather_source, auto:settings->snow_auto_schedule").eq("settings->snow_app->>enabled", "true");
+  const { data: companies, error } = await admin.from("companies").select("id, timezone, country, weather_source:settings->weather_source, auto:settings->snow_auto_schedule").eq("settings->snow_app->>enabled", "true");
   if (error) throw new Error(error.message);
   const tally = { companies: 0, alerted: 0, today: 0, iced: 0, logged: 0, unknown: 0 };
   for (const company of companies) {
@@ -681,7 +681,7 @@ async function snowWatch(env: Env) {
       const subs = going.length ? await admin.from("memberships").select("user_id").eq("company_id", company.id).eq("role", "subcontractor").in("user_id", going) : null;
       const asking = (subs?.data ?? []).map((m) => m.user_id);
       const sent = await admin.from("notifications").insert(
-        snowNotices(sites, office, asking, day).map((n) => ({ company_id: company.id, user_id: n.user_id, kind: "snow", title: n.title, body: n.office ? n.body + onSchedule : n.body, link: n.office ? "/snow" : "/field" })),
+        snowNotices(sites, office, asking, day, company.country).map((n) => ({ company_id: company.id, user_id: n.user_id, kind: "snow", title: n.title, body: n.office ? n.body + onSchedule : n.body, link: n.office ? "/snow" : "/field" })),
       );
       if (sent.error) throw new Error(sent.error.message);
       // The question isn't worth untelling everyone for: the Snow page asks nobody twice.
@@ -796,6 +796,7 @@ async function snowWatch(env: Env) {
           mine.map(({ site, risk }) => ({ name: named(site), risk, priority: site.priority, people: (recipients.data ?? []).filter((r) => r.job_id === site.job_id && !r.office).map((r) => r.user_id) })),
           office,
           `${today}T18:00`,
+          company.country,
         );
         const sent = recipients.error ? recipients : await admin.from("notifications").insert(notices.map((n) => ({ company_id: company.id, user_id: n.user_id, kind: "snow", title: n.title, body: n.body, link: n.office ? "/snow" : "/field" })));
         if (sent.error) {

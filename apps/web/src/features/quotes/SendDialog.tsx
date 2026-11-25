@@ -13,10 +13,12 @@ import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import { companyCountry } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { formatPhoneTyping } from "@/lib/validate";
 import { listWords, ownChoices, sendList, sendListProblem, sendPayload, type SendChannel, type SendChoices } from "./sendRecipients";
 import { translateError } from "@crewtavo/core/i18n/patterns";
+import { phoneExample } from "@crewtavo/core/phone";
 import { getLocale, t } from "@/lib/i18n";
 
 type Channel = SendChannel | "link";
@@ -203,7 +205,7 @@ export function SendDialog({
                 onChange={(e) => setTyped({ ...typed, [channel]: channel === "sms" ? formatPhoneTyping(e.target.value) : e.target.value })}
                 required={people.length === 0}
                 onBlur={channel === "email" ? typo.onBlur : undefined}
-                placeholder={channel === "email" ? "client@example.com" : "(555) 555-0123"}
+                placeholder={channel === "email" ? "client@example.com" : (phoneExample(companyCountry()) ?? "(555) 555-0123")}
               />
             </Field>
           )}

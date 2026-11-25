@@ -53,7 +53,7 @@ import { contrastRatio } from "../src/features/documents/words";
 import { invoiceFill } from "../src/features/documents/data";
 import { documentBlocks, EstimateDocument } from "../src/features/documents/EstimateDocument";
 import styles from "../src/features/documents/EstimateDocument.module.css";
-import { BODY_INSET, CONTENT_HEIGHT, CONTENT_WIDTH, FULL_SHEET_PAPER_VARS, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, paperSpace, WEBKIT_SHEET_RATIO } from "../src/features/documents/paper";
+import { BODY_INSET, CONTENT_HEIGHT, CONTENT_WIDTH, FULL_SHEET_PAPER_VARS, PAGE_HEIGHT, PAGE_MARGIN, PAGE_WIDTH, PAPER_VARS, paperSpace, paperVars, sheetOf, stackHeight, WEBKIT_SHEET_RATIO } from "../src/features/documents/paper";
 import type { DocumentCompany, DocumentData, DocumentLayout, DocumentOption, DocumentSection, PaperPart } from "../src/features/documents/types";
 import { logoUrl } from "../src/lib/files";
 import { contractBlocks, contractTable, sanitizeContractHtml, type ContractBlock } from "../src/lib/html";
@@ -630,6 +630,32 @@ describe("the page", () => {
     expect(html).toContain("--doc-color:#3b7d23");
   });
 
+  it("says the tax's name and rate in the totals, and the business's number for it with its details", () => {
+    const taxed = { ...SAMPLE_DOCUMENT, tax: 1464.32, taxRate: 0.08875, total: SAMPLE_DOCUMENT.total + 1464.32 };
+    // A US business: "Tax", with its rate, and no number.
+    expect(page({}, taxed)).toContain("<dt>Tax (8.875%)</dt>");
+    expect(page({}, { ...taxed, taxRate: undefined })).toContain("<dt>Tax</dt>");
+    expect(page({}, taxed)).not.toContain("Tax number");
+    // A UK business: its VAT number with its details, in each look, and VAT at its rate.
+    const vat = (template: Partial<TemplateSettings>, data: DocumentData = { ...taxed, taxRate: 0.2 }) =>
+      renderToStaticMarkup(createElement(EstimateDocument, { template: { ...DEFAULT_TEMPLATE, ...template }, company: { ...company, taxName: "VAT", taxNumber: "GB123456789" }, data }));
+    for (const header of ["classic", "banner", "centered"] as const) expect(vat({ header }), header).toContain("VAT number GB123456789");
+    expect(vat({})).toContain("<dt>VAT (20%)</dt>");
+    expect(vat({ license: "#RC-1", insurer: "Hartwell", header: "centered" })).toContain("Insured by Hartwell · VAT number GB123456789");
+    // No tax on it: no tax line, whatever it's called.
+    expect(vat({}, { ...SAMPLE_DOCUMENT, taxRate: 0.2 })).not.toContain("VAT (");
+  });
+
+  it("names the business's tax by its own word for it, else its country's", () => {
+    const row = { name: "Thames Roofing", address: null };
+    expect(documentCompany({ ...row, country: "US" })).toMatchObject({ taxName: "Tax", taxNumber: null });
+    expect(documentCompany({ ...row, country: "GB", settings: { tax_number: "GB 123 4567 89" } })).toMatchObject({ taxName: "VAT", taxNumber: "GB 123 4567 89" });
+    expect(documentCompany({ ...row, country: "CA" }).taxName).toBe("GST/HST");
+    // A business whose country isn't known yet (a sub's basics): the guess from its time zone.
+    expect(documentCompany({ ...row, timezone: "Europe/London" }).taxName).toBe("VAT");
+    expect(documentCompany({ ...row, country: "CA", settings: { tax_name: " HST ", tax_number: "  " } })).toMatchObject({ taxName: "HST", taxNumber: null });
+  });
+
   it("leaves off what the template turns off", () => {
     const html = page({ license: "#RC-104882", show_license: false, insurer: "Hartwell", show_insurer: false, page_numbers: false, terms: "", customer_signs: false, company_signs: false });
     expect(html).not.toContain("RC-104882");
@@ -1018,6 +1044,38 @@ describe("the business's own letterhead", () => {
     // Safari's column is wider than either page, so it shrinks the column to the paper (rather than cutting a page off).
     expect((PAGE_HEIGHT - 2) / WEBKIT_SHEET_RATIO).toBeGreaterThan(PAGE_WIDTH);
     expect((CONTENT_HEIGHT - 2) / WEBKIT_SHEET_RATIO).toBeGreaterThan(CONTENT_WIDTH);
+  });
+
+  it("is on A4 outside the US and Canada: 22 px narrower and 66 px taller, inside the same margins", () => {
+    expect(documentCompany({ name: "Ridgeline", country: "US" }).paper).toBe("letter");
+    expect(documentCompany({ name: "Ridgeline", country: "CA" }).paper).toBe("letter");
+    expect(documentCompany({ name: "Ridgeline", country: "PR" }).paper).toBe("letter");
+    expect(documentCompany({ name: "Ridgeline" }).paper).toBe("letter");
+    expect(documentCompany({ name: "Harbour", country: "AU" }).paper).toBe("a4");
+    expect(documentCompany({ name: "Thames", country: "GB" }).paper).toBe("a4");
+    expect(documentCompany({ name: "Thames", timezone: "Europe/London" }).paper).toBe("a4");
+    // Letter's measurements as they were.
+    expect(paperVars("letter")).toEqual(PAPER_VARS);
+    expect(paperVars(undefined, true)).toEqual(FULL_SHEET_PAPER_VARS);
+    expect(PAPER_VARS).toMatchObject({ "--page-w": "816px", "--page-h": "1056px", "--box-w": "739.2px", "--box-h": "979.2px" });
+    // A4 (210 × 297 mm is 793.70 × 1122.52 px), never more than the sheet.
+    const a4 = sheetOf("a4");
+    expect(a4.width).toBeLessThanOrEqual((210 / 25.4) * 96);
+    expect(a4.height).toBeLessThanOrEqual((297 / 25.4) * 96);
+    expect(a4.width).toBeGreaterThan((210 / 25.4) * 96 - 0.1);
+    expect(paperVars("a4")).toMatchObject({ "--page-w": "793.7px", "--page-h": "1122.5px", "--box-w": "716.9px", "--box-h": "1045.7px", "--page-margin": `${PAGE_MARGIN}px` });
+    expect(paperVars("a4", true)).toMatchObject({ "--box-w": "793.7px", "--box-h": "1122.5px", "--page-margin": "0px" });
+    const parts = { letterhead: 160, running: 50, footer: 140 };
+    expect(paperSpace(parts, false, "a4").first).toBeCloseTo(1045.7 - 300);
+    expect(paperSpace(parts, true, "a4").rest).toBeCloseTo(1122.5 - 190);
+    expect(stackHeight(2, "a4")).toBeCloseTo(2 * 1122.5 + 24);
+    // Safari's column still shrinks to the paper.
+    expect((1045.7 - 2) / WEBKIT_SHEET_RATIO).toBeGreaterThan(716.9);
+    // The page is drawn on it.
+    const html = renderToStaticMarkup(createElement(EstimateDocument, { template: DEFAULT_TEMPLATE, company: { ...company, paper: "a4" }, data: SAMPLE_DOCUMENT }));
+    expect(html).toContain("--page-w:793.7px");
+    expect(html).toContain("--box-h:1045.7px");
+    expect(page({})).toContain("--page-w:816px");
   });
 
   it("prints its pictures in place of Crewtavo's letterhead and the footer's words, on estimates and invoices", () => {

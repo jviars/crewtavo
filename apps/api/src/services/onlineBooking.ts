@@ -9,6 +9,7 @@
  * rules say: on the page, by email, and by text when the company can text and they gave a number.
  * The "visit booked" rule's own message is then called off, so they aren't told twice.
  */
+import { endWithStop } from "@crewtavo/core/regional";
 import { SALES } from "@crewtavo/core/roles";
 import { BOOKING_WEEK_DAYS, bookingDays, bookingLength, bookingOpenings, slotLabel, timeZoneLabel, type OpenSlot } from "@crewtavo/core/slots";
 import { addDays, arrivalWindowMin, localDate, zonedTimeToUtc } from "@crewtavo/core/time";
@@ -197,18 +198,18 @@ export async function confirmBooking(
   const result: Confirmation = { emailed: false, texted: false };
   try {
     const [company, found] = await Promise.all([
-      admin.from("companies").select("id, name, email, phone, timezone, settings, address").eq("id", booking.companyId).maybeSingle(),
+      admin.from("companies").select("id, name, email, phone, timezone, country, settings, address").eq("id", booking.companyId).maybeSingle(),
       admin.from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("company_id", booking.companyId).eq("id", booking.clientId).maybeSingle(),
     ]);
     const co = company.data;
     const client = found.data;
     if (!co || !client) return result;
     const tz = co.timezone || "UTC";
-    const when = slotLabel({ date: localDate(new Date(booking.startsAt), tz), starts_at: booking.startsAt }, tz, arrivalWindowMin(co.settings));
+    const when = slotLabel({ date: localDate(new Date(booking.startsAt), tz), starts_at: booking.startsAt }, tz, arrivalWindowMin(co.settings), co.country);
     const about = booking.visitId ? { related_type: "visit", related_id: booking.visitId } : { related_type: "request", related_id: booking.requestId };
     const [subject, line] = booking.booked
-      ? [`You're booked for ${when}`, `You're booked: ${booking.title} on ${when}.`]
-      : [`We got your request for ${when}`, `We got your request for ${booking.title} on ${when}. This time isn't confirmed yet: we'll let you know as soon as it is.`];
+      ? [`You're booked for ${when}`, endWithStop(`You're booked: ${booking.title} on ${when}`)]
+      : [`We got your request for ${when}`, `${endWithStop(`We got your request for ${booking.title} on ${when}`)} This time isn't confirmed yet: we'll let you know as soon as it is.`];
     const call = co.phone ? ` or call ${co.phone}` : "";
 
     if (await emailReady(env, co.id)) {

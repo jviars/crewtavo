@@ -13,8 +13,9 @@ import { InboxSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
-import { formatDate, timeAgo } from "@/lib/format";
+import { dateLocale, formatDate, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
+import { PostcardsUsOnly } from "../apps/LobPanel";
 import styles from "./Marketing.module.css";
 
 /** A new postcard's message, to change. */
@@ -42,7 +43,7 @@ export function PostcardCampaigns() {
       unwrap(
         await supabase()
           .from("postcard_campaigns")
-          .insert({ company_id: session.company.id, name: `Postcard ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, message: POSTCARD_STARTER, audience: { statuses: ["active"] } })
+          .insert({ company_id: session.company.id, name: `Postcard ${new Date().toLocaleDateString(dateLocale(), { month: "short", day: "numeric" })}`, message: POSTCARD_STARTER, audience: { statuses: ["active"] } })
           .select("id")
           .single(),
       ),
@@ -58,6 +59,7 @@ export function PostcardCampaigns() {
   };
   return (
     <Section title="Postcards" count={list.data?.length || undefined} flush action={<Button loading={create.isPending} onClick={() => create.mutate()}>New postcard</Button>}>
+      <PostcardsUsOnly />
       <FormError error={create.error} />
       {list.isPending ? (
         <InboxSkeleton rows={1} />

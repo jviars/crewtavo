@@ -3,6 +3,7 @@
  * The scheduling itself is in services/schedule.ts, which AI assistants' tools use too.
  */
 import { arrivalWindowMin, DISPATCH, OFFICE, SALES, timeZoneLabel, WITH_SUBS } from "@crewtavo/core";
+import { countryCode } from "@crewtavo/core/countries";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -49,12 +50,14 @@ schedule.post("/jobs/:id/generate-visits", requireUser, requireCompany(DISPATCH,
 });
 
 /**
- * Address -> coordinates (the shop address for route planning, and similar). `world` also looks
- * outside the US, for the measuring map; the answer says which country it found.
+ * Address -> coordinates (the shop address for route planning, and similar), in the business's
+ * country, or the one Settings → Company is about to save with the address. `world` also looks
+ * elsewhere, for the measuring map; the answer says which country it found.
  */
 schedule.post("/geocode", requireUser, requireCompany(), async (c) => {
-  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional() }));
-  const result = await geocodeAddress(body.address, { world: body.world });
+  const body = await readJson(c, z.object({ address: z.string().trim().min(5).max(300), world: z.boolean().optional(), country: z.string().optional() }));
+  const { data: company } = await c.var.db.from("companies").select("country").eq("id", c.var.companyId).maybeSingle();
+  const result = await geocodeAddress(body.address, { world: body.world, country: countryCode(body.country) ?? company?.country });
   return c.json(result ? { found: true, ...result } : { found: false });
 });
 
@@ -75,7 +78,7 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
   const lng = Number(c.req.query("lng"));
   const near = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : undefined;
   const { db, companyId } = c.var;
-  const fields = "id, line1, city, region, postal_code, lat, lng";
+  const fields = "id, line1, city, region, postal_code, country, lat, lng";
   const [byStreet, byClient, places] = await Promise.all([
     db.from("properties").select(`${fields}, client:clients(id, display_name)`).eq("company_id", companyId).ilike("line1", contains(q)).limit(6),
     db.from("clients").select(`id, display_name, properties(${fields})`).eq("company_id", companyId).ilike("display_name", contains(q)).limit(4),
@@ -85,8 +88,8 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
       return suggestPlaces(q, near).catch(() => null);
     })(),
   ]);
-  type Row = { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null; lat: number | null; lng: number | null };
-  const clients = new Map<string, { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; lat: number | null; lng: number | null; parts: AddressParts }>();
+  type Row = { id: string; line1: string | null; city: string | null; region: string | null; postal_code: string | null; country: string | null; lat: number | null; lng: number | null };
+  const clients = new Map<string, { property_id: string; client_id: string | null; client: string | null; label: string; detail: string | null; country: string | null; lat: number | null; lng: number | null; parts: AddressParts }>();
   const add = (p: Row, client: { id: string; display_name: string } | null) => {
     if (!p.line1 || clients.has(p.id) || clients.size >= 6) return;
     clients.set(p.id, {
@@ -95,6 +98,7 @@ schedule.get("/places/suggest", requireUser, requireCompany(), async (c) => {
       client: client?.display_name ?? null,
       label: p.line1,
       detail: [p.city, p.region].filter(Boolean).join(", ") || null,
+      country: p.country,
       lat: p.lat,
       lng: p.lng,
       parts: { line1: p.line1, city: p.city ?? "", region: p.region ?? "", postal_code: p.postal_code ?? "" },

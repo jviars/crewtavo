@@ -110,7 +110,7 @@ export const invoiceTools = {
       const materials = a.material_keys ? work.materials.filter((m) => a.material_keys!.includes(m.key)) : work.materials.filter(priced);
       const unpriced = materials.filter((m) => !priced(m));
       if (unpriced.length) throw new Error(`${unpriced.map((m) => `${m.name} (${m.key})`).join(", ")} has no price list item: give its price in material_prices.`);
-      const lines = workLines({ hours, rate: rate ?? null, materials, prices: a.material_prices, timeZone: ctx.timezone });
+      const lines = workLines({ hours, rate: rate ?? null, materials, prices: a.material_prices, timeZone: ctx.timezone, country: ctx.country });
       if (!lines.length) throw new Error("Nothing logged on this job is waiting to be billed.");
       const sort = Math.max(0, ...invoice.lines.map((l) => l.sort));
       await rows(ctx.db.from("invoice_line_items").insert(lines.map((l, i) => ({ ...l, company_id: ctx.companyId, invoice_id: invoice.id, sort: sort + i + 1 }))).select("id"));

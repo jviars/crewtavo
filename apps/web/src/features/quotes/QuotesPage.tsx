@@ -15,10 +15,9 @@ import { FilterTabs, SearchField, Toolbar } from "@/components/ui/Toolbar";
 import { api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { reportBulk, type BulkResult } from "@/lib/bulk";
-import { formatMoney, timeAgo, todayIn } from "@/lib/format";
+import { dateLocale, formatMoney, timeAgo, todayIn } from "@/lib/format";
 import { titleOrClientFilter, useStatusCounts } from "@/lib/listing";
 import { firstRows } from "@/lib/paging";
-import { intlLocale } from "@/lib/i18n";
 import { can, hasRole, useSession } from "@/lib/session";
 import { choiceLabel, isSignedQuote } from "../documents/build";
 import { NewQuoteDialog } from "./NewQuoteDialog";
@@ -105,7 +104,7 @@ export function shortDate(value: string, timeZone: string, now = new Date()): st
   const day = new Date(plain ? `${value}T12:00:00Z` : value);
   const zone = plain ? "UTC" : timeZone;
   const year = (d: Date) => d.toLocaleDateString("en-US", { year: "numeric", timeZone: zone });
-  return day.toLocaleDateString(intlLocale(), { month: "short", day: "numeric", ...(year(day) === year(now) ? {} : { year: "numeric" }), timeZone: zone });
+  return day.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", ...(year(day) === year(now) ? {} : { year: "numeric" }), timeZone: zone });
 }
 
 /** A quote sent, or still a draft, whose "valid until" day has gone by in the company's time zone. */

@@ -9,7 +9,7 @@ import { optionsIntroText, optionsRange, priceRange, rangeIntroText, type RangeS
 import { optionBaseTotal, optionTierLabels, toCents, type Amount, type OptionLine, type TotalsPromo } from "@crewtavo/core/money";
 import { SALES, type Role } from "@crewtavo/core/roles";
 import { statusText } from "@/components/ui/StatusPill";
-import { formatMoney } from "@/lib/format";
+import { dateLocale, formatMoney } from "@/lib/format";
 import type { QuoteApproval } from "../../documents/build";
 import { firstName, money, rangePosition, whenText } from "../estimate/rows";
 
@@ -170,7 +170,7 @@ export function rangePill(price: number, range: { low: number; high: number }): 
 
 /** Whole dollars in the business's currency, as the server words its messages. */
 const wholeMoney = (amount: number, currency: string | null | undefined) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: 0 }).format(amount);
+  new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol", maximumFractionDigits: 0 }).format(amount);
 
 /**
  * The words a range goes out with unless the office writes their own: the server's own (core
@@ -187,7 +187,7 @@ export const rangeIntro = (range: { low: number; high: number }, optionCount = 0
  */
 export function optionsIntro(prices: ReadonlyArray<{ total: number }>, currency?: string | null): string {
   if (prices.length < 2) return "";
-  const from = new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD" }).format(Math.min(...prices.map((p) => p.total)));
+  const from = new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", currencyDisplay: "narrowSymbol" }).format(Math.min(...prices.map((p) => p.total)));
   return optionsIntroText(prices.length, from);
 }
 
@@ -238,7 +238,7 @@ export function sendWords(q: RangeEstimate, mode: "range" | "exact", settings: R
 export function dayText(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
   const year = (d: Date) => d.toLocaleDateString("en-US", { year: "numeric", timeZone });
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
+  return at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
 }
 
 /** "on Oct 24 at 2:14 PM", "today at 9:12 AM". */

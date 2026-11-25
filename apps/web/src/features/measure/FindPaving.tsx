@@ -1,7 +1,7 @@
 /**
- * Find paving, two ways. The button starts the free one (TapOutline.tsx, also the Find tool on the
- * map): put a box round a lot, press Outline, and SAM 2.1 in the browser outlines it. The link under
- * it is **Find everything in view**, which outlines all the asphalt and concrete on the aerial and
+ * Find paving, two ways. The free one is the Find tool in the map's dock (TapOutline.tsx): put a box
+ * round a lot, press Outline, and SAM 2.1 in the browser outlines it. This is the panel's row for
+ * **Find everything in view**, which outlines all the asphalt and concrete on the aerial and
  * counts its stalls with Meta's SAM 3 on the business's own fal.ai account (Apps → fal.ai;
  * routes/paving.ts on the server); without fal.ai installed, its dialog says how to get it. What
  * either finds lands on the map as ordinary shapes with their takeoff item, to check before pricing.
@@ -46,7 +46,6 @@ export function FindPaving({
   pictureImagery,
   zoom,
   onFound,
-  onStart,
 }: {
   map: RefObject<MeasureMapHandle | null>;
   ready: boolean;
@@ -58,8 +57,6 @@ export function FindPaving({
   pictureImagery: () => Promise<ImageryId>;
   zoom: number;
   onFound: (ids: string[], item: string) => void;
-  /** Starts the free way: a box round a lot, then Outline. */
-  onStart: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState<Target[]>(["asphalt", "concrete"]);
@@ -110,7 +107,7 @@ export function FindPaving({
     },
     onSuccess: (found) => {
       setOpen(false);
-      if (!found.length) return void toast.info("Nothing found here. Zoom so the lot fills the map, or draw it with the items list.");
+      if (!found.length) return void toast.info("Nothing found here. Zoom so the lot fills the map, or draw it: pick the item under the map, then Area.");
       const words = found.map((f) => (f.unit === "count" ? `${f.count} ${f.count === 1 ? "stall" : "stalls"}` : `${f.count} ${f.item} ${f.count === 1 ? "area" : "areas"}`));
       toast.success(`Found ${list(words)}. Check them against the imagery and drag any corners that are off.`);
     },
@@ -121,13 +118,11 @@ export function FindPaving({
 
   return (
     <>
-      <Button size="sm" icon="sparkle" disabled={!ready} onClick={onStart}>
-        Find paving
-      </Button>
-      <span className="muted small">Put a box round a lot, then press Outline. Free.</span>
-      <button type="button" className="link-btn small" disabled={!ready} onClick={() => setOpen(true)}>
-        Find everything in view with fal.ai
-      </button>
+      <div className="measure-row">
+        <Icon name="sparkle" size={17} />
+        <span className="grow">Find everything in view <span className="measure-row-meta">· fal.ai</span></span>
+        <button type="button" className="link-btn" disabled={!ready} onClick={() => setOpen(true)}>Open</button>
+      </div>
       {open && (
         <Dialog open onClose={() => !run.isPending && setOpen(false)} title="Find everything in view" description="With fal.ai: all the asphalt and concrete on the aerial at once, and the stalls counted." size="md">
           <form

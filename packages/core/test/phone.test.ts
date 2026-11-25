@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { phoneDisplay, phoneE164, signInPhone, textsCodesTo } from "../src/phone";
+import { COUNTRY_CODES } from "../src/countries";
+import { internationalPhone, phoneDisplay, phoneE164, phoneExample, signInPhone, textedNumber, textsCodesTo } from "../src/phone";
 import { emailKey } from "../src/email";
 import { signInCodeEmail, signInCodeText, subSettings } from "../src/subs";
 
@@ -71,6 +72,98 @@ describe("phone numbers", () => {
     expect(signInCodeText("042517", "Oscar Roofing")).toBe(
       "042517 is your sign-in code for Oscar Roofing on Crewtavo. It runs out in 10 minutes. If you didn't ask for it, ignore this text.",
     );
+  });
+});
+
+/** Numbers as an office outside North America types them, and the number each is texted at. */
+const TEXTED: Array<[string, string, string]> = [
+  // The UK: the 0 gives way to +44, however the number is laid out.
+  ["GB", "07700 900123", "+447700900123"],
+  ["GB", "07700 900 123", "+447700900123"],
+  ["GB", "020 7946 0018", "+442079460018"],
+  ["GB", "(020) 7946-0018", "+442079460018"],
+  ["GB", "7700 900123", "7700 900123"],
+  ["GB", "(540) 555-0101", "(540) 555-0101"],
+  ["GB", "44 7700 900123", "+447700900123"],
+  ["GB", "+44 7700 900123", "+447700900123"],
+  ["GB", "+44 (0)20 7946 0018", "+442079460018"],
+  ["GB", "0044 20 7946 0018", "+442079460018"],
+  ["GB", "+1 540 555 0101", "+15405550101"],
+  ["GB", "0113 496 0000", "+441134960000"],
+  // Ireland, Australia (0011 to dial out), New Zealand, South Africa.
+  ["IE", "087 123 4567", "+353871234567"],
+  ["IE", "(01) 234 5678", "+35312345678"],
+  ["AU", "0412 345 678", "+61412345678"],
+  ["AU", "(02) 9876 5432", "+61298765432"],
+  ["AU", "0011 44 20 7946 0018", "+442079460018"],
+  ["AU", "61 412 345 678", "+61412345678"],
+  ["NZ", "021 123 4567", "+64211234567"],
+  ["NZ", "6421 123 456", "+6421123456"],
+  ["ZA", "082 123 4567", "+27821234567"],
+  ["ZA", "27 123 4567", "27 123 4567"],
+  ["ZA", "27 82 123 4567", "+27821234567"],
+  // The euro: France and Germany drop the 0, Spain has none, Italy keeps it.
+  ["FR", "06 12 34 56 78", "+33612345678"],
+  ["DE", "0151 23456789", "+4915123456789"],
+  ["ES", "612 34 56 78", "+34612345678"],
+  ["ES", "34 612 345 678", "+34612345678"],
+  ["IT", "06 1234 5678", "+390612345678"],
+  ["IT", "347 123 4567", "+393471234567"],
+  ["IT", "393 123 4567", "+393931234567"],
+  ["IT", "39 347 123 4567", "+393471234567"],
+  ["gb", "07700 900123", "+447700900123"],
+  // Left as typed: too short or long for the country, or not a number at all.
+  ["GB", "07700 9001234", "07700 9001234"],
+  ["GB", "900123", "900123"],
+  ["GB", "07700 900123 ext 4", "07700 900123 ext 4"],
+  ["GB", "0044", "0044"],
+  ["GB", "07700+900123", "07700+900123"],
+  ["GB", "call the office", "call the office"],
+  ["GB", "", ""],
+];
+
+describe("numbers texted for a business", () => {
+  it("get the country's calling code when they were typed without it", () => {
+    for (const [country, typed, texted] of TEXTED) expect(internationalPhone(typed, country), `${country} ${typed}`).toBe(texted);
+  });
+
+  it("go as typed in the US and Canada, and in a country whose numbers aren't known", () => {
+    for (const typed of ["(540) 555-0101", "540-555-0101", "1 540 555 0101", "+1 540 555 0101", "011 44 20 7946 0958", "07700 900123", "555-0101", ""]) {
+      for (const country of ["US", "CA", "MX", "JP", "", null, undefined]) expect(internationalPhone(typed, country), `${country} ${typed}`).toBe(typed);
+    }
+  });
+
+  it("are completed only where replies and STOPs from them still find the client by their last 10 digits", () => {
+    expect(textedNumber("07700 900123", "GB")).toBe("+447700900123");
+    expect(textedNumber("020 7946 0018", "GB")).toBe("+442079460018");
+    expect(textedNumber("0151 23456789", "DE")).toBe("+4915123456789");
+    expect(textedNumber("0044 20 7946 0018", "GB")).toBe("+442079460018");
+    // The country code changes the last 10 digits of these: they go as typed, as before.
+    expect(textedNumber("087 123 4567", "IE")).toBe("087 123 4567");
+    expect(textedNumber("0412 345 678", "AU")).toBe("0412 345 678");
+    expect(textedNumber("612 34 56 78", "ES")).toBe("612 34 56 78");
+    // A US or Canadian business's, and a number already international, as before.
+    expect(textedNumber("(540) 555-0101", "US")).toBe("(540) 555-0101");
+    expect(textedNumber("(540) 555-0101", "GB")).toBe("(540) 555-0101");
+    expect(textedNumber("+61 412 345 678", "GB")).toBe("+61412345678");
+  });
+
+  it("are whole E.164 numbers, which phoneE164 alone doesn't make of a UK one", () => {
+    expect(phoneE164(internationalPhone("07700 900123", "GB"))).toBe("+447700900123");
+    expect(phoneE164("07700 900123")).toBeNull();
+  });
+
+  it("have an example as the country writes them, which is completed like any number typed there", () => {
+    expect(phoneExample("GB")).toBe("07700 900123");
+    expect(phoneExample("gb")).toBe("07700 900123");
+    for (const country of ["US", "CA", "MX", "", null, undefined]) expect(phoneExample(country), String(country)).toBeNull();
+    const known = COUNTRY_CODES.filter((country) => phoneExample(country));
+    expect(known).toEqual(expect.arrayContaining(["GB", "IE", "AU", "NZ", "ZA", "DE", "FR", "ES", "IT"]));
+    for (const country of known) {
+      const texted = internationalPhone(phoneExample(country)!, country);
+      expect(texted, country).toMatch(/^\+[2-9][0-9]{6,14}$/);
+      expect(phoneE164(texted), country).toBe(texted);
+    }
   });
 });
 

@@ -21,7 +21,7 @@ import { Loading, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState, NoAccess } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { ApiError } from "@/lib/errors";
-import { dateIn, formatDate, formatDateTime, formatMoneyCents, formatTime } from "@/lib/format";
+import { companyCountry, dateIn, formatDate, formatDateTime, formatMoneyCents, formatTime, moneyCurrency } from "@/lib/format";
 import { isSub, useSession, type SubLogin } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { quantityWords } from "../subs/pay";
@@ -167,7 +167,7 @@ function MyJobs({ sub }: { sub: SubLogin }) {
                 key={o.id}
                 current={o.id === payId}
                 title={<span id={`job-${o.id}`} className="job-anchor">{o.job_title}</span>}
-                sub={[<StatusPill key="status" label={o.status === "offered" ? t(offerOutcomeLabel("expired", "sub")) : t(offerOutcomeLabel(o.outcome ?? o.status, "sub")) || t("Over")} tone="muted" />, visitDays(o), o.city, moneyShort(o.total)]}
+                sub={[<StatusPill key="status" label={o.status === "offered" ? t(offerOutcomeLabel("expired", "sub")) : t(offerOutcomeLabel(o.outcome ?? o.status, "sub")) || t("Over")} tone="muted" />, visitDays(o), o.city, moneyShort(o.total, moneyCurrency())]}
               />
             ))}
           </RelatedList>
@@ -177,7 +177,7 @@ function MyJobs({ sub }: { sub: SubLogin }) {
   );
 }
 
-const visitDays = (o: Pick<SubOffer, "visits">) => offerDays(o.visits.map((v) => v.scheduled_on));
+const visitDays = (o: Pick<SubOffer, "visits">) => offerDays(o.visits.map((v) => v.scheduled_on), companyCountry());
 
 /** An offer waiting for their answer: what it is, where (the town), when, the work, their price, and Accept or Decline. */
 function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean }) {
@@ -218,7 +218,7 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
         <p className="offer-sum">{offerCardLine({ ...o, job_title: "" })}</p>
       </div>
       {o.is_change && o.agreed_total != null && (
-        <p className="offer-note">{t("The office changed the price: {price}, was {was}. If you decline it, you keep the job at {was}.", { price: moneyShort(o.total), was: moneyShort(o.agreed_total) })}</p>
+        <p className="offer-note">{t("The office changed the price: {price}, was {was}. If you decline it, you keep the job at {was}.", { price: moneyShort(o.total, moneyCurrency()), was: moneyShort(o.agreed_total, moneyCurrency()) })}</p>
       )}
 
       <Facts>
@@ -228,7 +228,7 @@ function OfferCard({ offer: o, focused }: { offer: SubOffer; focused: boolean })
           ) : (
             o.visits.map((v) => (
               <span key={v.id} className="offer-day">
-                {v.scheduled_on ? offerDate(v.scheduled_on) : t("Not scheduled yet")}
+                {v.scheduled_on ? offerDate(v.scheduled_on, companyCountry()) : t("Not scheduled yet")}
                 {v.starts_at && <>, {v.ends_at ? t("{start} to {end}", { start: formatTime(v.starts_at, tz), end: formatTime(v.ends_at, tz) }) : formatTime(v.starts_at, tz)}</>}
               </span>
             ))
@@ -303,7 +303,7 @@ function DeclineDialog({ offer: o, disabled, note, sending, error, onClose, onDe
       onClose={onClose}
       size="sm"
       title={o.is_change ? t("Decline the new price?") : t("Decline this job?")}
-      description={o.is_change ? t("You keep {job} at {price}, the price you agreed.", { job: o.job_title, price: moneyShort(o.agreed_total) }) : t("{job} goes back to the office, and they can offer it to someone else.", { job: o.job_title })}
+      description={o.is_change ? t("You keep {job} at {price}, the price you agreed.", { job: o.job_title, price: moneyShort(o.agreed_total, moneyCurrency()) }) : t("{job} goes back to the office, and they can offer it to someone else.", { job: o.job_title })}
     >
       <form
         className="dialog-body"

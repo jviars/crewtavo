@@ -192,13 +192,18 @@ async function chargingNow(admin: ReturnType<typeof adminClient>, companyId: str
 }
 const CHARGING_NOW = "This invoice is being charged to your saved card right now.";
 
-/** Locate a new property in the background so routing and weather checks work for it. */
+/**
+ * Locate a new property in the background so routing and weather checks work for it, in the
+ * country it was saved in (its business's, 20261124100200_property_country.sql).
+ */
 export function geocodeLater(c: Parameters<typeof appUrl>[0], propertyId: string, address: { line1: string; city?: string; postal_code?: string }) {
   runInBackground(
     c,
     (async () => {
-      const hit = await geocodeAddress([address.line1, address.city, address.postal_code].filter(Boolean).join(", "));
-      if (hit) await saveLocation(adminClient(c.env), propertyId, hit);
+      const admin = adminClient(c.env);
+      const { data: property } = await admin.from("properties").select("country").eq("id", propertyId).maybeSingle();
+      const hit = await geocodeAddress([address.line1, address.city, address.postal_code].filter(Boolean).join(", "), { country: property?.country });
+      if (hit) await saveLocation(admin, propertyId, hit);
     })(),
   );
 }
@@ -227,8 +232,10 @@ async function verifyTurnstile(c: Parameters<typeof appUrl>[0], token: string | 
 // The range settings (company_private_settings' roofing), whether Roofing is installed, the autopay settings and the
 // trade are read here but never sent: the room on top is the business's own, Roofing only decides
 // whether a preview shows a roofing range, autopay's only say whether a card is required, and the
-// trade only picks the starter terms.
-const BRANDING = "name, phone, email, website, timezone, currency, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing_app, settings->paving_app, settings->autopay, settings->privacy_url";
+// trade only picks the starter terms. The country, the tax's name and the business's number for it
+// are sent: its quotes and invoices print them (core taxName).
+const BRANDING =
+  "name, phone, email, website, timezone, currency, country, address, trade_preset, settings->branding, settings->hub_tips, settings->roofing_app, settings->paving_app, settings->autopay, settings->privacy_url, settings->tax_name, settings->tax_number";
 
 /** The company as its clients see it, with where its logo loads from (null without one). */
 const withLogo = <T extends { branding?: unknown }>(companyId: string, company: T) => ({ ...company, logo: logoImage("", companyId, { branding: company.branding })?.src ?? null });
@@ -418,7 +425,7 @@ async function hubDrawings(admin: ReturnType<typeof adminClient>, companyId: str
  * A quote's or invoice's custom fields the business marked to print (pdf_fields) and to show on the
  * Hub (portal_fields), as they read: the other fields, and the values behind them, are never sent.
  */
-async function hubFields(admin: ReturnType<typeof adminClient>, companyId: string, record: "quote" | "invoice", values: unknown) {
+async function hubFields(admin: ReturnType<typeof adminClient>, companyId: string, record: "quote" | "invoice", values: unknown, country?: string | null) {
   const { data } = await admin
     .from("custom_field_definitions")
     .select("key, label, type, choices, show_on_pdf, show_in_portal, sort, archived_at")
@@ -426,7 +433,7 @@ async function hubFields(admin: ReturnType<typeof adminClient>, companyId: strin
     .eq("record_type", record)
     .is("archived_at", null)
     .order("sort");
-  const shown = (where: "pdf" | "portal") => shownCustomFields(data ?? [], values, where).map(({ label, text }) => ({ label, text }));
+  const shown = (where: "pdf" | "portal") => shownCustomFields(data ?? [], values, where, country).map(({ label, text }) => ({ label, text }));
   return { pdf_fields: shown("pdf"), portal_fields: shown("portal") };
 }
 
@@ -478,7 +485,7 @@ publicRoutes.get("/hub/:token", async (c) => {
       hubTemplate(admin, l.c, quote.template_id, trade, signed ? quote.approval : null),
       quote.roof_package_id ? admin.from("roof_packages").select("name, warranty, roof_service_id").eq("company_id", l.c).eq("id", quote.roof_package_id).maybeSingle() : null,
       l.pv ? null : homeLink(c, l.c, quote.client_id, l),
-      hubFields(admin, l.c, "quote", quote.custom_fields),
+      hubFields(admin, l.c, "quote", quote.custom_fields, company.country),
       // The business's Google rating and reviews, when it shows them on quotes.
       quoteReviewsFor(admin, l.c).catch((error) => {
         console.error("Couldn't read the reviews for a quote", error);
@@ -641,7 +648,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     await admin
       .from("invoices")
       .select(
-        "id, number, kind, status, subject, notes, issued_on, due_on, late_fee_at, no_late_fee, subtotal, discount_amount, credit_amount, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, job_id, billing_month, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at), custom_fields",
+        "id, number, kind, status, subject, notes, issued_on, due_on, late_fee_at, no_late_fee, subtotal, discount_amount, credit_amount, tax_rate, tax_amount, total, retainage_amount, amount_paid, balance_due, client_id, job_id, billing_month, promo:promo_codes(code, kind, value, description), credits:referral_credits(amount, note, created_at), client:clients(display_name, billing_address, tax_exempt, tax_exempt_note), job:jobs(property:properties(line1, city, region, postal_code), quote:quotes!jobs_company_id_quote_id_fkey(approval, option_id, roof_package_id, option:quote_options!quotes_option_fkey(name, warranty))), lines:invoice_line_items(name, description, quantity, unit, unit_price, sort, discount_quote_id), payments(amount, tip_amount, received_at), custom_fields",
       )
       .eq("company_id", l.c)
       .eq("id", l.id)
@@ -658,7 +665,7 @@ publicRoutes.get("/hub/:token", async (c) => {
     hubPayment(c.env, admin, l.c, invoice.id),
     hubTemplate(admin, l.c, null, trade),
     hubDrawings(admin, l.c, "invoice_id", invoice.id),
-    hubFields(admin, l.c, "invoice", invoice.custom_fields),
+    hubFields(admin, l.c, "invoice", invoice.custom_fields, company.country),
     invoiceChecklists(admin, l.c, invoice),
     admin.from("companies").select("settings->late_fee").eq("id", l.c).maybeSingle(),
   ]);
@@ -751,7 +758,7 @@ publicRoutes.post("/hub/:token/approve", async (c) => {
   const [lineRows, options, business] = await Promise.all([
     admin.from("quote_line_items").select("id, option_id, quantity, unit_price, taxable, optional, selected, option_group").eq("company_id", l.c).eq("quote_id", l.id),
     loadOptions(admin, l.c, l.id),
-    admin.from("companies").select("name, phone, timezone, trade_preset").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, timezone, currency, country, trade_preset").eq("id", l.c).maybeSingle(),
   ]);
   const lines = must(lineRows);
 
@@ -1113,7 +1120,7 @@ publicRoutes.post("/hub/:token/tip", async (c) => {
 
 async function findForm(c: Parameters<typeof appUrl>[0]) {
   const admin = adminClient(c.env);
-  const company = must(await admin.from("companies").select("id, name, phone, timezone, settings").eq("slug", c.req.param("company") ?? "").maybeSingle(), "Form not found.");
+  const company = must(await admin.from("companies").select("id, name, phone, timezone, country, settings").eq("slug", c.req.param("company") ?? "").maybeSingle(), "Form not found.");
   const form = must(
     await admin
       .from("intake_forms")
@@ -1141,8 +1148,9 @@ publicRoutes.get("/public/forms/:company/:form", async (c) => {
   return c.json({
     // `texts`: the business can text, so the phone box says what giving a number agrees to.
     // `logo` and `color`: the page wears the business's own logo and brand color (null without them).
+    // `country`: the address boxes are called what they are there (core addressLabels).
     company: {
-      name: company.name, phone: company.phone, logo: logoImage("", company.id, company.settings)?.src ?? null, color: brandColor(company.settings),
+      name: company.name, phone: company.phone, country: company.country, logo: logoImage("", company.id, company.settings)?.src ?? null, color: brandColor(company.settings),
       texts: await smsReady(c.env, company.id), privacy_url: privacyUrl(company.settings as Record<string, unknown> | null),
     },
     form: { name: form.name, kind: form.kind, questions: form.questions },
@@ -2189,13 +2197,13 @@ publicRoutes.get("/public/refer/:token", async (c) => {
   const l = await link(c, ["refer"]);
   const admin = adminClient(c.env);
   const [company, client] = await Promise.all([
-    admin.from("companies").select("name, phone, website, settings").eq("id", l.c).maybeSingle(),
+    admin.from("companies").select("name, phone, website, country, settings").eq("id", l.c).maybeSingle(),
     admin.from("clients").select("display_name").eq("company_id", l.c).eq("id", l.id).maybeSingle(),
   ]);
   if (!company.data || !client.data) throw new HttpError(404, "This referral link isn't valid anymore.");
   const referrals = referralSettings(company.data.settings as Record<string, unknown> | null);
   return c.json({
-    company: { name: company.data.name, phone: company.data.phone, website: company.data.website, logo: logoImage("", l.c, company.data.settings)?.src ?? null, color: brandColor(company.data.settings), texts: await smsReady(c.env, l.c), privacy_url: privacyUrl(company.data.settings as Record<string, unknown> | null) },
+    company: { name: company.data.name, phone: company.data.phone, website: company.data.website, country: company.data.country, logo: logoImage("", l.c, company.data.settings)?.src ?? null, color: brandColor(company.data.settings), texts: await smsReady(c.env, l.c), privacy_url: privacyUrl(company.data.settings as Record<string, unknown> | null) },
     referrer: firstName(client.data.display_name),
     offer: referrals.offer,
     // That the person recommending gets a credit, for the friend to know (core referrerDisclosure). Null when none is set.

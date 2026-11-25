@@ -21,7 +21,7 @@ const rangeInput = {
 
 function rangeOf(ctx: ToolContext, a: { range: ReportPreset; from?: string; to?: string }) {
   const custom = a.from || a.to ? "custom" : a.range;
-  return resolveRange(custom, localDate(new Date(), ctx.timezone), ctx.timezone, { from: a.from, to: a.to });
+  return resolveRange(custom, localDate(new Date(), ctx.timezone), ctx.timezone, { from: a.from, to: a.to }, ctx.country);
 }
 
 /** Up to 25,000 rows, a page at a time, as the Finance page reads them. */

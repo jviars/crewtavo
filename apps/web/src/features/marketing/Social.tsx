@@ -28,6 +28,7 @@ import { InboxSkeleton, SectionSkeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
+import { clockText } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { undoable } from "@/lib/undo";
@@ -393,7 +394,7 @@ function AutoPosts({ state, timeZone }: { state: SocialState; timeZone: string }
           </div>
         )}
         <p className={styles.note}>
-          New 5-star reviews with words post at 10 AM, 1 PM or 4 PM ({timeZoneWords(timeZone)}), at most {AUTO_POSTS_PER_DAY} a day, from the next day (the same day for a review in before 8 AM). You can change or cancel each one before it goes.
+          New 5-star reviews with words post at {clockText(10)}, {clockText(13)} or {clockText(16)} ({timeZoneWords(timeZone)}), at most {AUTO_POSTS_PER_DAY} a day, from the next day (the same day for a review in before {clockText(8)}). You can change or cancel each one before it goes.
         </p>
         <fieldset className={styles.fieldset}>
           <legend>Post to</legend>

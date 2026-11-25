@@ -28,7 +28,7 @@ postcards.get("/postcards/setup", requireUser, requireCompany(OFFICE, "marketing
   const admin = adminClient(c.env);
   const [lob, company] = await Promise.all([
     companyLob(c.env, admin, c.var.companyId).catch(() => null),
-    admin.from("companies").select("name, address, slug, website").eq("id", c.var.companyId).maybeSingle(),
+    admin.from("companies").select("name, address, country, slug, website").eq("id", c.var.companyId).maybeSingle(),
   ]);
   const from = company.data ? returnAddress(company.data) : null;
   return c.json({

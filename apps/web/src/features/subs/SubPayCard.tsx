@@ -1,4 +1,5 @@
-/** A sub's pay on every job: what's owed, what was paid this year (and toward their 1099), and the history. */
+/** A sub's pay on every job: what's owed, what was paid this year (and toward their 1099 for a US business), and the history. */
+import { usesIrsForms } from "@crewtavo/core/subs";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatedNumber, MONEY_CENTS } from "@/components/ui/AnimatedNumber";
@@ -8,7 +9,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Stat, StatStrip } from "@/components/ui/StatStrip";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { formatMoneyCents, todayIn } from "@/lib/format";
+import { companyCountry, formatMoneyCents, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { MarkPaidDialog, type ToPay } from "./MarkPaidDialog";
@@ -21,6 +22,8 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
   const session = useSession();
   const tz = session.company.timezone;
   const year = Number(todayIn(tz).slice(0, 4));
+  // The year-end totals are for 1099s: a US business's (core usesIrsForms).
+  const irs = usesIrsForms(companyCountry());
   const pays = useSubPays(session.company.id, subId);
   const [paying, setPaying] = useState<ToPay[] | null>(null);
   const [all, setAll] = useState(false);
@@ -35,7 +38,7 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
     <Section
       title="Pay"
       count={rows.length || undefined}
-      action={owed.length > 1 ? <Button icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button> : rows.length > 0 ? <Link to={`/subs/1099?year=${year}`}>Year-end totals</Link> : undefined}
+      action={owed.length > 1 ? <Button icon="check" onClick={() => setPaying(owed.map(toPay))}>Mark all {owed.length} paid</Button> : rows.length > 0 && irs ? <Link to={`/subs/1099?year=${year}`}>Year-end totals</Link> : undefined}
     >
       {pays.isPending ? (
         <Skeleton width="50%" />
@@ -49,9 +52,9 @@ export function SubPayCard({ subId, name }: { subId: string; name: string }) {
             <Stat
               label={`Paid in ${year}`}
               value={<AnimatedNumber value={totals.paid} format={MONEY_CENTS} />}
-              note={totals.for1099 !== totals.paid ? `${formatMoneyCents(totals.for1099)} counts toward their 1099: card and payment-app payments are left out.` : undefined}
-              to={`/subs/1099?year=${year}`}
-              title="Year-end totals"
+              note={irs && totals.for1099 !== totals.paid ? `${formatMoneyCents(totals.for1099)} counts toward their 1099: card and payment-app payments are left out.` : undefined}
+              to={irs ? `/subs/1099?year=${year}` : undefined}
+              title={irs ? "Year-end totals" : undefined}
             />
             <Stat label="Owed now" value={<AnimatedNumber value={totals.owed} format={MONEY_CENTS} />} />
           </StatStrip>

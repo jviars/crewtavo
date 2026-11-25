@@ -541,9 +541,9 @@ describe("a roof estimate's custom fields on its document", () => {
     for (const page of ["visit/VisitPage.tsx", "visit/SignPage.tsx", "visit/SignedPage.tsx"]) {
       const code = source(`../src/features/roofing/${page}`);
       expect(code).toContain(`const fields = useCustomFields("quote");`);
-      expect(code).toContain(`pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf"),`);
+      expect(code).toContain(`pdf_fields: shownCustomFields(fields, details.data?.customFields, "pdf", companyCountry()),`);
     }
-    expect(source("../src/features/roofing/flow/SignedEstimate.tsx")).toContain(`pdf_fields: shownCustomFields(fields, extras.custom_fields, "pdf")`);
+    expect(source("../src/features/roofing/flow/SignedEstimate.tsx")).toContain(`pdf_fields: shownCustomFields(fields, extras.custom_fields, "pdf", companyCountry())`);
     // Read with the estimate's details and the project's.
     expect(source("../src/features/roofing/visit/data.ts")).toMatch(/section_ids, custom_fields, package:/);
     expect(source("../src/features/roofing/flow/data.ts")).toMatch(/created_at, custom_fields, promo:/);

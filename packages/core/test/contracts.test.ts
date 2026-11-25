@@ -134,6 +134,18 @@ describe("contractValues", () => {
     expect(contractValues({ date: "someday" }).Date).toBe("");
   });
 
+  it("writes the date as the business's country does, a US business's as it always was", () => {
+    expect(contractValues({ date: "2026-10-06", country: "US" }).Date).toBe("October 6, 2026");
+    expect(contractValues({ date: "2026-10-06", country: "CA" }).Date).toBe("October 6, 2026");
+    expect(contractValues({ date: "2026-10-06", country: "GB" }).Date).toBe("6 October 2026");
+    expect(contractValues({ date: "2026-09-26T01:00:00Z", timeZone: "Australia/Sydney", country: "AU" }).Date).toBe("26 September 2026");
+    // The country goes with the facts only outside the US, as the currency does: a US business's facts are as they were.
+    const quote = { number: 7, sent_at: "2026-10-25T15:00:00Z", created_at: "2026-10-20", total: 1100, deposit_amount: 275 };
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "America/New_York", country: "US" }, { license: "" })).not.toHaveProperty("country");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "America/New_York", country: "US" }, { license: "" })).Date).toBe("October 25, 2026");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: "Europe/London", country: "GB", currency: "GBP" }, { license: "" })).Date).toBe("25 October 2026");
+  });
+
   it("writes money to the cent and leaves out what isn't there", () => {
     expect(contractValues({ total: 1234567.891, deposit: 0 })).toMatchObject({ Total: "$1,234,567.89", Deposit: "$0.00" });
     // The deposit asked for is never more than the total being signed.
@@ -142,6 +154,13 @@ describe("contractValues", () => {
     expect(contractValues({ deposit: 5000 }).Deposit).toBe("$5,000.00");
     expect(contractValues({ total: 0.5 }).Total).toBe("$0.50");
     expect(contractValues({ total: -45 }).Total).toBe("-$45.00");
+    // In the business's currency, with the symbol people there write; US dollars without one.
+    expect(contractValues({ total: 18304.5, deposit: 500, currency: "GBP" })).toMatchObject({ Total: "£18,304.50", Deposit: "£500.00" });
+    expect(contractValues({ total: 18304.5, deposit: 500, currency: "CAD" })).toMatchObject({ Total: "$18,304.50", Deposit: "$500.00" });
+    expect(contractValues({ total: 1250, currency: "ZAR" }).Total).toBe("R 1,250.00");
+    expect(contractValues({ total: -45, currency: "EUR" }).Total).toBe("-€45.00");
+    expect(contractValues({ total: 0.5, currency: null }).Total).toBe("$0.50");
+    expect(contractValues({ currency: "GBP" }).Total).toBe("");
     const empty = contractValues({});
     expect(Object.keys(empty)).toEqual(FILL_INS.map((f) => f.label));
     expect(Object.values(empty).every((v) => v === "")).toBe(true);
@@ -162,6 +181,11 @@ describe("contractValues", () => {
     // {Deposit} follows the option picked: a cheaper one asks for less.
     expect(contractValues({ total: 800, deposit: 275, depositPercent: 25 }).Deposit).toBe("$200.00");
     expect(contractInput({ number: 7, sent_at: null, created_at: "2026-11-03", total: 1100, deposit_amount: 275, deposit_percent: 25 }, null, null, { name: "Pine", phone: null, timezone: null }, { license: "" }).depositPercent).toBe(25);
+    // The business's currency goes with the facts, except US dollars, which is what's assumed without it.
+    const quote = { number: 7, sent_at: null, created_at: "2026-11-03", total: 1100, deposit_amount: 275 };
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "GBP" }, { license: "" }).currency).toBe("GBP");
+    expect(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "USD" }, { license: "" })).not.toHaveProperty("currency");
+    expect(contractValues(contractInput(quote, null, null, { name: "Pine", phone: null, timezone: null, currency: "EUR" }, { license: "" }))).toMatchObject({ Total: "€1,100.00", Deposit: "€275.00" });
   });
 
   it("fills a section the same way from the same facts", () => {
@@ -308,6 +332,19 @@ describe("contractStarters", () => {
     expect(contractStarters("general").map((s) => s.title)).toEqual(common);
     expect(contractStarters(null).map((s) => s.title)).toEqual(common);
     expect(contractStarters("something_new").map((s) => s.title)).toEqual(common);
+  });
+
+  it("has the FTC's right to cancel and its notice for a business in the US only, and the rest everywhere", () => {
+    const outside = common.filter((t) => t !== "Your right to cancel" && t !== "Notice of Cancellation");
+    for (const country of ["GB", "CA", "AU", "gb"]) expect(contractStarters("general", { country }).map((s) => s.title), country).toEqual(outside);
+    expect(contractStarters("general", { country: "US" }).map((s) => s.title)).toEqual(common);
+    expect(contractStarters("general", { country: null }).map((s) => s.title)).toEqual(common);
+    // The trade's own and the late fee come with them as anywhere.
+    const line = "An invoice still unpaid 7 days after its due date gets a late fee of £25.00, added once.";
+    const uk = contractStarters("roofing_exteriors", { country: "GB", lateFeeLine: line });
+    expect(uk.map((s) => s.title)).toContain("Hidden decking damage");
+    expect(uk.find((s) => s.title === "Payment")!.body).toContain(line);
+    expect(uk.filter((s) => s.initials || s.place === "signatures")).toEqual([]);
   });
 
   it("adds a few for the trade", () => {

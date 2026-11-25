@@ -24,7 +24,7 @@
 import { audienceKeys, type CampaignAudience } from "@crewtavo/core/campaigns";
 import { marketingOn } from "@crewtavo/core/marketing";
 import { CANT_SHARE, type CantShare } from "@crewtavo/core/social";
-import { addressLine, backFit, backHtml, frontHtml, mailable, messageProblem, POSTCARD_SIZE_INFO, postcardMessage, type AddressProblem, type MailingAddress, type PostcardSize } from "@crewtavo/core/postcards";
+import { addressLine, backFit, backHtml, frontHtml, mailable, messageProblem, POSTCARD_SIZE_INFO, postcardMessage, postcardsMailHere, postcardsUsOnly, type AddressProblem, type MailingAddress, type PostcardSize } from "@crewtavo/core/postcards";
 import type { Env } from "../env";
 import { createPostcard, listCards, lobAddress, lobMode, LobProblem, type LobMode, type LobSettings } from "../integrations/lob";
 import { loadSecret } from "../integrations/tokens";
@@ -85,7 +85,7 @@ export function keyLabelProblem(lob: Pick<CompanyLob, "mode" | "labelled">): str
   return `Apps → Lob says ${keyKind(lob.labelled)} is saved, but the key on file is ${keyKind(lob.mode)}, so nothing was sent. An owner or admin should connect Lob again in Apps.`;
 }
 
-type Company = { name: string; phone: string | null; website: string | null; address: unknown; slug: string | null; settings: unknown };
+type Company = { name: string; phone: string | null; website: string | null; address: unknown; country?: string | null; slug: string | null; settings: unknown };
 
 /** The company's return address as Lob takes it, or null when Lob wouldn't take it. Read as a client's is (mailable). */
 export function returnAddress(company: Pick<Company, "name" | "address">): MailingAddress | null {
@@ -100,10 +100,15 @@ const RETURN_ADDRESS_WORDS: Record<AddressProblem, string> = {
   too_long: "A line of your company's address (Settings → Company) is longer than the 64 characters Lob takes. Shorten it.",
 };
 
-/** What's wrong with the company's own address as a return address, or null: every card would be refused over it. */
-export function returnAddressProblem(company: Pick<Company, "address">): string | null {
+/**
+ * What's wrong with the company's own address as a return address, or null: every card would be
+ * refused over it. A business outside the US whose address isn't a US one is told that postcards
+ * are mailed in the US only, rather than what its address lacks.
+ */
+export function returnAddressProblem(company: Pick<Company, "address" | "country">): string | null {
   const found = mailable(company.address as Record<string, unknown> | null);
-  return typeof found === "object" ? null : RETURN_ADDRESS_WORDS[found];
+  if (typeof found === "object") return null;
+  return postcardsMailHere(company.country) ? RETURN_ADDRESS_WORDS[found] : postcardsUsOnly(company.country);
 }
 
 /**
@@ -293,7 +298,7 @@ async function readyToMail(env: Env, db: Db, companyId: string, id: string, ask:
   );
   if (campaign.status !== "draft") throw new HttpError(409, "This campaign has already been sent.");
   if (ask.draft && !sameDraft(campaign, ask.draft)) throw new HttpError(409, NOT_SAVED);
-  const company = must(await admin.from("companies").select("name, phone, website, address, slug, settings").eq("id", companyId).maybeSingle()) as Company;
+  const company = must(await admin.from("companies").select("name, phone, website, address, country, slug, settings").eq("id", companyId).maybeSingle()) as Company;
   const lob = await companyLob(env, admin, companyId);
   const size = campaign.size as PostcardSize;
   const link = await bookingLink(env, admin, companyId, company);

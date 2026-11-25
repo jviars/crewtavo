@@ -19,7 +19,7 @@ import { RelatedList, RelatedRow, Section } from "@/components/ui/Section";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, visitKindText } from "@/components/ui/StatusPill";
-import { todayIn } from "@/lib/format";
+import { dateLocale, formatTime, todayIn } from "@/lib/format";
 import { visitPlace } from "@/lib/maps";
 import { hasRole, isSub, keepsTime, useSession } from "@/lib/session";
 import { CrewEquipmentCard } from "../equipment/CrewEquipmentCard";
@@ -40,7 +40,7 @@ import { SpanishOffer } from "./SpanishOffer";
 import { featureOn } from "@/components/shell/nav";
 import { FIELD_SCOPE } from "@/lib/offline";
 import { toast } from "@/lib/toast";
-import { intlLocale, languageChoice, msg, t } from "@/lib/i18n";
+import { languageChoice, msg, t } from "@/lib/i18n";
 
 type Visit = MyDayVisit;
 
@@ -62,7 +62,7 @@ export function FieldTodayPage() {
   const [showDone, setShowDone] = useState(false);
   const isLead = useSchedulingRights().canDispatch;
   useDocumentTitle(t("My day"));
-  const time = (iso: string) => new Date(iso).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit", timeZone: tz });
+  const time = (iso: string) => formatTime(iso, tz);
   const key = myDayKey(session.company.id, today);
   const data = useMyDay();
 
@@ -108,7 +108,7 @@ export function FieldTodayPage() {
 
   return (
     <div className="field-app m-grouped">
-      <FieldHeader kicker={new Date().toLocaleDateString(intlLocale(), { weekday: "long", month: "long", day: "numeric", timeZone: tz })} title={t("My day")} />
+      <FieldHeader kicker={new Date().toLocaleDateString(dateLocale(), { weekday: "long", month: "long", day: "numeric", timeZone: tz })} title={t("My day")} />
 
       <OfflineNote />
       {languageChoice() && <SpanishOffer />}

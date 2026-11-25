@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { CardSkeleton, Loading, StatsSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { formatNumber, todayIn } from "@/lib/format";
+import { companyCountry, formatNumber, todayIn } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./Finance.module.css";
 import { calendarWords, PRESETS, resolveRange, shortDate, stepRange, type PresetKey, type Range } from "./range";
@@ -41,7 +41,7 @@ export function useRangeParams() {
   const tz = session.company.timezone;
   const today = todayIn(tz);
   const presetKey = (PRESETS.find((p) => p.key === params.get("range"))?.key ?? "month") as PresetKey;
-  const range = resolveRange(presetKey, today, tz, { from: params.get("from"), to: params.get("to") });
+  const range = resolveRange(presetKey, today, tz, { from: params.get("from"), to: params.get("to") }, companyCountry());
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) v === null ? next.delete(k) : next.set(k, v);
@@ -56,7 +56,7 @@ export const rangeQuery = (range: Range) => (range.key === "custom" ? `range=cus
 
 /** The button's words: the preset ("This month"), a whole month, quarter or year ("October 2026"), or "Custom range". */
 const rangeButtonWords = (range: Pick<Range, "key" | "from" | "to">) =>
-  range.key === "custom" ? (calendarWords(range.from, range.to) ?? "Custom range") : (PRESETS.find((p) => p.key === range.key)?.label ?? range.key);
+  range.key === "custom" ? (calendarWords(range.from, range.to, companyCountry()) ?? "Custom range") : (PRESETS.find((p) => p.key === range.key)?.label ?? range.key);
 
 /**
  * A custom range's two date boxes: for dates of the person's own, or once they pick Custom range. A

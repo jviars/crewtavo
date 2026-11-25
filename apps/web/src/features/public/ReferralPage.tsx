@@ -1,4 +1,5 @@
 /** A client's referral link (/refer/:token): their friend asks for a quote, credited to the client. */
+import { addressLabels } from "@crewtavo/core/countries";
 import { textDisclosure } from "@crewtavo/core/marketing";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
@@ -9,11 +10,12 @@ import { Icon } from "@/components/ui/Icon";
 import { PrivacyFooter } from "@/components/ui/PrivacyLink";
 import { linkToken } from "@/lib/linkToken";
 import { publicFetch, useTurnstile } from "@/lib/publicApi";
+import { setCountry } from "@/lib/format";
 import { formatPhoneTyping } from "@/lib/validate";
 import { Broken, ClientBody, ClientHeader, ClientPage, ClientSkeleton, Done, kit as k } from "./ClientKit";
 
 interface ReferralView {
-  company: { name: string; phone: string | null; website: string | null; logo?: string | null; color?: string | null; texts?: boolean; privacy_url?: string | null };
+  company: { name: string; phone: string | null; website: string | null; country?: string | null; logo?: string | null; color?: string | null; texts?: boolean; privacy_url?: string | null };
   referrer: string;
   offer: string | null;
   /** "Ana gets a credit from Acme if you become a client.", when the business gives one. */
@@ -40,6 +42,8 @@ export function ReferralPage() {
   });
   useEffect(() => {
     if (view.data) document.title = `${view.data.referrer} recommends ${view.data.company.name}`;
+    // Phone boxes read numbers as the business's country writes them (lib/validate.ts); there's no session here to say it.
+    if (view.data) setCountry({ country: view.data.company.country });
   }, [view.data]);
   const missingContact = !f.email.trim() && !f.phone.trim();
   // The button stays on; trying it without a way to reach them says so on the email field.
@@ -82,7 +86,7 @@ export function ReferralPage() {
                     <Field label="Address where you need the work" requiredMessage="Enter the address where the work is."><input className="input" value={f.line1} onChange={set("line1")} required minLength={3} maxLength={200} autoComplete="address-line1" /></Field>
                     <div className={cx(k.grid2, k.pair)}>
                       <Field label="City"><input className="input" value={f.city} onChange={set("city")} maxLength={100} autoComplete="address-level2" /></Field>
-                      <Field label="ZIP / Postal code"><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
+                      <Field label={addressLabels(view.data.company.country).postalCode}><input className="input" value={f.postal_code} onChange={set("postal_code")} maxLength={12} autoComplete="postal-code" /></Field>
                     </div>
                   </section>
                   <section className={k.part} aria-labelledby="referral-job">

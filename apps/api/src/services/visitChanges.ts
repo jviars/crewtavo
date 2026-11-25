@@ -10,6 +10,7 @@
  * The schedule screen (routes/schedule.ts) and AI assistants (assistant-tools/schedule.ts) both come
  * here as the person asking, so the database decides who may: whoever may move the visit.
  */
+import { endWithStop } from "@crewtavo/core/regional";
 import { arrivalWindowMin, localTime, slotLabel, zonedTimeToUtc } from "@crewtavo/core";
 import type { Env } from "../env";
 import { companyFooter, firstName, renderEmail } from "../lib/email";
@@ -96,7 +97,7 @@ export async function answerVisitChange(s: Scope, env: Env, id: string, answer: 
 async function tellClient(env: Env, s: Scope, requestId: string, note: string | null, baseUrl: string | null): Promise<boolean> {
   const admin = adminClient(env);
   const [company, row] = await Promise.all([
-    admin.from("companies").select("id, name, email, phone, timezone, settings, address").eq("id", s.companyId).maybeSingle(),
+    admin.from("companies").select("id, name, email, phone, timezone, country, settings, address").eq("id", s.companyId).maybeSingle(),
     admin.from("visit_change_requests").select("kind, visit:visits(id, title, scheduled_on, starts_at), client:clients(id, display_name, email, phone)").eq("company_id", s.companyId).eq("id", requestId).maybeSingle(),
   ]);
   const co = company.data;
@@ -107,14 +108,14 @@ async function tellClient(env: Env, s: Scope, requestId: string, note: string | 
   const people = await recipientsFor(admin, co.id, client, "email", co.settings);
   if (!people.length) return false;
   // The visit as it is now: moved, for an approved reschedule.
-  const when = visit.scheduled_on ? slotLabel({ date: visit.scheduled_on, starts_at: visit.starts_at }, co.timezone || "UTC", arrivalWindowMin(co.settings)) : "a day still to be set";
+  const when = visit.scheduled_on ? slotLabel({ date: visit.scheduled_on, starts_at: visit.starts_at }, co.timezone || "UTC", arrivalWindowMin(co.settings), co.country) : "a day still to be set";
   const cancel = row.data!.kind === "cancel";
   const [subject, line] =
     note === null
       ? cancel
         ? [`Your visit on ${when} is cancelled`, `Your ${visit.title} visit on ${when} is cancelled, as you asked.`]
-        : [`Your visit is now ${when}`, `Your ${visit.title} visit is now ${when}.`]
-      : [`About your visit on ${when}`, `We can't ${cancel ? "cancel" : "move"} your ${visit.title} visit, so it stays on ${when}.${note ? `\n\n${note}` : ""}`];
+        : [`Your visit is now ${when}`, endWithStop(`Your ${visit.title} visit is now ${when}`)]
+      : [`About your visit on ${when}`, `${endWithStop(`We can't ${cancel ? "cancel" : "move"} your ${visit.title} visit, so it stays on ${when}`)}${note ? `\n\n${note}` : ""}`];
   const text = [`Hi ${firstName(client.display_name)},`, line, `Questions? Reply to this email${co.phone ? ` or call ${co.phone}` : ""}.`, co.name].join("\n\n");
   const email = renderEmail({ companyName: co.name, logo: baseUrl ? logoImage(baseUrl, co.id, co.settings) : null, text, footer: companyFooter(co) });
   const delivery = await sendToEach(people, (person) => sendEmail(env, { to: person.to, subject, text: email.text, html: email.html, replyTo: co.email ?? undefined, fromName: co.name }, co.id));

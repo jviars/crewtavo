@@ -17,6 +17,7 @@ import { BackLink } from "@/components/ui/PageHeader";
 import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
+import { currencySymbol } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { BASES, BASIS_IDS, DEFAULT_SETUP, DEFAULT_WEIGHT, fromArea, parseSetup, sectionsOf, setupFrom, type Basis, type CalcItem, type CalcSetup, type ProfitBy } from "./calculator";
 import { NumberBox } from "./NumberBox";
@@ -151,7 +152,7 @@ export function CalculatorSetupPage() {
                     <div className={styles.cell}>
                       <span className={styles.cellLabel} aria-hidden="true">Price</span>
                       <span className={styles.inline}>
-                        <NumberBox label={`${called} price`} value={item.price} onChange={(price) => setItem(item.id, { price })} prefix="$" width={110} />
+                        <NumberBox label={`${called} price`} value={item.price} onChange={(price) => setItem(item.id, { price })} prefix={currencySymbol()} width={110} />
                         <span className={styles.unit}>/{BASES[item.basis].unit}</span>
                       </span>
                     </div>
@@ -186,7 +187,7 @@ export function CalculatorSetupPage() {
                 </div>
                 {setup.profit.by !== "none" ? (
                   <span className={styles.inline}>
-                    <NumberBox label={setup.profit.by === "day" ? "Profit per day" : "Profit percent of cost"} value={setup.profit.amount} onChange={(amount) => setSetup((s) => ({ ...s, profit: { ...s.profit, amount } }))} prefix={setup.profit.by === "day" ? "$" : undefined} width={120} />
+                    <NumberBox label={setup.profit.by === "day" ? "Profit per day" : "Profit percent of cost"} value={setup.profit.amount} onChange={(amount) => setSetup((s) => ({ ...s, profit: { ...s.profit, amount } }))} prefix={setup.profit.by === "day" ? currencySymbol() : undefined} width={120} />
                     <span className={styles.unit}>{setup.profit.by === "day" ? "for each crew day" : "% of the cost"}</span>
                   </span>
                 ) : (
@@ -197,7 +198,7 @@ export function CalculatorSetupPage() {
             <div className={styles.setRow}>
               <span className={styles.setLabel} aria-hidden="true">Minimum charge</span>
               <div className={styles.setControl}>
-                <NumberBox label="Minimum charge" value={setup.minimum} onChange={(minimum) => setSetup((s) => ({ ...s, minimum }))} prefix="$" width={120} />
+                <NumberBox label="Minimum charge" value={setup.minimum} onChange={(minimum) => setSetup((s) => ({ ...s, minimum }))} prefix={currencySymbol()} width={120} />
                 <span className={styles.hint}>A smaller job is brought up to this (0 for none).</span>
               </div>
             </div>
@@ -280,7 +281,7 @@ function ItemExtras({ item, onChange }: { item: CalcItem; onChange: (change: Par
               <input className="input input-sm" style={{ width: 160 }} aria-label="Choice name" value={c.label} maxLength={40} placeholder={area ? '2"' : "Tack coat"} onChange={(e) => setChoice(i, { label: e.target.value })} />
               {area ? (
                 <>
-                  <NumberBox label={`${c.label} price`} value={c.price ?? 0} onChange={(price) => setChoice(i, { price })} prefix="$" width={100} />
+                  <NumberBox label={`${c.label} price`} value={c.price ?? 0} onChange={(price) => setChoice(i, { price })} prefix={currencySymbol()} width={100} />
                   <span className={styles.unit}>/{BASES[item.basis].unit}</span>
                 </>
               ) : (

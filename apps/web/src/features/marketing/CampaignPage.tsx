@@ -5,6 +5,7 @@
  */
 import { greetingName } from "@crewtavo/core/automations";
 import { audienceKeys, hasTrackableLink, HUB_HOME_BUTTON, RECURRING_CHOICES, recurringChoice, type CampaignAudience } from "@crewtavo/core/campaigns";
+import { businessCountry } from "@crewtavo/core/countries";
 import { hasPostalAddress } from "@crewtavo/core/postcards";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
@@ -224,7 +225,7 @@ function CampaignPageScreen() {
     link: window.location.origin,
   };
   // No marketing email goes without the company's postal address under it.
-  const hasAddress = hasPostalAddress(session.company.address);
+  const hasAddress = hasPostalAddress(session.company.address, businessCountry(session.company));
   const problems = [
     !draft.subject.trim() && "Add a subject line.",
     draft.body.trim().length < 10 && "Write the email.",

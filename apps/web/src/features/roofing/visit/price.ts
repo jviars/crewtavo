@@ -11,7 +11,8 @@
  */
 import { isSiteAdjustment, lineChanges, SITE_ADJUSTMENT_NAME, siteAdjustmentLines, sitePriceAdjustment, siteSubtotal, type LineChange, type SnapshotLine } from "@crewtavo/core/estimates";
 import { lineTotal, quoteTotals, toCents, type Amount } from "@crewtavo/core/money";
-import { formatNumber } from "@/lib/format";
+import { decimalPoint, typedAmount } from "@/lib/decimal";
+import { dateLocale, formatNumber } from "@/lib/format";
 import { counts, money } from "../estimate/rows";
 import type { EstimateLine, EstimateQuote } from "../estimate/types";
 
@@ -173,9 +174,9 @@ export const keptPriceKey = (quoteId: string, optionId: string | null) => `crewt
 /** An amount rounded down to a whole `step` ($19,524 → $19,500). */
 export const roundDown = (amount: number, step = ROUND_TO) => (Math.floor(toCents(amount) / (step * 100)) * step * 100) / 100;
 
-/** A price as typed ("19,500", "$19,500.50"), to the cent; null when it isn't one. */
+/** A price as typed ("19,500", "$19,500.50", "£45", "12,50"), to the cent; null when it isn't one. */
 export function parsePrice(text: string): number | null {
-  const clean = text.replace(/[\s$,]/g, "");
+  const clean = typedAmount(text);
   if (!/^\d*(\.\d{0,2})?$/.test(clean) || !/\d/.test(clean)) return null;
   const value = toCents(Number(clean)) / 100;
   return value > 0 && value <= MAX_SITE_PRICE ? value : null;
@@ -184,9 +185,9 @@ export function parsePrice(text: string): number | null {
 /** The most of one thing a line can be set to by hand (LineEditor). */
 export const MAX_QUANTITY = 100_000;
 
-/** How many of something, as typed ("3", "1,200", "2.5"), to a thousandth; null when it isn't one above zero. */
+/** How many of something, as typed ("3", "1,200", "2.5", "2,5"), to a thousandth; null when it isn't one above zero. */
 export function readQuantity(text: string): number | null {
-  const clean = text.replace(/[\s,]/g, "");
+  const clean = decimalPoint(text).replace(/\s/g, "");
   if (!/^\d*(\.\d{0,3})?$/.test(clean) || !/\d/.test(clean)) return null;
   const n = Math.round(Number(clean) * 1000) / 1000;
   return n > 0 && n <= MAX_QUANTITY ? n : null;
@@ -229,7 +230,7 @@ export const rangeWords = (low: number, high: number) => `${money(low)} to ${mon
 export function shortDay(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
   const year = (d: Date) => d.toLocaleDateString("en-US", { year: "numeric", timeZone });
-  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
+  return at.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: year(at) === year(now) ? undefined : "numeric", timeZone });
 }
 
 /**
@@ -299,7 +300,7 @@ export function signedCopies(messages: readonly CopyMessage[], approvedAt: strin
 /** "at 2:14 PM" today, else "on Oct 22 at 2:14 PM", in the business's time zone. */
 export function signedWhen(iso: string, timeZone: string, now: Date = new Date()): string {
   const at = new Date(iso);
-  const time = at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  const time = at.toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit", timeZone });
   const day = (d: Date) => d.toLocaleDateString("en-CA", { timeZone });
   return day(at) === day(now) ? `at ${time}` : `on ${shortDay(iso, timeZone, now)} at ${time}`;
 }

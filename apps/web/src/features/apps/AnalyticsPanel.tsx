@@ -15,7 +15,7 @@ import { SectionSkeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
-import { timeAgo } from "@/lib/format";
+import { dateLocale, timeAgo } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import styles from "./AnalyticsPanel.module.css";
 import { CodeBlock, CodeRow, kit, Step, Steps } from "./PanelKit";
@@ -202,7 +202,7 @@ export function AnalyticsPanel() {
   const data = setup.data;
   const builder = BUILDERS.find((b) => b.id === builderId) ?? BUILDERS[0]!;
   const line = builder.id === "godaddy" ? pageLine(data.snippet) : data.snippet;
-  const visited = data.last_visit_at ? timeAgo(data.last_visit_at) : data.last_visit_day ? `on ${new Date(`${data.last_visit_day}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}` : null;
+  const visited = data.last_visit_at ? timeAgo(data.last_visit_at) : data.last_visit_day ? `on ${new Date(`${data.last_visit_day}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone: "UTC" })}` : null;
   const result = check.data?.check ?? data.check;
   const working = Boolean(result?.found || visited);
   const submit = (e: FormEvent) => {

@@ -16,6 +16,8 @@ export interface ToolContext {
   userId: string;
   companyId: string;
   timezone: string;
+  /** Where the business is (companies.country): words the tools write for people (an invoice line's days) follow it. */
+  country?: string | null;
   /** The person's level and the areas their role gives them, as requireCompany works them out. */
   role: Role;
   permissions: Permission[];

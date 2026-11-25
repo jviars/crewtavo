@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { boxAround, buildingAt, buildingsOn } from "../src/features/measure/buildings";
 import { lasHeader } from "../src/features/measure/lidar";
 import { photoAngle, pitchFromAngle, startingHandles, tiltOf } from "../src/features/measure/pitchMath";
+import { groupRows } from "../src/features/measure/TakeoffList";
 
 describe("pitch gauges", () => {
   it("reads the phone's tilt whichever way it lies on the roof", () => {
@@ -69,5 +70,37 @@ describe("lidar files", () => {
     expect(lasHeader(file).count).toBe(5_000_000_000);
     file[0] = 0;
     expect(() => lasHeader(file)).toThrow("Not a LAS file");
+  });
+});
+
+describe("the takeoff list", () => {
+  const rows = [
+    { id: "a", kind: "Area" as const, value: 1000 },
+    { id: "b", kind: "Area" as const, value: 500 },
+    { id: "c", kind: "Length" as const, value: 40 },
+    { id: "d", kind: "Length" as const, value: 30 },
+    { id: "e", kind: "Count" as const, value: 1 },
+    { id: "f", kind: "Cutout" as const, value: 200 },
+  ];
+
+  it("groups items the way the items are, and the rest by kind with their totals", () => {
+    // "c" is crack seal; "b" says it's a stall row, which an area can't be, so it stays a plain area.
+    const groups = groupRows(rows, { a: "asphalt", b: "stall_row", c: "crack" }, {}, false, "sqft");
+    expect(groups.map((g) => g.title)).toEqual(["Pavement", "Sealcoat and repair", "Areas", "Cut out", "Lines", "Counts"]);
+    expect(groups[0].entries).toEqual([{ item: expect.objectContaining({ id: "asphalt" }), rows: [rows[0]] }]);
+    expect(groups.find((g) => g.title === "Areas")?.total).toBe("500 sq ft");
+    expect(groups.find((g) => g.title === "Cut out")?.total).toBe("−200 sq ft");
+    expect(groups.find((g) => g.title === "Counts")?.total).toBe("1");
+  });
+
+  it("puts a roof's lines under their edges, and its areas as sections, in square yards when asked", () => {
+    const groups = groupRows(rows, {}, { c: "ridge" }, true, "sqyd");
+    expect(groups.map((g) => [g.title, g.total])).toEqual([
+      ["Roof sections", "166.7 sq yd"],
+      ["Cut out", "−200 sq ft"],
+      ["Ridges", "40 ft"],
+      ["Lines", "30 ft"],
+      ["Counts", "1"],
+    ]);
   });
 });

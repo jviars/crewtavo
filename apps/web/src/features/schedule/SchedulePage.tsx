@@ -11,6 +11,7 @@
  * (dropping a visit on someone puts them on it, and someone on two visits at once is marked). List
  * shows a day's, week's or month's visits under each day, and Map a day's visits as pins.
  */
+import { monthFirst } from "@crewtavo/core/regional";
 import { scheduleSettings } from "@crewtavo/core/routing";
 import { localDate, localTime, zonedTimeToUtc } from "@crewtavo/core/time";
 import { crewPeople, visitPeople, type CrewMember } from "@crewtavo/core/visitPeople";
@@ -31,7 +32,7 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { EntityStatus, statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { api, supabase, unwrap } from "@/lib/api";
-import { addDaysIso, addressLine, formatNumber, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, addressLine, companyCountry, dateLocale, formatNumber, formatTime, todayIn } from "@/lib/format";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
@@ -47,7 +48,7 @@ import { useSchedulingRights } from "./myCrews";
 import { eventOnRow, movePeople, onRow, peopleRows } from "./people";
 import { filterLine } from "./filterLine";
 import { spanDays, stepMonth, weekStart, type Span } from "./range";
-import { intlLocale, msg, t } from "@/lib/i18n";
+import { msg, t } from "@/lib/i18n";
 import { Select } from "@/components/ui/Select";
 
 const ScheduleMap = lazy(() => import("./ScheduleMap").then((m) => ({ default: m.ScheduleMap })));
@@ -103,7 +104,16 @@ type Patch = Moves & { assignee_ids?: string[] };
 /** A visit with a change made: the people go to the API as assignee_ids, and the board reads them as assignees. */
 const applied = (visit: Visit, patch: Patch): Visit => ({ ...visit, ...patch, ...(patch.assignee_ids && { assignees: patch.assignee_ids.map((user_id) => ({ user_id })) }) });
 
-const label = (date: string, opts: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString(intlLocale(), { ...opts, timeZone: "UTC" });
+const label = (date: string, opts: Intl.DateTimeFormatOptions) => new Date(`${date}T12:00:00Z`).toLocaleDateString(dateLocale(), { ...opts, timeZone: "UTC" });
+/** A week's heading: "Oct 12 – 18, 2026" in the US, "12 – 18 Oct 2026" where the day comes first (Intl writes the range the country's way). */
+function weekHeading(from: string, to: string) {
+  if (!monthFirst(companyCountry()) && !dateLocale().startsWith("es")) {
+    return new Intl.DateTimeFormat(dateLocale(), { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).formatRange(new Date(`${from}T12:00:00Z`), new Date(`${to}T12:00:00Z`));
+  }
+  return from.slice(5, 7) === to.slice(5, 7)
+    ? `${label(from, { month: "short", day: "numeric" })} – ${Number(to.slice(8))}, ${to.slice(0, 4)}`
+    : `${label(from, { month: "short", day: "numeric" })} – ${label(to, { month: "short", day: "numeric" })}, ${to.slice(0, 4)}`;
+}
 const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 const lengthLabel = (m: number) => (m < 60 ? `${m} min` : m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} ${m === 60 ? "hour" : "hours"}`);
 const toMinutes = (t: string | undefined, fallback: number) => {
@@ -415,9 +425,7 @@ export function SchedulePage() {
     oneDay
       ? label(anchor, { weekday: "long", month: "long", day: "numeric" })
       : period === "week"
-        ? range.from.slice(5, 7) === range.to.slice(5, 7)
-          ? `${label(range.from, { month: "short", day: "numeric" })} – ${Number(range.to.slice(8))}, ${range.to.slice(0, 4)}`
-          : `${label(range.from, { month: "short", day: "numeric" })} – ${label(range.to, { month: "short", day: "numeric" })}, ${range.to.slice(0, 4)}`
+        ? weekHeading(range.from, range.to)
         : label(`${anchor.slice(0, 7)}-15`, { month: "long", year: "numeric" });
 
   // The hours shown: the workday plus an hour either side, stretched to fit any visit.

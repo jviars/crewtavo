@@ -142,7 +142,7 @@ describe("campaigns", () => {
   });
 
   it("get the company's phone from GET /me, so previews show {{company.phone}} as the email does", () => {
-    expect(source("../../api/src/routes/account.ts")).toContain("company:companies(id, name, slug, trade_preset, timezone, currency, address, phone)");
+    expect(source("../../api/src/routes/account.ts")).toContain("company:companies(id, name, slug, trade_preset, timezone, currency, country, address, phone)");
   });
 
   it("read a campaign's numbers and list once more when it finishes sending, and keep the page's own copy saved", () => {

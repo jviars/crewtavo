@@ -5,8 +5,8 @@
  * The worker reads the changes to their own time, the office everyone's, a crew lead their crew's.
  */
 import { supabase } from "@/lib/api";
-import { dateIn, formatTime } from "@/lib/format";
-import { intlLocale, t } from "@/lib/i18n";
+import { dateIn, dateLocale, formatTime } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { everyRow } from "@/lib/paging";
 import { CATEGORY_LABELS, type TimerCategory } from "../field/fieldData";
 
@@ -93,7 +93,7 @@ export function editNote(change: Pick<TimeChange, "action" | "changed_by" | "sou
 function stamp(iso: string, other: string | null, timeZone: string): string {
   const time = formatTime(iso, timeZone);
   if (!other || dateIn(iso, timeZone) === dateIn(other, timeZone)) return time;
-  return `${new Date(iso).toLocaleDateString(intlLocale(), { weekday: "short", month: "short", day: "numeric", timeZone })} ${time}`;
+  return `${new Date(iso).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric", timeZone })} ${time}`;
 }
 
 /** "8:00 AM – 12:00 PM", or "8:00 AM – now" for a clock still running. */

@@ -137,6 +137,9 @@ describe("offering the job to someone else", () => {
     expect(paperworkWords(ok)).toBeNull();
     expect(paperworkWords(lapsed)).toBe("Workers' comp expired");
     expect(paperworkWords([])).toBe("W-9 missing, Liability insurance missing, Workers' comp missing");
+    // A business outside the US asks for no W-9.
+    expect(paperworkWords([], "GB")).toBe("Liability insurance missing, Workers' comp missing");
+    expect(paperworkWords(ok.slice(1), "CA")).toBeNull();
     expect(paperworkWords([{ ...ok[0]! }, { ...ok[1]!, verified: false }, { ...ok[2]!, state: "expiring", days_left: 12 }])).toBe("Liability insurance not verified yet, Workers' comp expires in 12 days");
     const subs = [
       { id: "a", name: "Apex Roofing", trade: "roofing", active: true },
@@ -418,6 +421,9 @@ describe("this year's total", () => {
       `${base} $0.00 of it counts toward your 1099: card and payment-app payments are reported on a 1099-K instead.`,
     );
     expect(paidTotalNote(undefined, "Romeo Roofing")).toBe(base);
+    // A business outside the US sends no 1099.
+    expect(paidTotalNote({ year: 2026, paid: 5400, payments: 3, owed: 0, owed_jobs: 0, counted: 3000 }, "Romeo Roofing", "GB")).toBe(base);
+    expect(paidTotalNote({ year: 2026, paid: 54210, payments: 521, owed: 0, owed_jobs: 0, counted: 54210 }, "Romeo Roofing", "CA")).toBe(base);
   });
 });
 

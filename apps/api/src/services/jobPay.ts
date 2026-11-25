@@ -172,5 +172,7 @@ export async function wcAudit(s: JobPayScope, from: string, to: string) {
 /** The same, as a CSV for the auditor. */
 export async function wcAuditCsvFile(s: JobPayScope, from: string, to: string) {
   const report = await wcAudit(s, from, to);
-  return { filename: `workers-comp-audit-${from}-to-${to}.csv`, csv: wcAuditCsv(report.rows), totals: report.totals };
+  // The certificates' dates as the business's country writes them.
+  const company = await s.db.from("companies").select("country").eq("id", s.companyId).maybeSingle();
+  return { filename: `workers-comp-audit-${from}-to-${to}.csv`, csv: wcAuditCsv(report.rows, company.data?.country), totals: report.totals };
 }

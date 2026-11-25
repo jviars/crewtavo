@@ -1,6 +1,6 @@
 /** Report date ranges (in the company's time zone) and how to bucket them for charts. */
 import { addDays, localDate } from "@crewtavo/core/time";
-import { formatDate } from "@/lib/format";
+import { dateLocale, formatDate } from "@/lib/format";
 
 // The ranges themselves are shared with AI assistants' report tools (packages/core/src/reports.ts).
 export { calendarWords, hoursBetween, REPORT_PRESETS as PRESETS, resolveRange, stepRange, type ReportPreset as PresetKey, type ReportRange as Range } from "@crewtavo/core/reports";
@@ -8,14 +8,14 @@ import type { ReportRange as Range } from "@crewtavo/core/reports";
 
 const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
 
-export const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+export const shortDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(dateLocale(), { month: "short", day: "numeric", timeZone: "UTC" });
 
 /** A day as a list says it: "Today", "Yesterday", "Wed, Nov 19" this past week, "Nov 3", or "Nov 3, 2025" from another year. */
 export function dayWords(day: string, today: string): string {
   if (day === today) return "Today";
   if (day === addDays(today, -1)) return "Yesterday";
   if (day.slice(0, 4) !== today.slice(0, 4)) return formatDate(day);
-  return new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: day >= addDays(today, -6) ? "short" : undefined, month: "short", day: "numeric", timeZone: "UTC" });
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString(dateLocale(), { weekday: day >= addDays(today, -6) ? "short" : undefined, month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 export interface Bucket {
@@ -33,7 +33,7 @@ export function bucketsFor(range: Range): Bucket[] {
   if (range.days <= 31) {
     for (let d = range.from; d <= range.to; d = addDays(d, 1)) {
       const date = new Date(`${d}T12:00:00Z`);
-      out.push({ key: d, label: String(date.getUTCDate()), title: date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }), from: d, to: d });
+      out.push({ key: d, label: String(date.getUTCDate()), title: date.toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }), from: d, to: d });
     }
   } else if (range.days <= 120) {
     // Weeks starting Monday.
@@ -55,8 +55,8 @@ export function bucketsFor(range: Range): Bucket[] {
       const date = new Date(`${from}T12:00:00Z`);
       out.push({
         key: from.slice(0, 7),
-        label: date.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }),
-        title: date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }),
+        label: date.toLocaleDateString(dateLocale(), { month: "short", timeZone: "UTC" }),
+        title: date.toLocaleDateString(dateLocale(), { month: "long", year: "numeric", timeZone: "UTC" }),
         from: from < range.from ? range.from : from,
         to: to > range.to ? range.to : to,
       });

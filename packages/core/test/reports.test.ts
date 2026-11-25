@@ -189,3 +189,13 @@ describe("date ranges a step at a time", () => {
     for (const key of ["month", "quarter", "year", "30d", "90d"] as const) expect(on(key)).toBeNull();
   });
 });
+
+describe("a custom range's name", () => {
+  it("is its first and last day, written the way the business's country writes them", () => {
+    const custom = { from: "2026-10-03", to: "2026-10-09" };
+    expect(resolveRange("custom", "2026-11-21", "America/New_York", custom).label).toBe("Oct 3 – Oct 9");
+    expect(resolveRange("custom", "2026-11-21", "America/New_York", custom, "US").label).toBe("Oct 3 – Oct 9");
+    expect(resolveRange("custom", "2026-11-21", "Europe/London", custom, "GB").label).toBe("3 Oct – 9 Oct");
+    expect(resolveRange("month", "2026-11-21", "Europe/London", custom, "GB").label).toBe(resolveRange("month", "2026-11-21", "America/New_York").label);
+  });
+});

@@ -22,7 +22,7 @@ import { statusText } from "@/components/ui/StatusPill";
 import { Face } from "@/components/ui/Avatar";
 import { Select } from "@/components/ui/Select";
 import { api, supabase, unwrap, unwrapOne } from "@/lib/api";
-import { addDaysIso, formatDate, formatTime, todayIn } from "@/lib/format";
+import { addDaysIso, englishDateLocale, formatDate, formatTime, todayIn } from "@/lib/format";
 import { shopPlace } from "@/lib/maps";
 import { useSession } from "@/lib/session";
 import { VisitChecklists } from "../jobs/FilledChecklists";
@@ -366,7 +366,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                     const active = d === date && t === time;
                     return (
                       <button key={s.starts_at} type="button" className="tab" aria-pressed={active} onClick={() => { setDate(d); setTime(t); }}>
-                        {new Date(s.starts_at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: tz })}
+                        {new Date(s.starts_at).toLocaleString(englishDateLocale(), { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: tz })}
                       </button>
                     );
                   })}
@@ -504,7 +504,7 @@ export function VisitDialog({ visit, onClose, onSaved }: { visit: VisitInput; on
                 <div className="grow small" style={{ fontWeight: 400 }}>
                   {clashes.data.map((cl) => (
                     <div key={`${cl.equipment_id}-${cl.visit_id}`}>
-                      <strong>{machines.data.find((m) => m.id === cl.equipment_id)?.name}</strong> is also booked on {cl.title}{cl.starts_at ? ` (${new Date(cl.starts_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })}${cl.ends_at ? `–${new Date(cl.ends_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: tz })}` : ""})` : " that day"}.
+                      <strong>{machines.data.find((m) => m.id === cl.equipment_id)?.name}</strong> is also booked on {cl.title}{cl.starts_at ? ` (${new Date(cl.starts_at).toLocaleTimeString(englishDateLocale(), { hour: "numeric", minute: "2-digit", timeZone: tz })}${cl.ends_at ? `–${new Date(cl.ends_at).toLocaleTimeString(englishDateLocale(), { hour: "numeric", minute: "2-digit", timeZone: tz })}` : ""})` : " that day"}.
                     </div>
                   ))}
                 </div>
@@ -640,4 +640,4 @@ export function workDays(first: string, count: number, skip: readonly number[]):
   }
   return out;
 }
-const shortDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+const shortDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString(englishDateLocale(), { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });

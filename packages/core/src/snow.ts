@@ -4,6 +4,7 @@
  * and the hours around it; fetching it lives in the API (services/forecast.ts), and the customers in
  * the database (snow_sites, 20261113000100_snow_app.sql).
  */
+import { clockStyle, writtenDate } from "./regional";
 import type { Sky } from "./weather";
 
 /** A snow customer's triggers. */
@@ -59,9 +60,13 @@ export const snowBands = (saved: unknown): SnowBand[] =>
 export const standardTiers = (bands: SnowBand[], push: number): SnowTier[] => bands.map((b) => ({ up_to_in: b.up_to_in, price: Math.round(push * b.times * 100) / 100 }));
 
 export const inchesText = (n: number) => `${Math.round(n * 10) / 10} in`;
-/** "07:00:00" as "7 AM", "13:30" as "1:30 PM". */
-export function clockText(time: string): string {
+/**
+ * "07:00:00" as "7 AM", "13:30" as "1:30 PM"; where the business's country keeps time another way
+ * (core regional), "7 a.m." in Canada, "7 am" in Australia, "07:00" and "13:30" in the UK.
+ */
+export function clockText(time: string, country?: string | null): string {
   const [hour = 0, minute = 0] = time.split(":").map(Number);
+  if (clockStyle(country) !== "AM") return writtenDate(new Date(Date.UTC(2000, 0, 1, hour, minute)), "FMHH12:MI AM", country).replace(":00 ", " ");
   return `${hour % 12 || 12}${minute ? `:${String(minute).padStart(2, "0")}` : ""} ${hour < 12 ? "AM" : "PM"}`;
 }
 
@@ -81,10 +86,10 @@ const MAX_LINES = 30;
 /** Which storm a notice is about: tomorrow's, told the day before, or one that's here today and wasn't told about. */
 export type SnowDay = "today" | "tomorrow";
 
-function snowLine(s: SnowSite, day: SnowDay): string {
+function snowLine(s: SnowSite, day: SnowDay, country?: string | null): string {
   const what = s.plan.kind === "salt" ? `salt only (it plows at ${inchesText(s.trigger_in)})` : `trigger ${inchesText(s.trigger_in)}${s.plan.pushes > 1 ? `, ${s.plan.pushes} pushes` : ""}`;
   const when = day === "today" ? "today, counted from 6pm last night" : "from 6pm tonight through tomorrow";
-  return `${s.name}: ${inchesText(s.snow_in)} ${when}, ${what}${s.clear_by ? `, clear by ${clockText(s.clear_by)}` : ""}`;
+  return `${s.name}: ${inchesText(s.snow_in)} ${when}, ${what}${s.clear_by ? `, clear by ${clockText(s.clear_by, country)}` : ""}`;
 }
 
 export interface SnowNotice { user_id: string; office: boolean; title: string; body: string }
@@ -109,9 +114,10 @@ function notices<T extends { people: string[]; priority?: number }>(sites: T[], 
  * weren't told about), and what: each site goes to its people, and every one of them to the office
  * (`office`: the people who schedule the team). The first priority first, then the most snow.
  * `asked` are the ones asked whether they can go out: the subcontractors, who work for themselves;
- * the business's own people are told. Empty for no sites.
+ * the business's own people are told. Empty for no sites. Times are as the business's `country`
+ * keeps them (the US's way without one).
  */
-export function snowNotices(sites: SnowSite[], office: string[], asked: string[] = [], day: SnowDay = "tomorrow"): SnowNotice[] {
+export function snowNotices(sites: SnowSite[], office: string[], asked: string[] = [], day: SnowDay = "tomorrow", country?: string | null): SnowNotice[] {
   const ordered = [...sites].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2) || b.snow_in - a.snow_in);
   const when = day === "today" ? "today" : "by tomorrow";
   return notices(
@@ -122,7 +128,7 @@ export function snowNotices(sites: SnowSite[], office: string[], asked: string[]
       if (mine.length > 1) return `Snow ${when}: ${mine.length} properties to service`;
       return `${one.plan.kind === "salt" ? "Salt run" : "Snow"} ${when} at ${one.name}: ${inchesText(one.snow_in)}${day === "today" ? "" : " forecast"}`;
     },
-    (site) => snowLine(site, day),
+    (site) => snowLine(site, day, country),
     asked,
   );
 }
@@ -131,7 +137,7 @@ export function snowNotices(sites: SnowSite[], office: string[], asked: string[]
 export interface IceRisk { kind: "ice" | "refreeze"; at: string; low_f?: number }
 
 /** "2026-11-14T03:00" as "3 AM tonight" or "3 AM tomorrow", going by the day the window opens. */
-const hourText = (time: string, from: string) => `${clockText(time.slice(11, 16))} ${time.slice(0, 10) === from.slice(0, 10) ? "tonight" : "tomorrow"}`;
+const hourText = (time: string, from: string, country?: string | null) => `${clockText(time.slice(11, 16), country)} ${time.slice(0, 10) === from.slice(0, 10) ? "tonight" : "tomorrow"}`;
 
 /**
  * Ice between `from` and `to` (the place's own hours, as "2026-11-13T18:00"): freezing rain, or
@@ -148,14 +154,17 @@ export function iceRisk(hours: Array<{ time: string; temp_f: number | null; sky:
   return frozen ? { kind: "refreeze", at: frozen.time, low_f: Math.min(...window.slice(wet + 1).flatMap((h) => (h.temp_f == null ? [] : [h.temp_f]))) } : null;
 }
 
-/** Who's warned about ice at their salting customers, and what; the office about all of them. `from` is when the window opens. */
-export function iceNotices(sites: Array<{ name: string; risk: IceRisk; people: string[]; priority?: number }>, office: string[], from: string): SnowNotice[] {
+/**
+ * Who's warned about ice at their salting customers, and what; the office about all of them. `from`
+ * is when the window opens; times are as the business's `country` keeps them.
+ */
+export function iceNotices(sites: Array<{ name: string; risk: IceRisk; people: string[]; priority?: number }>, office: string[], from: string, country?: string | null): SnowNotice[] {
   const ordered = [...sites].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2) || a.risk.at.localeCompare(b.risk.at));
   return notices(
     ordered,
     office,
     (mine) => (mine.length > 1 ? `Ice by tomorrow: ${mine.length} properties to salt` : `${mine[0]!.risk.kind === "ice" ? "Freezing rain" : "Refreeze"} by tomorrow at ${mine[0]!.name}`),
-    (s) => (s.risk.kind === "ice" ? `${s.name}: freezing rain around ${hourText(s.risk.at, from)}` : `${s.name}: wet, then ${s.risk.low_f}° by ${hourText(s.risk.at, from)}: it will refreeze`),
+    (s) => (s.risk.kind === "ice" ? `${s.name}: freezing rain around ${hourText(s.risk.at, from, country)}` : `${s.name}: wet, then ${s.risk.low_f}° by ${hourText(s.risk.at, from, country)}: it will refreeze`),
     [],
   );
 }

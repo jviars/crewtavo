@@ -149,6 +149,11 @@ describe("the workers' comp audit", () => {
     expect(certificateText({ ...exemption, starts_on: null, expires_on: "2027-10-13" })).toBe("Workers' comp exemption, no start date to Oct 13, 2027, no start date on file, so a year up to its end date is assumed");
     expect(certificateText({ ...exemption, starts_on: null, expires_on: null })).toBe("Workers' comp exemption, no dates on file, so it's counted from the day it was added");
     expect(certificateText({ ...exemption, starts_on: "2026-01-01", expires_on: null })).toBe("Workers' comp exemption, Jan 1, 2026 to no end date, no end date on file, so it's counted as still in force");
+    // Its dates as the business's country writes them; a US business's as they were.
+    const first = (rows[0]!.documents as WcCertificate[])[0]!;
+    expect(certificateText(first, "US")).toBe("Workers' comp certificate, Acme Mutual WC-1, Jan 1, 2026 to Oct 12, 2026 (replaced)");
+    expect(certificateText(first, "GB")).toBe("Workers' comp certificate, Acme Mutual WC-1, 1 Jan 2026 to 12 Oct 2026 (replaced)");
+    expect(wcAuditCsv(rows, "GB").split("\r\n")[1]).toContain("1 Jan 2026 to 12 Oct 2026 (replaced); Workers' comp exemption, no start date to 13 Oct 2027");
   });
 
   it("downloads for the auditor", () => {

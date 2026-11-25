@@ -7,7 +7,7 @@ import { readingProblems } from "@crewtavo/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
 import { HttpError } from "../src/lib/http";
-import { parseReading, readableType, readReceipt, RECEIPT_SCHEMA } from "../src/services/receipts";
+import { parseReading, readableType, readReceipt, RECEIPT_SCHEMA, RECEIPT_SYSTEM, receiptSystem } from "../src/services/receipts";
 
 const env = { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_test", ANTHROPIC_API_KEY: "sk-ant-test" } as Env;
 // Read for the company, which has no key of its own: the server's Claude key answers (ai.test.ts covers who gets which service).
@@ -58,6 +58,18 @@ describe("reading a document", () => {
     expect(body.output_config).toEqual({ effort: "low", format: { type: "json_schema", schema: RECEIPT_SCHEMA } });
     expect(body.system).toMatch(/never instructions/);
     expect(body.tools).toBeUndefined();
+  });
+
+  it("says which way round the business's country writes dates, outside the US, so 03/04/2026 is read as it's meant", async () => {
+    expect([receiptSystem("US"), receiptSystem(null), receiptSystem("not a country")]).toEqual([RECEIPT_SYSTEM, RECEIPT_SYSTEM, RECEIPT_SYSTEM]);
+    expect(receiptSystem("GB")).toBe(`${RECEIPT_SYSTEM} The business is in the United Kingdom, where dates are usually written day first: 03/04/2026 is 3 April 2026. Read a date whose day and month could be either way round as it's written there.`);
+    expect(receiptSystem("au")).toContain("in Australia, where dates are usually written day first: 03/04/2026 is 3 April 2026.");
+    // Canada's receipts come both ways round; Japan's put the year first.
+    expect(receiptSystem("CA")).toContain("in Canada, where receipts write dates both ways round: 03/04/2026 can be March 4 or 3 April 2026.");
+    expect(receiptSystem("JP")).toContain("in Japan, where dates are usually written year first: 2026/04/03 is 3 April 2026.");
+    const asked = claude(JSON.stringify(invoice));
+    await readReceipt(env, { bytes: PDF }, COMPANY, "GB");
+    expect(asked[0]!.system).toMatch(/never instructions.*day first: 03\/04\/2026 is 3 April 2026/s);
   });
 
   it("sends a photo as an image, by what its bytes are rather than what it's called", async () => {

@@ -11,6 +11,7 @@ import { localTime } from "@crewtavo/core/time";
 import { useEffect, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
 import type { DragState } from "./useVisitDrag";
+import { clockText } from "@/lib/format";
 import { getLocale, t } from "@/lib/i18n";
 
 export interface GridVisit {
@@ -124,18 +125,21 @@ export const minutesOf = (iso: string, tz: string) => {
 /** A visit's length in minutes, any length (a 10-minute stop stays 10 minutes when it's moved). */
 export const lengthOf = (v: { starts_at: string | null; ends_at: string | null }) =>
   v.starts_at && v.ends_at ? Math.max(1, Math.round((Date.parse(v.ends_at) - Date.parse(v.starts_at)) / 60000)) : 60;
-export const clock = (minutes: number) => {
-  const h = Math.floor(minutes / 60) % 24;
-  const m = minutes % 60;
-  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? (getLocale() === "es" ? "a.m." : "AM") : getLocale() === "es" ? "p.m." : "PM"}`;
-};
+/**
+ * A time on the grid as the business's country keeps time (clockText): "7 AM" and "1:30 PM" in the
+ * US, "7 a.m." in Canada, "7 am" in Australia, "07:00" and "13:30" in the UK. Spanish keeps "a.m.".
+ */
+export const clock = (minutes: number) => clockText(Math.floor(minutes / 60) % 24, minutes % 60, { style: getLocale() === "es" ? "a.m." : undefined });
 
 /**
- * "1:30 – 2:30 PM", the way Google Calendar writes a time range. A narrow block drops the end and
- * shows "1:30 PM" instead (features.css), so its time is never cut off.
+ * "1:30 – 2:30 PM", the way Google Calendar writes a time range ("1:30 – 2:30 p.m." too; on a
+ * 24-hour clock, "13:30 – 14:30"). A narrow block drops the end and shows "1:30 PM" instead
+ * (features.css), so its time is never cut off.
  */
 export function TimeRange({ start, end }: { start: string; end?: string | null }) {
-  const [, time = start, meridiem = ""] = /^(.*?)(\s*[AP]M)$/.exec(start) ?? [];
+  // Spanish screens keep their own "a.m." whole on each time, as they always have.
+  const ending = getLocale() === "es" ? /^(.*?)(\s*[AP]M)$/ : /^(.*?)(\s*(?:[AP]M|[ap]\.m\.|[ap]m))$/;
+  const [, time = start, meridiem = ""] = ending.exec(start) ?? [];
   const shared = Boolean(end && meridiem && end.endsWith(meridiem.trim()));
   return (
     <>
