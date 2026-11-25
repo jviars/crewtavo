@@ -71,6 +71,7 @@ export const NOTICES: readonly NoticeGroup[] = [
     kind: "chat",
     from: ["private.chat_notify_mentions"],
     titles: [
+      ["{name} replied to you in {where}", "{name} te respondió en {where}"],
       ["{name} mentioned you in {where}", "{name} te mencionó en {where}"],
       ["{name} posted in {where}", "{name} publicó en {where}"],
     ],

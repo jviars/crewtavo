@@ -22,7 +22,7 @@ export const NOTIFICATION_TOPICS = [
   // Subs only: their job offers and their pay (on by default, texts too: an offer waits for their answer).
   { key: "jobs", label: msg("My jobs"), hint: msg("Job offers, and what you're owed and paid") },
   { key: "alerts", label: msg("Other alerts"), hint: msg("Leads handed to you, and your company's automations, like a quote being approved") },
-  { key: "chat", label: msg("Team chat"), hint: msg("When someone @mentions you or your role") },
+  { key: "chat", label: msg("Team chat"), hint: msg("When someone @mentions you or your role, or replies to you") },
   // Owners and admins: Railway's warnings (services/hosting.ts) and storage nearing its limit
   // (services/storageUsage.ts), and owners: the nightly database backup failing (services/backups.ts).
   // Off Railway, Settings → Profile calls it "Storage and backups".
