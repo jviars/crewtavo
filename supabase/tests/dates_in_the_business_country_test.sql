@@ -187,15 +187,16 @@ select public.answer_sub_offer(:'ca_pay', true);
 select tdbc.as_user(:'ulf');
 select public.answer_sub_offer(:'us_pay', true);
 commit;
-update public.job_pay set status = 'done', earned_on = current_date where id in (:'gb_pay', :'ca_pay', :'us_pay');
+-- Each on the business's own today: past midnight in London it's still yesterday in Toronto.
+update public.job_pay set status = 'done', earned_on = private.company_today(company_id) where id in (:'gb_pay', :'ca_pay', :'us_pay');
 begin;
 set local role authenticated;
 select tdbc.as_user(:'olive');
-select public.job_pay_mark_paid(array[:'gb_pay']::uuid[], 'check', current_date);
+select public.job_pay_mark_paid(array[:'gb_pay']::uuid[], 'check', private.company_today(:'gb'));
 select tdbc.as_user(:'cora');
-select public.job_pay_mark_paid(array[:'ca_pay']::uuid[], 'check', current_date);
+select public.job_pay_mark_paid(array[:'ca_pay']::uuid[], 'check', private.company_today(:'ca'));
 select tdbc.as_user(:'una');
-select public.job_pay_mark_paid(array[:'us_pay']::uuid[], 'check', current_date);
+select public.job_pay_mark_paid(array[:'us_pay']::uuid[], 'check', private.company_today(:'us'));
 commit;
 select tdbc.check(tdbc.told(:'sid', :'gb_pay') @> array['Paid £2,040.50 on ' || (select to_char(paid_at at time zone 'Europe/London', 'FMDD Mon') from public.job_pay where id = :'gb_pay')],
   'what the UK sub is paid says the day first, in pounds');
