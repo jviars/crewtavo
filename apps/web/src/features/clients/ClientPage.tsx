@@ -585,7 +585,7 @@ export function ClientPage() {
 
         {c.properties.length > 0 && <PlansCard scope={{ kind: "client", properties: c.properties.map((p) => ({ id: p.id, label: p.label || p.line1 })) }} />}
 
-        <Timeline clientId={c.id} />
+        <Timeline clientId={c.id} clientName={c.display_name} />
       </DetailColumns>
 
       {canSell && (

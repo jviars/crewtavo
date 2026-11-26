@@ -1,8 +1,9 @@
 /**
  * Texts from numbers that aren't a client's or a contact's (public.unknown_texts): listed in
- * Messages under "Unknown numbers", so none is lost. Opening one shows its texts and offers to
- * attach the number to a client, as their phone or as a new contact, which moves the conversation
- * onto that client's timeline (public.attach_unknown_texts); or to delete it.
+ * Messages under "Unknown numbers", so none is lost. Missed calls and voicemails on a business's
+ * Quo number from such a number wait there with them. Opening one shows its texts and calls and
+ * offers to attach the number to a client, as their phone or as a new contact, which moves the
+ * conversation onto that client's timeline (public.attach_unknown_texts); or to delete it.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type FormEvent } from "react";
@@ -16,10 +17,15 @@ import { InboxGroup } from "@/components/ui/InboxList";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { supabase, unwrap } from "@/lib/api";
 import { dateLocale, formatDateTime } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { hasRole, useSession } from "@/lib/session";
+import { CallNotes } from "../clients/CallNotes";
+import { callIcon, callPreview, callView } from "../clients/callWords";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { ConversationRow } from "./ConversationRow";
-import { byNumber, numberWords, type UnknownNumber } from "./unknownTexts";
+import { byNumber, kindsOf, movesWords, numberWords, type UnknownNumber } from "./unknownTexts";
+
+const COLUMNS = "id, from_phone, phone_key, body, created_at, channel, call";
 
 /** Who sees unknown numbers: whoever starts conversations with clients (the database holds to the same). */
 export const seesUnknownNumbers = (session: Parameters<typeof hasRole>[0]) => hasRole(session, "admin", "office", "estimator");
@@ -34,7 +40,7 @@ export function useUnknownNumbers() {
     enabled: seesUnknownNumbers(session),
     refetchInterval: 30_000,
     meta: { silent: true },
-    queryFn: async () => byNumber(unwrap(await supabase().from("unknown_texts").select("id, from_phone, phone_key, body, created_at").eq("company_id", session.company.id).order("created_at", { ascending: false }).limit(500))),
+    queryFn: async () => byNumber(unwrap(await supabase().from("unknown_texts").select(COLUMNS).eq("company_id", session.company.id).order("created_at", { ascending: false }).limit(500))),
   });
 }
 
@@ -53,8 +59,9 @@ export function UnknownRows({ numbers, selected, onOpen }: { numbers: readonly U
           at={n.created_at}
           onOpen={() => onOpen(n.phone_key)}
         >
-          <Icon name="messages" size={13} />
-          <span>{n.body}</span>
+          {/* An unknown number's call is always one that came in. */}
+          <Icon name={n.channel === "call" ? callIcon(callView({ direction: "in", call: n.call })?.outcome) : "messages"} size={13} />
+          <span>{n.channel === "call" ? callPreview({ direction: "in", call: n.call, body: n.body }) : n.body}</span>
         </ConversationRow>
       ))}
     </InboxGroup>
@@ -70,11 +77,12 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
     queryKey: [...unknownKey(session.company.id), phoneKey],
     refetchInterval: 15_000,
     queryFn: async () =>
-      unwrap(await supabase().from("unknown_texts").select("id, from_phone, phone_key, body, created_at").eq("company_id", session.company.id).eq("phone_key", phoneKey).order("created_at", { ascending: false }).limit(300)).reverse(),
+      unwrap(await supabase().from("unknown_texts").select(COLUMNS).eq("company_id", session.company.id).eq("phone_key", phoneKey).order("created_at", { ascending: false }).limit(300)).reverse(),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["messages", session.company.id] });
+  const kinds = kindsOf(texts.data ?? []);
   const remove = useMutation({
-    meta: { success: "Texts deleted" },
+    meta: { success: () => (!kinds.calls ? "Texts deleted" : kinds.texts ? t("Texts and calls deleted") : t("Calls deleted")) },
     mutationFn: async () => unwrap(await supabase().from("unknown_texts").delete().eq("company_id", session.company.id).eq("phone_key", phoneKey)),
     onSuccess: () => {
       void refresh();
@@ -95,8 +103,12 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
     return <div className="thread-empty"><EmptyState icon="messages" title="No texts from this number">They may have been added to a client or deleted.</EmptyState></div>;
   }
   const from = rows[rows.length - 1]!.from_phone;
+  const deleteLabel = !kinds.calls ? "Delete these texts" : kinds.texts ? t("Delete these texts and calls") : t("Delete these calls");
   const askDelete = async () => {
-    if (await confirm({ title: `Delete the texts from ${numberWords(from)}?`, body: "They're removed for good. If the number texts again, it shows up here again.", confirmLabel: "Delete", danger: true })) remove.mutate();
+    const question = kinds.calls
+      ? { title: kinds.texts ? t("Delete the texts and calls from {number}?", { number: numberWords(from) }) : t("Delete the calls from {number}?", { number: numberWords(from) }), body: t("They're removed for good. If the number texts or calls again, it shows up here again.") }
+      : { title: `Delete the texts from ${numberWords(from)}?`, body: "They're removed for good. If the number texts again, it shows up here again." };
+    if (await confirm({ ...question, confirmLabel: "Delete", danger: true })) remove.mutate();
   };
   let lastDay = "";
   return (
@@ -108,19 +120,26 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
           <span className="who-sub">Not one of your clients' numbers</span>
         </span>
         <Button size="sm" variant="primary" icon="plus" className="thread-head-add" onClick={() => setAttaching(true)}>Add to a client</Button>
-        {hasRole(session, "admin", "office") && <Button size="sm" variant="ghost" icon="trash" aria-label="Delete these texts" title="Delete these texts" loading={remove.isPending} onClick={askDelete} />}
+        {hasRole(session, "admin", "office") && <Button size="sm" variant="ghost" icon="trash" aria-label={deleteLabel} title={deleteLabel} loading={remove.isPending} onClick={askDelete} />}
       </div>
       <div className="thread-body">
         {rows.map((m) => {
           const day = new Date(m.created_at).toLocaleDateString(dateLocale(), { weekday: "short", month: "short", day: "numeric" });
           const showDay = day !== lastDay;
           lastDay = day;
+          // A call says how it went (the number is in the header), with what Quo added under it.
+          const call = m.channel === "call" ? callView({ direction: "in", call: m.call }) : null;
+          const time = <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span>;
           return (
             <Fragment key={m.id}>
               {showDay && <span className="thread-day">{day}</span>}
               <div className="msg">
-                <div className="msg-bubble">{m.body}</div>
-                <span className="msg-meta"><Icon name="messages" size={12} />Text · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span></span>
+                {call ? <div className="msg-bubble"><span className="msg-subject">{call.title}</span><CallNotes view={call} /></div> : <div className="msg-bubble">{m.body}</div>}
+                {call || m.channel === "call" ? (
+                  <span className="msg-meta"><Icon name={callIcon(call?.outcome)} size={12} />{t("Call", { context: "noun" })} · {time}</span>
+                ) : (
+                  <span className="msg-meta"><Icon name="messages" size={12} />Text · {time}</span>
+                )}
               </div>
             </Fragment>
           );
@@ -135,6 +154,7 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
         <AttachDialog
           from={from}
           count={rows.length}
+          calls={kinds.calls}
           onClose={() => setAttaching(false)}
           onAttached={(clientId) => {
             setAttaching(false);
@@ -148,7 +168,7 @@ export function UnknownThread({ phoneKey, onBack, onAttached }: { phoneKey: stri
   );
 }
 
-function AttachDialog({ from, count, onClose, onAttached }: { from: string; count: number; onClose: () => void; onAttached: (clientId: string) => void }) {
+function AttachDialog({ from, count, calls, onClose, onAttached }: { from: string; count: number; calls: number; onClose: () => void; onAttached: (clientId: string) => void }) {
   const session = useSession();
   const [client, setClient] = useState<PickedClient>(null);
   const [choice, setChoice] = useState<"phone" | "contact" | null>(null);
@@ -167,7 +187,7 @@ function AttachDialog({ from, count, onClose, onAttached }: { from: string; coun
     onSuccess: () => onAttached(client!.id),
   });
   return (
-    <Dialog open onClose={onClose} title={`Add ${numberWords(from)} to a client`} description={`${count === 1 ? "Its text moves" : `Its ${count} texts move`} onto the client's timeline, and new ones go there from now on.`} size="sm">
+    <Dialog open onClose={onClose} title={`Add ${numberWords(from)} to a client`} description={calls ? movesWords(count - calls, calls) : `${count === 1 ? "Its text moves" : `Its ${count} texts move`} onto the client's timeline, and new ones go there from now on.`} size="sm">
       <form
         className="stack-sm"
         onSubmit={(e: FormEvent) => {

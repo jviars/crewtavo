@@ -1,4 +1,8 @@
-/** Message center: conversations by client (emails, texts, notes), with replies by email or text, and texts from unknown numbers to attach to a client. */
+/**
+ * Message center: conversations by client (emails, texts, notes, and calls on a business's Quo
+ * number), with replies by email or text, and texts and calls from unknown numbers to attach to a
+ * client. Calls only get their own filter once there are some.
+ */
 import { textsOff, textsOffReason } from "@crewtavo/core/marketing";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -14,8 +18,11 @@ import { InboxSkeleton, Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { ApiError, api, searchTerm, supabase, unwrap } from "@/lib/api";
 import { dateLocale, formatDateTime } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
+import { CallNotes } from "../clients/CallNotes";
+import { callIcon, callPreview, callView } from "../clients/callWords";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { MessageBody } from "../clients/MessageBody";
 import { messageFrom, messagePeople } from "../clients/messagePeople";
@@ -23,17 +30,29 @@ import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ConversationRow } from "./ConversationRow";
 import { isWaiting, useDoneMarks, useMarkDone } from "./done";
 import { UnknownRows, UnknownThread, useUnknownNumbers } from "./UnknownNumbers";
-import { matchingNumbers } from "./unknownTexts";
+import { numbersFor } from "./unknownTexts";
 
 const FILTERS = [
   { key: "all", label: "All", channels: ["sms", "email", "note", "call"] },
   { key: "in", label: "From clients", channels: ["sms", "email", "note", "call"] },
   { key: "email", label: "Email", channels: ["email"] },
   { key: "sms", label: "Texts", channels: ["sms"] },
+  { key: "calls", label: "Calls", channels: ["call"] },
 ] as const;
 const ICON: Record<string, IconName> = { email: "mail", sms: "messages", note: "note", call: "phone" };
 
-interface Msg { id: string; channel: string; direction: string; subject: string | null; body: string; status: string; created_at: string; client: { id: string; display_name: string } | null }
+interface Msg { id: string; channel: string; direction: string; subject: string | null; body: string; status: string; created_at: string; call: unknown; client: { id: string; display_name: string } | null }
+
+/** Whether the business has any calls here (from its Quo number), so Calls is offered as a filter. */
+function useHasCalls() {
+  const session = useSession();
+  return useQuery({
+    queryKey: ["messages", session.company.id, "has-calls"],
+    staleTime: 5 * 60_000,
+    meta: { silent: true },
+    queryFn: async () => unwrap(await supabase().from("messages").select("id").eq("company_id", session.company.id).eq("channel", "call").limit(1)).length > 0,
+  });
+}
 
 export function MessagesPage() {
   const session = useSession();
@@ -48,6 +67,7 @@ export function MessagesPage() {
   const strangers = useUnknownNumbers();
   const marks = useDoneMarks().data;
   const markDone = useMarkDone();
+  const hasCalls = useHasCalls().data;
   const f = FILTERS.find((x) => x.key === filter)!;
 
   const messages = useQuery({
@@ -57,7 +77,7 @@ export function MessagesPage() {
     queryFn: async () => {
       let q = supabase()
         .from("messages")
-        .select("id, channel, direction, subject, body, status, created_at, client:clients(id, display_name)")
+        .select("id, channel, direction, subject, body, status, created_at, call, client:clients(id, display_name)")
         .eq("company_id", session.company.id)
         .in("channel", [...f.channels])
         .not("client_id", "is", null)
@@ -79,8 +99,10 @@ export function MessagesPage() {
     return [...seen.values()].filter((c) => !term || c.client!.display_name.toLowerCase().includes(term.toLowerCase()) || c.body.toLowerCase().includes(term.toLowerCase()));
   }, [messages.data, term]);
   const open = (clientId: string | null) => setParams(clientId ? { client: clientId } : {}, { replace: true });
-  // Texts from unknown numbers are texts from outside: not under Email.
-  const unknownNumbers = filter === "email" ? [] : matchingNumbers(strangers.data ?? [], term);
+  // Texts and calls from unknown numbers are from outside: none under Email, and only theirs under Texts or Calls.
+  const unknownNumbers = numbersFor(strangers.data ?? [], filter, term);
+  // Calls is a filter once there are some, from a client or an unknown number (and stays while it's the one picked).
+  const filters = FILTERS.filter((x) => x.key !== "calls" || hasCalls || filter === "calls" || strangers.data?.some((n) => n.calls > 0));
   // Conversations move to the top as messages come in.
   const list = useListAnimation<HTMLDivElement>();
 
@@ -93,7 +115,7 @@ export function MessagesPage() {
       <div className="inbox" data-open={selected || unknown ? "" : undefined}>
         <section className="inbox-list" aria-label="Conversations">
           <SearchField value={search} onChange={setSearch} placeholder="Search conversations" label="Search conversations" />
-          <FilterTabs label="Filter messages" value={filter} onChange={setFilter} options={FILTERS.map((x) => ({ value: x.key, label: x.label }))} />
+          <FilterTabs label="Filter messages" value={filter} onChange={setFilter} options={filters.map((x) => ({ value: x.key, label: x.key === "calls" ? t("Calls") : x.label }))} />
           <div className="inbox-scroll" ref={list}>
             {messages.isPending && <InboxSkeleton rows={6} />}
             {messages.error && <ErrorState compact error={messages.error} onRetry={() => messages.refetch()} />}
@@ -119,8 +141,17 @@ export function MessagesPage() {
                           </button>
                         )}
                       >
-                        <Icon name={ICON[c.channel] ?? "messages"} size={13} />
-                        <span>{c.direction === "in" ? "" : c.direction === "internal" ? "Note: " : "You: "}{c.subject ? `${c.subject} · ` : ""}<MessageBody body={c.body} /></span>
+                        {c.channel === "call" ? (
+                          <>
+                            <Icon name={callIcon(callView(c)?.outcome)} size={13} />
+                            <span>{callPreview(c)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Icon name={ICON[c.channel] ?? "messages"} size={13} />
+                            <span>{c.direction === "in" ? "" : c.direction === "internal" ? "Note: " : "You: "}{c.subject ? `${c.subject} · ` : ""}<MessageBody body={c.body} /></span>
+                          </>
+                        )}
                       </ConversationRow>
                       );
                     })}
@@ -164,7 +195,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
     queryFn: async () => {
       const [client, rows] = await Promise.all([
         supabase().from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("id", clientId).maybeSingle(),
-        supabase().from("messages").select("id, channel, direction, subject, body, status, created_at, recipients, from_name").eq("client_id", clientId).order("created_at", { ascending: false }).limit(300),
+        supabase().from("messages").select("id, channel, direction, subject, body, status, created_at, recipients, from_name, origin, call").eq("client_id", clientId).order("created_at", { ascending: false }).limit(300),
       ]);
       return { client: unwrap(client), rows: unwrap(rows).reverse() };
     },
@@ -209,19 +240,35 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
           // One message however many people it went to: who they were, and anyone it didn't reach.
           const sent = messagePeople(m);
           const from = messageFrom(m);
+          // A call says how it went and who with in its bubble, with what Quo added under it.
+          const call = m.channel === "call" ? callView(m, (m.direction === "in" ? from : sent.to) ?? client.display_name) : null;
+          const time = <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span>;
           return (
             <Fragment key={m.id}>
               {showDay && <span className="thread-day">{day}</span>}
               <div className="msg" data-mine={mine || undefined} data-note={note || undefined} data-failed={m.status === "failed" || undefined}>
-                <div className="msg-bubble">{m.subject && <span className="msg-subject">{m.subject}</span>}<MessageBody body={m.body} /></div>
-                <span className="msg-meta">
-                  <Icon name={ICON[m.channel] ?? "messages"} size={12} />
-                  {note ? "Internal note" : m.channel === "email" ? "Email" : m.channel === "sms" ? "Text" : "Call"}
-                  {from && <> from {from}</>}
-                  {sent.to && <span title={sent.toFull ?? undefined}> to {sent.to}</span>} · <span title={formatDateTime(m.created_at)}>{new Date(m.created_at).toLocaleTimeString(dateLocale(), { hour: "numeric", minute: "2-digit" })}</span>
-                  {m.status === "failed" && <span className="text-danger strong">· Not delivered</span>}
-                  {sent.missed && <span className="text-danger">· Didn't reach {sent.missed}</span>}
-                </span>
+                {call ? (
+                  <div className="msg-bubble"><span className="msg-subject">{call.title}</span><CallNotes view={call} /></div>
+                ) : (
+                  <div className="msg-bubble">{m.subject && <span className="msg-subject">{m.subject}</span>}<MessageBody body={m.body} /></div>
+                )}
+                {call ? (
+                  <span className="msg-meta">
+                    <Icon name={callIcon(call.outcome)} size={12} />
+                    {t("Call", { context: "noun" })} · {time}
+                    {m.origin === "quo_import" && <span title={t("Brought in from Quo's history")}>· {t("From Quo")}</span>}
+                  </span>
+                ) : (
+                  <span className="msg-meta">
+                    <Icon name={ICON[m.channel] ?? "messages"} size={12} />
+                    {note ? "Internal note" : m.channel === "email" ? "Email" : m.channel === "sms" ? (m.origin === "quo" && mine ? t("Text sent from Quo") : "Text") : "Call"}
+                    {from && <> from {from}</>}
+                    {sent.to && <span title={sent.toFull ?? undefined}> to {sent.to}</span>} · {time}
+                    {m.origin === "quo_import" && <span title={t("Brought in from Quo's history")}>· {t("From Quo")}</span>}
+                    {m.status === "failed" && <span className="text-danger strong">· Not delivered</span>}
+                    {sent.missed && <span className="text-danger">· Didn't reach {sent.missed}</span>}
+                  </span>
+                )}
               </div>
             </Fragment>
           );

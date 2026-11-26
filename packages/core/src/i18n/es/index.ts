@@ -9,11 +9,12 @@ import common from "./common";
 import { ERRORS } from "./errors";
 import field from "./field";
 import { NOTICE_WORDS, NOTICES } from "./notices";
+import office from "./office";
 import server from "./server";
 import team from "./team";
 
 /** By area, so each line is read in the screen it's for. */
-export const parts = { common, field, team, server };
+export const parts = { common, field, team, office, server };
 
 let installed = false;
 

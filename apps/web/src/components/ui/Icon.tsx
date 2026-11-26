@@ -107,6 +107,9 @@ const ICONS = {
   /** Send, on a phone's round send button. */
   arrowUp: "arrow-up",
   phone: "phone",
+  /** A call nobody answered, and one that left a voicemail (calls on a Quo number, on a client's timeline). */
+  phoneMissed: "phone-x",
+  voicemail: "voicemail",
   mail: "envelope-simple",
   logout: "sign-out",
   chevronRight: "caret-right",

@@ -1,4 +1,9 @@
-/** Notes, emails and texts for a client, newest first, with a note composer (Ctrl/⌘+Enter saves). */
+/**
+ * Notes, emails, texts and calls for a client, newest first, with a note composer (Ctrl/⌘+Enter
+ * saves). A call on the business's Quo number says how it went and who with, then what Quo added
+ * (callWords.ts); a text someone sent from the Quo app says so, and what was brought in from Quo's
+ * history is marked quietly.
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Button, useJustDone } from "@/components/ui/Button";
@@ -9,22 +14,45 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { supabase, unwrap } from "@/lib/api";
 import { formatDateTime, timeAgo } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { useListAnimation } from "@/lib/motion";
 import { hasRole, useSession } from "@/lib/session";
 import { undoable } from "@/lib/undo";
+import { CallNotes } from "./CallNotes";
+import { callIcon, callIsLong, callView, foldedCall, type CallView } from "./callWords";
 import styles from "./clients.module.css";
 import { MessageBody } from "./MessageBody";
 import { messageFrom, messagePeople } from "./messagePeople";
 
 const ICON: Record<string, IconName> = { note: "note", email: "mail", sms: "messages", call: "phone" };
 
-function label(m: { channel: string; direction: string; subject: string | null; recipients?: unknown; from_name?: string | null }) {
+const SELECT = "id, channel, direction, subject, body, status, created_at, sent_by, recipients, from_name, origin, call";
+
+function label(m: { channel: string; direction: string; subject: string | null; recipients?: unknown; from_name?: string | null; origin?: string | null }) {
   if (m.channel === "note") return m.direction === "in" ? "From client" : "Note";
   const what = m.channel === "email" ? "Email" : m.channel === "sms" ? "Text" : "Call";
   // A text from a contact's phone says whose; a send says who it went to, when that was recorded.
   if (m.direction === "in") return `${what} from ${messageFrom(m) ?? "client"}`;
   const { to } = messagePeople(m);
+  // Typed in the Quo app rather than sent from Crewtavo.
+  if (m.channel === "sms" && m.origin === "quo") return to ? t("Text sent from Quo to {name}", { name: to }) : t("Text sent from Quo");
   return to ? `${what} sent to ${to}` : `${what} sent`;
+}
+
+/** Who a call was with: the contact whose phone it was, whoever it went to, else the client. */
+const callWith = (m: { direction: string; recipients?: unknown; from_name?: string | null }, clientName: string | undefined) =>
+  (m.direction === "in" ? messageFrom(m) : messagePeople(m).to) ?? clientName ?? null;
+
+/** What Quo added to a call; a long one shows its first lines until Show all. */
+function CallBody({ view }: { view: CallView }) {
+  const [open, setOpen] = useState(false);
+  const long = callIsLong(view);
+  return (
+    <div className={styles.body}>
+      <CallNotes view={long && !open ? foldedCall(view) : view} clamp={long && !open} />
+      {long && <button type="button" className={`link-btn ${styles.showAll} ${styles.tap}`} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>}
+    </div>
+  );
 }
 
 /** A message's words, cut to three quiet lines when it's long (an email with its links), its blank lines closed up until Show all. */
@@ -42,7 +70,7 @@ function EntryBody({ m }: { m: { body: string | null } }) {
 
 const newestFirst = (a: { created_at: string }, b: { created_at: string }) => b.created_at.localeCompare(a.created_at);
 
-export function Timeline({ clientId }: { clientId: string }) {
+export function Timeline({ clientId, clientName }: { clientId: string; /** For a call from or to the client's own phone: "Missed call from Ana". */ clientName?: string }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const [note, setNote] = useState("");
@@ -56,7 +84,7 @@ export function Timeline({ clientId }: { clientId: string }) {
       unwrap(
         await supabase()
           .from("messages")
-          .select("id, channel, direction, subject, body, status, created_at, sent_by, recipients, from_name")
+          .select(SELECT)
           .eq("client_id", clientId)
           .order("created_at", { ascending: false })
           .limit(limit + 1),
@@ -71,7 +99,7 @@ export function Timeline({ clientId }: { clientId: string }) {
         await supabase()
           .from("messages")
           .insert({ company_id: session.company.id, client_id: clientId, channel: "note", direction: "internal", body: note.trim() })
-          .select("id, channel, direction, subject, body, status, created_at, sent_by, recipients, from_name")
+          .select(SELECT)
           .single(),
       ),
     onSuccess: (row) => {
@@ -141,18 +169,21 @@ export function Timeline({ clientId }: { clientId: string }) {
       <div ref={listRef} className="timeline">
         {rows.map((m) => {
           const people = messagePeople(m);
+          // A call with its details says how it went; an older one without them reads as its words.
+          const call = m.channel === "call" ? callView(m, callWith(m, clientName)) : null;
           return (
-            <div key={m.id} className={`timeline-item ${styles.entry}`} data-kind={m.channel}>
-              <span className="t-icon"><Icon name={ICON[m.channel] ?? "note"} size={14} /></span>
+            <div key={m.id} className={`timeline-item ${styles.entry}`} data-kind={m.channel} data-outcome={call?.outcome}>
+              <span className="t-icon"><Icon name={call ? callIcon(call.outcome) : (ICON[m.channel] ?? "note")} size={14} /></span>
               <div className={styles.entryText}>
                 <div>
-                  <span className={styles.who} title={people.toFull ?? undefined}>{label(m)}</span>
+                  <span className={styles.who} title={people.toFull ?? undefined}>{call ? call.title : label(m)}</span>
+                  {m.origin === "quo_import" && <span className={styles.origin} title={t("Brought in from Quo's history")}> · {t("From Quo")}</span>}
                   {m.status === "failed" && <span className={styles.failed}><StatusPill label="Failed" tone="danger" /></span>}
                   {people.missed && <span className={styles.missed}> · Didn't reach {people.missed}</span>}
                 </div>
                 {/* An email's subject on its own line under who it went to (Page-Client.dc.html). */}
                 {m.subject && <div className={styles.subjectLine}>{m.subject}</div>}
-                <EntryBody m={m} />
+                {call ? <CallBody view={call} /> : <EntryBody m={m} />}
               </div>
               <span className={styles.when}>
                 <time dateTime={m.created_at} title={formatDateTime(m.created_at)}>{timeAgo(m.created_at)}</time>

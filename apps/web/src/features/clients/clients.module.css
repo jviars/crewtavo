@@ -195,6 +195,17 @@ a.star:hover { color: var(--ink); text-decoration: none; }
 .showAll { margin-top: 2px; font-size: var(--fs-12); }
 .missed { color: var(--danger); }
 .older { display: flex; justify-content: flex-start; padding-top: 10px; }
+/* A call on the Quo number: its phone tinted like a text's, red when nobody answered (as a phone's call list does). */
+.entry[data-kind="call"] :global(.t-icon) { color: var(--green-dark); }
+.entry[data-outcome="missed"] :global(.t-icon) { color: var(--danger); }
+/* Brought in from Quo's history: said quietly after who it was with. */
+.origin { font-weight: 400; color: var(--quiet); }
+/* What Quo added to a call (CallNotes.tsx): the voicemail, the summary a line each, next steps as a short list.
+   Their colour is where they sit: a timeline row's quiet words, or either side's bubble in Messages. */
+.callNotes { display: grid; gap: 6px; margin-top: 2px; white-space: normal; overflow-wrap: anywhere; }
+.callNotes p { margin: 0; }
+.callNotes ul { margin: 2px 0 0; padding-left: 18px; }
+.callLabel { font-weight: 600; }
 
 /* A phone's small words that act (Show all, the balance, an email, a piece of equipment, Not duplicates):
    a 44px tap area around them, the look unchanged. A section's link has its own (components.css). */
