@@ -5,7 +5,7 @@
  * only when the person asked for that. The server keeps it in the stop list every send checks
  * (POST /clients/:id/texts), with who set it.
  *
- * A number that texted STOP can't be turned back on here: Twilio refuses it until they text START.
+ * A number that texted STOP can't be turned back on here: the texting service (Quo or Twilio) refuses it until they text START.
  */
 import { STOP_HOW_LABELS, STOP_HOWS, textsOffWhy, twilioHasStop, type StopHow, type TextStop } from "@crewtavo/core/marketing";
 import { phoneMatchKey } from "@crewtavo/core/recipients";
@@ -42,7 +42,7 @@ export function useTextStops(phones: ReadonlyArray<string | null | undefined>, e
 
 /** What was asked before turning texts back on by hand. */
 export const TEXTS_BACK_ON_BODY =
-  "Only turn texts back on if they asked you to. Twilio's rules want that in writing, so keep their email or message if you can.";
+  "Only turn texts back on if they asked you to. Texting rules want that in writing, so keep their email or message if you can.";
 
 export function TextsSwitch({ clientId, contactId, name, phone, stop, since, label = "Gets texts" }: {
   clientId: string;

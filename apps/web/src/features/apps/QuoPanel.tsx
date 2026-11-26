@@ -369,7 +369,7 @@ function DeliveriesSection({ quo }: { quo: QuoState }) {
       <Fold summary={t("The address Quo sends to")}>
         <CodeRow value={quo.webhook.url} name={t("Address for Quo's deliveries")} done={t("Address copied")} />
         <p className={kit.note}>
-          <T text="Crewtavo sets this up in Quo for you, as a webhook named Crewtavo under <b>Workspace Settings → Webhooks</b>. Don't add it there yourself: Quo signs what it sends with a key only the webhook Crewtavo made knows." b={bold} />
+          <T text="Crewtavo sets this up in Quo for you, as a webhook named Crewtavo under <b>Settings → Webhooks</b>. Don't add it there yourself: Quo signs what it sends with a key only the webhook Crewtavo made knows." b={bold} />
         </p>
       </Fold>
     </Section>
