@@ -364,7 +364,8 @@ function DeliveriesSection({ quo }: { quo: QuoState }) {
           </div>
         </div>
       )}
-      <FormError error={setUp.error ?? test.error} />
+      {/* A failed setup is kept with Quo's state, and its callout above says it already. */}
+      <FormError error={test.error ?? (state === "problem" ? null : setUp.error)} />
       <Fold summary={t("The address Quo sends to")}>
         <CodeRow value={quo.webhook.url} name={t("Address for Quo's deliveries")} done={t("Address copied")} />
         <p className={kit.note}>

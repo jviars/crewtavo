@@ -57,7 +57,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: "/subs", label: msg("Subcontractors"), icon: "users", roles: ["admin", "office"], perm: "subs", keywords: "subs contractors 1099 w-9 w9 insurance certificates coi liability workers comp audit paperwork vendors" },
     { to: "/equipment", label: msg("Equipment"), icon: "truck", go: "E", keywords: "trucks mowers trailers tools fleet maintenance" },
     { to: "/kb", label: msg("Knowledge base"), icon: "book", go: "K", keywords: "sop procedures training how to guides" },
-    { to: "/apps", label: msg("Apps"), icon: "apps", roles: ["admin"], perm: "apps", foot: true, go: "A", keywords: "integrations connect app store team chat website forms formspree contact form careers job applications hiring drive files documents google drive marketing reviews referrals campaigns google reviews google business profile facebook instagram social posts quickbooks zoho books stripe payments google calendar outlook twilio texts sms claude chatgpt ai assistant sveltia cms website" },
+    { to: "/apps", label: msg("Apps"), icon: "apps", roles: ["admin"], perm: "apps", foot: true, go: "A", keywords: "integrations connect app store team chat website forms formspree contact form careers job applications hiring drive files documents google drive marketing reviews referrals campaigns google reviews google business profile facebook instagram social posts quickbooks zoho books stripe payments google calendar outlook twilio quo openphone texts sms calls claude chatgpt ai assistant sveltia cms website" },
   ],
 ];
 
