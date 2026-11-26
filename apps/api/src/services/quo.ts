@@ -374,8 +374,8 @@ export type CallFiled = "filed" | "updated" | "unknown" | "skipped";
 /**
  * Files a call on the timeline of each client whose number it was, once (messages_call_once):
  * one already filed has what's new added to it. A call in from a number nobody knows waits under
- * Unknown numbers (within the same daily share as texts), unless it was answered and is from
- * history. `notify` tells the office about a missed call or voicemail, as about a text.
+ * Unknown numbers (within the same daily share as texts), unless it's from history. `notify`
+ * tells the office about a missed call or voicemail, as about a text.
  */
 export async function fileCall(admin: Db, companyId: string, call: CallInfo, options: { origin: "quo" | "quo_import"; notify: boolean; resolve?: Resolve }): Promise<CallFiled> {
   if (await addToCall(admin, companyId, call.id, { voicemail: call.voicemail, summary: call.summary })) {
@@ -392,7 +392,8 @@ export async function fileCall(admin: Db, companyId: string, call: CallInfo, opt
   const body = callBody(call.direction, details);
   const parties = await (options.resolve ?? ((phone: string) => partiesFor(admin, companyId, phone)))(call.other);
   if (!parties.length) {
-    if (call.direction !== "in" || (options.origin === "quo_import" && details.outcome === "answered")) return "skipped";
+    // From history, a number nobody knows stays in Quo, as its texts do: months-old missed calls aren't leads to answer today.
+    if (call.direction !== "in" || options.origin === "quo_import") return "skipped";
     return (await keepUnknownCall(admin, companyId, call, details, body, options.notify)) ? "unknown" : "skipped";
   }
   for (const party of parties) {

@@ -432,6 +432,7 @@ describe("Bringing in past texts and calls", () => {
       "GET /calls": () => ({ body: { data: [
         { id: "AChc", direction: "incoming", status: "completed", answeredAt: "2026-10-04T12:00:05.000Z", duration: 125, createdAt: "2026-10-04T12:00:00.000Z", participants: [{ phoneNumber: OWN }, { phoneNumber: ANA }], summary: { status: "completed", summary: ["Asked about trim colours."], nextSteps: [] }, voicemail: null },
         { id: "ACignored", direction: "incoming", status: "answered", answeredAt: "2026-10-04T13:00:00.000Z", duration: 30, createdAt: "2026-10-04T13:00:00.000Z", participants: [{ phoneNumber: OWN }, { phoneNumber: "+15405559999" }] },
+        { id: "AColdlead", direction: "incoming", status: "missed", answeredAt: null, duration: 0, createdAt: "2026-10-03T13:00:00.000Z", participants: [{ phoneNumber: OWN }, { phoneNumber: "+15405559998" }], voicemail: { status: "completed", duration: 9, transcript: "Call me back" } },
       ], nextCursor: null } }),
     });
     const state = await beginQuoImport(data.db, CO, "2026-09-01");
@@ -453,7 +454,7 @@ describe("Bringing in past texts and calls", () => {
     expect(data.tables.unknown_texts ?? []).toHaveLength(0);
     expect(data.tables.conversations_done).toEqual([expect.objectContaining({ client_id: "client-ana" })]);
     const done = (data.tables.integrations![0]!.settings as QuoSettings).import!;
-    expect(done).toMatchObject({ status: "done", since: "2026-09-01", counts: { texts: 3, calls: 1, skipped: 2 } });
+    expect(done).toMatchObject({ status: "done", since: "2026-09-01", counts: { texts: 3, calls: 1, skipped: 3 } });
   });
 
   it("says it failed, and why, when Quo stops answering", async () => {
