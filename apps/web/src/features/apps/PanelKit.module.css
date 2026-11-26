@@ -108,12 +108,13 @@
 .rowProblem { display: flex; align-items: flex-start; gap: 5px; font-size: var(--fs-12); font-weight: 600; line-height: 1.45; color: var(--danger); }
 .rowProblem > svg { flex: none; margin-top: 1px; }
 .rowEnd { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
-/* A row's buttons, and the one beside a status line, are quiet words that fill on hover. */
+/* A row's buttons, and the one beside a status line, are quiet words that fill on hover; a primary one (the step to take) keeps its fill. */
 :is(.rowEnd, .statusLine) :global(.btn) { height: 28px; padding: 0 8px; border-color: transparent; background: none; color: var(--text-2); font-size: var(--fs-12); }
 .rowEnd :global(.btn-icon) { width: 28px; padding: 0; color: var(--text-3); }
 :is(.rowEnd, .statusLine) :global(.btn):not(:global(.btn-primary)):hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
-.rowEnd :global(.btn-primary) { border-color: var(--green-solid); background: var(--green-solid); color: #fff; }
+:is(.rowEnd, .statusLine) :global(.btn-primary) { border-color: var(--green-solid); background: var(--green-solid); color: #fff; }
 .rowEnd :global(.btn-primary):hover { background: var(--green-solid-hover); color: #fff; }
+.statusLine :global(.btn-primary):hover:not(:disabled) { border-color: var(--green-solid-hover); background: var(--green-solid-hover); color: #fff; }
 .rowTime { font-size: var(--fs-12); color: var(--quiet); white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* Turned off: quieter words that still read (4.5:1), and a faded color or icon. */
 .row[data-off] .rowTitle { font-weight: 500; color: var(--text-3); }
