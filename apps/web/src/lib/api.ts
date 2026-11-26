@@ -38,7 +38,7 @@ export interface AppConfig {
 
 /**
  * What's on for one business: the instance's own keys (config), or what the business set up itself.
- * Its own mailbox (Settings → Email) turns email on, its own Twilio account (Apps → Twilio) texting,
+ * Its own mailbox (Settings → Email) turns email on, its own Twilio account or Quo number (Apps) texting,
  * its own Anthropic or OpenAI key (Apps → Claude, Apps → ChatGPT) AI, and its fal.ai key (Apps →
  * fal.ai) Find paving on the measuring map. The person's own ChatGPT plan turns AI on for them
  * alone (`chatgptPlan`: it's answering what they ask, so pages say "Using ChatGPT plan").

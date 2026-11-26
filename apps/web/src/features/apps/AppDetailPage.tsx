@@ -31,6 +31,7 @@ import { StatusPill, type Tone } from "@/components/ui/StatusPill";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { timeAgo } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { useDriveSwitch } from "../drive/useDriveSwitch";
@@ -52,6 +53,8 @@ import { LobPanel } from "./LobPanel";
 import { MarketingPanel } from "./MarketingPanel";
 import { MetaPanel } from "./MetaPanel";
 import { Fold, Step, Steps, kit } from "./PanelKit";
+import { hookState } from "./quo";
+import { QuoPanel } from "./QuoPanel";
 import { SCREENSHOTS, type Screenshot } from "./screenshots";
 import { StripePanel } from "./StripePanel";
 import { TeamChatPanel, useTeamChatSwitch } from "./TeamChatPanel";
@@ -97,6 +100,8 @@ function statusOf(app: AppRow, installed: boolean): { label: string; tone: Tone 
     if (app.meta.problem === "pick" || app.meta.problem === "permissions" || app.meta.needs_business_permissions) return { label: "Needs attention", tone: "warning" };
     if (!app.meta.live_confirmed_at) return { label: "Not Live yet", tone: "warning" };
   }
+  // Quo's texts go out either way, but replies and calls don't come in while its webhook is in trouble.
+  if (installed && app.quo && (hookState(app.quo) === "problem" || hookState(app.quo) === "moved")) return { label: "Needs attention", tone: "warning" };
   if (installed) return app.calendars ? { label: plural(app.calendars, "calendar"), tone: "good" } : { label: "Installed", tone: "good" };
   if (!app.available && !byLinkOnly(app) && !app.takes_app_keys) return { label: "Not available yet", tone: "muted" };
   return { label: "Not installed", tone: "muted" };
@@ -146,9 +151,9 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
   const refresh = () => {
     for (const key of ["apps", "calendars", "google-calendars"]) queryClient.invalidateQueries({ queryKey: [key] });
     // The company's own Anthropic or OpenAI key (or the person's ChatGPT plan) turns on Ask and the other AI buttons, a fal.ai key
-    // Find paving on the measuring map, its Twilio account texting (lib/session.tsx), and the
+    // Find paving on the measuring map, its Twilio account or Quo number texting (lib/session.tsx), and the
     // website's editor puts Website in the menu.
-    if (app.id === "anthropic" || app.id === "chatgpt" || app.id === "fal" || app.id === "twilio" || app.auth === "site") session.refresh();
+    if (app.id === "anthropic" || app.id === "chatgpt" || app.id === "fal" || app.id === "twilio" || app.id === "quo" || app.auth === "site") session.refresh();
   };
   const connect = useMutation({
     mutationFn: () => api.post<{ authorization_url: string }>(`/apps/${app.id}/connect`),
@@ -448,6 +453,8 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
               <AbcSupplyPanel app={app} onChanged={refresh} />
             ) : app.id === "twilio" ? (
               <TwilioPanel app={app} onChanged={refresh} />
+            ) : app.id === "quo" ? (
+              <QuoPanel app={app} onChanged={refresh} />
             ) : app.id === "lob" ? (
               <LobPanel app={app} onChanged={refresh} />
             ) : app.id === "chatgpt" ? (
@@ -476,13 +483,14 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
             {app.auth === "link" && <LinkCalendarsPanel app={app.id} appName={app.name} steps={info.steps} />}
             {(app.id === "anthropic" || app.id === "chatgpt") && <AiServiceChoice ai={ai} onChanged={refresh} />}
             {app.id === "stripe" && app.stripe && <StripePanel app={app} onChanged={refresh} />}
-            {app.auth === "api_key" && app.id !== "abc_supply" && app.id !== "twilio" && app.id !== "lob" && <KeyCard app={app} onSaved={refresh} />}
+            {app.auth === "api_key" && app.id !== "abc_supply" && app.id !== "twilio" && app.id !== "quo" && app.id !== "lob" && <KeyCard app={app} onSaved={refresh} />}
             {app.id === "chatgpt" && app.status !== "disconnected" && <OpenAiModelCard app={app} onChanged={refresh} />}
             {app.id === "chatgpt" && <ChatGptPlanCard where="app" />}
             {app.id === "chatgpt" && <TeamPlansSwitch />}
             {app.id === "lob" && <LobPanel app={app} onChanged={refresh} />}
             {app.id === "abc_supply" && <AbcSupplyPanel app={app} onChanged={refresh} />}
             {app.id === "twilio" && <TwilioPanel app={app} onChanged={refresh} />}
+            {app.id === "quo" && <QuoPanel app={app} onChanged={refresh} />}
             {app.id === "website_analytics" && <AnalyticsPanel />}
             {app.id === "website_forms" && <WebsiteFormsPanel />}
             {app.id === "careers" && <WebsiteFormsPanel kind="careers" />}
@@ -651,6 +659,7 @@ function uninstallBody(app: AppRow, counts: { calendars: number; teamPlans?: boo
     return `${parts.join(" ")} ${again}`;
   }
   if (app.id === "twilio") return `Texts stop going out from your number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. ${again}`;
+  if (app.id === "quo") return quoUninstallWords(Boolean(app.quo?.twilio));
   if (app.auth === "site") return `Website comes out of the menu. Your website, its editor and everything on it stay as they are. ${again}`;
   return `Crewtavo stops using it right away. Nothing already here is deleted. ${again}`;
 }
@@ -883,4 +892,10 @@ export function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) 
       {stripeSteps && note}
     </Section>
   );
+}
+
+/** What uninstalling Quo does: its texts stop (Twilio's take over when it's connected), and Crewtavo's key and webhook leave Quo. */
+export function quoUninstallWords(twilio: boolean): string {
+  const texts = twilio ? t("Texts stop going out from your Quo number, and go out through your Twilio account again.") : t("Texts stop going out from your Quo number.");
+  return `${texts} ${t("Your API key is removed from Crewtavo, and the webhook Crewtavo made in Quo is taken out. Nothing already on clients' timelines is deleted, and nothing else in Quo changes. You can install it again any time.")}`;
 }

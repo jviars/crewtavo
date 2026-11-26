@@ -15,6 +15,7 @@ import { Link } from "react-router-dom";
 import { cx } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { supabase, unwrap } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import { can, hasRole, useSession, type Session } from "@/lib/session";
 import { undoable } from "@/lib/undo";
 import { useAutopayStatus } from "../settings/PaymentSettings";
@@ -121,8 +122,9 @@ export interface SetupStep {
 
 /**
  * Email and texting, before the first quote goes out: connecting the business's own mailbox
- * (Settings → Email) and its own Twilio account (Apps → Twilio). Each is done once this business
- * can send that way, its own or the server's. For the people who can connect them.
+ * (Settings → Email) and its Quo number or own Twilio account (Apps → Messaging, where both are).
+ * Each is done once this business can send that way, its own or the server's. For the people who
+ * can connect them.
  */
 export function sendingSteps(session: Pick<Session, "role" | "permissions" | "config">): SetupStep[] {
   const admin = hasRole(session, "admin");
@@ -133,7 +135,7 @@ export function sendingSteps(session: Pick<Session, "role" | "permissions" | "co
     },
     {
       key: "texting", show: admin && can(session, "apps"), done: session.config.features.sms,
-      title: "Turn on texting", detail: "Reminders and on-my-way texts from your own number, with your Twilio account.", to: "/apps/twilio", minutes: 5, action: "Connect Twilio",
+      title: "Turn on texting", detail: t("Reminders and on-my-way texts from your own number, with Quo or your Twilio account."), to: "/apps?cat=Messaging", minutes: 5, action: t("Connect Quo or Twilio"),
     },
   ];
 }

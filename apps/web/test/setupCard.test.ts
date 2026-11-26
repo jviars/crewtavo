@@ -41,7 +41,7 @@ describe("email and texting on the setup checklist", () => {
   const steps = (...args: Parameters<typeof session>) => sendingSteps(session(...args)).map((s) => [s.key, s.show, s.done, s.to]);
 
   it("asks a new owner to connect email and turn on texting, and says where", () => {
-    expect(steps("owner", [], { email: false, sms: false })).toEqual([["email", true, false, "/settings?tab=email"], ["texting", true, false, "/apps/twilio"]]);
+    expect(steps("owner", [], { email: false, sms: false })).toEqual([["email", true, false, "/settings?tab=email"], ["texting", true, false, "/apps?cat=Messaging"]]);
   });
 
   it("ticks each off once the business can send that way, its own account or the server's", () => {

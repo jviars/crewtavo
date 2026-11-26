@@ -4,18 +4,20 @@
  * three are checked with Twilio before they're kept (the token encrypted, never shown again). Once
  * connected: the number texts go from, the address Twilio needs for incoming texts, and a button
  * that sets it on the number. A Crewtavo whose server was given a Twilio account works without any
- * of this, and says so.
+ * of this, and says so. With Quo connected too, texts go through Quo instead, which this says first.
  */
 import { TEXT_CONSENT_HINT } from "@crewtavo/core/marketing";
 import { phoneExample } from "@crewtavo/core/phone";
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Field, FormChecks, FormError } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Fact, Facts, Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
 import { companyCountry } from "@/lib/format";
+import { T, t } from "@/lib/i18n";
 import { formatPhoneTyping } from "@/lib/validate";
 import type { AppRow, TwilioState } from "./catalog";
 import { CodeRow, Fold, Step, Steps, kit } from "./PanelKit";
@@ -26,9 +28,11 @@ const TWILIO_NUMBERS = "https://console.twilio.com/us1/develop/phone-numbers/man
 export function TwilioPanel({ app, onChanged }: { app: AppRow; onChanged: () => void }) {
   const state = app.twilio ?? null;
   const [changing, setChanging] = useState(false);
-  if (state?.own && app.status !== "disconnected" && !changing) return <Connected app={app} state={state} onChanged={onChanged} onChange={() => setChanging(true)} />;
+  const quo = state?.quo ? <QuoTakesOver /> : null;
+  if (state?.own && app.status !== "disconnected" && !changing) return <>{quo}<Connected app={app} state={state} onChanged={onChanged} onChange={() => setChanging(true)} /></>;
   return (
     <>
+      {quo}
       {state?.server && (
         <section className="callout callout-good" aria-label="Texting">
           <Icon name="check" size={16} />
@@ -49,6 +53,19 @@ export function TwilioPanel({ app, onChanged }: { app: AppRow; onChanged: () => 
         onCancel={changing ? () => setChanging(false) : undefined}
       />
     </>
+  );
+}
+
+/** Quo is connected too: every text goes from its number while it is, and Twilio's take over again once it's disconnected. */
+function QuoTakesOver() {
+  return (
+    <section className="callout callout-info" aria-label={t("Texting")}>
+      <Icon name="info" size={16} />
+      <div className="grow">
+        <div>{t("Your texts go through Quo now")}</div>
+        <T text="While Quo is connected (<link>Apps → Quo</link>), texts go out from your Quo number. If you disconnect Quo, Twilio takes over again." link={(s: ReactNode) => <Link to="/apps/quo">{s}</Link>} />
+      </div>
+    </section>
   );
 }
 

@@ -53,6 +53,8 @@ export interface AppRow {
   meta?: MetaState;
   /** Twilio: whose account texts go from, and where the number's incoming texts go (routes/apps.ts). */
   twilio?: TwilioState | null;
+  /** Quo: the number texts go from, its webhook, the switches and the last import (routes/quo.ts). */
+  quo?: QuoState | null;
   /** Lob, once connected: whether its key is a test key (nothing mailed) or a live one. */
   lob?: { mode: "test" | "live" | null } | null;
   /** ChatGPT, once the company's OpenAI key is saved: the model it uses and the ones to pick from. */
@@ -93,7 +95,53 @@ export interface TwilioState {
   other_webhook: string | null;
   /** This Crewtavo has a public https address, which Twilio needs to reach it. */
   reachable: boolean;
+  /** Quo is connected too, and texts go through it instead (Apps → Quo); Twilio takes over again if Quo is disconnected. */
+  quo?: boolean;
 }
+
+/** Bringing in a Quo number's past texts and calls (apps/api/src/lib/quo.ts QuoImportState). */
+export interface QuoImport {
+  status: "running" | "done" | "failed";
+  /** From this day (YYYY-MM-DD), or everything Quo has. */
+  since: string | null;
+  started_at: string;
+  finished_at?: string;
+  updated_at?: string;
+  error?: string;
+  /** skipped: texts and calls with numbers that aren't a client's or a contact's, left in Quo. */
+  counts: { texts: number; calls: number; skipped: number };
+  /** It was running, and stopped hearing from itself: its server restarted. Starting it again carries on. */
+  stopped?: boolean;
+}
+
+/** Quo on its app page (apps/api/src/routes/quo.ts QuoState). */
+export interface QuoState {
+  /** The number texts go from: Quo's id for it, the number in E.164 and its name in Quo. */
+  number: { id: string; number: string; name: string } | null;
+  webhook: {
+    /** Crewtavo made it in Quo, for this address. */
+    set: boolean;
+    /** It was made for another address (this Crewtavo moved): bringing it up to date fixes it. */
+    moved: boolean;
+    url: string;
+    /** Why it couldn't be set up, in words. */
+    problem: string | null;
+  };
+  /** Quo can reach this Crewtavo (a public https address). */
+  reachable: boolean;
+  /** When Quo's last delivery got through (noted every few minutes at most). */
+  heard_at: string | null;
+  /** The number's calls go on clients' timelines. */
+  calls: boolean;
+  /** Texts Crewtavo sends by itself go to Quo's Done view, not its inbox. */
+  quiet: boolean;
+  import: QuoImport | null;
+  /** The business has its own Twilio account connected too, which Quo takes texts over from. */
+  twilio: boolean;
+}
+
+/** A Quo import that's still going: running, and not one whose server stopped. */
+export const quoImportRunning = (state: QuoImport | null | undefined) => state?.status === "running" && !state.stopped;
 
 export interface MetaState {
   page: { id: string; name: string | null; picture: string | null } | null;
@@ -196,12 +244,14 @@ export interface AppsData {
 }
 
 /**
- * How often Apps is read again: every 3 seconds while a Stripe import runs, every 5 while Google
- * reviews are coming in for the first time (the app page's "Bringing in your reviews: 50 of 145",
- * as the Reviews tab does), and not otherwise.
+ * How often Apps is read again: every 3 seconds while a Stripe import runs, every 4 while a Quo
+ * number's past texts and calls come in, every 5 while Google reviews are coming in for the first
+ * time (the app page's "Bringing in your reviews: 50 of 145", as the Reviews tab does), and not
+ * otherwise.
  */
-export function appsPollMs(apps: ReadonlyArray<Pick<AppRow, "stripe" | "google_business">> | undefined): number | false {
+export function appsPollMs(apps: ReadonlyArray<Pick<AppRow, "stripe" | "google_business" | "quo">> | undefined): number | false {
   if (apps?.some((a) => importRunning(a.stripe?.import))) return 3000;
+  if (apps?.some((a) => quoImportRunning(a.quo?.import))) return 4000;
   if (apps?.some((a) => a.google_business?.progress)) return 5000;
   return false;
 }
@@ -221,7 +271,7 @@ export function useApps() {
     queryKey: ["apps", session.company.id],
     enabled: allowed,
     queryFn: () => api.get<AppsData>("/apps"),
-    // Follow a Stripe import while it runs, and a first sync of Google reviews while they come in.
+    // Follow a Stripe or Quo import while it runs, and a first sync of Google reviews while they come in.
     refetchInterval: (q) => appsPollMs(q.state.data?.apps),
   });
   return { allowed, ...query };
@@ -791,6 +841,25 @@ export const APP_INFO: Record<string, AppInfo> = {
     access: ["Send texts from your number", "Receive replies, and stop texting anyone who texts STOP", "Set where your number sends incoming texts, only when you ask"],
     connectsWith: "Your Twilio account",
     website: "https://www.twilio.com/",
+    open: "/messages",
+  },
+  quo: {
+    developer: "Quo",
+    tagline: "Texts and calls from your Quo (OpenPhone) number",
+    about:
+      "Quo, once called OpenPhone, is a phone system for small businesses. Connect your Quo workspace with an API key and pick one of its numbers: visit reminders, on-my-way texts and the texts you send from Messages then go out from that number, and show in your Quo inbox. Replies come into Messages, texts your team sends from the Quo app land on the client's timeline, and so do the number's calls, answered, missed or a voicemail, with Quo's summary, next steps and the voicemail's words. Missed calls and voicemails from numbers that aren't clients wait under Unknown numbers in Messages, like texts do. Past texts and calls can be brought in too. Quo charges for texts sent through its API from your workspace's prepaid credits (about $0.01 a segment, per Quo's pricing page), and call summaries need a Quo plan that has them (Business or Scale). If you also have Twilio connected, Quo takes over your texts while it's connected.",
+    highlights: [
+      { icon: "messages", title: "Your Quo number", text: "Reminders and replies go out from the number your clients already know, and show in Quo too." },
+      { icon: "phone", title: "Calls on the timeline", text: "Missed calls, voicemails and Quo's call summaries, on the client they were with." },
+      { icon: "download", title: "Your history too", text: "Bring in past texts and calls. Running it again never adds one twice." },
+    ],
+    access: [
+      "Send texts from your Quo number",
+      "Receive replies, texts sent from the Quo app and the number's calls, with Quo's summaries",
+      "Set up a webhook in your Quo workspace",
+    ],
+    connectsWith: "Your Quo workspace",
+    website: "https://www.quo.com/",
     open: "/messages",
   },
   sveltia: {
