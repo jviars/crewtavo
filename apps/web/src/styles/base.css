@@ -356,7 +356,7 @@ select.business-name:hover { background: var(--fill-2); }
   /* The same for a conversation open in Messages: its thread head has the back button. */
   .main:has(> .content .messages-page[data-open]) > .topbar { display: none; }
   .business { gap: 10px; }
-  .business-tile { width: 30px; height: 30px; border-radius: 8px; font-size: var(--fs-11); }
+  .business-tile { font-size: var(--fs-11); } /* not a fixed width: that squeezed a wide logo onto the name */
   .business-logo img { height: 22px; }
   .business-name, select.business-name { font-size: var(--fs-16); font-weight: 700; letter-spacing: -0.01em; }
   .search { display: none; }
