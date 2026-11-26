@@ -658,7 +658,7 @@ function uninstallBody(app: AppRow, counts: { calendars: number; teamPlans?: boo
     if (AI_CHAT_APPS.has(app.id)) parts.push(`Assistants connected in Settings → AI assistants keep working.`);
     return `${parts.join(" ")} ${again}`;
   }
-  if (app.id === "twilio") return `Texts stop going out from your number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. ${again}`;
+  if (app.id === "twilio") return twilioUninstallWords(Boolean(app.twilio?.quo));
   if (app.id === "quo") return quoUninstallWords(Boolean(app.quo?.twilio));
   if (app.auth === "site") return `Website comes out of the menu. Your website, its editor and everything on it stay as they are. ${again}`;
   return `Crewtavo stops using it right away. Nothing already here is deleted. ${again}`;
@@ -892,6 +892,13 @@ export function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) 
       {stripeSteps && note}
     </Section>
   );
+}
+
+/** What uninstalling Twilio does: its texts stop, unless Quo is connected and sends them already; either way its keys leave Crewtavo. */
+export function twilioUninstallWords(quo: boolean): string {
+  return quo
+    ? t("Texts keep going out from your Quo number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. You can install it again any time.")
+    : t("Texts stop going out from your number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. You can install it again any time.");
 }
 
 /** What uninstalling Quo does: its texts stop (Twilio's take over when it's connected), and Crewtavo's key and webhook leave Quo. */

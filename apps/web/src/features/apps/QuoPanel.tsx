@@ -22,7 +22,21 @@ import { T, t } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { quoImportRunning, type AppRow, type AppsData, type QuoState } from "./catalog";
 import { CodeRow, Fold, Step, Steps, SwitchLine, dotted, kit } from "./PanelKit";
-import { canTest, hookState, importProgress, importResult, importSince, type ImportRange, type QuoNumber } from "./quo";
+import {
+  canTest,
+  changeHeldBack,
+  deliveriesError,
+  hookState,
+  importProgress,
+  importResult,
+  importSince,
+  nameIsNumber,
+  numberLabel,
+  testArrived,
+  withQuo,
+  type ImportRange,
+  type QuoNumber,
+} from "./quo";
 
 /** How long a test waits for Quo's sample to arrive, and how often it looks. */
 const TEST_WAIT_MS = 30_000;
@@ -30,18 +44,14 @@ const TEST_EVERY_MS = 3000;
 
 const bold = (s: ReactNode) => <strong>{s}</strong>;
 
-/** The number in words: its name in Quo, then the number when the name isn't the number itself. */
-export const numberLabel = (n: Pick<QuoNumber, "name" | "number">) => {
-  const shown = phoneDisplay(n.number);
-  return n.name && n.name !== shown ? `${n.name} · ${shown}` : shown;
-};
-
-/** Puts what the server says about Quo straight on the Apps list, so a switch or a fix shows without waiting for it to be read again. */
+/**
+ * Puts what the server says about Quo straight on the Apps list, so a switch, a fix, a new number
+ * or a new key shows without waiting for it to be read again. `saved`: a key or number was saved.
+ */
 function useKeepQuo() {
   const session = useSession();
   const queryClient = useQueryClient();
-  return (quo: QuoState) =>
-    queryClient.setQueryData<AppsData>(["apps", session.company.id], (data) => (data ? { ...data, apps: data.apps.map((a) => (a.id === "quo" ? { ...a, quo } : a)) } : data));
+  return (quo: QuoState, saved = false) => queryClient.setQueryData<AppsData>(["apps", session.company.id], (data) => withQuo(data, quo, saved));
 }
 
 export function QuoPanel({ app, onChanged }: { app: AppRow; onChanged: () => void }) {
@@ -69,7 +79,7 @@ function NumberChoices({ numbers, value, current, onChange }: { numbers: QuoNumb
       {numbers.map((n) => {
         // A number with no name of its own in Quo is named by the number: said once.
         const shown = phoneDisplay(n.number);
-        const named = Boolean(n.name) && n.name !== shown;
+        const named = Boolean(n.name?.trim()) && !nameIsNumber(n.name.trim(), n.number);
         const sub = dotted(named && shown, current === n.id && t("Texts go from it now"));
         return (
           <label key={n.id} className={kit.choice}>
@@ -87,6 +97,7 @@ function NumberChoices({ numbers, value, current, onChange }: { numbers: QuoNumb
 
 /** Connecting, or using another key: the key made in Quo, checked by listing its numbers, then the one to text from. */
 function ConnectForm({ twilio, changing, onSaved, onCancel }: { twilio: boolean; changing: boolean; onSaved: () => void; onCancel?: () => void }) {
+  const keepQuo = useKeepQuo();
   const [key, setKey] = useState("");
   const [show, setShow] = useState(false);
   const [numbers, setNumbers] = useState<QuoNumber[] | null>(null);
@@ -103,7 +114,9 @@ function ConnectForm({ twilio, changing, onSaved, onCancel }: { twilio: boolean;
   const connect = useMutation({
     meta: { inline: true, success: (res: { quo: QuoState }) => (res.quo.webhook.problem && res.quo.reachable ? t("Quo connected. Replies and calls need one more thing: see below.") : t("Quo connected")) },
     mutationFn: () => api.put<{ quo: QuoState }>("/apps/quo/account", { api_key: key.trim(), phone_number_id: picked }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // Connected at once: the form doesn't come back while the Apps list is read again.
+      keepQuo(res.quo, true);
       setKey("");
       setNumbers(null);
       onSaved();
@@ -183,6 +196,9 @@ function Connected({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo: Quo
 
 /** The number texts go from, with Change number (the kept key's numbers) and Use a different API key. */
 function NumberSection({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo: QuoState; onChanged: () => void; onChangeKey: () => void }) {
+  const keepQuo = useKeepQuo();
+  // Past texts and calls coming in: they go on with this number and key until they're in.
+  const held = changeHeldBack(quo);
   const [numbers, setNumbers] = useState<QuoNumber[] | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const list = useMutation({
@@ -196,7 +212,9 @@ function NumberSection({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo:
   const save = useMutation({
     meta: { inline: true, success: t("Texts go out from that number now") },
     mutationFn: () => api.put<{ quo: QuoState }>("/apps/quo/account", { phone_number_id: picked }),
-    onSuccess: () => {
+    onSuccess: (res) => {
+      // The new number at once, not the old one until the Apps list is read again.
+      keepQuo(res.quo, true);
       setNumbers(null);
       onChanged();
     },
@@ -211,7 +229,7 @@ function NumberSection({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo:
     <Section
       className={kit.panel}
       title={t("Quo number")}
-      action={!numbers && <button type="button" onClick={() => list.mutate()} disabled={list.isPending}><Icon name="edit" size={14} />{t("Change number")}</button>}
+      action={!numbers && <button type="button" onClick={() => list.mutate()} disabled={list.isPending || Boolean(held)} title={held ?? undefined}><Icon name="edit" size={14} />{t("Change number")}</button>}
     >
       {app.status === "error" && (
         <div className="callout callout-danger" role="alert">
@@ -219,18 +237,19 @@ function NumberSection({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo:
           <div className={`grow ${kit.calloutBody}`}>
             <div>{t("Quo isn't accepting this API key anymore")}</div>
             {app.last_error && <span>{app.last_error}</span>}
-            <div className={kit.actions}><Button size="sm" onClick={onChangeKey}>{t("Use a different API key")}</Button></div>
+            <div className={kit.actions}><Button size="sm" onClick={onChangeKey} disabled={Boolean(held)} title={held ?? undefined}>{t("Use a different API key")}</Button></div>
           </div>
         </div>
       )}
       {numbers ? (
-        <form className={kit.form} onSubmit={(e: FormEvent) => { e.preventDefault(); if (picked && picked !== number.id) save.mutate(); }}>
+        <form className={kit.form} onSubmit={(e: FormEvent) => { e.preventDefault(); if (picked && picked !== number.id && !held) save.mutate(); }}>
           <p className={kit.label}>{t("Pick the number to text from")}</p>
           <NumberChoices numbers={numbers} value={picked} current={number.id} onChange={(id) => { setPicked(id); save.reset(); }} />
           <p className={kit.note}>{t("Replies and calls come from the new number from then on. What's already on clients' timelines stays.")}</p>
+          {held && <p className={kit.note}>{held}</p>}
           <FormError error={save.error} />
           <div className={kit.actions}>
-            <Button type="submit" variant="primary" loading={save.isPending} disabled={!picked || picked === number.id}>{t("Use this number")}</Button>
+            <Button type="submit" variant="primary" loading={save.isPending} disabled={!picked || picked === number.id || Boolean(held)}>{t("Use this number")}</Button>
             <Button variant="ghost" onClick={stop}>{t("Cancel")}</Button>
           </div>
         </form>
@@ -242,7 +261,8 @@ function NumberSection({ app, quo, onChanged, onChangeKey }: { app: AppRow; quo:
           <p className={kit.note}>{t("Reminders, on-my-way texts and the texts you send from Messages go out from this number, and show in your Quo inbox.")}</p>
           <FormError error={list.error} />
           <div className={kit.actions}>
-            <Button size="sm" variant="ghost" onClick={onChangeKey}>{t("Use a different API key")}</Button>
+            <Button size="sm" variant="ghost" onClick={onChangeKey} disabled={Boolean(held)} title={held ?? undefined}>{t("Use a different API key")}</Button>
+            {held && <span className={kit.note}>{held}</span>}
           </div>
         </>
       )}
@@ -260,25 +280,36 @@ function DeliveriesSection({ quo }: { quo: QuoState }) {
   const queryClient = useQueryClient();
   const keepQuo = useKeepQuo();
   const state = hookState(quo);
-  const setUp = useMutation({
-    meta: { inline: true, success: t("Quo sends replies and calls here now") },
-    mutationFn: () => api.post<{ quo: QuoState }>("/apps/quo/webhook"),
-    onSuccess: (res) => keepQuo(res.quo),
-    // A problem is kept on the integration too: read it back to show it.
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["apps", session.company.id] }),
-  });
-  // A test asked for: what heard_at was then, and until when to look.
+  // A test asked for: what heard_at was when it was clicked, and until when to look.
   const [testing, setTesting] = useState<{ before: string | null; until: number } | null>(null);
   const [tested, setTested] = useState<"arrived" | "missing" | null>(null);
   const test = useMutation({
     meta: { inline: true },
-    mutationFn: () => api.post<{ sent: boolean; asked_at: string }>("/apps/quo/test"),
+    // `before`: heard_at at the click, as a delivery can come in while the request is on its way.
+    mutationFn: (_before: string | null) => api.post<{ sent: boolean; asked_at: string }>("/apps/quo/test"),
     onMutate: () => setTested(null),
-    onSuccess: () => setTesting({ before: quo.heard_at, until: Date.now() + TEST_WAIT_MS }),
+    onSuccess: (_res, before) => setTesting({ before, until: Date.now() + TEST_WAIT_MS }),
+  });
+  // Setting it up again starts over: a test's result, or its error, was about the webhook before.
+  const forgetTest = () => {
+    setTesting(null);
+    setTested(null);
+    test.reset();
+  };
+  const setUp = useMutation({
+    meta: { inline: true, success: t("Quo sends replies and calls here now") },
+    mutationFn: () => api.post<{ quo: QuoState }>("/apps/quo/webhook"),
+    onMutate: forgetTest,
+    onSuccess: (res) => {
+      forgetTest();
+      keepQuo(res.quo);
+    },
+    // A problem is kept on the integration too: read it back to show it.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["apps", session.company.id] }),
   });
   useEffect(() => {
     if (!testing) return;
-    if (quo.heard_at && quo.heard_at !== testing.before) {
+    if (testArrived(testing.before, quo.heard_at)) {
       setTesting(null);
       setTested("arrived");
       return;
@@ -289,12 +320,13 @@ function DeliveriesSection({ quo }: { quo: QuoState }) {
         setTested("missing");
         return;
       }
-      void queryClient.invalidateQueries({ queryKey: ["apps", session.company.id] });
+      // A read still on its way is left to finish: a slow one isn't cut off by the next look.
+      void queryClient.invalidateQueries({ queryKey: ["apps", session.company.id] }, { cancelRefetch: false });
     }, TEST_EVERY_MS);
     return () => clearInterval(look);
   }, [testing, quo.heard_at, queryClient, session.company.id]);
   const testButton = canTest(quo) && (
-    <Button size="sm" loading={test.isPending || Boolean(testing)} onClick={() => test.mutate()}>{testing ? t("Waiting for Quo…") : t("Send a test")}</Button>
+    <Button size="sm" loading={test.isPending || Boolean(testing)} disabled={setUp.isPending} onClick={() => test.mutate(quo.heard_at)}>{testing ? t("Waiting for Quo…") : t("Send a test")}</Button>
   );
 
   return (
@@ -364,8 +396,8 @@ function DeliveriesSection({ quo }: { quo: QuoState }) {
           </div>
         </div>
       )}
-      {/* A failed setup is kept with Quo's state, and its callout above says it already. */}
-      <FormError error={test.error ?? (state === "problem" ? null : setUp.error)} />
+      {/* The latest error; a failed setup's problem is kept with Quo's state, and when the callout above says it, it isn't said twice. */}
+      <FormError error={deliveriesError(test, setUp, state === "problem" ? quo.webhook.problem : null)} />
       <Fold summary={t("The address Quo sends to")}>
         <CodeRow value={quo.webhook.url} name={t("Address for Quo's deliveries")} done={t("Address copied")} />
         <p className={kit.note}>
@@ -394,14 +426,14 @@ function SwitchesSection({ quo }: { quo: QuoState }) {
         checked={calls}
         disabled={save.isPending}
         onChange={(on) => save.mutate({ calls: on })}
-        hint={<T text="Answered and missed calls and voicemails on your Quo number, with Quo's summary, next steps and the voicemail's words when your Quo plan has them. Missed calls and voicemails from numbers that aren't clients wait under <link>Unknown numbers</link> in Messages." link={(s) => <Link to="/messages" style={{ textDecoration: "underline" }}>{s}</Link>} />}
+        hint={<T text="Answered and missed calls and voicemails on your Quo number, with Quo's summary, next steps and the voicemail's words when your Quo plan has them. Calls from numbers that aren't clients wait under <link>Unknown numbers</link> in Messages." link={(s) => <Link to="/messages" style={{ textDecoration: "underline" }}>{s}</Link>} />}
       />
       <SwitchLine
         label={t("Keep automatic texts out of your Quo inbox")}
         checked={quiet}
         disabled={save.isPending}
         onChange={(on) => save.mutate({ quiet: on })}
-        hint={t("Reminders, on-my-way texts and other texts Crewtavo sends by itself go to Quo's Done view. A reply reopens the conversation.")}
+        hint={t("Reminders, on-my-way texts and other texts Crewtavo sends by itself go to Quo's Done view, unless the person texted you in the last 3 days, so a question waiting for an answer stays in your inbox. A reply reopens the conversation.")}
       />
       <FormError error={save.error} />
     </Section>

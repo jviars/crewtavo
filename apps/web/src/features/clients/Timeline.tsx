@@ -50,7 +50,7 @@ function CallBody({ view }: { view: CallView }) {
   return (
     <div className={styles.body}>
       <CallNotes view={long && !open ? foldedCall(view) : view} clamp={long && !open} />
-      {long && <button type="button" className={`link-btn ${styles.showAll} ${styles.tap}`} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show all"}</button>}
+      {long && <button type="button" className={`link-btn ${styles.showAll} ${styles.tap}`} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? t("Show less") : t("Show all", { context: "details" })}</button>}
     </div>
   );
 }

@@ -34,7 +34,7 @@ export function TwilioPanel({ app, onChanged }: { app: AppRow; onChanged: () => 
     <>
       {quo}
       {state?.server && (
-        <section className="callout callout-good" aria-label="Texting">
+        <section className="callout callout-good" aria-label="Texting through this server">
           <Icon name="check" size={16} />
           <div className="grow">
             <div>Texts go out from the Twilio number set up for this server</div>
@@ -59,7 +59,7 @@ export function TwilioPanel({ app, onChanged }: { app: AppRow; onChanged: () => 
 /** Quo is connected too: every text goes from its number while it is, and Twilio's take over again once it's disconnected. */
 function QuoTakesOver() {
   return (
-    <section className="callout callout-info" aria-label={t("Texting")}>
+    <section className="callout callout-info" aria-label={t("Texting through Quo")}>
       <Icon name="info" size={16} />
       <div className="grow">
         <div>{t("Your texts go through Quo now")}</div>

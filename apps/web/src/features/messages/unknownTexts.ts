@@ -1,7 +1,7 @@
 /**
  * Texts from unknown numbers (public.unknown_texts), as Messages lists them: one row for each number.
- * A missed call or voicemail on a business's Quo number from a number nobody knows waits there too
- * (channel "call", its details in `call`), as a new customer's first call often does.
+ * A call on a business's Quo number from a number nobody knows, answered, missed or a voicemail,
+ * waits there too (channel "call", its details in `call`), as a new customer's first call often does.
  */
 import { phoneDisplay, phoneE164 } from "@crewtavo/core/phone";
 import { t } from "@/lib/i18n";

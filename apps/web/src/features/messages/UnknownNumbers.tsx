@@ -1,9 +1,9 @@
 /**
  * Texts from numbers that aren't a client's or a contact's (public.unknown_texts): listed in
- * Messages under "Unknown numbers", so none is lost. Missed calls and voicemails on a business's
- * Quo number from such a number wait there with them. Opening one shows its texts and calls and
- * offers to attach the number to a client, as their phone or as a new contact, which moves the
- * conversation onto that client's timeline (public.attach_unknown_texts); or to delete it.
+ * Messages under "Unknown numbers", so none is lost. Calls on a business's Quo number from such a
+ * number, answered, missed or a voicemail, wait there with them. Opening one shows its texts and
+ * calls and offers to attach the number to a client, as their phone or as a new contact, which
+ * moves the conversation onto that client's timeline (public.attach_unknown_texts); or to delete it.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type FormEvent } from "react";

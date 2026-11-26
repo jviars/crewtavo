@@ -23,6 +23,8 @@ export default {
   "Call to {name}": "Llamada a {name}",
   "Call with {name}": "Llamada con {name}",
   "noun::Call": "Llamada",
+  "details::Show all": "Mostrar todo",
+  "Show less": "Mostrar menos",
 
   // Messages (features/messages)
   "Calls": "Llamadas",
@@ -44,6 +46,10 @@ export default {
   "Texts stop going out from your Quo number, and go out through your Twilio account again.": "Los mensajes dejan de salir de tu número de Quo y vuelven a salir por tu cuenta de Twilio.",
   "Texts stop going out from your Quo number.": "Los mensajes dejan de salir de tu número de Quo.",
   "Your API key is removed from Crewtavo, and the webhook Crewtavo made in Quo is taken out. Nothing already on clients' timelines is deleted, and nothing else in Quo changes. You can install it again any time.": "Tu clave de API se quita de Crewtavo, y el webhook que Crewtavo creó en Quo se elimina. No se borra nada de lo que ya está en el historial de los clientes, y nada más cambia en Quo. Puedes instalarla de nuevo cuando quieras.",
+
+  // Uninstalling Twilio (features/apps/AppDetailPage.tsx)
+  "Texts keep going out from your Quo number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. You can install it again any time.": "Los mensajes siguen saliendo de tu número de Quo, y las claves de tu cuenta de Twilio se quitan de Crewtavo. No se borra nada de lo que ya se envió, y tu cuenta de Twilio no cambia. Puedes instalarla de nuevo cuando quieras.",
+  "Texts stop going out from your number, and your Twilio account's keys are removed from Crewtavo. Nothing already sent is deleted, and your Twilio account isn't changed. You can install it again any time.": "Los mensajes dejan de salir de tu número, y las claves de tu cuenta de Twilio se quitan de Crewtavo. No se borra nada de lo que ya se envió, y tu cuenta de Twilio no cambia. Puedes instalarla de nuevo cuando quieras.",
 
   // Quo's app page (features/apps/QuoPanel.tsx)
   "Your Quo numbers": "Tus números de Quo",
@@ -72,6 +78,7 @@ export default {
   "Pick the number to text from": "Elige el número desde el que se envían los mensajes",
   "Replies and calls come from the new number from then on. What's already on clients' timelines stays.": "Desde entonces, las respuestas y las llamadas llegan del número nuevo. Lo que ya está en el historial de los clientes se queda.",
   "Use this number": "Usar este número",
+  "Change the number or the API key once the past texts and calls are in.": "Cambia el número o la clave de API cuando hayan llegado los mensajes y las llamadas anteriores.",
   "Texts go from": "Los mensajes salen de",
   "Reminders, on-my-way texts and the texts you send from Messages go out from this number, and show in your Quo inbox.": "Los recordatorios, los avisos de en camino y los mensajes que envías desde Mensajes salen de este número y aparecen en tu bandeja de Quo.",
   "Quo sends replies and calls here now": "Quo ya manda aquí las respuestas y las llamadas",
@@ -96,9 +103,9 @@ export default {
   "Crewtavo sets this up in Quo for you, as a webhook named Crewtavo under <b>Settings → Webhooks</b>. Don't add it there yourself: Quo signs what it sends with a key only the webhook Crewtavo made knows.": "Crewtavo lo configura en Quo por ti, como un webhook llamado Crewtavo en <b>Settings → Webhooks</b>. No lo agregues tú ahí: Quo firma lo que manda con una clave que solo conoce el webhook que creó Crewtavo.",
   "Calls and your Quo inbox": "Llamadas y tu bandeja de Quo",
   "Put calls on client timelines": "Poner las llamadas en el historial de los clientes",
-  "Answered and missed calls and voicemails on your Quo number, with Quo's summary, next steps and the voicemail's words when your Quo plan has them. Missed calls and voicemails from numbers that aren't clients wait under <link>Unknown numbers</link> in Messages.": "Las llamadas contestadas y perdidas y los mensajes de voz de tu número de Quo, con el resumen de Quo, los próximos pasos y las palabras del mensaje de voz cuando tu plan de Quo los incluye. Las llamadas perdidas y los mensajes de voz de números que no son de clientes esperan en <link>Números desconocidos</link> en Mensajes.",
+  "Answered and missed calls and voicemails on your Quo number, with Quo's summary, next steps and the voicemail's words when your Quo plan has them. Calls from numbers that aren't clients wait under <link>Unknown numbers</link> in Messages.": "Las llamadas contestadas y perdidas y los mensajes de voz de tu número de Quo, con el resumen de Quo, los próximos pasos y las palabras del mensaje de voz cuando tu plan de Quo los incluye. Las llamadas de números que no son de clientes esperan en <link>Números desconocidos</link> en Mensajes.",
   "Keep automatic texts out of your Quo inbox": "Mantener los mensajes automáticos fuera de tu bandeja de Quo",
-  "Reminders, on-my-way texts and other texts Crewtavo sends by itself go to Quo's Done view. A reply reopens the conversation.": "Los recordatorios, los avisos de en camino y otros mensajes que Crewtavo envía solo van a la vista Done de Quo. Una respuesta vuelve a abrir la conversación.",
+  "Reminders, on-my-way texts and other texts Crewtavo sends by itself go to Quo's Done view, unless the person texted you in the last 3 days, so a question waiting for an answer stays in your inbox. A reply reopens the conversation.": "Los recordatorios, los avisos de en camino y otros mensajes que Crewtavo envía solo van a la vista Done de Quo, salvo que la persona te haya escrito en los últimos 3 días, para que una pregunta que espera respuesta se quede en tu bandeja. Una respuesta vuelve a abrir la conversación.",
   "Bring in past texts and calls": "Traer mensajes y llamadas anteriores",
   "Texts and calls from your Quo number's history go on the timelines of the clients they were with. Nobody is texted, and it's safe to run again: nothing is added twice.": "Los mensajes y las llamadas del historial de tu número de Quo van al historial de los clientes con los que fueron. No se le envía nada a nadie, y puedes hacerlo otra vez sin problema: nada se agrega dos veces.",
   "Bringing them in…": "Trayéndolos…",
@@ -115,7 +122,7 @@ export default {
   "something went wrong.": "algo salió mal.",
 
   // Twilio's app page with Quo connected too (features/apps/TwilioPanel.tsx)
-  "Texting": "Mensajes de texto",
+  "Texting through Quo": "Mensajes de texto por Quo",
   "Your texts go through Quo now": "Tus mensajes salen por Quo ahora",
   "While Quo is connected (<link>Apps → Quo</link>), texts go out from your Quo number. If you disconnect Quo, Twilio takes over again.": "Mientras Quo esté conectado (<link>Aplicaciones → Quo</link>), los mensajes salen de tu número de Quo. Si desconectas Quo, Twilio vuelve a encargarse.",
 
