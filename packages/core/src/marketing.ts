@@ -706,7 +706,7 @@ export function textsOffWhy(stop: TextStop | null): string {
     return `Turned off by ${stop.set_by_name?.trim() || "the office"}: they asked${how}.${stop.note?.trim() ? ` ${stop.note.trim()}` : ""}`;
   }
   if (stop.source === "phrase") return `They texted “${(stop.note ?? "").trim().slice(0, 160)}”.`;
-  return "They texted STOP. Twilio won't deliver texts to this number until they text START, so it can't be turned back on here.";
+  return "They texted STOP. Your texting service won't deliver texts to this number until they text START, so it can't be turned back on here.";
 }
 
 /** As long as a text can be, tidied, and still be read as only asking for texts to stop. */

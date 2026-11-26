@@ -565,7 +565,7 @@ describe("why a number's texts are off, as the office reads it", () => {
   it("says a STOP is Twilio's to lift, which the office's own stops aren't", () => {
     for (const source of ["keyword", "carrier", null]) {
       expect(twilioHasStop(source), String(source)).toBe(true);
-      expect(textsOffWhy(stop({ source })), String(source)).toBe("They texted STOP. Twilio won't deliver texts to this number until they text START, so it can't be turned back on here.");
+      expect(textsOffWhy(stop({ source })), String(source)).toBe("They texted STOP. Your texting service won't deliver texts to this number until they text START, so it can't be turned back on here.");
     }
     for (const source of ["office", "phrase"]) expect(twilioHasStop(source), source).toBe(false);
     // Marked on the client alone (a merge, a number changed since): the office can turn it back on.
