@@ -32,6 +32,22 @@ create index messages_external_idx on public.messages (company_id, external_id) 
 -- its summary can come at the same moment, in any order).
 create unique index messages_call_once on public.messages (company_id, client_id, external_id) where channel = 'call' and external_id is not null;
 
+-- Merging two clients who both have the same call (a contact's number kept under each): the kept
+-- client's copy stays, and the other is left behind to go with the merged client
+-- (public.merge_clients moves the messages, then deletes the client).
+create function private.call_moves_once() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if new.channel = 'call' and new.external_id is not null and new.client_id is distinct from old.client_id
+     and exists (select 1 from public.messages m
+                  where m.company_id = new.company_id and m.client_id = new.client_id and m.external_id = new.external_id
+                    and m.channel = 'call' and m.id <> new.id) then
+    return null;
+  end if;
+  return new;
+end $$;
+create trigger call_moves_once before update of client_id on public.messages for each row execute function private.call_moves_once();
+
 -- Only the server says a message came from Quo, or what a call was: from the browser a message is
 -- the office's own, as it always was. The database's own functions (attaching an unknown number,
 -- merging clients) run as their owner and write through.

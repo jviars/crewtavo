@@ -98,6 +98,26 @@ select t_quo.check((select channel = 'sms' and origin is null and call is null f
 commit;
 
 \o
+\echo 'Merging two clients who share a call'
+\o /dev/null
+
+-- A contact's number kept under two clients: its call is on both timelines.
+insert into public.clients (company_id, display_name) values (:'co', 'Bea Twin') returning id as bea \gset
+insert into public.clients (company_id, display_name) values (:'co', 'Bea Twin (copy)') returning id as copy \gset
+insert into public.messages (company_id, client_id, channel, direction, status, body, external_id, origin, call) values
+  (:'co', :'bea', 'call', 'in', 'received', 'Missed call', 'ACshared', 'quo', '{"outcome": "missed", "quo_id": "ACshared"}'),
+  (:'co', :'copy', 'call', 'in', 'received', 'Missed call', 'ACshared', 'quo', '{"outcome": "missed", "quo_id": "ACshared"}'),
+  (:'co', :'copy', 'sms', 'in', 'received', 'From the copy', 'ACcopytext', null, null);
+begin;
+set local role authenticated;
+select t_quo.as_user(:'quinn');
+select public.merge_clients(:'co', :'bea', :'copy');
+commit;
+select t_quo.check((select count(*) = 1 from public.messages where external_id = 'ACshared'), 'merging two clients who share a call keeps it once');
+select t_quo.check((select client_id = :'bea' from public.messages where external_id = 'ACshared') and (select client_id = :'bea' from public.messages where external_id = 'ACcopytext'),
+  'on the client kept, with the merged client''s other messages');
+
+\o
 \echo 'The server''s own records'
 \o /dev/null
 
