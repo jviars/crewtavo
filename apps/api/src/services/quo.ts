@@ -128,8 +128,12 @@ export function textWords(text: string | null, pictures: number): string {
   return pictures === 1 ? "Sent a picture." : `Sent ${pictures} pictures.`;
 }
 
-/** A text that came in to the number: filed as Twilio's are, then its pictures kept. Returns the companies whose automations should look. */
-async function textCameIn(env: Env, admin: Db, account: QuoAccount, event: QuoEvent, fetcher: FetchLike): Promise<string[]> {
+/**
+ * A text that came in to the number: filed as Twilio's are, once (a delivery Quo tries again after
+ * it was filed isn't filed twice), then its pictures kept, after Quo has its answer (`later`).
+ * Returns the companies whose automations should look.
+ */
+async function textCameIn(env: Env, admin: Db, account: QuoAccount, event: QuoEvent, fetcher: FetchLike, later: (work: Promise<unknown>) => void): Promise<string[]> {
   const r = event.data?.resource ?? {};
   const ctx = event.data?.context ?? {};
   const from = str(ctx.senderIdentifier);
@@ -139,11 +143,17 @@ async function textCameIn(env: Env, admin: Db, account: QuoAccount, event: QuoEv
   const media = Array.isArray(r.media) ? (r.media as Array<{ url?: unknown; type?: unknown }>) : [];
   const body = textWords(text, media.length);
   if (!body) return [];
+  const [{ data: filed, error }, { data: waiting, error: waitingError }] = await Promise.all([
+    admin.from("messages").select("id").eq("company_id", account.companyId).eq("external_id", id).eq("channel", "sms").limit(1),
+    admin.from("unknown_texts").select("id").eq("company_id", account.companyId).eq("external_id", id).limit(1),
+  ]);
+  if (error || waitingError) throw new Error(`Couldn't read whether a text was filed: ${(error ?? waitingError)!.message}`);
+  if (filed?.length || waiting?.length) return [];
   // STOP or START by the words: Quo keeps the number's opt-out itself, and refuses to text it (lib/notify.ts).
   const word = smsKeyword(text);
   const phrase = !word && asksToStopTexts(text);
   const touched = await receiveText(admin, { from, body, sid: id, keyword: phrase ? "stop" : word, phrase }, [account.companyId]);
-  if (media.length) await keepPictures(env, admin, account.companyId, id, media, fetcher).catch((error) => reportError(error, { feature: "quo-pictures" }));
+  if (media.length) later(keepPictures(env, admin, account.companyId, id, media, fetcher).catch((error) => reportError(error, { feature: "quo-pictures" })));
   return touched;
 }
 
@@ -277,6 +287,8 @@ export interface CallInfo {
   createdAt: string;
   /** Someone picked up (for a call out, possibly the other phone's voicemail). */
   answered: boolean;
+  /** Quo's AI agent took it, not someone at the business: the office still has to follow up. */
+  ai: boolean;
   seconds: number | null;
   /** The other phone, in E.164, when there's one. */
   other: string | null;
@@ -294,20 +306,26 @@ export interface QuoApiCall {
   createdAt?: string;
   answeredAt?: string | null;
   duration?: number | null;
+  aiHandled?: string | null;
   participants?: Array<{ phoneNumber?: string | null; actorId?: string | null }>;
   summary?: { status?: string; summary?: string[] | null; nextSteps?: string[] | null } | null;
   voicemail?: { status?: string; duration?: number | null; transcript?: string | null } | null;
 }
 
-/** A call from Quo's API in the shape it's filed in. Null for one that isn't over, or has no id. */
+/**
+ * A call from Quo's API in the shape it's filed in. Null for one that isn't over, or has no id.
+ * The other phone is a party that isn't someone in the workspace (no actorId): a call passed to
+ * a teammate's line isn't filed under that line.
+ */
 export function callFromApi(call: QuoApiCall, own: string): CallInfo | null {
   if (!call.id || ["queued", "initiated", "ringing", "in-progress"].includes(call.status ?? "")) return null;
-  const other = (call.participants ?? []).map((p) => p.phoneNumber ?? null).find((n) => isPhone(n) && n !== own) ?? null;
+  const other = (call.participants ?? []).filter((p) => !p.actorId).map((p) => p.phoneNumber ?? null).find((n) => isPhone(n) && n !== own) ?? null;
   return {
     id: call.id,
     direction: call.direction === "outgoing" ? "out" : "in",
     createdAt: isoOr(call.createdAt, new Date().toISOString()),
     answered: Boolean(call.answeredAt) || call.status === "answered",
+    ai: Boolean(call.aiHandled),
     seconds: num(call.duration),
     other,
     voicemail: call.voicemail ? { words: voicemailWords(call.voicemail.transcript), seconds: num(call.voicemail.duration) } : null,
@@ -321,15 +339,17 @@ function callFromEvent(event: QuoEvent, own: string): CallInfo | null {
   const ctx = event.data?.context ?? {};
   const id = str(r.id);
   if (!id) return null;
-  const participants = (ctx.participants ?? {}) as { external?: unknown };
+  const participants = (ctx.participants ?? {}) as { external?: unknown; workspace?: unknown };
+  const workspace = strings(participants.workspace);
   const status = str(r.status);
   return {
     id,
     direction: r.direction === "outgoing" ? "out" : "in",
     createdAt: isoOr(r.createdAt, isoOr(event.createdAt, new Date().toISOString())),
     answered: Boolean(str(r.answeredAt)) || status === "answered" || status === "ai-handled",
+    ai: status === "ai-handled",
     seconds: num(r.duration),
-    other: strings(participants.external).find((n) => isPhone(n) && n !== own) ?? null,
+    other: strings(participants.external).find((n) => isPhone(n) && n !== own && !workspace.includes(n)) ?? null,
     voicemail: r.hasVoicemail === true ? { words: null, seconds: null } : null,
     summary: null,
   };
@@ -346,25 +366,51 @@ export function callDetails(call: CallInfo, before: CallDetails | null = null): 
     seconds: (outcome === "voicemail" ? (voicemail?.seconds ?? null) : null) ?? call.seconds ?? before?.seconds ?? null,
     ...(summary.length ? { summary } : {}),
     ...(steps.length ? { next_steps: steps } : {}),
-    ...(voicemail?.words || before?.voicemail ? { voicemail: voicemail?.words ?? before?.voicemail ?? null } : {}),
+    ...(voicemail?.words || before?.voicemail ? { voicemail: voicemail?.words || before?.voicemail || null } : {}),
     quo_id: call.id,
   };
 }
 
-/** Adds what's now known (a summary, a voicemail's words) to a call already filed. True when it was. */
-async function addToCall(admin: Db, companyId: string, id: string, more: Partial<Pick<CallInfo, "voicemail" | "summary">>): Promise<boolean> {
-  const [{ data: rows }, { data: waiting }] = await Promise.all([
-    admin.from("messages").select("id, direction, call").eq("company_id", companyId).eq("external_id", id).eq("channel", "call").limit(CONTACT_CLIENTS),
-    admin.from("unknown_texts").select("id, call").eq("company_id", companyId).eq("external_id", id).eq("channel", "call").limit(1),
+/** What a report adds to a call already filed: only what it knows (a summary, a voicemail), over what was kept. */
+const adding = (id: string, more: Partial<Pick<CallInfo, "voicemail" | "summary">>) => (before: CallDetails | null): CallDetails =>
+  callDetails(
+    { id, direction: "in", createdAt: "", answered: before?.outcome === "answered", ai: false, seconds: before?.seconds ?? null, other: null, voicemail: more.voicemail ?? null, summary: more.summary ?? null },
+    before,
+  );
+
+type CallTable = "messages" | "unknown_texts";
+
+/**
+ * Changes a filed call's details (and its words) by `change`, without losing what another of the
+ * call's reports added at the same moment: each write says which version it changed (call.rev),
+ * and one that lost the race reads the call again and tries again.
+ */
+async function changeCall(admin: Db, table: CallTable, id: string, direction: string, change: (before: CallDetails | null) => CallDetails): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data: row, error } = await admin.from(table).select("call").eq("id", id).maybeSingle();
+    if (error) throw new Error(`Couldn't read a call: ${error.message}`);
+    if (!row) return;
+    const kept = (row.call ?? null) as { rev?: unknown } | null;
+    const rev = typeof kept?.rev === "number" ? kept.rev : 0;
+    const details = change(readCall(row.call));
+    const write = admin.from(table).update({ call: { ...details, rev: rev + 1 } as unknown as never, body: callBody(direction, details) }).eq("id", id);
+    const { data: done, error: writeError } = await (rev ? write.filter("call->>rev", "eq", String(rev)) : write.filter("call->>rev", "is", null)).select("id");
+    if (writeError) throw new Error(`Couldn't add to a call: ${writeError.message}`);
+    if (done?.length) return;
+  }
+  throw new Error("Couldn't add to a call: it kept changing.");
+}
+
+/** Changes the call wherever it's filed (each client's timeline, or Unknown numbers). True when it was filed. */
+async function changeFiledCall(admin: Db, companyId: string, id: string, change: (before: CallDetails | null) => CallDetails): Promise<boolean> {
+  const [{ data: rows, error }, { data: waiting, error: waitingError }] = await Promise.all([
+    admin.from("messages").select("id, direction").eq("company_id", companyId).eq("external_id", id).eq("channel", "call").limit(CONTACT_CLIENTS),
+    admin.from("unknown_texts").select("id").eq("company_id", companyId).eq("external_id", id).eq("channel", "call").limit(1),
   ]);
+  if (error || waitingError) throw new Error(`Couldn't read a call: ${(error ?? waitingError)!.message}`);
   if (!rows?.length && !waiting?.length) return false;
-  const update = (before: CallDetails | null, direction: string) => {
-    const was = before ?? { outcome: "missed" as const, seconds: null, quo_id: id };
-    const details = callDetails({ id, direction: direction === "out" ? "out" : "in", createdAt: "", answered: was.outcome === "answered", seconds: was.seconds, other: null, voicemail: more.voicemail ?? null, summary: more.summary ?? null }, was);
-    return { call: details as unknown as never, body: callBody(direction, details) };
-  };
-  for (const row of rows ?? []) await admin.from("messages").update(update(readCall(row.call), row.direction)).eq("id", row.id);
-  for (const row of waiting ?? []) await admin.from("unknown_texts").update(update(readCall(row.call), "in")).eq("id", row.id);
+  for (const row of rows ?? []) await changeCall(admin, "messages", row.id, row.direction, change);
+  for (const row of waiting ?? []) await changeCall(admin, "unknown_texts", row.id, "in", change);
   return true;
 }
 
@@ -375,18 +421,10 @@ export type CallFiled = "filed" | "updated" | "unknown" | "skipped";
  * Files a call on the timeline of each client whose number it was, once (messages_call_once):
  * one already filed has what's new added to it. A call in from a number nobody knows waits under
  * Unknown numbers (within the same daily share as texts), unless it's from history. `notify`
- * tells the office about a missed call or voicemail, as about a text.
+ * tells the office about a missed call, a voicemail or a call Quo's AI agent took, as about a text.
  */
 export async function fileCall(admin: Db, companyId: string, call: CallInfo, options: { origin: "quo" | "quo_import"; notify: boolean; resolve?: Resolve }): Promise<CallFiled> {
-  if (await addToCall(admin, companyId, call.id, { voicemail: call.voicemail, summary: call.summary })) {
-    // The call itself may say more than an earlier voicemail or summary did (how long, answered).
-    const { data: rows } = await admin.from("messages").select("id, direction, call").eq("company_id", companyId).eq("external_id", call.id).eq("channel", "call").limit(CONTACT_CLIENTS);
-    for (const row of rows ?? []) {
-      const details = callDetails(call, readCall(row.call));
-      await admin.from("messages").update({ call: details as unknown as never, body: callBody(row.direction, details) }).eq("id", row.id);
-    }
-    return "updated";
-  }
+  if (await changeFiledCall(admin, companyId, call.id, (before) => callDetails(call, before))) return "updated";
   if (!call.other) return "skipped";
   const details = callDetails(call);
   const body = callBody(call.direction, details);
@@ -404,19 +442,21 @@ export async function fileCall(admin: Db, companyId: string, call: CallInfo, opt
     });
     // Filed a moment ago by another of the call's reports: add to that one instead.
     if (error?.code === "23505") {
-      await addToCall(admin, companyId, call.id, { voicemail: call.voicemail, summary: call.summary });
+      await changeFiledCall(admin, companyId, call.id, (before) => callDetails(call, before));
       continue;
     }
     if (error) throw new Error(`Couldn't file a call: ${error.message}`);
     if (!options.notify || call.direction !== "in") continue;
-    if (details.outcome === "answered") {
+    const who = partyName(party);
+    if (details.outcome === "answered" && !call.ai) {
       // Answered: the office spoke with them, so nothing waits on a reply (when the call is the latest).
       await markDoneAfterCall(admin, companyId, party.client_id, call.id);
     } else {
-      const who = partyName(party);
       await tellOffice(admin, companyId, {
-        title: details.outcome === "voicemail" ? `Voicemail from ${who}` : `Missed call from ${who}`,
-        body: details.outcome === "voicemail" ? "They left a voicemail. Its words show on their timeline once Quo has them." : "They called your Quo number and nobody answered.",
+        title: details.outcome === "voicemail" ? `Voicemail from ${who}` : details.outcome === "answered" ? `Quo's AI agent took a call from ${who}` : `Missed call from ${who}`,
+        body: details.outcome === "voicemail"
+          ? "They left a voicemail. Its words show on their timeline once Quo has them."
+          : details.outcome === "answered" ? "Nobody at the business spoke with them. Quo's summary shows on their timeline once it's ready." : "They called your Quo number and nobody answered.",
         link: `/messages?client=${party.client_id}`,
       });
     }
@@ -424,7 +464,7 @@ export async function fileCall(admin: Db, companyId: string, call: CallInfo, opt
   return "filed";
 }
 
-/** A missed call or voicemail from a number nobody knows, kept under Unknown numbers. False when the day's share is used. */
+/** A call from a number nobody knows, kept under Unknown numbers. False when the day's share is used. */
 async function keepUnknownCall(admin: Db, companyId: string, call: CallInfo, details: CallDetails, body: string, notify: boolean): Promise<boolean> {
   const key = phoneMatchKey(call.other);
   if (!key || !call.other) return false;
@@ -441,11 +481,15 @@ async function keepUnknownCall(admin: Db, companyId: string, call: CallInfo, det
   const { error } = await admin.from("unknown_texts").insert({
     company_id: companyId, from_phone: call.other.slice(0, 40), phone_key: key, body, external_id: call.id, channel: "call", call: details as unknown as never, created_at: call.createdAt,
   });
-  if (error?.code === "23505") return true;
+  // Kept a moment ago by another of the call's reports: what this one knows is added to it.
+  if (error?.code === "23505") {
+    await changeFiledCall(admin, companyId, call.id, (before) => callDetails(call, before));
+    return true;
+  }
   if (error) throw new Error(`Couldn't keep a call from an unknown number: ${error.message}`);
-  if (notify && !lastHour && details.outcome !== "answered") {
+  if (notify && !lastHour && (details.outcome !== "answered" || call.ai)) {
     await tellOffice(admin, companyId, {
-      title: details.outcome === "voicemail" ? "Voicemail from an unknown number" : "Missed call from an unknown number",
+      title: details.outcome === "voicemail" ? "Voicemail from an unknown number" : details.outcome === "answered" ? "Quo's AI agent took a call from an unknown number" : "Missed call from an unknown number",
       body: `${phoneDisplay(call.other)} called your Quo number.`,
       link: `/messages?unknown=${key}`,
     });
@@ -467,7 +511,12 @@ export async function fetchCall(env: Env, account: QuoAccount, id: string, fetch
   return got?.data ? callFromApi(got.data, account.settings.from_number) : null;
 }
 
-/** call.summary.completed and call.voicemail.completed: added to the call, which is fetched from Quo when it isn't filed yet. */
+/**
+ * call.summary.completed and call.voicemail.completed: added to the call, which is fetched from
+ * Quo when it isn't filed yet (its report can come last). Only a client's call is filed that way:
+ * a call from a number nobody knows that isn't under Unknown numbers was deleted there, or is
+ * filed by its own report, and isn't brought back by its voicemail.
+ */
 async function callNews(env: Env, admin: Db, account: QuoAccount, event: QuoEvent, fetcher: FetchLike) {
   const r = event.data?.resource ?? {};
   const callId = str(r.callId);
@@ -479,9 +528,14 @@ async function callNews(env: Env, admin: Db, account: QuoAccount, event: QuoEven
   } else {
     more = { voicemail: { words: voicemailWords(r.transcript), seconds: num(r.duration) } };
   }
-  if (await addToCall(admin, account.companyId, callId, more)) return;
+  if (await changeFiledCall(admin, account.companyId, callId, adding(callId, more))) return;
   const call = await fetchCall(env, account, callId, fetcher);
-  if (call) await fileCall(admin, account.companyId, { ...call, ...(more.summary ? { summary: more.summary } : {}), ...(more.voicemail ? { voicemail: { ...more.voicemail, words: more.voicemail.words ?? call.voicemail?.words ?? null } } : {}) }, { origin: "quo", notify: true });
+  if (!call?.other || !(await partiesFor(admin, account.companyId, call.other)).length) return;
+  await fileCall(admin, account.companyId, {
+    ...call,
+    ...(more.summary ? { summary: more.summary } : {}),
+    ...(more.voicemail ? { voicemail: { words: more.voicemail.words ?? call.voicemail?.words ?? null, seconds: more.voicemail.seconds ?? call.voicemail?.seconds ?? null } } : {}),
+  }, { origin: "quo", notify: true });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -498,15 +552,16 @@ export async function handleQuoEvent(
   admin: Db,
   account: QuoAccount,
   event: QuoEvent,
-  options: { fetcher?: FetchLike; wait?: (ms: number) => Promise<unknown> } = {},
+  options: { fetcher?: FetchLike; wait?: (ms: number) => Promise<unknown>; later?: (work: Promise<unknown>) => void } = {},
 ): Promise<string[]> {
   const fetcher = options.fetcher ?? fetch;
+  const later = options.later ?? ((work: Promise<unknown>) => void work);
   const wait = options.wait ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const ctx = event.data?.context ?? {};
   if (str(ctx.phoneNumberId) !== account.settings.phone_number_id) return [];
   switch (event.type) {
     case "message.received":
-      return textCameIn(env, admin, account, event, fetcher);
+      return textCameIn(env, admin, account, event, fetcher, later);
     case "message.delivered":
     case "message.failed":
     case "message.undelivered":
@@ -514,7 +569,9 @@ export async function handleQuoEvent(
       return [];
     case "call.completed": {
       if (account.settings.calls === false) return [];
-      const call = callFromEvent(event, account.settings.from_number);
+      let call = callFromEvent(event, account.settings.from_number);
+      // Quo couldn't say who was on the call ("unavailable"): its own record of the call can.
+      if (call && !call.other) call = (await fetchCall(env, account, call.id, fetcher)) ?? call;
       if (call) await fileCall(admin, account.companyId, call, { origin: "quo", notify: true });
       return [];
     }

@@ -49,6 +49,13 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
     const tests: Array<(row: Row) => boolean> = [];
 
     const matches = (row: Row) => tests.every((test) => test(row));
+    /** A column, or a JSON field in one ("call->>rev", read as text as PostgREST does). */
+    const read = (row: Row, column: string) => {
+      const [col, field] = column.split("->>");
+      if (field === undefined) return row[col!];
+      const value = (row[col!] ?? null)?.[field];
+      return value === undefined || value === null ? null : String(value);
+    };
     const embed = (row: Row): Row => {
       const out = { ...row };
       // client:clients(display_name): the client the row belongs to.
@@ -136,8 +143,10 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
       gt: (c: string, v: unknown) => (tests.push((r) => r[c] > (v as never)), builder),
       gte: (c: string, v: unknown) => (tests.push((r) => r[c] >= (v as never)), builder),
       match: (values: Row) => (tests.push((r) => Object.entries(values).every(([k, v]) => r[k] === v)), builder),
-      filter: (c: string, operator: string, v: string) => {
-        if (operator === "match") tests.push((r) => typeof r[c] === "string" && new RegExp(v).test(r[c]));
+      filter: (c: string, operator: string, v: string | null) => {
+        if (operator === "match") tests.push((r) => typeof r[c] === "string" && new RegExp(v!).test(r[c]));
+        if (operator === "eq") tests.push((r) => read(r, c) === v);
+        if (operator === "is") tests.push((r) => read(r, c) === v);
         return builder;
       },
       order: (column: string, options: { ascending?: boolean } = {}) => ((order = { column, ascending: options.ascending !== false }), builder),

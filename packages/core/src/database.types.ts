@@ -2386,14 +2386,14 @@ isOneToOne: false
                   ]
                 },"quo_events": {
                   Row: {
-                    "company_id": string,"event_id": string,"received_at": string
+                    "company_id": string,"done_at": string | null,"event_id": string,"received_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "company_id": string,"event_id": string,"received_at"?: string
+                    "company_id": string,"done_at"?: string | null,"event_id": string,"received_at"?: string
                   }
                   Update: {
-                    "company_id"?: string,"event_id"?: string,"received_at"?: string
+                    "company_id"?: string,"done_at"?: string | null,"event_id"?: string,"received_at"?: string
                   }
                   Relationships: [
                     {

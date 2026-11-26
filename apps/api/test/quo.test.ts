@@ -12,7 +12,8 @@ import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 import { sendSms } from "../src/lib/notify";
-import { forgetQuo, quoRequest, verifyQuoWebhook, type QuoSettings } from "../src/lib/quo";
+import { companyQuo, forgetQuo, quoRequest, verifyQuoWebhook, type QuoSettings } from "../src/lib/quo";
+import { callFromApi } from "../src/services/quo";
 import { forgetTwilio } from "../src/lib/twilio";
 import { beginQuoImport, importFromQuo } from "../src/services/quoImport";
 import { memoryDb, type MemoryDb, type Row } from "./quoDb";
@@ -257,13 +258,14 @@ describe("Quo's deliveries", () => {
     expect(data.tables.notifications?.some((n) => n.title === "New text from a client")).toBe(true);
   });
 
-  it("refuse a delivery signed with another key, and one for a business without Quo", async () => {
+  it("refuse a delivery signed with another key, and one for a business without Quo, the same way", async () => {
     const data = await connectedDb();
     const event = messageEvent("message.received", { id: "ACin2", direction: "incoming", text: "Hi" }, { senderIdentifier: ANA });
     const wrong = await deliver(event, { key: `whsec_${Buffer.from("someone else's key, thirty-two b").toString("base64")}` });
-    expect(wrong.status).toBe(401);
     const nobody = await deliver(event, { company: OTHER });
-    expect(nobody.status).toBe(404);
+    const junk = await app.request("/api/webhooks/quo/not-a-company", { method: "POST", body: "{}" }, env);
+    expect([wrong.status, nobody.status, junk.status]).toEqual([401, 401, 401]);
+    expect(await nobody.json()).toEqual(await wrong.json());
     expect(data.tables.messages ?? []).toHaveLength(0);
   });
 
@@ -282,6 +284,8 @@ describe("Quo's deliveries", () => {
     vi.stubGlobal("fetch", fakeQuo({ "GET https://media.quo.example/p1.jpg": () => new Response(jpeg, { headers: { "content-type": "image/jpeg" } }) }).fetcher);
     await deliver(messageEvent("message.received", { id: "ACpic", text: "", media: [{ url: "https://media.quo.example/p1.jpg", type: "image/jpeg" }] }, { senderIdentifier: ANA }));
     expect(data.tables.messages!.find((m) => m.external_id === "ACpic")).toMatchObject({ body: "Sent a picture.", client_id: "client-ana" });
+    // Kept after Quo has its answer.
+    await vi.waitFor(() => expect(data.tables.attachments ?? []).toHaveLength(1));
     expect(data.tables.attachments).toEqual([expect.objectContaining({ owner_type: "client", owner_id: "client-ana", content_type: "image/jpeg", caption: "Texted by Ana Alvarez" })]);
     expect([...data.files.keys()]).toEqual([`${CO}/client/client-ana/text-ACpic-1.jpg`]);
   });
@@ -327,7 +331,7 @@ describe("Quo's deliveries", () => {
     await deliver(messageEvent("call.voicemail.completed", { id: "ACvmact", callId: "ACvm", direction: "incoming", duration: 42, from: ANA, to: OWN, transcript: "Hi, it's Ana about the deck." }, callContext(ANA)));
     const rows = data.tables.messages!.filter((m) => m.external_id === "ACvm");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.call).toEqual({ outcome: "voicemail", seconds: 42, summary: ["Wants a quote for the deck."], next_steps: ["Call back Friday."], voicemail: "Hi, it's Ana about the deck.", quo_id: "ACvm" });
+    expect(rows[0]!.call).toEqual({ outcome: "voicemail", seconds: 42, summary: ["Wants a quote for the deck."], next_steps: ["Call back Friday."], voicemail: "Hi, it's Ana about the deck.", quo_id: "ACvm", rev: 2 });
     expect(rows[0]!.body).toBe("Voicemail · 42 sec\n\n“Hi, it's Ana about the deck.”\n\nWants a quote for the deck.\n\nNext steps:\n• Call back Friday.");
     expect(data.tables.notifications).toEqual([expect.objectContaining({ title: "Voicemail from Ana Alvarez", link: "/messages?client=client-ana" })]);
   });
@@ -382,6 +386,10 @@ describe("Connecting Quo on the Apps page", () => {
     expect(JSON.stringify(row.settings)).not.toContain(KEY);
     const kept = await decryptJson<{ api_key: string; extra: { webhook_key: string } }>(env, data.tables.integration_secrets![0]!.ciphertext);
     expect(kept).toEqual({ api_key: KEY, extra: { webhook_key: HOOK_KEY } });
+    expect(row.account_label).toBe("Main line · (540) 555-0000");
+    // A number Quo has no name for is labelled by the number once.
+    await app.request("/api/apps/quo/account", { method: "PUT", headers, body: JSON.stringify({ phone_number_id: "PNother" }) }, env);
+    expect(data.tables.integrations!.find((r) => r.provider === "quo")!.account_label).toBe("Quo · (540) 555-0001");
   });
 
   it("says what to fix when Quo doesn't take the key", async () => {
@@ -463,5 +471,148 @@ describe("Bringing in past texts and calls", () => {
     const state = await beginQuoImport(data.db, CO, null);
     await expect(importFromQuo(env, data.db, CO, state, fetcher as unknown as typeof fetch)).rejects.toThrow();
     expect((data.tables.integrations![0]!.settings as QuoSettings).import).toMatchObject({ status: "failed", error: "Key can't read messages" });
+  });
+});
+
+describe("What review turned up", () => {
+  it("a summary and a voicemail's words that come at the same moment both stay", async () => {
+    const data = await connectedDb();
+    await deliver(messageEvent("call.completed", { id: "ACboth", direction: "incoming", status: "unanswered", duration: 0, hasVoicemail: true }, callContext(ANA)));
+    await Promise.all([
+      deliver(messageEvent("call.summary.completed", { callId: "ACboth", processingStatus: "completed", summary: ["Asked about colors."], nextSteps: ["Send the color list."] }, callContext(ANA))),
+      deliver(messageEvent("call.voicemail.completed", { id: "ACvmx", callId: "ACboth", direction: "incoming", duration: 12, from: ANA, to: OWN, transcript: "Call me about colors." }, callContext(ANA))),
+    ]);
+    const row = data.tables.messages!.find((m) => m.external_id === "ACboth")!;
+    expect(row.call).toMatchObject({ outcome: "voicemail", seconds: 12, summary: ["Asked about colors."], next_steps: ["Send the color list."], voicemail: "Call me about colors." });
+    expect(row.body).toContain("Call me about colors.");
+    expect(row.body).toContain("Send the color list.");
+  });
+
+  it("a delivery still being handled is to be tried again later, and one left half done is taken over", async () => {
+    const data = await connectedDb({}, { quo_events: [{ company_id: CO, event_id: "msg_busy", received_at: new Date().toISOString(), done_at: null }, { company_id: CO, event_id: "msg_left", received_at: new Date(Date.now() - 10 * 60_000).toISOString(), done_at: null }] });
+    const busy = await deliver(messageEvent("message.received", { id: "ACbusy", text: "Hello?" }, { senderIdentifier: ANA }), { id: "msg_busy" });
+    expect(busy.status).toBe(409);
+    const left = await deliver(messageEvent("message.received", { id: "ACleft", text: "Anyone there?" }, { senderIdentifier: ANA }), { id: "msg_left" });
+    expect(left.status).toBe(200);
+    expect(data.tables.messages!.filter((m) => m.external_id === "ACleft")).toHaveLength(1);
+    expect(data.tables.quo_events!.find((e) => e.event_id === "msg_left")!.done_at).toBeTruthy();
+    // And a text already filed (Quo trying again after a failure further on) isn't filed twice.
+    await deliver(messageEvent("message.received", { id: "ACleft", text: "Anyone there?" }, { senderIdentifier: ANA }), { id: "msg_other_try" });
+    expect(data.tables.messages!.filter((m) => m.external_id === "ACleft")).toHaveLength(1);
+  });
+
+  it("a business whose Quo connection can't be read sends nothing, rather than from another number", async () => {
+    const data = await connectedDb();
+    // The secrets table doesn't answer.
+    const failing = { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: "database down" } }) }) }) }) };
+    const down = { ...data.db, from: (table: string) => (table === "integration_secrets" ? failing : data.db.from(table as never)) };
+    current.db = down;
+    const withServer: Env = { ...env, TWILIO_ACCOUNT_SID: "AC" + "5".repeat(32), TWILIO_AUTH_TOKEN: "server-token", TWILIO_FROM_NUMBER: "+15405550000" };
+    const { fetcher, seen } = fakeQuo({});
+    vi.stubGlobal("fetch", fetcher);
+    const result = await sendSms(withServer, { to: ANA, body: "Reminder" }, CO);
+    expect(result.sent).toBe(false);
+    expect(seen).toHaveLength(0);
+    await expect(companyQuo(withServer, CO)).rejects.toThrow("database down");
+  });
+
+  it("an automatic text to a number that texted in the last few days stays in Quo's inbox", async () => {
+    await connectedDb({}, { messages: [{ company_id: CO, client_id: "client-ana", channel: "sms", direction: "in", status: "received", body: "Is Tuesday ok?", from_phone: ANA, created_at: new Date(Date.now() - 3600_000).toISOString() }] });
+    const { fetcher, seen } = fakeQuo({ "POST /messages": () => ({ status: 202, body: { data: { id: "ACq" } } }) });
+    vi.stubGlobal("fetch", fetcher);
+    await sendSms(env, { to: "(540) 555-0163", body: "Reminder: tomorrow at 9" }, CO);
+    expect(seen[0]!.body.inboxStatus).toBeUndefined();
+    await sendSms(env, { to: "(540) 555-0177", body: "Reminder: tomorrow at 9" }, CO);
+    expect(seen[1]!.body.inboxStatus).toBe("done");
+  });
+
+  it("a late refusal of the key doesn't bring a disconnected Quo back", async () => {
+    const data = await connectedDb();
+    await companyQuo(env, CO);
+    data.tables.integrations![0]!.status = "disconnected";
+    vi.stubGlobal("fetch", fakeQuo({ "POST /messages": () => ({ status: 401, body: { title: "Unauthorized", message: "Invalid API key" } }) }).fetcher);
+    await sendSms(env, { to: ANA, body: "Hi" }, CO);
+    expect(data.tables.integrations![0]!.status).toBe("disconnected");
+  });
+
+  it("a new key takes the old webhook out of Quo, even when the old key no longer works, and any other sending here", async () => {
+    const data = await connectedDb({ webhook_id: "77" });
+    const url = `https://crew.example.com/api/webhooks/quo/${CO}`;
+    const { fetcher, seen } = fakeQuo({
+      ...NUMBERS,
+      "DELETE /webhooks/77": (req) => (req.headers.authorization === "new-key" ? { status: 204 } : { status: 401, body: { title: "Unauthorized", message: "revoked" } }),
+      "POST /webhooks": () => ({ status: 201, body: { data: { id: "992", key: HOOK_KEY } } }),
+      "GET /webhooks": () => ({ body: { data: [{ id: "992", url }, { id: "55", url }, { id: "60", url: "https://elsewhere.example/hook" }] } }),
+      "DELETE /webhooks/55": () => ({ status: 204 }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const res = await app.request("/api/apps/quo/account", { method: "PUT", headers, body: JSON.stringify({ api_key: "new-key", phone_number_id: PN }) }, env);
+    expect(res.status).toBe(200);
+    const deletes = seen.filter((r) => r.method === "DELETE").map((r) => `${r.url.pathname} ${r.headers.authorization}`);
+    expect(deletes).toEqual(["/webhooks/77 quo-key-123", "/webhooks/77 new-key", "/webhooks/55 new-key"]);
+    expect((data.tables.integrations![0]!.settings as QuoSettings).webhook_id).toBe("992");
+  });
+
+  it("a webhook whose signing key was lost gets a new one from Quo", async () => {
+    const data = await connectedDb({ webhook_id: "77" });
+    data.tables.integration_secrets![0]!.ciphertext = await encryptJson(env, { api_key: KEY, extra: {} });
+    const { fetcher, seen } = fakeQuo({
+      "PATCH /webhooks/77": () => ({ body: { data: { id: "77" } } }),
+      "POST /webhooks/77/rotate": () => ({ body: { data: { id: "77", key: HOOK_KEY } } }),
+      "GET /webhooks": () => ({ body: { data: [] } }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const res = await app.request("/api/apps/quo/webhook", { method: "POST", headers, body: "{}" }, env);
+    expect(res.status).toBe(200);
+    expect(seen.some((r) => r.url.pathname === "/webhooks/77/rotate")).toBe(true);
+    const kept = await decryptJson<{ extra: { webhook_key: string } }>(env, data.tables.integration_secrets![0]!.ciphertext);
+    expect(kept.extra.webhook_key).toBe(HOOK_KEY);
+  });
+
+  it("the number can't change while past texts and calls are coming in", async () => {
+    await connectedDb({ import: { status: "running", since: null, started_at: new Date().toISOString(), updated_at: new Date().toISOString(), counts: { texts: 3, calls: 0, skipped: 0 } } });
+    vi.stubGlobal("fetch", fakeQuo(NUMBERS).fetcher);
+    const res = await app.request("/api/apps/quo/account", { method: "PUT", headers, body: JSON.stringify({ phone_number_id: "PNother" }) }, env);
+    expect(res.status).toBe(409);
+  });
+
+  it("a voicemail from a number nobody knows, deleted under Unknown numbers, isn't brought back by its words", async () => {
+    const data = await connectedDb();
+    vi.stubGlobal("fetch", fakeQuo({ "GET /calls/ACgone": () => ({ body: { data: { id: "ACgone", direction: "incoming", status: "missed", duration: 0, participants: [{ phoneNumber: OWN, actorId: "US1" }, { phoneNumber: "+15405559999", actorId: null }], voicemail: { status: "completed", duration: 8, transcript: "Call me" } } } }) }).fetcher);
+    await deliver(messageEvent("call.voicemail.completed", { id: "ACv", callId: "ACgone", direction: "incoming", duration: 8, from: "+15405559999", to: OWN, transcript: "Call me" }, callContext("+15405559999")));
+    expect(data.tables.unknown_texts ?? []).toHaveLength(0);
+    expect(data.tables.notifications ?? []).toHaveLength(0);
+  });
+
+  it("a call Quo's AI agent took tells the office, and leaves the conversation waiting", async () => {
+    const data = await connectedDb();
+    await deliver(messageEvent("call.completed", { id: "ACai", direction: "incoming", status: "ai-handled", answeredAt: "2026-11-20T20:00:01.000Z", duration: 95, hasVoicemail: false }, callContext(ANA)));
+    expect(data.tables.messages!.find((m) => m.external_id === "ACai")!.call).toMatchObject({ outcome: "answered" });
+    expect(data.tables.conversations_done ?? []).toHaveLength(0);
+    expect(data.tables.notifications).toEqual([expect.objectContaining({ title: "Quo's AI agent took a call from Ana Alvarez" })]);
+  });
+
+  it("the other phone on a call is never one of the business's own", () => {
+    const call = callFromApi({ id: "ACx", direction: "incoming", status: "completed", answeredAt: "2026-11-20T10:00:00Z", duration: 30, participants: [{ phoneNumber: OWN, actorId: "US1" }, { phoneNumber: "+15405550111", actorId: "US2" }, { phoneNumber: ANA, actorId: null }] }, OWN);
+    expect(call?.other).toBe(ANA);
+  });
+
+  it("Quo's key goes in on its own page, not as a plain key", async () => {
+    await connectedDb();
+    const res = await app.request("/api/apps/quo/key", { method: "PUT", headers, body: JSON.stringify({ api_key: "something" }) }, env);
+    expect(res.status).toBe(400);
+  });
+
+  it("bringing in history leaves a conversation from the last few days waiting", async () => {
+    const data = await connectedDb();
+    const recent = new Date(Date.now() - 86_400_000).toISOString();
+    const { fetcher } = fakeQuo({
+      "GET /messages": () => ({ body: { data: [{ id: "ACrecent", direction: "incoming", from: ANA, to: [OWN], text: "Still on for Friday?", status: "received", createdAt: recent, media: [] }], nextCursor: null } }),
+      "GET /calls": () => ({ body: { data: [], nextCursor: null } }),
+    });
+    const state = await beginQuoImport(data.db, CO, null);
+    await importFromQuo(env, data.db, CO, state, fetcher as unknown as typeof fetch);
+    expect(data.tables.messages!.find((m) => m.external_id === "ACrecent")).toBeTruthy();
+    expect(data.tables.conversations_done ?? []).toHaveLength(0);
   });
 });

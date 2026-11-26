@@ -146,12 +146,15 @@ grant execute on function public.attach_unknown_texts(uuid, text, uuid, text, te
 -- The server's own records
 -- ---------------------------------------------------------------------------------------------
 
--- Quo's deliveries already handled, by their webhook-id: Quo tries a delivery again for about a
--- day until it's answered, and one handled once isn't filed twice. Kept a few days.
+-- Quo's deliveries, by their webhook-id: Quo tries a delivery again for about a day until it's
+-- answered with a 2xx, and one handled once isn't filed twice. A delivery being handled has no
+-- done_at yet: another try at it is told to come back later, and one left half done by a server
+-- that stopped is taken over after a couple of minutes. Kept a few days.
 create table public.quo_events (
   company_id uuid not null references public.companies (id) on delete cascade,
   event_id text not null check (char_length(event_id) between 1 and 200),
   received_at timestamptz not null default now(),
+  done_at timestamptz,
   primary key (company_id, event_id)
 );
 create index quo_events_age_idx on public.quo_events (received_at);

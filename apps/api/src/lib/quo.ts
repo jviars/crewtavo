@@ -94,6 +94,15 @@ export interface QuoAccount {
 
 const cache = new Map<string, { at: number; value: QuoAccount | null }>();
 let some: { at: number; value: boolean } | null = null;
+/** At most this many companies are remembered: a busy server has fewer, and strangers' guesses don't pile up. */
+const CACHE_MAX = 2000;
+
+/** Remembers `value` under `key`, letting the oldest go once the map is full. */
+export function remember<K, V>(map: Map<K, V>, key: K, value: V, max = CACHE_MAX) {
+  map.delete(key);
+  if (map.size >= max) map.delete(map.keys().next().value as K);
+  map.set(key, value);
+}
 
 export const forgetQuo = (companyId?: string) => {
   if (companyId) cache.delete(companyId);
@@ -101,7 +110,12 @@ export const forgetQuo = (companyId?: string) => {
   some = null;
 };
 
-/** The company's connected Quo number, if any (cached for a minute; reminders send many at once). */
+/**
+ * The company's connected Quo number, if any (cached for a minute; reminders send many at once).
+ * Throws when it can't be told (the database didn't answer, or the key can't be decrypted), and
+ * that isn't remembered: a business with Quo mustn't have its texts go out from another number
+ * because a read failed.
+ */
 export async function companyQuo(env: Env, companyId: string): Promise<QuoAccount | null> {
   const hit = cache.get(companyId);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
@@ -110,17 +124,20 @@ export async function companyQuo(env: Env, companyId: string): Promise<QuoAccoun
     admin.from("integrations").select("status, settings").eq("company_id", companyId).eq("provider", "quo").maybeSingle(),
     admin.from("integration_secrets").select("ciphertext").eq("company_id", companyId).eq("provider", "quo").maybeSingle(),
   ]);
+  if (row.error || secret.error) throw new Error(`Couldn't read the company's Quo connection: ${(row.error ?? secret.error)!.message}`);
   let value: QuoAccount | null = null;
   const settings = (row.data?.settings ?? null) as unknown as QuoSettings | null;
   if (row.data && row.data.status !== "disconnected" && secret.data && settings?.phone_number_id && settings.from_number) {
+    let kept: QuoSecret;
     try {
-      const kept = await decryptJson<QuoSecret>(env, secret.data.ciphertext);
-      if (kept.api_key) value = { companyId, key: kept.api_key, webhookKey: kept.extra?.webhook_key ?? null, settings, status: row.data.status };
+      kept = await decryptJson<QuoSecret>(env, secret.data.ciphertext);
     } catch (error) {
       reportError(error, { feature: "quo" });
+      throw new Error("The company's Quo key can't be read (was ENCRYPTION_KEY changed?).");
     }
+    if (kept.api_key) value = { companyId, key: kept.api_key, webhookKey: kept.extra?.webhook_key ?? null, settings, status: row.data.status };
   }
-  cache.set(companyId, { at: Date.now(), value });
+  remember(cache, companyId, { at: Date.now(), value });
   return value;
 }
 
@@ -272,7 +289,7 @@ export async function quoNumberUsers(env: Pick<Env, "QUO_API_URL">, account: Pic
   const value = rows
     .filter((u): u is { id: string; email: string; firstName?: string | null; lastName?: string | null } => Boolean(u.id && u.email))
     .map((u) => ({ id: u.id, email: u.email.toLowerCase(), name: [u.firstName, u.lastName].filter(Boolean).join(" ") }));
-  usersCache.set(cacheKey, { at: Date.now(), value });
+  remember(usersCache, cacheKey, { at: Date.now(), value });
   return value;
 }
 
@@ -368,6 +385,19 @@ export async function updateQuoWebhook(
 /** Asks Quo to send the webhook a sample delivery, to see that it gets through. */
 export async function testQuoWebhook(env: Pick<Env, "QUO_API_URL">, key: string, id: string, fetcher: FetchLike = fetch): Promise<void> {
   await quoRequest(env, key, `/webhooks/${encodeURIComponent(id)}/events/test`, { method: "POST", body: { eventType: "message.received" } }, fetcher);
+}
+
+/** A new signing key for the webhook (Quo's rotate), when the one Crewtavo kept was lost. */
+export async function rotateQuoWebhook(env: Pick<Env, "QUO_API_URL">, key: string, id: string, fetcher: FetchLike = fetch): Promise<string> {
+  const rotated = await quoRequest<{ data?: { key?: string } }>(env, key, `/webhooks/${encodeURIComponent(id)}/rotate`, { method: "POST" }, fetcher);
+  if (!rotated?.data?.key) throw new QuoError("Quo didn't return the webhook's new signing key.", 502);
+  return rotated.data.key;
+}
+
+/** The workspace's webhooks (Quo lists them all at once): their ids and addresses. */
+export async function listQuoWebhooks(env: Pick<Env, "QUO_API_URL">, key: string, fetcher: FetchLike = fetch): Promise<Array<{ id: string; url: string }>> {
+  const listed = await quoRequest<{ data?: Array<{ id?: string | number; url?: string }> }>(env, key, "/webhooks", {}, fetcher);
+  return (listed?.data ?? []).filter((w) => w.id !== undefined && w.url).map((w) => ({ id: String(w.id), url: w.url! }));
 }
 
 /** Takes the webhook out of Quo. One that's already gone is fine. */

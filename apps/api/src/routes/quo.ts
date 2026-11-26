@@ -29,9 +29,12 @@ import {
   createQuoWebhook,
   deleteQuoWebhook,
   forgetQuo,
+  listQuoWebhooks,
   QuoError,
   quoNumbers,
   QuoProblem,
+  remember,
+  rotateQuoWebhook,
   testQuoWebhook,
   updateQuoWebhook,
   verifyQuoWebhook,
@@ -39,9 +42,9 @@ import {
   type QuoSettings,
 } from "../lib/quo";
 import { adminClient, type Db } from "../lib/supabase";
-import { loadSecret, saveSecret } from "../integrations/tokens";
+import { IntegrationError, loadSecret, saveSecret } from "../integrations/tokens";
 import { handleQuoEvent, type QuoEvent } from "../services/quo";
-import { beginQuoImport, importFromQuo, importRunning } from "../services/quoImport";
+import { beginQuoImport, importFromQuo, importing, importRunning } from "../services/quoImport";
 
 export const quo = new Hono<AppEnv>();
 
@@ -51,6 +54,12 @@ const HEARD_EVERY_MS = 5 * 60_000;
 /** Handled deliveries are kept a little past Quo's 28 hours of trying again; Crewtavo's own texts long enough to recognise them in an import. */
 const EVENTS_KEPT_MS = 3 * 86_400_000;
 const SENT_KEPT_MS = 400 * 86_400_000;
+
+/** A number's name in Quo that's only the number written out (an unnamed one): not said twice. */
+export function nameIsNumber(name: string, number: string): boolean {
+  const digits = name.replace(/\D/g, "").replace(/^0+/, "");
+  return /^[\d\s()+.-]+$/.test(name.trim()) && digits.length >= 7 && number.replace(/\D/g, "").endsWith(digits);
+}
 
 /** Where Quo sends the company's number's events. */
 export const quoWebhookUrl = (base: string, companyId: string) => `${base}/api/webhooks/quo/${companyId}`;
@@ -64,39 +73,56 @@ const reachable = (env: Env, base: string) => base.startsWith("https://") || Boo
 
 /** When a company's key was last read again after a signature didn't match, so a stranger's posts can't make every one a read. */
 const reread = new Map<string, number>();
+/** A delivery still being handled after this long was left by a server that stopped: another try takes it over. */
+const HANDLING_MS = 2 * 60_000;
 
 quo.post("/webhooks/quo/:company", async (c) => {
+  const refused = () => new HttpError(401, "Not a delivery for this Crewtavo.");
   const companyId = c.req.param("company");
-  if (!UUID.test(companyId)) throw new HttpError(404, "Not found.");
+  if (!UUID.test(companyId)) throw refused();
   const body = await c.req.text();
   const headers = { id: c.req.header("webhook-id"), timestamp: c.req.header("webhook-timestamp"), signature: c.req.header("webhook-signature") };
   let account = await companyQuo(c.env, companyId);
-  let signed = Boolean(account?.webhookKey) && (await verifyQuoWebhook(account!.webhookKey!, headers, body));
-  // The webhook made again a moment ago has a new key: read it once more before refusing.
+  // The same answer whether or not the business has Quo, so strangers learn nothing from it.
+  if (!account) throw refused();
+  let signed = Boolean(account.webhookKey) && (await verifyQuoWebhook(account.webhookKey!, headers, body));
+  // The webhook got a new key a moment ago: read it once more before refusing (at most every 10 seconds).
   if (!signed && Date.now() - (reread.get(companyId) ?? 0) > 10_000) {
-    reread.set(companyId, Date.now());
+    remember(reread, companyId, Date.now());
     forgetQuo(companyId);
     account = await companyQuo(c.env, companyId);
-    signed = Boolean(account?.webhookKey) && (await verifyQuoWebhook(account!.webhookKey!, headers, body));
+    if (!account) throw refused();
+    signed = Boolean(account.webhookKey) && (await verifyQuoWebhook(account.webhookKey!, headers, body));
   }
-  if (!account) throw new HttpError(404, "Quo isn't connected here.");
-  if (!signed) throw new HttpError(401, "Bad signature.");
+  if (!signed) throw refused();
 
   const admin = adminClient(c.env);
   const eventId = headers.id!.slice(0, 200);
-  // Each delivery once: Quo tries one again until it's answered with a 2xx.
-  const seen = await admin.from("quo_events").insert({ company_id: companyId, event_id: eventId });
-  if (seen.error?.code === "23505") return c.json({ ok: true, again: true });
-  if (seen.error) throw dbError(seen.error);
+  // Each delivery once: Quo tries one again until it's answered with a 2xx. One being handled right
+  // now is to be tried again later; one left half done by a server that stopped is taken over.
+  const claim = await admin.from("quo_events").insert({ company_id: companyId, event_id: eventId });
+  if (claim.error?.code === "23505") {
+    const { data: seen } = await admin.from("quo_events").select("received_at, done_at").match({ company_id: companyId, event_id: eventId }).maybeSingle();
+    if (!seen || seen.done_at) return c.json({ ok: true, again: true });
+    if (Date.now() - Date.parse(seen.received_at) < HANDLING_MS) return c.json({ error: "Still handling this delivery. Try it again later." }, 409);
+    const { data: taken } = await admin.from("quo_events").update({ received_at: new Date().toISOString() }).match({ company_id: companyId, event_id: eventId, received_at: seen.received_at }).is("done_at", null).select("event_id");
+    if (!taken?.length) return c.json({ error: "Still handling this delivery. Try it again later." }, 409);
+  } else if (claim.error) throw dbError(claim.error);
+  const finish = async () => {
+    const { error } = await admin.from("quo_events").update({ done_at: new Date().toISOString() }).match({ company_id: companyId, event_id: eventId });
+    if (error) throw dbError(error);
+  };
   let event: QuoEvent;
   try {
     event = JSON.parse(body) as QuoEvent;
   } catch {
+    await finish();
     return c.json({ ok: true, ignored: "not JSON" });
   }
   try {
-    const touched = await handleQuoEvent(c.env, admin, account, event);
+    const touched = await handleQuoEvent(c.env, admin, account, event, { later: (work) => runInBackground(c, work) });
     for (const company of touched) kickAutomations(c, company);
+    await finish();
   } catch (error) {
     // Not handled: Quo tries it again later, and it isn't taken for one already done.
     await admin.from("quo_events").delete().match({ company_id: companyId, event_id: eventId });
@@ -168,10 +194,27 @@ async function readSettings(admin: Db, companyId: string): Promise<{ status: str
   return data ? { status: data.status, settings: (data.settings ?? {}) as unknown as QuoSettings } : null;
 }
 
-async function writeSettings(admin: Db, companyId: string, settings: QuoSettings) {
-  const { error } = await admin.from("integrations").update({ settings: asJson(settings) }).match({ company_id: companyId, provider: "quo" });
+/**
+ * Writes only what changed, over the settings as they are now: an import's progress and Quo's
+ * last delivery are written alongside, and a whole copy read earlier would put them back.
+ */
+async function patchSettings(admin: Db, companyId: string, patch: Partial<QuoSettings>) {
+  const { data, error: readError } = await admin.from("integrations").select("settings").match({ company_id: companyId, provider: "quo" }).maybeSingle();
+  if (readError) throw dbError(readError);
+  const { error } = await admin.from("integrations").update({ settings: asJson({ ...((data?.settings ?? {}) as Record<string, unknown>), ...patch }) }).match({ company_id: companyId, provider: "quo" });
   if (error) throw dbError(error);
   forgetQuo(companyId);
+}
+
+/** The company's kept secret: null when there's none or it can't be decrypted (ENCRYPTION_KEY changed); a database error is thrown. */
+async function keptSecret(c: Context<AppEnv>, admin: Db) {
+  try {
+    return await loadSecret(c.env, admin, c.var.companyId, "quo");
+  } catch (error) {
+    if (error instanceof IntegrationError) throw error;
+    reportError(error, { feature: "quo" });
+    return null;
+  }
 }
 
 /** Whether the company has its own Twilio account connected too. */
@@ -198,34 +241,48 @@ const asProblem = (error: unknown) => {
   return error;
 };
 
+/** Keeps the webhook's signing key with the API key. */
+async function keepWebhookKey(c: Context<AppEnv>, admin: Db, key: string, webhookKey: string) {
+  const secret = await loadSecret(c.env, admin, c.var.companyId, "quo");
+  await saveSecret(c.env, admin, c.var.companyId, "quo", { api_key: key, extra: { ...(secret?.extra ?? {}), webhook_key: webhookKey } });
+}
+
 /**
  * Makes the webhook in Quo for the company's number, or brings the one there up to date (its
- * address, events and number), keeping its signing key. What went wrong is kept for the page to
- * say, and the company stays connected: texts still go out without it.
+ * address, events and number), keeping its signing key; one whose key Crewtavo lost gets a new
+ * key from Quo. Others in the workspace sending to this company's address (left by an earlier
+ * connection) are taken out. Returns what changed in the settings; what went wrong is kept for the
+ * page to say, and the company stays connected: texts still go out without it.
  */
-async function setUpWebhook(c: Context<AppEnv>, admin: Db, key: string, settings: QuoSettings): Promise<QuoSettings> {
+async function setUpWebhook(c: Context<AppEnv>, admin: Db, key: string, settings: QuoSettings): Promise<Partial<QuoSettings>> {
   const base = appUrl(c);
   const url = quoWebhookUrl(base, c.var.companyId);
   const input = { url, phoneNumberId: settings.phone_number_id, calls: settings.calls !== false };
-  if (!reachable(c.env, base)) return { ...settings, webhook_problem: "Quo can only send replies and calls to a public https address, and this Crewtavo doesn't have one yet." };
+  if (!reachable(c.env, base)) return { webhook_problem: "Quo can only send replies and calls to a public https address, and this Crewtavo doesn't have one yet." };
   try {
-    if (settings.webhook_id) {
+    let id = settings.webhook_id ?? null;
+    if (id) {
       try {
-        await updateQuoWebhook(c.env, key, settings.webhook_id, input);
-        return { ...settings, webhook_url: url, webhook_problem: null };
+        await updateQuoWebhook(c.env, key, id, input);
+        if (!(await loadSecret(c.env, admin, c.var.companyId, "quo"))?.extra?.webhook_key) await keepWebhookKey(c, admin, key, await rotateQuoWebhook(c.env, key, id));
       } catch (error) {
         // Deleted in Quo: make a new one.
         if (!(error instanceof QuoError && error.status === 404)) throw error;
+        id = null;
       }
     }
-    const made = await createQuoWebhook(c.env, key, input);
-    const secret = await loadSecret(c.env, admin, c.var.companyId, "quo");
-    await saveSecret(c.env, admin, c.var.companyId, "quo", { api_key: key, extra: { ...(secret?.extra ?? {}), webhook_key: made.key } });
-    return { ...settings, webhook_id: made.id, webhook_url: url, webhook_problem: null };
+    if (!id) {
+      const made = await createQuoWebhook(c.env, key, input);
+      await keepWebhookKey(c, admin, key, made.key);
+      id = made.id;
+    }
+    const others = await listQuoWebhooks(c.env, key).catch(() => []);
+    for (const other of others) if (other.id !== id && other.url === url) await deleteQuoWebhook(c.env, key, other.id).catch((error) => reportError(error, { feature: "quo" }));
+    return { webhook_id: id, webhook_url: url, webhook_problem: null };
   } catch (error) {
     if (!(error instanceof QuoError)) throw error;
     const problem = error.status === 401 ? "Quo didn't accept the API key." : `Quo couldn't set it up (${error.status ? `error ${error.status}: ` : ""}${error.message})`;
-    return { ...settings, webhook_problem: problem.slice(0, 300) };
+    return { webhook_problem: problem.slice(0, 300) };
   }
 }
 
@@ -245,7 +302,8 @@ quo.put("/apps/quo/account", requireUser, requireCompany(ADMINS, "apps"), async 
   const body = await readJson(c, z.object({ api_key: z.string().trim().max(500).optional(), phone_number_id: z.string().trim().regex(/^PN\S{1,100}$/, "Pick the number to text from.") }));
   const admin = adminClient(c.env);
   const before = await readSettings(admin, c.var.companyId);
-  const oldKey = await loadSecret(c.env, admin, c.var.companyId, "quo").then((s) => s?.api_key ?? null).catch(() => null);
+  const oldSecret = await keptSecret(c, admin);
+  const oldKey = oldSecret?.api_key ?? null;
   const key = body.api_key || (before && before.status !== "disconnected" ? oldKey : null);
   if (!key) throw new HttpError(400, "Paste your Quo API key.");
   let numbers;
@@ -256,10 +314,18 @@ quo.put("/apps/quo/account", requireUser, requireCompany(ADMINS, "apps"), async 
   }
   const number = numbers.find((n) => n.id === body.phone_number_id);
   if (!number) throw new HttpError(400, "That number isn't in this Quo workspace anymore. Pick it again.");
-  // A new key may be another workspace's: the webhook made with the old one goes, and a new one is made.
   const was = before && before.status !== "disconnected" ? before.settings : null;
   const sameKey = Boolean(oldKey) && oldKey === key;
-  if (was?.webhook_id && !sameKey && oldKey) await deleteQuoWebhook(c.env, oldKey, was.webhook_id).catch((error) => reportError(error, { feature: "quo" }));
+  // An import goes on with the number and key it started with: they change once it's done.
+  if (was && (importRunning(was.import) || importing(c.var.companyId)) && (!sameKey || was.phone_number_id !== number.id)) {
+    throw new HttpError(409, "Past texts and calls are still coming in. Change the number or key once they're in.");
+  }
+  // A new key may be another workspace's: the webhook made with the old one goes (with the old key,
+  // or the new one when it's the same workspace), and a new one is made.
+  if (was?.webhook_id && !sameKey) {
+    const gone = oldKey ? await deleteQuoWebhook(c.env, oldKey, was.webhook_id).then(() => true, () => false) : false;
+    if (!gone) await deleteQuoWebhook(c.env, key, was.webhook_id).catch((error) => reportError(error, { feature: "quo" }));
+  }
   const settings: QuoSettings = {
     ...(was ?? {}),
     phone_number_id: number.id,
@@ -274,7 +340,7 @@ quo.put("/apps/quo/account", requireUser, requireCompany(ADMINS, "apps"), async 
     company_id: c.var.companyId,
     provider: "quo",
     status: "connected",
-    account_label: `${number.name} · ${phoneDisplay(number.number)}`.slice(0, 200),
+    account_label: `${nameIsNumber(number.name, number.number) ? "Quo" : number.name} · ${phoneDisplay(number.number)}`.slice(0, 200),
     external_account_id: number.id,
     settings: asJson(settings),
     connected_by: c.var.userId,
@@ -282,10 +348,9 @@ quo.put("/apps/quo/account", requireUser, requireCompany(ADMINS, "apps"), async 
     last_error: null,
   });
   if (error) throw dbError(error);
-  const kept = sameKey ? await loadSecret(c.env, admin, c.var.companyId, "quo").catch(() => null) : null;
-  await saveSecret(c.env, admin, c.var.companyId, "quo", { api_key: key, extra: { ...(kept?.extra ?? {}) } });
+  await saveSecret(c.env, admin, c.var.companyId, "quo", { api_key: key, extra: { ...(sameKey ? (oldSecret?.extra ?? {}) : {}) } });
   forgetQuo(c.var.companyId);
-  await writeSettings(admin, c.var.companyId, await setUpWebhook(c, admin, key, settings));
+  await patchSettings(admin, c.var.companyId, await setUpWebhook(c, admin, key, settings));
   // A warning that texts weren't going out was about how they went before.
   await sendingWorks(c.env, c.var.companyId, "sms");
   return c.json({ provider: "quo", status: "connected", quo: await stateFor(c, admin) });
@@ -302,7 +367,7 @@ quo.post("/apps/quo/webhook", requireUser, requireCompany(ADMINS, "apps"), async
   const admin = adminClient(c.env);
   const { key, settings } = await connected(c, admin);
   const next = await setUpWebhook(c, admin, key, settings);
-  await writeSettings(admin, c.var.companyId, next);
+  await patchSettings(admin, c.var.companyId, next);
   if (next.webhook_problem) throw new HttpError(502, next.webhook_problem);
   return c.json({ quo: await stateFor(c, admin) });
 });
@@ -323,10 +388,10 @@ quo.patch("/apps/quo/settings", requireUser, requireCompany(ADMINS, "apps"), asy
   const body = await readJson(c, z.object({ calls: z.boolean().optional(), quiet: z.boolean().optional() }));
   const admin = adminClient(c.env);
   const { key, settings } = await connected(c, admin);
-  let next: QuoSettings = { ...settings, ...(body.calls === undefined ? {} : { calls: body.calls }), ...(body.quiet === undefined ? {} : { quiet: body.quiet }) };
+  let patch: Partial<QuoSettings> = { ...(body.calls === undefined ? {} : { calls: body.calls }), ...(body.quiet === undefined ? {} : { quiet: body.quiet }) };
   // The webhook listens for calls only while they're kept.
-  if (body.calls !== undefined && body.calls !== (settings.calls !== false) && settings.webhook_id) next = await setUpWebhook(c, admin, key, next);
-  await writeSettings(admin, c.var.companyId, next);
+  if (body.calls !== undefined && body.calls !== (settings.calls !== false) && settings.webhook_id) patch = { ...patch, ...(await setUpWebhook(c, admin, key, { ...settings, ...patch })) };
+  await patchSettings(admin, c.var.companyId, patch);
   return c.json({ quo: await stateFor(c, admin) });
 });
 
@@ -334,7 +399,7 @@ quo.post("/apps/quo/import", requireUser, requireCompany(ADMINS, "apps"), async 
   const body = await readJson(c, z.object({ since: isoDate.nullable().default(null) }));
   const admin = adminClient(c.env);
   const { settings } = await connected(c, admin);
-  if (importRunning(settings.import)) throw new HttpError(409, "Past texts and calls are already coming in.");
+  if (importRunning(settings.import) || importing(c.var.companyId)) throw new HttpError(409, "Past texts and calls are already coming in.");
   const state = await beginQuoImport(admin, c.var.companyId, body.since);
   runInBackground(c, importFromQuo(c.env, admin, c.var.companyId, state));
   return c.json({ status: "running" }, 202);

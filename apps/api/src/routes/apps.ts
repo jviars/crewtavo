@@ -802,6 +802,7 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   if (!entry || entry.auth !== "api_key") throw new HttpError(400, "That app doesn't use a key.");
   if (provider === "abc_supply") throw new HttpError(400, "ABC Supply takes your app's Client ID and secret.");
   if (provider === "twilio") throw new HttpError(400, "Twilio takes your Account SID, Auth Token and number.");
+  if (provider === "quo") throw new HttpError(400, "Quo takes your API key and the number to text from, on its page.");
   const body = await readJson(c, z.object({ api_key: z.string().trim().min(10).max(500) }));
   const admin = adminClient(c.env);
   if (provider === "stripe") {

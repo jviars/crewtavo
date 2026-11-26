@@ -69,7 +69,8 @@ export function callBody(direction: string, call: CallDetails): string {
   if (summary.length) parts.push(summary.join("\n"));
   const steps = callLines(call.next_steps);
   if (steps.length) parts.push(`Next steps:\n${steps.map((step) => `• ${step}`).join("\n")}`);
-  return parts.join("\n\n");
+  // Within what a message and a text from an unknown number keep (10,000 characters).
+  return parts.join("\n\n").slice(0, 10_000);
 }
 
 /** messages.call as read back: what's there, in the shape above, or null for anything else. */

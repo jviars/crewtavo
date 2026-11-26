@@ -419,8 +419,17 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
  */
 export async function sendSms(env: Env, message: SmsMessage, companyId?: string | null): Promise<SendResult> {
   const whose = companyId ?? message.company ?? null;
-  // A company with its Quo number texts from it, whatever else it has (lib/quo.ts).
-  const quo = whose ? await companyQuo(env, whose).catch(() => null) : null;
+  // A company with its Quo number texts from it, whatever else it has (lib/quo.ts). When that
+  // can't be read, nothing is sent: it mustn't go out from another number instead.
+  let quo: QuoAccount | null = null;
+  if (whose) {
+    try {
+      quo = await companyQuo(env, whose);
+    } catch (error) {
+      reportError(error, { feature: "quo" });
+      return { sent: false, reason: "Couldn't read how this business sends texts. Try again in a minute." };
+    }
+  }
   if (quo) {
     const result = await quoTextOut(env, quo, message);
     await noteQuoHealth(env, quo, result);
@@ -476,7 +485,9 @@ async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): P
   const to = phoneE164(await numberToText(env, account.companyId, message.to));
   if (!to) return { sent: false, reason: `${message.to} isn't a whole phone number.`, code: 21211 };
   const senderUserId = message.by ? await quoUserFor(env, account, await signInEmail(env, message.by.userId)) : null;
-  const quiet = !message.by && account.settings.quiet !== false;
+  // To Quo's Done view only when nothing from that number may be waiting for an answer: Done moves
+  // the whole conversation, a question they texted included.
+  const quiet = !message.by && account.settings.quiet !== false && !(await textedLately(env, account.companyId, to));
   const sent = await postQuoText(env, account, { to, body: message.body.slice(0, 1600), quiet, senderUserId });
   if (sent.ok) {
     // Before anything else: Quo reports every text the number sends, and this one is Crewtavo's.
@@ -496,6 +507,23 @@ async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): P
   };
 }
 
+/** How far back a text from a number keeps Crewtavo's own texts to it in Quo's inbox. */
+const LATELY_MS = 3 * 86_400_000;
+
+/** The number texted the company in the last few days (or that can't be told). */
+async function textedLately(env: Env, companyId: string, to: string): Promise<boolean> {
+  const key = to.replace(/\D/g, "").slice(-10);
+  if (key.length < 7) return false;
+  const since = new Date(Date.now() - LATELY_MS).toISOString();
+  const pattern = `${key.slice(-4).split("").join("[^0-9]*")}[^0-9]*$`;
+  const [client, stranger] = await Promise.all([
+    adminClient(env).from("messages").select("id").eq("company_id", companyId).eq("direction", "in").eq("channel", "sms").gte("created_at", since).filter("from_phone", "match", pattern).limit(1),
+    adminClient(env).from("unknown_texts").select("id").eq("company_id", companyId).eq("phone_key", key).gte("created_at", since).limit(1),
+  ]);
+  if (client.error || stranger.error) return true;
+  return Boolean(client.data?.length || stranger.data?.length);
+}
+
 /** A person's sign-in email, or null when it can't be read. */
 async function signInEmail(env: Env, userId: string): Promise<string | null> {
   const { data, error } = await adminClient(env).auth.admin.getUserById(userId);
@@ -508,11 +536,13 @@ async function noteQuoHealth(env: Env, account: QuoAccount, result: SendResult) 
   const next = result.sent ? "connected" : refused ? "error" : account.status;
   if (next === account.status) return;
   account.status = next;
+  // Never over a disconnect that happened while the text was on its way.
   await adminClient(env)
     .from("integrations")
     .update({ status: next, last_error: result.sent ? null : (result.reason ?? "").slice(0, 500) })
     .eq("company_id", account.companyId)
-    .eq("provider", "quo");
+    .eq("provider", "quo")
+    .neq("status", "disconnected");
   forgetQuo(account.companyId);
 }
 
