@@ -368,6 +368,9 @@ insert into public.client_duplicate_dismissals (company_id, client_a, client_b) 
 insert into public.sms_stops (company_id, phone_key, phone) values (:'co', '5405550190', '+15405550190');
 insert into public.sms_stop_changes (company_id, phone_key, phone, texts_on, source) values (:'co', '5405550190', '+15405550190', false, 'keyword');
 insert into public.unknown_texts (company_id, from_phone, phone_key, body) values (:'co', '+15405550191', '5405550191', 'Do you do gutters?');
+-- Quo's deliveries and the texts sent through it (20261126100100_quo.sql): the server's alone.
+insert into public.quo_events (company_id, event_id) values (:'co', 'msg_sweep');
+insert into public.quo_sent (company_id, message_id) values (:'co', 'ACsweep');
 -- A custom field on the business's jobs (20261103000700_custom_fields.sql): the team's, never a sub's.
 insert into public.custom_field_definitions (company_id, record_type, key, label, type) values (:'co', 'job', 'permit', 'Permit number', 'text');
 -- Ann's attic fan at the house Al roofs, serviced on his visit (20261106000200_property_equipment.sql): the team's, never a sub's.

@@ -870,7 +870,8 @@ describe("Marketing's routes", () => {
     expect(sendSms).not.toHaveBeenCalled();
     const spouse = await call("/messages/send", { method: "POST", body: { client_id: ANA_ID, channel: "sms", to: "(540) 555-0199", body: "Running late" } });
     expect(spouse.status).toBe(200);
-    expect(sendSms).toHaveBeenCalledWith(env, { to: "(540) 555-0199", body: "Running late", company: CO });
+    // Sent by hand: as the person who wrote it (on Quo, lib/notify.ts).
+    expect(sendSms).toHaveBeenCalledWith(env, { to: "(540) 555-0199", body: "Running late", company: CO, by: { userId: expect.any(String) } });
 
     // A number that once texted STOP, typed in for a client who never did: Twilio refuses, and the client keeps texts on.
     sendSms.mockImplementation(async () => ({ sent: false, reason: "The text provider refused it (400).", code: 21610 }));

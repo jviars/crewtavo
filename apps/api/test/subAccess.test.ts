@@ -255,7 +255,7 @@ const NOT_SIGNED_IN_ROUTES = [
   "GET /api/config", "GET /api/health", "GET /api/presets", "GET /api/setup", "POST /api/setup/owner",
   "POST /api/auth/email-link", "POST /api/auth/recover", ...PUBLIC_SUB_ROUTES,
   // Callbacks and webhooks, each checked its own way.
-  "GET /api/apps/:provider/callback", "GET /api/railway/callback", "POST /api/webhooks/twilio", "POST /api/webhooks/stripe", "POST /api/webhooks/stripe/:company",
+  "GET /api/apps/:provider/callback", "GET /api/railway/callback", "POST /api/webhooks/twilio", "POST /api/webhooks/quo/:company", "POST /api/webhooks/stripe", "POST /api/webhooks/stripe/:company",
   // Pages for people without an account, behind signed links: a sub's paperwork, the Client Hub,
   // booking forms, logos, unsubscribing, reviews, referrals and calendar feeds; and the pictures on
   // estimates (letterheads, packages, price list items), each under a name never reused.
