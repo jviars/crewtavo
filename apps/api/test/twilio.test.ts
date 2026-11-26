@@ -324,7 +324,7 @@ describe("sending a text", () => {
     expect([await smsReady(env, ALDER), await smsReady(env, BIRCH), await smsReady(env, null)]).toEqual([true, false, false]);
     expect([await smsReady(withServer, ALDER), await smsReady(withServer, BIRCH)]).toEqual([true, true]);
     vi.stubGlobal("fetch", twilio().fetcher);
-    expect(await sendSms(env, { to: "+15405550163", body: "Hi", company: BIRCH })).toEqual({ sent: false, reason: "Texting isn't set up yet. An admin can connect a Twilio account in Apps → Twilio." });
+    expect(await sendSms(env, { to: "+15405550163", body: "Hi", company: BIRCH })).toEqual({ sent: false, reason: "Texting isn't set up yet. An admin can connect Quo or Twilio in Apps." });
   });
 
   it("marks the company's account as needing attention when Twilio turns its token down, and clears that when a text goes", async () => {

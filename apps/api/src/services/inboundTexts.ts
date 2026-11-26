@@ -57,7 +57,7 @@ const HOUR_MS = 3_600_000;
 type Notice = { title: string; body: string; link: string };
 
 /** The bell, for the people who hear about new messages: the company's owners, admins and office. */
-async function tellOffice(admin: Db, companyId: string, notice: Notice) {
+export async function tellOffice(admin: Db, companyId: string, notice: Notice) {
   const { data: office } = await admin.from("memberships").select("user_id").eq("company_id", companyId).eq("active", true).in("role", ["owner", "admin", "office"]);
   if (!office?.length) return;
   await admin.from("notifications").insert(office.map((m) => ({ company_id: companyId, user_id: m.user_id, kind: "client", title: notice.title.slice(0, 300), body: notice.body, link: notice.link })));

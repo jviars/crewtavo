@@ -133,7 +133,7 @@ account.get("/me", requireUser, async (c) => {
   // ...and, on Railway, whether the owner still has to connect it (services/railway.ts).
   const [connected, agreements, railways] = companyIds.length
     ? await Promise.all([
-        adminClient(c.env).from("integrations").select("company_id, provider, external_account_id").in("provider", ["email", "anthropic", "chatgpt", "fal", "twilio"]).neq("status", "disconnected").in("company_id", companyIds),
+        adminClient(c.env).from("integrations").select("company_id, provider, external_account_id").in("provider", ["email", "anthropic", "chatgpt", "fal", "twilio", "quo"]).neq("status", "disconnected").in("company_id", companyIds),
         adminClient(c.env).from("terms_acceptances").select("company_id").eq("version", TERMS_VERSION).in("company_id", companyIds),
         adminClient(c.env).from("integrations").select("company_id, status").eq("provider", "railway").in("company_id", companyIds),
       ]).then(([apps, terms, railway]) => [must(apps), must(terms), must(railway)] as const)
@@ -142,8 +142,8 @@ account.get("/me", requireUser, async (c) => {
   // A key of the company's own for Crewtavo's AI: Claude's or OpenAI's (services/ai.ts).
   const withAiKey = new Set(connected.filter((r) => r.provider === "anthropic" || r.provider === "chatgpt").map((r) => r.company_id));
   const withFal = new Set(connected.filter((r) => r.provider === "fal").map((r) => r.company_id));
-  // (One connected with its Account SID: a key saved the old way never sent anything.)
-  const withTwilio = new Set(connected.filter((r) => r.provider === "twilio" && r.external_account_id).map((r) => r.company_id));
+  // (One connected with its Account SID: a key saved the old way never sent anything.) Or its Quo number.
+  const withTwilio = new Set(connected.filter((r) => (r.provider === "twilio" || r.provider === "quo") && r.external_account_id).map((r) => r.company_id));
   // ...and where this person connected their own ChatGPT plan (Apps → ChatGPT), which answers what
   // they ask the AI themselves: AI is on for them there whatever the company has.
   const plans = rows.length ? await connectedPlans(adminClient(c.env), c.var.userId) : [];
@@ -173,7 +173,7 @@ account.get("/me", requireUser, async (c) => {
           : null,
         // Whether email goes out for this company (its own mailbox): for a sub too, whose notices it sends.
         email_connected: withMailbox.has(m.company_id),
-        // Whether texts go out for this company from its own Twilio account (Apps → Twilio): for a sub too.
+        // Whether texts go out for this company from its own Twilio account or Quo number (Apps): for a sub too.
         sms_connected: withTwilio.has(m.company_id),
         ai_connected: staff && (withAiKey.has(m.company_id) || plans.some((p) => p.company_id === m.company_id && p.problem !== "sign_in")),
         // Their own ChatGPT plan is answering what they ask (nothing in its way): pages say so.

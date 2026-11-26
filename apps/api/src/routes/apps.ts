@@ -17,6 +17,8 @@ import { endConnection, teamConnections } from "../lib/assistants";
 import { appUrl, asJson, dbError, HttpError, isoDate, must, readJson, uuid } from "../lib/http";
 import { emailReady, sendEmail, sendingWorks } from "../lib/notify";
 import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, textingCountry, TwilioProblem, type TwilioSettings } from "../lib/twilio";
+import { deleteQuoWebhook, forgetQuo, type QuoSettings } from "../lib/quo";
+import { quoState } from "./quo";
 import { adminClient, type Db } from "../lib/supabase";
 import { aiChoice, askerOf, complete, countAiAsk, teamPlans, type OpenAiSettings } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
@@ -120,6 +122,10 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   if (!twilioRow) byProvider.delete("twilio");
   if (serverTexts) byProvider.set("twilio", { provider: "twilio", status: "connected", account_label: "Set up for this server", connected_at: null, last_sync_at: null, last_error: null });
   const twilio = twilioState(appUrl(c), twilioRow ? (twilioRow.settings as unknown as TwilioSettings) : null, serverTexts);
+  // Quo: the number picked, its webhook, the switches and the last import (routes/quo.ts). Twilio
+  // says when Quo has taken its texts over.
+  const quoRow = integrations.find((r) => r.provider === "quo" && r.status !== "disconnected");
+  const quo = quoState(c.env, appUrl(c), c.var.companyId, quoRow ? (quoRow.settings as unknown as QuoSettings) : null, Boolean(twilioRow));
   // Lob: whether its key is a test key (cards made but never mailed) or a live one.
   const lobRow = integrations.find((r) => r.provider === "lob" && r.status !== "disconnected");
   const lob = lobRow ? { mode: (lobRow.settings as unknown as LobSettings | null)?.mode ?? null } : null;
@@ -161,7 +167,8 @@ apps.get("/apps", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
         ...(entry.auth === "site" ? { website } : {}),
         ...(entry.id === "stripe" ? { ...(stripe ? { stripe } : {}), owners_emailed: ownersEmailed } : {}),
         ...(entry.id === "abc_supply" && abc ? { supplier: abc } : {}),
-        ...(entry.id === "twilio" ? { twilio } : {}),
+        ...(entry.id === "twilio" ? { twilio: twilio && { ...twilio, quo: Boolean(quoRow) } } : {}),
+        ...(entry.id === "quo" ? { quo } : {}),
         ...(entry.id === "lob" ? { lob } : {}),
         ...(entry.id === "google_business" ? { google_business: business } : {}),
         ...(entry.id === "meta" ? { meta } : {}),
@@ -406,6 +413,12 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
   // Stripe's open invoices are voided with the old key, which can finish after the response.
   if (secret && provider === "stripe") runInBackground(c, (await disconnectStripe(c.env, admin, c.var.companyId, secret)).settled);
   else if (secret && provider === "meta") await signOutMeta(c.env, secret);
+  else if (secret?.api_key && provider === "quo") {
+    // Quo stops sending here: the webhook Crewtavo made goes, if Quo still has it.
+    const { data } = await admin.from("integrations").select("settings").match({ company_id: c.var.companyId, provider }).maybeSingle();
+    const hook = (data?.settings as unknown as QuoSettings | null)?.webhook_id;
+    if (hook) await deleteQuoWebhook(c.env, secret.api_key, hook).catch((error) => console.error("Couldn't take the webhook out of Quo", error instanceof Error ? error.message : error));
+  }
   else if (secret && !shared) await revoke(c.env, provider, secret);
   // The company's own app keys stay, so connecting again is one click.
   const keys = catalogEntry(provider)?.appKeys ? appKeysOf(secret?.extra) : {};
@@ -427,6 +440,8 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
   if (who && was) runInBackground(c, noteStripeChange(c, who, { before: was.label, after: null, from: was.id, to: null, moved: null }));
   // Texts go from the server's account again, if it has one, from the next one on.
   if (provider === "twilio") forgetTwilio(c.var.companyId);
+  // Texts go from Twilio again, if it's connected, from the next one on.
+  if (provider === "quo") forgetQuo(c.var.companyId);
   return c.json({ provider, status: "disconnected", ...(provider === "google_business" ? { removed } : {}), ...(shared ? { revoked: false } : {}) });
 });
 

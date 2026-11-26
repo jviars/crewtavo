@@ -1830,14 +1830,14 @@ isOneToOne: false
                   ]
                 },"messages": {
                   Row: {
-                    "body": string,"channel": string,"client_id": string | null,"company_id": string,"created_at": string,"direction": string,"external_id": string | null,"from_name": string | null,"from_phone": string | null,"id": string,"recipients": Json | null,"related_id": string | null,"related_type": string | null,"sent_by": string | null,"status": string,"subject": string | null
+                    "body": string,"call": Json | null,"channel": string,"client_id": string | null,"company_id": string,"created_at": string,"direction": string,"external_id": string | null,"from_name": string | null,"from_phone": string | null,"id": string,"origin": string | null,"recipients": Json | null,"related_id": string | null,"related_type": string | null,"sent_by": string | null,"status": string,"subject": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "body": string,"channel": string,"client_id"?: string | null,"company_id": string,"created_at"?: string,"direction"?: string,"external_id"?: string | null,"from_name"?: string | null,"from_phone"?: string | null,"id"?: string,"recipients"?: Json | null,"related_id"?: string | null,"related_type"?: string | null,"sent_by"?: string | null,"status"?: string,"subject"?: string | null
+                    "body": string,"call"?: Json | null,"channel": string,"client_id"?: string | null,"company_id": string,"created_at"?: string,"direction"?: string,"external_id"?: string | null,"from_name"?: string | null,"from_phone"?: string | null,"id"?: string,"origin"?: string | null,"recipients"?: Json | null,"related_id"?: string | null,"related_type"?: string | null,"sent_by"?: string | null,"status"?: string,"subject"?: string | null
                   }
                   Update: {
-                    "body"?: string,"channel"?: string,"client_id"?: string | null,"company_id"?: string,"created_at"?: string,"direction"?: string,"external_id"?: string | null,"from_name"?: string | null,"from_phone"?: string | null,"id"?: string,"recipients"?: Json | null,"related_id"?: string | null,"related_type"?: string | null,"sent_by"?: string | null,"status"?: string,"subject"?: string | null
+                    "body"?: string,"call"?: Json | null,"channel"?: string,"client_id"?: string | null,"company_id"?: string,"created_at"?: string,"direction"?: string,"external_id"?: string | null,"from_name"?: string | null,"from_phone"?: string | null,"id"?: string,"origin"?: string | null,"recipients"?: Json | null,"related_id"?: string | null,"related_type"?: string | null,"sent_by"?: string | null,"status"?: string,"subject"?: string | null
                   }
                   Relationships: [
                     {
@@ -2383,6 +2383,46 @@ isOneToOne: false
                   }
                   Relationships: [
                     
+                  ]
+                },"quo_events": {
+                  Row: {
+                    "company_id": string,"event_id": string,"received_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"event_id": string,"received_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"event_id"?: string,"received_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "quo_events_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"quo_sent": {
+                  Row: {
+                    "company_id": string,"message_id": string,"sent_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"message_id": string,"sent_at"?: string
+                  }
+                  Update: {
+                    "company_id"?: string,"message_id"?: string,"sent_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "quo_sent_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
                   ]
                 },"quote_alerts": {
                   Row: {
@@ -3794,14 +3834,14 @@ isOneToOne: false
                   ]
                 },"unknown_texts": {
                   Row: {
-                    "body": string,"company_id": string,"created_at": string,"external_id": string | null,"from_phone": string,"id": string,"phone_key": string
+                    "body": string,"call": Json | null,"channel": string,"company_id": string,"created_at": string,"external_id": string | null,"from_phone": string,"id": string,"phone_key": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "body": string,"company_id": string,"created_at"?: string,"external_id"?: string | null,"from_phone": string,"id"?: string,"phone_key": string
+                    "body": string,"call"?: Json | null,"channel"?: string,"company_id": string,"created_at"?: string,"external_id"?: string | null,"from_phone": string,"id"?: string,"phone_key": string
                   }
                   Update: {
-                    "body"?: string,"company_id"?: string,"created_at"?: string,"external_id"?: string | null,"from_phone"?: string,"id"?: string,"phone_key"?: string
+                    "body"?: string,"call"?: Json | null,"channel"?: string,"company_id"?: string,"created_at"?: string,"external_id"?: string | null,"from_phone"?: string,"id"?: string,"phone_key"?: string
                   }
                   Relationships: [
                     {

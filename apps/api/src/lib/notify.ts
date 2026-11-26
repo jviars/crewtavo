@@ -4,18 +4,20 @@
  *      SMTP with an app password, or the company's Resend key;
  *   2. the server's Resend account (RESEND_API_KEY, EMAIL_FROM), if whoever installed it set one;
  *   3. in development, the local Mailpit inbox (MAILPIT_URL).
- * SMS uses Twilio over REST: the company's own account when it connected one (Apps → Twilio), else
- * the server's (lib/twilio.ts). When nothing is set up, sends are skipped and the caller gets
+ * SMS goes through the company's Quo number when it connected one (Apps → Quo, lib/quo.ts), else
+ * Twilio over REST: the company's own account when it connected one (Apps → Twilio), else the
+ * server's (lib/twilio.ts). When nothing is set up, sends are skipped and the caller gets
  * { sent: false } plus the reason; the UI can then offer the link to copy instead.
  * How each send for a company went is noted (noteSending), so its owners and admins hear on the bell
  * and by push when its email or texts stop going out, and not only on Settings → Email.
  */
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
-import { textedNumber } from "@crewtavo/core/phone";
+import { phoneE164, textedNumber } from "@crewtavo/core/phone";
 import type { Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
 import { smtpReach, smtpSend, SmtpError, type SmtpReach, type SmtpSettings } from "./smtp";
+import { companyQuo, forgetQuo, postQuoText, quoUserFor, type QuoAccount } from "./quo";
 import { adminClient } from "./supabase";
 import { companyTwilio, postMessage, textingCountry, twilioFor, type TwilioAccount } from "./twilio";
 
@@ -121,8 +123,9 @@ export async function emailReady(env: Env, companyId?: string | null): Promise<b
   return emailConfigured(env);
 }
 
-/** Can this company send texts (its own Twilio account, or the server's)? */
+/** Can this company send texts (its Quo number, its own Twilio account, or the server's)? */
 export async function smsReady(env: Env, companyId?: string | null): Promise<boolean> {
+  if (companyId && (await companyQuo(env, companyId).catch(() => null))) return true;
   if (companyId && (await companyTwilio(env, companyId).catch(() => null))) return true;
   return smsConfigured(env);
 }
@@ -251,6 +254,8 @@ const SENDING_WARNING = {
 };
 /** The same for a company on its own Twilio account, which it fixes itself on the Apps page. */
 const OWN_TWILIO_FIX = "Reminders and other texts won't reach anyone until it's fixed. Check your Twilio account, then connect it again in Apps → Twilio.";
+/** And on its Quo number. */
+const OWN_QUO_FIX = "Reminders and other texts won't reach anyone until it's fixed. Check your Quo workspace, then connect it again in Apps → Quo if its key changed.";
 
 /**
  * Tells the database how a company's email or text went, so its owners and admins hear when sending
@@ -259,7 +264,7 @@ const OWN_TWILIO_FIX = "Reminders and other texts won't reach anyone until it's 
  * that can't be sent to says nothing about the company's sending, so it isn't counted. Never throws:
  * whether the message went is already known, and this mustn't change it.
  */
-export async function noteSending(env: Env, companyId: string, channel: "email" | "sms", result: SendResult, ownTwilio = false): Promise<void> {
+export async function noteSending(env: Env, companyId: string, channel: "email" | "sms", result: SendResult, own: boolean | "quo" = false): Promise<void> {
   const problem = result.sent ? null : sendProblem(result);
   if (problem === "unset" || problem === "recipient") return;
   const key = `${companyId}:${channel}`;
@@ -274,7 +279,7 @@ export async function noteSending(env: Env, companyId: string, channel: "email" 
       problem
         ? {
             p_company: companyId, p_channel: channel, p_ok: false, p_error: reason, p_refused: problem === "sign_in",
-            p_title: words.title, p_body: [problem === "sign_in" ? "" : words.lead, reason, channel === "sms" && ownTwilio ? OWN_TWILIO_FIX : words.fix].filter(Boolean).join(" "),
+            p_title: words.title, p_body: [problem === "sign_in" ? "" : words.lead, reason, channel === "sms" && own === "quo" ? OWN_QUO_FIX : channel === "sms" && own ? OWN_TWILIO_FIX : words.fix].filter(Boolean).join(" "),
           }
         : { p_company: companyId, p_channel: channel, p_ok: true },
     );
@@ -412,13 +417,103 @@ async function mailpit(env: Env, message: EmailMessage & { from?: string }): Pro
  * `companyId` (sends nobody is watching: notifications, automations, review asks), how it went is
  * also noted, so its owners hear when texts stop going out (noteSending).
  */
-export async function sendSms(env: Env, message: { to: string; body: string; company?: string | null }, companyId?: string | null): Promise<SendResult> {
+export async function sendSms(env: Env, message: SmsMessage, companyId?: string | null): Promise<SendResult> {
   const whose = companyId ?? message.company ?? null;
+  // A company with its Quo number texts from it, whatever else it has (lib/quo.ts).
+  const quo = whose ? await companyQuo(env, whose).catch(() => null) : null;
+  if (quo) {
+    const result = await quoTextOut(env, quo, message);
+    await noteQuoHealth(env, quo, result);
+    if (companyId) await noteSending(env, companyId, "sms", result, "quo");
+    return result;
+  }
   const account = await twilioFor(env, whose);
   const result = await textOut(env, account, { ...message, to: await numberToText(env, whose, message.to) });
   if (account?.own && whose) await noteTwilioHealth(env, whose, account, result);
   if (companyId) await noteSending(env, companyId, "sms", result, Boolean(account?.own));
   return result;
+}
+
+export interface SmsMessage {
+  to: string;
+  body: string;
+  /** Whose number it goes from, when someone is sending by hand and watching how it goes. */
+  company?: string | null;
+  /**
+   * Someone wrote it themselves (Messages): on Quo it's sent as them when they're on the number
+   * (by their sign-in email), and the conversation stays open in Quo's inbox. Anything else
+   * Crewtavo sends by itself goes to Quo's Done view, unless the company turned that off.
+   */
+  by?: { userId: string } | null;
+}
+
+/**
+ * Quo's refusals, said the way the rest of Crewtavo reads a text that wasn't sent (sendProblem,
+ * services/textsOff.ts): a number that opted out as Twilio's 21610, one that isn't a number or
+ * can't get texts as Twilio's 21211 and 21612, and a key Quo no longer takes as a 401.
+ */
+const QUO_CODES: Record<string, number> = {
+  "User Opted Out": 21610,
+  "Invalid `to` Phone Number": 21211,
+  "Unreachable `to` Phone Number": 21612,
+};
+
+/** In words for the office, for Quo's refusals that aren't plain. */
+const QUO_WORDS: Record<string, string> = {
+  "User Opted Out": "They opted out of texts from your Quo number.",
+  "Not Enough Credits": "Your Quo workspace is out of prepaid credits for texts sent through its API. Add credits in Quo's billing settings.",
+  "Subscription Expired": "Your Quo subscription has expired.",
+  "Not Phone Number User": "The Quo number's owner isn't a member of it anymore, so Quo won't send from it. Check the number's members in Quo.",
+  "A2P Registration Not Approved": "Quo hasn't approved your business for texting yet (A2P 10DLC registration). Check its status in Quo.",
+  "A2P 10DLC Daily Message Cap Reached": "Your Quo number reached its daily texting limit. Quo's support can raise it.",
+  "International Messaging Not Allowed": "International texting isn't turned on for your Quo number.",
+  "Not TFN Registered": "Your Quo toll-free number isn't registered for texting yet.",
+};
+
+async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): Promise<SendResult> {
+  if (!message.body.trim()) return { sent: false, reason: "There's nothing to text." };
+  // Quo takes numbers only in E.164 ("+15405550101"), completed for the company's country as Twilio's are.
+  const to = phoneE164(await numberToText(env, account.companyId, message.to));
+  if (!to) return { sent: false, reason: `${message.to} isn't a whole phone number.`, code: 21211 };
+  const senderUserId = message.by ? await quoUserFor(env, account, await signInEmail(env, message.by.userId)) : null;
+  const quiet = !message.by && account.settings.quiet !== false;
+  const sent = await postQuoText(env, account, { to, body: message.body.slice(0, 1600), quiet, senderUserId });
+  if (sent.ok) {
+    // Before anything else: Quo reports every text the number sends, and this one is Crewtavo's.
+    const { error } = await adminClient(env).from("quo_sent").upsert({ company_id: account.companyId, message_id: sent.id });
+    if (error) reportError(new Error(`Couldn't note a text sent through Quo: ${error.message}`), { feature: "quo" });
+    return { sent: true, id: sent.id };
+  }
+  if (sent.status === 0) return { sent: false, reason: "Couldn't reach Quo. Try again." };
+  const code = sent.title ? QUO_CODES[sent.title] : undefined;
+  const words = (sent.title && QUO_WORDS[sent.title]) || sent.message;
+  return {
+    sent: false,
+    // A key Quo turned down, or a number nobody may send from, is the company's to fix; Quo's other 403s (a daily cap) aren't.
+    ...(sent.status === 401 || sent.title === "Not Phone Number User" ? { status: sent.status } : {}),
+    reason: `Quo refused it (${sent.status}${words ? `: ${words}` : ""}).`,
+    ...(code ? { code } : {}),
+  };
+}
+
+/** A person's sign-in email, or null when it can't be read. */
+async function signInEmail(env: Env, userId: string): Promise<string | null> {
+  const { data, error } = await adminClient(env).auth.admin.getUserById(userId);
+  return error ? null : (data.user?.email ?? null);
+}
+
+/** Show a Quo key that stopped working on the Apps page (status "error"), and clear it once a text goes through again. */
+async function noteQuoHealth(env: Env, account: QuoAccount, result: SendResult) {
+  const refused = !result.sent && result.status === 401;
+  const next = result.sent ? "connected" : refused ? "error" : account.status;
+  if (next === account.status) return;
+  account.status = next;
+  await adminClient(env)
+    .from("integrations")
+    .update({ status: next, last_error: result.sent ? null : (result.reason ?? "").slice(0, 500) })
+    .eq("company_id", account.companyId)
+    .eq("provider", "quo");
+  forgetQuo(account.companyId);
 }
 
 /**
@@ -454,7 +549,7 @@ async function textOut(env: Env, account: TwilioAccount | null, message: { to: s
     const digits = message.to.replace(/[^0-9]/g, "") || "unknown";
     return mailpit(env, { to: `sms-${digits}@sms.local`, subject: `Text to ${message.to}`, text: message.body });
   }
-  if (!account) return { sent: false, reason: "Texting isn't set up yet. An admin can connect a Twilio account in Apps → Twilio." };
+  if (!account) return { sent: false, reason: "Texting isn't set up yet. An admin can connect Quo or Twilio in Apps." };
   const response = await postMessage(account, message);
   if (!response) return { sent: false, reason: "Couldn't reach the text provider. Try again." };
   if (!response.ok) {

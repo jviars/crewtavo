@@ -93,7 +93,7 @@ automations.post("/automations/preview", requireUser, requireCompany(OFFICE, "au
         if (!emailTo.length) warnings.push(`${ctx.client?.display_name ?? "This client"} has no email address.`);
         return { type: a.type, to: emailTo.join(", ") || null, title: r(a.subject), body: r(a.body) };
       case "send_sms":
-        if (!canText) warnings.push("Texting isn't set up yet (Apps → Twilio), so text actions will fail until it is.");
+        if (!canText) warnings.push("Texting isn't set up yet (Apps → Quo or Twilio), so text actions will fail until it is.");
         return { type: a.type, to: textTo.join(", ") || null, body: r(a.body) };
       case "add_note":
         return { type: a.type, body: r(a.body) };
@@ -106,7 +106,7 @@ automations.post("/automations/preview", requireUser, requireCompany(OFFICE, "au
       case "invite_autopay": {
         if (!takesAutopay) warnings.push("Autopay isn't on (Settings → Payments, and a Stripe key that can save cards), so invites won't go out until it is.");
         const to = a.channel === "sms" ? (ctx.client?.phone ?? null) : (ctx.client?.email ?? null);
-        if (a.channel === "sms" && !canText) warnings.push("Texting isn't set up yet (Apps → Twilio), so text actions will fail until it is.");
+        if (a.channel === "sms" && !canText) warnings.push("Texting isn't set up yet (Apps → Quo or Twilio), so text actions will fail until it is.");
         if (a.channel !== "sms" && !canEmail) warnings.push("Email isn't connected yet (Settings → Email), so email actions will fail until it is.");
         if (!to) warnings.push(`${ctx.client?.display_name ?? "This client"} has no ${a.channel === "sms" ? "mobile number" : "email address"}.`);
         // The set-up invite as it goes (a client with a card from Stripe is asked to confirm it instead).

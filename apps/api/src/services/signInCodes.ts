@@ -37,6 +37,7 @@ import { allowStrict } from "../lib/limit";
 import { reportError } from "../lib/monitoring";
 import { sealAuthToken } from "../lib/signInGuard";
 import { anyMailbox, emailConfigured, emailReady, sendEmail, sendSms, smsConfigured } from "../lib/notify";
+import { anyQuo } from "../lib/quo";
 import { anyTwilio } from "../lib/twilio";
 import { adminClient } from "../lib/supabase";
 import { visitorBlock } from "../lib/visitor";
@@ -235,11 +236,11 @@ async function withinBudget(env: Env, way: Way): Promise<boolean> {
 
 /**
  * Whether the sign-in page offers codes by text (GET /api/config, features.smsCodes): when this
- * Crewtavo can text at all, through the server's Twilio account or at least one company's own. It's
+ * Crewtavo can text at all, through the server's Twilio account or at least one company's own (or its Quo number). It's
  * the same for everyone, as with codes by email (emailCodesOffered). When it can't be told, they are.
  */
 export async function textCodesOffered(env: Env): Promise<boolean> {
-  return smsConfigured(env) || ((await anyTwilio(env)) ?? true);
+  return smsConfigured(env) || ((await anyTwilio(env)) ?? true) || ((await anyQuo(env)) ?? true);
 }
 
 /**

@@ -59,7 +59,7 @@ messages.post("/messages/send", requireUser, requireCompany(SALES), async (c) =>
     if (textsOffTo(client, to)) throw new HttpError(400, textsOffRefusal(client.display_name));
     if (await numberStopped(adminClient(c.env), companyId, to)) throw new HttpError(400, numberStoppedRefusal(to));
     if (body.body.length > 1600) throw new HttpError(400, "Texts are limited to 1,600 characters.");
-    result = await sendSms(c.env, { to, body: body.body, company: companyId });
+    result = await sendSms(c.env, { to, body: body.body, company: companyId, by: { userId: c.var.userId } });
     await noteRefusedText(adminClient(c.env), client, to, result, companyId);
   }
   const { data: row, error } = await db

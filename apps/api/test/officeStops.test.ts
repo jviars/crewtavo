@@ -186,7 +186,7 @@ describe("the office's Texts switch", () => {
     const calls = serve(world({ stops: [{ ...officeStop(), source }], clients: [{ ...ANA, sms_opt_out_at: "2026-10-20T15:00:00Z" }] }));
     const res = await call(`/clients/${ANA_ID}/texts`, { on: true });
     expect([res.status, await res.json()]).toEqual([400, {
-      error: "Ana Smith texted STOP from (540) 555-0100. Twilio, which sends your texts, refuses that number until they text START to your texting number, so it can't be turned back on from here.",
+      error: "Ana Smith texted STOP from (540) 555-0100. The service that sends your texts refuses that number until they text START to your texting number, so it can't be turned back on from here.",
     }]);
     expect(writes(calls, "DELETE", "sms_stops")).toEqual([]);
     expect(writes(calls, "PATCH", "clients")).toEqual([]);

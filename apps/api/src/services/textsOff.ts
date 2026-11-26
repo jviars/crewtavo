@@ -176,7 +176,7 @@ export class TextsRefusal extends Error {}
 
 /** Why the office can't turn texts back on for a number that texted STOP. */
 export const startOnly = (name: string, phone: string) =>
-  `${name} texted STOP from ${phone}. Twilio, which sends your texts, refuses that number until they text START to your texting number, so it can't be turned back on from here.`;
+  `${name} texted STOP from ${phone}. The service that sends your texts refuses that number until they text START to your texting number, so it can't be turned back on from here.`;
 
 /** The clients of the company whose own phone is this number (compared as phoneMatchKey compares). */
 async function clientsWithPhone(admin: Db, companyId: string, key: string): Promise<Array<{ id: string; sms_opt_out_at: string | null }>> {

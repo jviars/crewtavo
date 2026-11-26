@@ -91,6 +91,11 @@ export interface Env {
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_FROM_NUMBER?: string;
+  /**
+   * Testing only: where Quo's API is, for a stand-in (lib/quo.ts). Unset is Quo's own
+   * (https://api.quo.com). Set, the Apps page also makes Quo's webhook on a plain http address.
+   */
+  QUO_API_URL?: string;
   /** Development only: deliver email and texts to a local Mailpit inbox (e.g. http://localhost:56324). */
   MAILPIT_URL?: string;
   TURNSTILE_SITE_KEY?: string;
