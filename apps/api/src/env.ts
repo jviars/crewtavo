@@ -138,14 +138,14 @@ export type AppEnv = { Bindings: Env & { incoming?: IncomingMessage }; Variables
 
 const normalized = new WeakMap<object, Env>();
 
+/** Settings that point an outside service at a stand-in. Never honored in production (readEnv). */
+const STAND_INS = ["LOOKALYKE_URL", "QUO_API_URL"];
+
 /**
  * Settings as the app reads them. A blank value counts as unset (an empty line copied from
  * .env.example, or a field left empty in a deploy form), and APP_URL falls back to the address the
  * platform gives the deployment, so emails sent by background tasks have working links.
  */
-/** Settings that point an outside service at a stand-in. Never honored in production (readEnv). */
-const STAND_INS = ["LOOKALYKE_URL", "QUO_API_URL"];
-
 export function readEnv(source: object): Env {
   const cached = normalized.get(source);
   if (cached) return cached;
