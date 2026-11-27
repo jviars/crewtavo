@@ -21,7 +21,7 @@ import { useWaitingCount } from "@/features/messages/done";
 import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
 import { signOutNote, subCodeWays } from "@/features/auth/textCode";
 import { inkOn } from "@/features/documents/words";
-import { createItems, foldedGroups, mobileTabs, NAV_GROUP_LABELS, NAV_GROUPS, navVisible, saveFoldedGroups, settingsItem, subCanOpen, type NavItem } from "./nav";
+import { createItems, flipSidebar, foldedGroups, mobileTabs, NAV_GROUP_LABELS, NAV_GROUPS, navVisible, saveFoldedGroups, settingsItem, sidebarClosed, subCanOpen, type NavItem } from "./nav";
 import { HelpButton, openHelp } from "./Help";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
@@ -190,6 +190,21 @@ export function AppShell() {
       saveFoldedGroups(session.userId, next);
       return next;
     });
+  // The sidebar closed to its icons (the « in the top bar, or ⌘\), so a laptop or an iPad has the room.
+  const [closed, setClosed] = useState(sidebarClosed);
+  const mac = navigator.platform.toLowerCase().includes("mac");
+  const sidebarWords = `${closed ? t("Open sidebar") : t("Close sidebar")} (${mac ? "⌘\\" : t("Ctrl \\")})`;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key !== "\\" || e.defaultPrevented) return;
+      // A phone or narrow window has no sidebar, only the tabs: nothing there to open or close.
+      if (window.matchMedia("(max-width: 900px)").matches) return;
+      e.preventDefault();
+      setClosed(flipSidebar);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const shownEmail = isPlaceholderEmail(session.profile.email) ? null : session.profile.email;
   const myName = session.profile.full_name || shownEmail || t("Account");
 
@@ -310,12 +325,13 @@ export function AppShell() {
   ];
 
   return (
-    <div className="shell">
+    <div className="shell" data-sidebar={closed ? "closed" : undefined}>
       <div className="route-progress" data-active={navigation.state !== "idle" || undefined} aria-hidden="true" />
       {!online && <OfflinePill />}
       <RestartBanner />
 
-      <aside className="sidebar" aria-label={t("Primary")} lang={shellLang}>
+      {/* Closed, each icon names itself on hover, beside it (Tooltips). */}
+      <aside className="sidebar" id="sidebar" aria-label={t("Primary")} lang={shellLang} data-tip={closed ? "right" : undefined}>
         <Link to={sub ? "/field" : "/"} className="brand" aria-label={t("Crewtavo home")} viewTransition>
           <BrandLockup size={30} />
         </Link>
@@ -325,7 +341,8 @@ export function AppShell() {
           {groups.map((group, i) => (
             <div key={i} className="nav" role={group.label ? "group" : undefined} aria-labelledby={group.label ? `nav-group-${i}` : undefined}>
               {group.label ? (
-                <button type="button" className="nav-label" id={`nav-group-${i}`} aria-expanded={!folded.includes(group.label)} aria-controls={`nav-rows-${i}`} onClick={() => toggleGroup(group.label!)}>
+                // Closed, a group's name turns into a short line and can't fold it: every link shows, as icons.
+                <button type="button" className="nav-label" id={`nav-group-${i}`} aria-expanded={!folded.includes(group.label)} aria-controls={`nav-rows-${i}`} onClick={() => toggleGroup(group.label!)} tabIndex={closed ? -1 : undefined} aria-hidden={closed || undefined}>
                   {t(group.label)}
                   <Icon name={folded.includes(group.label) ? "chevronRight" : "chevronDown"} size={12} />
                 </button>
@@ -334,8 +351,8 @@ export function AppShell() {
               )}
               <div className="nav" id={`nav-rows-${i}`}>
                 {/* A folded group still shows the page you're on, so you can see where you are. */}
-                {group.items.filter((item) => !group.label || !folded.includes(group.label) || here(item)).map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} aria-current={current(item)} viewTransition>
+                {group.items.filter((item) => closed || !group.label || !folded.includes(group.label) || here(item)).map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} aria-current={current(item)} title={closed ? t(item.label) : undefined} viewTransition>
                     {({ isActive }) => (
                       <>
                         <Icon name={item.icon} size={18} filled={active(item, isActive)} />
@@ -351,7 +368,7 @@ export function AppShell() {
         </nav>
         <nav className="nav nav-bottom" aria-label={t("Settings")}>
           {[...foot, settings].map((item) => (
-            <NavLink key={item.to} to={item.to} className={navClass(item)} viewTransition>
+            <NavLink key={item.to} to={item.to} className={navClass(item)} title={closed ? t(item.label) : undefined} viewTransition>
               {({ isActive }) => (
                 <>
                   <Icon name={item.icon} size={18} filled={active(item, isActive)} />
@@ -365,6 +382,9 @@ export function AppShell() {
 
       <div className="main">
         <header className="topbar" data-scrolled={scrolled || undefined} lang={shellLang}>
+          <button type="button" className="icon-btn hide-mobile sidebar-toggle" onClick={() => setClosed(flipSidebar)} aria-controls="sidebar" aria-expanded={!closed} aria-label={closed ? t("Open sidebar") : t("Close sidebar")} title={sidebarWords}>
+            <Icon name="chevronsLeft" size={18} />
+          </button>
           <div className="business">
             <BusinessTile name={session.company.name} settings={session.company.settings} />
             {session.companies.length > 1 ? (
@@ -382,7 +402,7 @@ export function AppShell() {
             <button type="button" className="search" onClick={openPalette} aria-label={t("Search (⌘K)")}>
               <Icon name="search" size={16} />
               <span>{t("Search")}</span>
-              <kbd className="kbd">{navigator.platform.toLowerCase().includes("mac") ? "⌘K" : t("Ctrl K")}</kbd>
+              <kbd className="kbd">{mac ? "⌘K" : t("Ctrl K")}</kbd>
             </button>
           )}
           {!sub && (

@@ -80,6 +80,7 @@ img, svg { flex-shrink: 0; }
   padding: 16px 12px; display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; height: 100vh;
   /* Clear of a phone's notch and home indicator, sideways (a big phone is wider than 900px then). */
   padding-left: max(12px, env(safe-area-inset-left)); padding-bottom: max(16px, env(safe-area-inset-bottom));
+  overflow-x: clip; transition: width var(--dur-enter) var(--ease-enter);
 }
 .brand { display: flex; align-items: center; gap: 10px; align-self: flex-start; margin: 2px 0 14px 8px; border-radius: 6px; color: var(--brand-ink); font-weight: 800; font-size: 19px; letter-spacing: -0.03em; }
 .brand:hover { color: var(--brand-ink); }
@@ -116,7 +117,7 @@ img, svg { flex-shrink: 0; }
 }
 .nav-scroll > * { flex: none; }
 /* A group's name folds its links; its caret points down while open, right while folded. */
-.nav-label { display: flex; align-items: center; gap: 4px; padding: 16px 12px 4px; border: 0; border-radius: var(--radius-sm); background: none; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); text-align: left; }
+.nav-label { position: relative; display: flex; align-items: center; gap: 4px; padding: 16px 12px 4px; border: 0; border-radius: var(--radius-sm); background: none; font-size: var(--fs-11); font-weight: 600; color: var(--quiet); text-align: left; }
 .nav-label:hover { color: var(--text-2); }
 .nav-label svg { flex: none; }
 .nav-bottom { padding-top: 8px; border-top: 1px solid var(--ground-border); }
@@ -142,6 +143,28 @@ img, svg { flex-shrink: 0; }
 .create-trigger[aria-expanded="true"] .nav-create-dot svg { color: var(--on-solid); }
 .create-trigger[aria-expanded="true"] { background: none; color: var(--ink); }
 .nav-divider { height: 1px; background: var(--ground-border); margin: 8px 12px; }
+/*
+ * Closed (the « in the top bar, or ⌘\), the sidebar narrows to its icons, 68px so they're centered
+ * where they already were. Only its edge moves: the words fade out quickly as it slides in; opening,
+ * it slides out and the words fade back in behind it. A group's name
+ * becomes a short line in the same space, so no icon moves up or down. A count fades with the words
+ * and a dot comes up on its icon instead: amber for new requests, red where someone's waiting on
+ * you, green otherwise.
+ */
+.shell[data-sidebar="closed"] { --sidebar-width: 68px; }
+.shell[data-sidebar="closed"] .sidebar { transition: width 260ms var(--ease-exit) 60ms; }
+.sidebar :is(.nav-text, .brand-name, .nav-count, .nav-dot) { transition: opacity 220ms var(--ease-out) 120ms; }
+.sidebar .nav-label { transition: color 220ms var(--ease-out) 120ms; }
+.nav-label::after { content: ""; position: absolute; left: 12px; top: 60%; width: 20px; height: 1px; background: var(--ground-border); opacity: 0; transition: opacity 120ms linear; }
+.shell[data-sidebar="closed"] .sidebar :is(.nav-text, .brand-name, .nav-count, .nav-dot) { opacity: 0; transition: opacity 80ms linear; }
+.shell[data-sidebar="closed"] .sidebar .nav-label { color: transparent; pointer-events: none; transition: color 80ms linear; }
+.shell[data-sidebar="closed"] .nav-label::after { opacity: 1; transition: opacity 220ms var(--ease-out) 120ms; }
+.shell[data-sidebar="closed"] .sidebar .nav-link:has(.nav-count, .nav-dot)::after {
+  content: ""; position: absolute; top: 6px; left: 28px; width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 0 2px var(--ground); animation: pop-in var(--dur) var(--ease-spring) 120ms both;
+}
+.shell[data-sidebar="closed"] .sidebar .nav-link:has(.nav-count-new)::after { background: var(--req-text); }
+.shell[data-sidebar="closed"] .sidebar .nav-link:has(.nav-count-alert)::after { background: var(--danger); }
 .mobile-only { display: none !important; }
 /* A word that labels a value in a stacked table row on a phone, where the column heads are hidden. */
 .mobile-inline { display: none !important; }
@@ -187,6 +210,11 @@ select.business-name:hover { background: var(--fill-2); }
 .topbar .icon-btn { width: 38px; height: 38px; border-radius: 8px; color: var(--text-3); }
 .topbar .icon-btn svg { width: 20px; height: 20px; }
 .topbar .icon-btn:hover, .topbar .icon-btn[aria-expanded="true"] { background: var(--fill-3); color: var(--ink); }
+/* The sidebar's « at the top bar's start, by the sidebar's edge; it turns to » while the sidebar is closed. */
+.topbar .sidebar-toggle { margin-left: -28px; }
+.topbar .sidebar-toggle[aria-expanded="true"]:not(:hover) { background: none; color: var(--text-3); }
+.sidebar-toggle svg { transition: transform var(--dur-enter) var(--ease-enter); }
+.shell[data-sidebar="closed"] .sidebar-toggle svg { transform: rotate(180deg); transition: transform 260ms var(--ease-exit) 60ms; }
 .notif-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--page); animation: pop-in var(--dur) var(--ease-spring); }
 .account-avatar { width: 28px; height: 28px; font-size: 11px; letter-spacing: 0.02em; overflow: hidden; }
 .topbar .account-trigger:hover, .topbar .account-trigger[aria-expanded="true"] { background: none; }
@@ -557,6 +585,8 @@ section + .more-group { margin-top: 14px; }
   .deal:hover, .category-card:hover, .guide-card:hover, .hub-actions button:hover { transform: none !important; }
   /* Create's x and the current page's pill change at once; a count doesn't pop. */
   .nav-create-dot, .nav-create-dot svg, .nav-pill[data-moving] { transition: none; }
+  /* The sidebar opens and closes at once. */
+  .sidebar, .sidebar :is(.nav-text, .brand-name, .nav-label, .nav-count, .nav-dot), .nav-label::after, .sidebar-toggle svg { transition: none !important; }
   @keyframes count-pop { to { transform: none; } }
   .switch::after { transition-duration: 1ms; }
   /* The sheets fade in and out where they are. */

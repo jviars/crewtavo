@@ -116,6 +116,8 @@ const ICONS = {
   chevronLeft: "caret-left",
   chevronDown: "caret-down",
   chevronUp: "caret-up",
+  /** The sidebar's open and close button (AppShell): two thin carets, turned to point the way it goes. */
+  chevronsLeft: "caret-double-left",
   more: "dots-three",
   grip: "dots-six-vertical",
   filter: "funnel-simple",

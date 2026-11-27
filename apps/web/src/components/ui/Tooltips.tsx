@@ -10,6 +10,8 @@
  *   (WCAG 1.4.13), so there's a moment to reach it.
  * - Not on touch, as before: there's nothing to hover, and a held finger has other uses.
  * - Not where the title only says the words already shown, unless they're cut off.
+ * - Inside data-tip="right" (the closed sidebar, whose links show only their icons) a title always
+ *   shows, and beside its element rather than above, so it doesn't cover the link above.
  *
  * While the pointer is on an element its title is lifted (titles.ts), or the browser would show its
  * tooltip too. Keyboard focus leaves it alone: browsers never show theirs for focus, so assistive
@@ -40,6 +42,8 @@ function titled(target: EventTarget | null): HTMLElement | null {
 
 /** Whether its words don't all fit (an ellipsis or a clamp). */
 const cutOff = (el: HTMLElement) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+/** Inside data-tip="right": its words aren't on screen, so its title shows, to the right. */
+const beside = (el: HTMLElement) => el.closest('[data-tip="right"]') !== null;
 
 export function Tooltips() {
   const [tip, setTip] = useState<Tip | null>(null);
@@ -73,7 +77,7 @@ export function Tooltips() {
     };
     const showSoon = (el: HTMLElement) => {
       const text = titleText(el);
-      if (!tipAdds(el, text, cutOff(el))) return hide();
+      if (!tipAdds(el, text, cutOff(el) || beside(el))) return hide();
       window.clearTimeout(showTimer);
       if (showing || Date.now() - hiddenAt < WARM) return show(el, text);
       // Still what the pointer is on, or what has focus, when the time comes (a scroll may have moved it away).
@@ -173,7 +177,7 @@ export function Tooltips() {
       }}
     >
       <Tooltip.Portal container={layerFor(tip?.anchor) ?? undefined}>
-        <Tooltip.Positioner className={styles.positioner} anchor={tip?.anchor} side="top" sideOffset={6} collisionPadding={8} positionMethod="fixed">
+        <Tooltip.Positioner className={styles.positioner} anchor={tip?.anchor} side={tip && beside(tip.anchor) ? "right" : "top"} sideOffset={6} collisionPadding={8} positionMethod="fixed">
           <Tooltip.Popup id={TOOLTIP_ID} role="tooltip" className={styles.tip}>
             {tip?.text}
           </Tooltip.Popup>
