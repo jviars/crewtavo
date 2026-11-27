@@ -184,29 +184,6 @@ export function saveFoldedGroups(userId: string, folded: string[]) {
   }
 }
 
-/**
- * Whether the sidebar is closed to its icons. Open until someone closes it, and remembered on this
- * device rather than for the person, since a laptop and a big screen want different things.
- */
-const SIDEBAR_KEY = "crewtavo.sidebar-closed";
-export function sidebarClosed(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-/** Opens a closed sidebar or closes an open one, and remembers it (a state updater for AppShell). */
-export function flipSidebar(closed: boolean): boolean {
-  try {
-    if (closed) localStorage.removeItem(SIDEBAR_KEY);
-    else localStorage.setItem(SIDEBAR_KEY, "1");
-  } catch {
-    // Private mode: it just won't be remembered.
-  }
-  return !closed;
-}
-
 /** Whether a person sees a navigation item. */
 export function navVisible(
   session: { role: string; permissions: readonly string[]; company?: { settings?: Record<string, unknown> | null; country?: string | null; timezone?: string | null } },

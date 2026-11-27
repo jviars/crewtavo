@@ -5,6 +5,7 @@
  */
 import type { CSSProperties } from "react";
 import { t } from "@/lib/i18n";
+import { sidebarClosed } from "../shell/sidebar";
 
 export function Skeleton({ width, height = 12, radius, circle, style, className }: { width?: number | string; height?: number | string; radius?: number; circle?: boolean; style?: CSSProperties; className?: string }) {
   return <span className={["skeleton", circle && "skeleton-circle", className].filter(Boolean).join(" ")} style={{ width: width ?? "100%", height, borderRadius: radius, ...style }} aria-hidden="true" />;
@@ -185,15 +186,20 @@ export function DetailSkeleton() {
   );
 }
 
-/** Sidebar + top bar outline while the session loads. */
+/**
+ * Sidebar + top bar outline while the session loads. The sidebar is outlined as this device left it:
+ * closed to its icons (shell/sidebar.ts), it's the logo and the icons alone, at that width, so it
+ * doesn't show wide and snap narrow as the app arrives.
+ */
 export function ShellSkeleton() {
+  const closed = sidebarClosed();
   return (
-    <div className="shell skeleton-wrap" role="status" aria-busy="true">
+    <div className="shell skeleton-wrap" data-sidebar={closed ? "closed" : undefined} role="status" aria-busy="true">
       <span className="sr-only">{t("Loading Crewtavo…")}</span>
       <aside className="sidebar" aria-hidden="true">
-        <div className="row" style={{ margin: "0 0 14px 6px" }}><Skeleton width={34} height={34} radius={8} /><Skeleton width={100} height={14} /></div>
+        <div className="row" style={{ margin: "0 0 14px 6px" }}><Skeleton width={34} height={34} radius={8} />{!closed && <Skeleton width={100} height={14} />}</div>
         {Array.from({ length: 11 }, (_, i) => (
-          <div key={i} className="row" style={{ height: 38, padding: "0 12px", gap: 12 }}><Skeleton width={18} height={18} radius={4} /><Skeleton width={`${50 + ((i * 17) % 35)}%`} height={11} /></div>
+          <div key={i} className="row" style={{ height: 38, padding: "0 12px", gap: 12 }}><Skeleton width={18} height={18} radius={4} />{!closed && <Skeleton width={`${50 + ((i * 17) % 35)}%`} height={11} />}</div>
         ))}
       </aside>
       <div className="main">

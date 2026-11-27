@@ -4,7 +4,10 @@
  * its short time).
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ShellSkeleton } from "../src/components/ui/Skeleton";
 import { CHAT_OFF_TAB, createItems, foldedGroups, MOBILE_TABS, mobileTabs, NAV_GROUPS, saveFoldedGroups, shortcutTarget } from "../src/components/shell/nav";
 import { noticeTone, shortWhen } from "../src/components/shell/Notifications";
 
@@ -98,6 +101,29 @@ describe("the sidebar closed to its icons", () => {
     // A count is invisible but still as wide as its number, which made the 59px column 88px wide inside.
     expect(rule('.shell[data-sidebar="closed"] .sidebar :is(.nav-count, .nav-dot)')).toMatch(/position:\s*absolute/);
     expect(rule(".nav-scroll")).toMatch(/overflow-x:\s*hidden/);
+  });
+
+  describe("while the app loads", () => {
+    afterEach(() => vi.unstubAllGlobals());
+    const saved = (value: string | null) => vi.stubGlobal("localStorage", { getItem: (k: string) => (k === "crewtavo.sidebar-closed" ? value : null) });
+    const bars = (html: string) => html.split("<aside")[1]!.split("</aside>")[0]!.split('class="skeleton"').length - 1;
+
+    it("outlines a closed sidebar closed, so it doesn't show wide and snap narrow", () => {
+      saved("1");
+      const html = renderToStaticMarkup(createElement(ShellSkeleton));
+      expect(html).toContain('<div class="shell skeleton-wrap" data-sidebar="closed"');
+      // The logo and an icon a link, with no bars for the words beside them.
+      expect(bars(html)).toBe(12);
+    });
+
+    it("outlines it open otherwise, and when storage is off", () => {
+      saved(null);
+      const open = renderToStaticMarkup(createElement(ShellSkeleton));
+      expect(open).not.toContain("data-sidebar");
+      expect(bars(open)).toBe(24);
+      vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); } });
+      expect(renderToStaticMarkup(createElement(ShellSkeleton))).not.toContain("data-sidebar");
+    });
   });
 
   it("keeps a dot on the icon of a link that has a count", () => {
