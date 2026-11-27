@@ -109,10 +109,10 @@ img, svg { flex-shrink: 0; }
 /*
  * The links scroll between Create and the foot, so Apps and Settings stay in view however long the
  * list is; it fades at the bottom edge where there's more below. Room around it for a link's focus
- * ring, and its scrollbar sits on the sidebar's own edge.
+ * ring, and its scrollbar sits on the sidebar's own edge. It scrolls up and down only, never sideways.
  */
 .nav-scroll {
-  position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; margin: -4px -12px 0 -4px; padding: 4px 12px 28px 4px;
+  position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; margin: -4px -12px 0 -4px; padding: 4px 12px 28px 4px;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
 }
 .nav-scroll > * { flex: none; }
@@ -157,6 +157,8 @@ img, svg { flex-shrink: 0; }
 .sidebar .nav-label { transition: color 220ms var(--ease-out) 120ms; }
 .nav-label::after { content: ""; position: absolute; left: 12px; top: 60%; width: 20px; height: 1px; background: var(--ground-border); opacity: 0; transition: opacity 120ms linear; }
 .shell[data-sidebar="closed"] .sidebar :is(.nav-text, .brand-name, .nav-count, .nav-dot) { opacity: 0; transition: opacity 80ms linear; }
+/* A faded count stays where it was, at the link's right end, but takes no room: in the row it made the links wider than the closed sidebar, which then scrolled sideways. */
+.shell[data-sidebar="closed"] .sidebar :is(.nav-count, .nav-dot) { position: absolute; right: 12px; }
 .shell[data-sidebar="closed"] .sidebar .nav-label { color: transparent; pointer-events: none; transition: color 80ms linear; }
 .shell[data-sidebar="closed"] .nav-label::after { opacity: 1; transition: opacity 220ms var(--ease-out) 120ms; }
 .shell[data-sidebar="closed"] .sidebar .nav-link:has(.nav-count, .nav-dot)::after {

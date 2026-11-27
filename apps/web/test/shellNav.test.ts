@@ -3,6 +3,7 @@
  * start something from anywhere (G S, N R), and how a notification reads at a glance (its tone and
  * its short time).
  */
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHAT_OFF_TAB, createItems, foldedGroups, MOBILE_TABS, mobileTabs, NAV_GROUPS, saveFoldedGroups, shortcutTarget } from "../src/components/shell/nav";
 import { noticeTone, shortWhen } from "../src/components/shell/Notifications";
@@ -85,6 +86,22 @@ describe("folded sidebar groups", () => {
     memory();
     localStorage.setItem("crewtavo.nav-folded.ana", "{oops");
     expect(foldedGroups("ana")).toEqual([]);
+  });
+});
+
+describe("the sidebar closed to its icons", () => {
+  const base = readFileSync(new URL("../src/styles/base.css", import.meta.url), "utf8");
+  /** A selector's own declarations, from the rule that starts a line with it. */
+  const rule = (selector: string) => new RegExp(`^${selector.replace(/[.*+?^$()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`, "m").exec(base)?.[1] ?? "";
+
+  it("doesn't scroll sideways: a faded count takes no room there, and the links only scroll up and down", () => {
+    // A count is invisible but still as wide as its number, which made the 59px column 88px wide inside.
+    expect(rule('.shell[data-sidebar="closed"] .sidebar :is(.nav-count, .nav-dot)')).toMatch(/position:\s*absolute/);
+    expect(rule(".nav-scroll")).toMatch(/overflow-x:\s*hidden/);
+  });
+
+  it("keeps a dot on the icon of a link that has a count", () => {
+    expect(rule('.shell[data-sidebar="closed"] .sidebar .nav-link:has(.nav-count, .nav-dot)::after')).toContain("border-radius: 50%");
   });
 });
 
