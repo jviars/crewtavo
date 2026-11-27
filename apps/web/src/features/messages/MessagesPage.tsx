@@ -28,7 +28,8 @@ import { MessageBody } from "../clients/MessageBody";
 import { messageFrom, messagePeople } from "../clients/messagePeople";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ConversationRow } from "./ConversationRow";
-import { isWaiting, useDoneMarks, useMarkDone } from "./done";
+import { conversationsFrom } from "./conversations";
+import { answersMessages, isWaiting, useDoneMarks, useMarkDone } from "./done";
 import { UnknownRows, UnknownThread, useUnknownNumbers } from "./UnknownNumbers";
 import { numbersFor } from "./unknownTexts";
 
@@ -42,6 +43,9 @@ const FILTERS = [
 const ICON: Record<string, IconName> = { email: "mail", sms: "messages", note: "note", call: "phone" };
 
 interface Msg { id: string; channel: string; direction: string; subject: string | null; body: string; status: string; created_at: string; call: unknown; client: { id: string; display_name: string } | null }
+const LISTED = "id, channel, direction, subject, body, status, created_at, call, client:clients(id, display_name)";
+/** How many messages the list reads, newest first. */
+const READ = 500;
 
 /** Whether the business has any calls here (from its Quo number), so Calls is offered as a filter. */
 function useHasCalls() {
@@ -77,27 +81,28 @@ export function MessagesPage() {
     queryFn: async () => {
       let q = supabase()
         .from("messages")
-        .select("id, channel, direction, subject, body, status, created_at, call, client:clients(id, display_name)")
+        .select(LISTED)
         .eq("company_id", session.company.id)
         .in("channel", [...f.channels])
         .not("client_id", "is", null)
         .order("created_at", { ascending: false })
-        .limit(500);
+        .limit(READ);
       if (filter === "in") q = q.eq("direction", "in");
-      return unwrap(await q) as unknown as Msg[];
+      // With them, each waiting conversation's latest message, for those who answer: one that waits
+      // has a row to mark done even when its latest message is older than the ones read. Newest
+      // first and as many, so a waiting conversation among the messages read is always among these.
+      const [rows, waiting] = await Promise.all([
+        q,
+        answersMessages(session) ? supabase().rpc("waiting_conversation_messages", { p_company: session.company.id }).select(LISTED).order("created_at", { ascending: false }).limit(READ) : null,
+      ]);
+      return { rows: unwrap(rows) as unknown as Msg[], waiting: waiting && (unwrap(waiting) as unknown as Msg[]) };
     },
   });
   // One row per client: their latest message.
-  const conversations = useMemo(() => {
-    const seen = new Map<string, Msg & { count: number }>();
-    for (const m of messages.data ?? []) {
-      if (!m.client) continue;
-      const existing = seen.get(m.client.id);
-      if (existing) existing.count++;
-      else seen.set(m.client.id, { ...m, count: 1 });
-    }
-    return [...seen.values()].filter((c) => !term || c.client!.display_name.toLowerCase().includes(term.toLowerCase()) || c.body.toLowerCase().includes(term.toLowerCase()));
-  }, [messages.data, term]);
+  const conversations = useMemo(
+    () => conversationsFrom(messages.data?.rows ?? [], messages.data?.waiting, f.channels).filter((c) => !term || c.client!.display_name.toLowerCase().includes(term.toLowerCase()) || c.body.toLowerCase().includes(term.toLowerCase())),
+    [messages.data, f, term],
+  );
   const open = (clientId: string | null) => setParams(clientId ? { client: clientId } : {}, { replace: true });
   // Texts and calls from unknown numbers are from outside: none under Email, and only theirs under Texts or Calls.
   const unknownNumbers = numbersFor(strangers.data ?? [], filter, term);

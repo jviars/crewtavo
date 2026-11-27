@@ -5807,6 +5807,33 @@ isOneToOne: false
               "id": string,"price": number,"price_note": string
             }[]
                            },
+"waiting_conversation_messages":
+{ Args: { "p_company": string }; Returns: {
+              "body": string,
+"call": Json | null,
+"channel": string,
+"client_id": string | null,
+"company_id": string,
+"created_at": string,
+"direction": string,
+"external_id": string | null,
+"from_name": string | null,
+"from_phone": string | null,
+"id": string,
+"origin": string | null,
+"recipients": Json | null,
+"related_id": string | null,
+"related_type": string | null,
+"sent_by": string | null,
+"status": string,
+"subject": string | null
+            }[]
+                          SetofOptions: {
+        from: "*"
+        to: "messages"
+        isOneToOne: false
+        isSetofReturn: true
+      } },
 "waiting_conversations":
 { Args: { "p_company": string }; Returns: number
                            },

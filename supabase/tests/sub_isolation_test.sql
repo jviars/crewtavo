@@ -724,8 +724,9 @@ select t1070.check(array(
   'visit_extra_scope(uuid)',
   -- What visits bill: the roles that read a job's lines only (it checks), no rows for a sub.
   'visit_prices(uuid[])',
-  -- The dot on Messages: runs as the caller and counts only messages they can already read, so it tells a sub nothing new.
-  'waiting_conversations(uuid)',
+  -- The conversations that wait in Messages, and the dot that counts them: both run as the caller over the clients and
+  -- messages they can already read, so they tell a sub nothing new.
+  'waiting_conversation_messages(uuid)', 'waiting_conversations(uuid)',
   'web_analytics_save(uuid, jsonb)', 'web_stats(uuid, date, date)',
   'website_forms_set_enabled(uuid, boolean)', 'withdraw_sub_offer(uuid)']::text[],
   'the functions a signed-in person can call are the known list (a new one needs a decision about subs, here)');
