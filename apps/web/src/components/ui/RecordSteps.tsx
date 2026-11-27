@@ -12,11 +12,15 @@ import { Icon } from "./Icon";
 
 type Walk = { walk: string[] };
 
-/** The rows' pages in a list, as they're shown, for the record `link` opens. */
+/**
+ * The rows' pages in a list, as they're shown, for the record `link` opens. Each page once, where it
+ * first comes: a list can open one record from several rows (Snow's storm log has a row for each
+ * storm on a job), and counted twice › would lead back to the same page.
+ */
 export function listWalk(link: HTMLAnchorElement): string[] {
   const list = link.closest(".il");
   if (!list) return [];
-  return [...list.querySelectorAll<HTMLAnchorElement>("a.il-link[href]")].map((a) => a.pathname);
+  return [...new Set([...list.querySelectorAll<HTMLAnchorElement>("a.il-link[href]")].map((a) => a.pathname))];
 }
 
 /** Router state for opening a row: what it already carried, and the list's rows. */
