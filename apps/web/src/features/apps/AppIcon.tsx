@@ -17,6 +17,7 @@ import lobLogo from "@/assets/apps/lob.svg";
 import metaLogo from "@/assets/apps/meta.svg";
 import outlookLogo from "@/assets/apps/outlook.svg";
 import quickbooksLogo from "@/assets/apps/quickbooks.svg";
+import quoLogo from "@/assets/apps/quo.png";
 import stripeLogo from "@/assets/apps/stripe.svg";
 import sveltiaLogo from "@/assets/apps/sveltia.svg";
 import twilioLogo from "@/assets/apps/twilio.svg";
@@ -48,6 +49,7 @@ const LOGOS: Record<string, string> = {
   stripe: stripeLogo,
   abc_supply: abcSupplyLogo,
   twilio: twilioLogo,
+  quo: quoLogo,
   lob: lobLogo,
   anthropic: claudeLogo,
   fal: falLogo,
@@ -58,7 +60,7 @@ const LOGOS: Record<string, string> = {
 /** Wordmark-shaped logos get more width. */
 const WIDE = new Set(["zoho_calendar", "zoho_books", "abc_supply"]);
 /** Logos that are already a whole app icon fill the tile. */
-const FULL = new Set(["sveltia", "open_meteo"]);
+const FULL = new Set(["sveltia", "open_meteo", "quo"]);
 
 /** sm: 36px (a collection's icons); md: a card's 48px; lg: 64px; xl: the top of an app's own page, 88px (64px on a phone). */
 export type IconSize = "sm" | "md" | "lg" | "xl";

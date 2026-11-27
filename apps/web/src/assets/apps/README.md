@@ -20,6 +20,10 @@ open-meteo/open-meteo, Public/android-chrome-512x512.png, downloaded 2026-11-14)
 app (forecasts from its paid service). It's already a rounded app icon, so AppIcon.tsx shows it edge
 to edge.
 
+quo.png is Quo's own app icon, unchanged, from its website (cdn.quo.com/favicon/android-chrome-512x512.png,
+downloaded 2026-11-27), for the Quo app (texts and calls from a Quo number). It's already a rounded app icon,
+so AppIcon.tsx shows it edge to edge.
+
 abc-supply.svg is ABC Supply's logo as its own website shows it (abcsupply.com, wp-content/uploads/
 2026/03/ABC-US-Exteriors-Logo.svg, downloaded 2026-10-22), in ABC's red and blue, for the ABC Supply
 app (material prices). It's a wordmark, so AppIcon.tsx gives it more width.
