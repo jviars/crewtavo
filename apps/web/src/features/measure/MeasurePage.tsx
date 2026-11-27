@@ -45,6 +45,7 @@ import { ShareDrawing, type DrawingRow } from "./drawings";
 import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, imageryUsable, isImageryId, mapKeys, openingImagery, OVERLAYS, probeImagery, resolveAuto, setMyDefault, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { imageryMenu, ImageryPicker, type ImageryPickerProps } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
+import { roofOrLawn } from "./modes";
 import { drawnAs, itemAfterTool } from "./nextShape";
 import { drawable, loadedShapes } from "./reopen";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
@@ -390,9 +391,10 @@ export function MeasurePage() {
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   // The asphalt areas only (every area, on a drawing that marks none as an item): not the concrete, gravel or patches.
   const asphaltTons = depthIn ? (pavingQuantities(summary.sections).asphalt_sqyd * depthIn * 110) / 2000 : 0;
-  // With Roofing installed the roof tools show on every row; anyone else gets them once they set a pitch or an edge.
+  // With Roofing installed the roof tools show on every row; anyone else gets them once they set a pitch or an edge,
+  // or open Roof pitch and edges on a drawing that isn't a lawn (roofOrLawn, below).
   const roofer = isRoofingCompany(company);
-  const roofing = roofer || params.has("roofing") || roofOpen || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
+  const roofSet = roofer || params.has("roofing") || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
   // The roof, step by step (RoofSteps.tsx), with Roofing installed and for a roof opened from Roofing.
   const roofSteps = roofer || params.has("roofing");
   const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
@@ -405,7 +407,7 @@ export function MeasurePage() {
   // opened with the drawing keeps what was saved.
   const lawnTrade = LAWN_TRADES.has(company.trade_preset ?? "");
   const lawnDrawing = Object.values(items).some((i) => lawnItem(i)) || summary.sections.some((s) => s.slope);
-  const lawn = !roofing && (lawnTrade || lawnDrawing || lawnOn);
+  const { roofing, lawn } = roofOrLawn({ roof: roofSet, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });
   const slopeKeys = useMemo(() => {
     const cuts = JSON.stringify(shapes.filter((s) => s.kind === "Cutout").map((s) => s.geometry));
     return Object.fromEntries(shapes.filter((s) => s.kind === "Area").map((s) => [s.id, JSON.stringify(s.geometry) + cuts]));
@@ -1520,7 +1522,7 @@ export function MeasurePage() {
   );
 
   const roofCard = (
-    <details key="roof" className="measure-extra" open={roofing} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>
+    <details key="roof" className="measure-extra" open={roofing || roofOpen} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>
       <summary>
         <Icon name="pitch" size={17} />
         <span className="measure-extra-text"><strong>Roof pitch and edges</strong><span>{squares !== null ? `${formatNumber(squares, 1)} squares` : "Roofing squares, drip edge, ridge cap"}</span></span>

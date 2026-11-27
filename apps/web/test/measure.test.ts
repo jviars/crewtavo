@@ -4,6 +4,7 @@ import { pavingItem } from "@crewtavo/core/paving";
 import { readFileSync } from "node:fs";
 import { boxAround, buildingAt, buildingsOn } from "../src/features/measure/buildings";
 import { lasHeader } from "../src/features/measure/lidar";
+import { roofOrLawn } from "../src/features/measure/modes";
 import { drawnAs, itemAfterTool } from "../src/features/measure/nextShape";
 import { drawable, loadedShapes } from "../src/features/measure/reopen";
 import { photoAngle, pitchFromAngle, startingHandles, tiltOf } from "../src/features/measure/pitchMath";
@@ -197,5 +198,23 @@ describe("the Depth card", () => {
     expect(card).not.toMatch(/open=\{[^}]*depthIn/);
     expect(card).not.toMatch(/open=\{[^}]*\(depth\)/);
     expect(page).toContain("const [depthOpen, setDepthOpen] = useState(false);");
+  });
+});
+
+describe("roof tools and lawn tools", () => {
+  it("keeps a lawn's tools when Roof pitch and edges is only opened", () => {
+    // A lawn care business looks into the roof card: its lawn items, Find, slope and Lawn card stay.
+    expect(roofOrLawn({ roof: false, roofCardOpen: true, lawn: true })).toEqual({ roofing: false, lawn: true });
+    expect(roofOrLawn({ roof: false, roofCardOpen: false, lawn: true })).toEqual({ roofing: false, lawn: true });
+    // Once a pitch or an edge is set it's a roof, as before; so is anything with Roofing installed.
+    expect(roofOrLawn({ roof: true, roofCardOpen: true, lawn: true })).toEqual({ roofing: true, lawn: false });
+    expect(roofOrLawn({ roof: true, roofCardOpen: false, lawn: true })).toEqual({ roofing: true, lawn: false });
+    // With no lawn in it, opening the card still brings out the roof tools.
+    expect(roofOrLawn({ roof: false, roofCardOpen: true, lawn: false })).toEqual({ roofing: true, lawn: false });
+    expect(roofOrLawn({ roof: false, roofCardOpen: false, lawn: false })).toEqual({ roofing: false, lawn: false });
+    const page = readFileSync(new URL("../src/features/measure/MeasurePage.tsx", import.meta.url), "utf8");
+    expect(page).toContain("const { roofing, lawn } = roofOrLawn({ roof: roofSet, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });");
+    // The card itself opens and shuts by its own switch, a roof or not.
+    expect(page).toContain("<details key=\"roof\" className=\"measure-extra\" open={roofing || roofOpen} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>");
   });
 });
