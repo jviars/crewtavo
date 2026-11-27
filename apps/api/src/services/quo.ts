@@ -249,8 +249,9 @@ async function textWentOut(admin: Db, account: QuoAccount, event: QuoEvent, wait
     const [sent, byId, byRecipient] = await Promise.all([
       admin.from("quo_sent").select("message_id").eq("company_id", account.companyId).eq("message_id", id).maybeSingle(),
       admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("external_id", id).eq("channel", "sms").limit(10),
-      // A text to several people keeps each one's Quo id on that recipient (services/recipients.ts).
-      admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("channel", "sms").contains("recipients", [{ id }]).limit(10),
+      // A text to several people keeps each one's Quo id on that recipient (services/recipients.ts). As JSON
+      // text: given an array, the client writes a Postgres array ({...}), which a jsonb column refuses.
+      admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("channel", "sms").contains("recipients", JSON.stringify([{ id }])).limit(10),
     ]);
     // Unread isn't "not ours": it would be filed again as typed in Quo.
     const error = sent.error ?? byId.error ?? byRecipient.error;

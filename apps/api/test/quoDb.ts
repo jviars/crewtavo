@@ -44,6 +44,7 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
     let head = false;
     let returning = false;
     let one: "single" | "maybe" | null = null;
+    let failure: { message: string } | null = null;
     let limit = Infinity;
     let order: { column: string; ascending: boolean } | null = null;
     const tests: Array<(row: Row) => boolean> = [];
@@ -63,6 +64,7 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
       return out;
     };
     const run = (): { data: unknown; error: { message: string; code?: string } | null; count?: number } => {
+      if (failure) return { data: null, error: failure };
       const rows = table(name);
       if (op === "insert" || op === "upsert") {
         const unique = UNIQUE[name];
@@ -142,7 +144,13 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
       lte: (c: string, v: unknown) => (tests.push((r) => r[c] <= (v as never)), builder),
       gt: (c: string, v: unknown) => (tests.push((r) => r[c] > (v as never)), builder),
       gte: (c: string, v: unknown) => (tests.push((r) => r[c] >= (v as never)), builder),
-      contains: (c: string, v: unknown) => (tests.push((r) => Array.isArray(v) && Array.isArray(r[c]) && v.every((want: Row) => (r[c] as Row[]).some((have) => Object.entries(want).every(([k, x]) => have?.[k] === x)))), builder),
+      // Like PostgREST: a jsonb value only as JSON text. An array would be sent as a Postgres array, which jsonb refuses.
+      contains: (c: string, v: unknown) => {
+        if (typeof v !== "string") return ((failure = { message: `invalid input syntax for type json (${c})` }), builder);
+        const want = JSON.parse(v) as Row[];
+        tests.push((r) => Array.isArray(r[c]) && want.every((w) => (r[c] as Row[]).some((have) => Object.entries(w).every(([k, x]) => have?.[k] === x))));
+        return builder;
+      },
       match: (values: Row) => (tests.push((r) => Object.entries(values).every(([k, v]) => r[k] === v)), builder),
       filter: (c: string, operator: string, v: string | null) => {
         if (operator === "match") tests.push((r) => typeof r[c] === "string" && new RegExp(v!).test(r[c]));
