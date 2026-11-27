@@ -258,7 +258,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     channel === "email"
       ? await sendToEach(people, (person) => email(person.to, message(linkFor("email", person.to))))
       : await sendToEach(people, async (person) => {
-          const result = await textWithStopLine(admin, s.companyId, person.to, `${company.name}: ${intro} ${linkFor("sms", person.to)}`, (text) => sendSms(s.env, { to: person.to, body: text, company: s.companyId }));
+          const result = await textWithStopLine(admin, s.companyId, person.to, `${company.name}: ${intro} ${linkFor("sms", person.to)}`, (text) => sendSms(s.env, { to: person.to, body: text, company: s.companyId, kept: true }));
           await noteRefusedText(admin, client, person.to, result, s.companyId);
           return result;
         });

@@ -175,7 +175,7 @@ async function deliver(
     if (channel === "email") {
       result = await emailClient(env, { companyId: d.companyId, company: d.company, client: d.client, subject: d.subject, text: body, baseUrl: d.baseUrl, footer: companyFooter(d.company) });
     } else {
-      result = await sendSms(env, { to: d.client.phone!, body }, d.companyId);
+      result = await sendSms(env, { to: d.client.phone!, body, kept: true }, d.companyId);
       await noteRefusedText(admin, d.client, d.client.phone!, result, d.companyId);
       // They've been told how to stop, so their next text from the business doesn't say it again.
       if (result.sent) await noteTold(admin, d.companyId, d.client.phone!);

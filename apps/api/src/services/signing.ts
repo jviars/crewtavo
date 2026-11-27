@@ -299,7 +299,7 @@ async function deliverCopy(s: SigningScope, quote: Quote, company: Company, link
       if (texted && textsOffTo(texted, to)) return { sent: false, reason: textsOffRefusal(who) };
       // Nor to any other number that texted STOP.
       if (await numberStopped(adminClient(s.env), s.companyId, to)) return { sent: false, reason: numberStoppedRefusal(to) };
-      result = await textWithStopLine(adminClient(s.env), s.companyId, to, sms(linkFor("sms", to)), (text) => sendSms(s.env, { to, body: text, company: s.companyId }));
+      result = await textWithStopLine(adminClient(s.env), s.companyId, to, sms(linkFor("sms", to)), (text) => sendSms(s.env, { to, body: text, company: s.companyId, kept: true }));
       if (texted) await noteRefusedText(adminClient(s.env), texted, to, result, s.companyId);
     }
   } catch (error) {

@@ -24,7 +24,7 @@ import { phoneMatchKey } from "@crewtavo/core/recipients";
 import type { Env } from "../env";
 import { allow } from "../lib/limit";
 import { reportError } from "../lib/monitoring";
-import { QuoError, quoRequest, type QuoAccount } from "../lib/quo";
+import { QuoError, quoKeptMark, quoRequest, type QuoAccount } from "../lib/quo";
 import type { Db } from "../lib/supabase";
 import { receiveText, tellOffice, UNKNOWN_PER_COMPANY, UNKNOWN_PER_NUMBER } from "./inboundTexts";
 import { lastDigits, phoneKey } from "./textsOff";
@@ -237,7 +237,8 @@ export async function fileSentText(admin: Db, companyId: string, text: SentText,
 /**
  * A text the number sent reached its end: delivered, or not. One Crewtavo sent has its status
  * brought up to date; any other was typed in the Quo app and is filed. A report can beat
- * Crewtavo's own note that it sent the text by a moment, so a fresh one is looked at twice.
+ * Crewtavo's own note that it sent the text by a moment, so a fresh one is looked at twice. One
+ * Crewtavo sent and keeps no message for (a sign-in code, a notice to the team) is let go at once.
  */
 async function textWentOut(admin: Db, account: QuoAccount, event: QuoEvent, wait: (ms: number) => Promise<unknown>): Promise<void> {
   const r = event.data?.resource ?? {};
@@ -246,8 +247,9 @@ async function textWentOut(admin: Db, account: QuoAccount, event: QuoEvent, wait
   if (!id) return;
   const failed = event.type !== "message.delivered";
   const ours = async () => {
+    const mark = quoKeptMark(id);
     const [sent, byId, byRecipient] = await Promise.all([
-      admin.from("quo_sent").select("message_id").eq("company_id", account.companyId).eq("message_id", id).maybeSingle(),
+      admin.from("quo_sent").select("message_id").eq("company_id", account.companyId).in("message_id", mark ? [id, mark] : [id]),
       admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("external_id", id).eq("channel", "sms").limit(10),
       // A text to several people keeps each one's Quo id on that recipient (services/recipients.ts). As JSON
       // text: given an array, the client writes a Postgres array ({...}), which a jsonb column refuses.
@@ -257,15 +259,20 @@ async function textWentOut(admin: Db, account: QuoAccount, event: QuoEvent, wait
     const error = sent.error ?? byId.error ?? byRecipient.error;
     if (error) throw new Error(`Couldn't look up the text Quo reported on: ${error.message}`);
     const kept = [...(byId.data ?? []), ...(byRecipient.data ?? []).filter((row) => !byId.data?.some((k) => k.id === row.id))];
-    return { sent: Boolean(sent.data), kept };
+    const noted = (sent.data ?? []).map((row) => row.message_id);
+    // `awaited`: its sender saves a message with this id (quoKeptMark), so there's one to wait for.
+    return { sent: noted.includes(id), awaited: mark !== null && noted.includes(mark), kept };
   };
   let found = await ours();
   // Crewtavo saves its message once everyone is texted, and notes the text as its own just after Quo
-  // takes it: a report can come first. Wait a moment; if it's ours and still not saved, Quo sends it again.
-  if (!found.kept.length && Date.now() - Date.parse(isoOr(r.createdAt, new Date(0).toISOString())) < 60_000) {
+  // takes it: a report can come first. Wait a moment; if a message is coming and still isn't saved,
+  // Quo sends the report again. Not for a text of Crewtavo's that nobody keeps a message for: there's
+  // nothing to wait for, and nothing for Quo to try again.
+  const fresh = Date.now() - Date.parse(isoOr(r.createdAt, new Date(0).toISOString())) < 60_000;
+  if (!found.kept.length && fresh && (found.awaited || !found.sent)) {
     await wait(3000);
     found = await ours();
-    if (found.sent && !found.kept.length) throw new Error("Quo reported on a text Crewtavo hasn't saved yet. Quo will send the report again.");
+    if (found.awaited && !found.kept.length) throw new Error("Quo reported on a text Crewtavo hasn't saved yet. Quo will send the report again.");
   }
   if (found.kept.length) {
     for (const row of found.kept) {

@@ -244,7 +244,7 @@ export async function confirmBooking(
       if (people.length) {
         const body = `${co.name}: ${line}${co.phone ? ` Questions? Call ${co.phone}.` : ""}`;
         const delivery = await sendToEach(people, async (person) => {
-          const sent = await textWithStopLine(admin, co.id, person.to, body, (text) => sendSms(env, { to: person.to, body: text }, co.id));
+          const sent = await textWithStopLine(admin, co.id, person.to, body, (text) => sendSms(env, { to: person.to, body: text, kept: true }, co.id));
           await noteRefusedText(admin, client, person.to, sent, co.id);
           return sent;
         });

@@ -301,6 +301,15 @@ export async function quoUserFor(env: Pick<Env, "QUO_API_URL">, account: Pick<Qu
   return users.find((u) => u.email === wanted)?.id ?? null;
 }
 
+/**
+ * quo_sent's second row for a text whose sender keeps it on a timeline (a message with Quo's id,
+ * SmsMessage.kept): a report on it that comes before that message is saved is worth waiting for
+ * (services/quo.ts textWentOut). A text nobody keeps (a sign-in code, a notice to the team) has only
+ * its own row, and its reports are let go at once. A row, because quo_sent has no column to say it
+ * in, and it's only ever read by a text's exact id. Null for an id too long to mark (never Quo's).
+ */
+export const quoKeptMark = (messageId: string): string | null => (messageId.length <= 195 ? `${messageId} kept` : null);
+
 /** What Quo said to a text: its id, or why it didn't take it. */
 export type QuoSent = { ok: true; id: string } | { ok: false; status: number; title: string | null; message: string };
 

@@ -17,7 +17,7 @@ import { serviceUrl, type Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
 import { smtpReach, smtpSend, SmtpError, type SmtpReach, type SmtpSettings } from "./smtp";
-import { companyQuo, forgetQuo, postQuoText, quoUserFor, type QuoAccount } from "./quo";
+import { companyQuo, forgetQuo, postQuoText, quoKeptMark, quoUserFor, type QuoAccount } from "./quo";
 import { adminClient } from "./supabase";
 import { companyTwilio, postMessage, textingCountry, twilioFor, type TwilioAccount } from "./twilio";
 
@@ -454,6 +454,13 @@ export interface SmsMessage {
    * Crewtavo sends by itself goes to Quo's Done view, unless the company turned that off.
    */
   by?: { userId: string } | null;
+  /**
+   * The sender keeps this text on a client's timeline, as a message with the id it's given back.
+   * On Quo, a delivery report that comes before that message is saved then waits for it
+   * (services/quo.ts). Left out for a text nobody keeps by its id (a sign-in code, a notice to the
+   * team, a sub's or autopay's text): Quo's reports on those are let go.
+   */
+  kept?: boolean;
 }
 
 /**
@@ -491,7 +498,11 @@ async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): P
   const sent = await postQuoText(env, account, { to, body: message.body.slice(0, 1600), quiet, senderUserId });
   if (sent.ok) {
     // Before anything else: Quo reports every text the number sends, and this one is Crewtavo's.
-    const { error } = await adminClient(env).from("quo_sent").upsert({ company_id: account.companyId, message_id: sent.id });
+    // With it, whether a message is about to be saved for the report to land on (quoKeptMark).
+    const mark = message.kept ? quoKeptMark(sent.id) : null;
+    const { error } = await adminClient(env)
+      .from("quo_sent")
+      .upsert([{ company_id: account.companyId, message_id: sent.id }, ...(mark ? [{ company_id: account.companyId, message_id: mark }] : [])]);
     if (error) reportError(new Error(`Couldn't note a text sent through Quo: ${error.message}`), { feature: "quo" });
     return { sent: true, id: sent.id };
   }

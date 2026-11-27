@@ -842,7 +842,7 @@ export async function sendAutopayInvite(
   const sms = (url: string) => words(url).sms;
   // The button says what tapping it does here; receipts and notices keep "Manage autopay".
   const button = card ? "Confirm autopay" : "Save your card";
-  const result = input.channel === "email" ? await emailFrom(env, company, client.email!.trim(), subject, text(links.own), base, button) : await textWithStopLine(admin, input.companyId, client.phone!, sms(links.own), (text) => sendSms(env, { to: client.phone!, body: text, company: input.companyId }));
+  const result = input.channel === "email" ? await emailFrom(env, company, client.email!.trim(), subject, text(links.own), base, button) : await textWithStopLine(admin, input.companyId, client.phone!, sms(links.own), (text) => sendSms(env, { to: client.phone!, body: text, company: input.companyId, kept: true }));
   if (input.channel === "sms") await noteRefusedText(admin, client, client.phone!, result, input.companyId);
   if (!result.sent) throw new Error(result.reason ?? "The invite wasn't sent.");
   await logMessage(admin, {

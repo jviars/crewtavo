@@ -814,7 +814,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
         // The first text a number gets says how to stop them, and a promotional one always does (services/stopLine.ts).
         const result = await textWithStopLine(
           admin, ctx.company.id, person.to, render(action.body, person.contact_id ? forContacts : ctx),
-          (body) => sendSms(env, { to: person.to, body }, ctx.company.id),
+          (body) => sendSms(env, { to: person.to, body, kept: true }, ctx.company.id),
           { promotional: Boolean(ctx.campaign?.marketing) },
         );
         await noteRefusedText(admin, client, person.to, result, ctx.company.id);

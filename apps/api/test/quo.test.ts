@@ -13,7 +13,7 @@ import type { Env } from "../src/env";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 import { sendSms } from "../src/lib/notify";
 import { companyQuo, forgetQuo, quoRequest, verifyQuoWebhook, type QuoSettings } from "../src/lib/quo";
-import { callFromApi } from "../src/services/quo";
+import { callFromApi, handleQuoEvent } from "../src/services/quo";
 import { forgetTwilio } from "../src/lib/twilio";
 import { beginQuoImport, importFromQuo } from "../src/services/quoImport";
 import { memoryDb, type MemoryDb, type Row } from "./quoDb";
@@ -320,6 +320,46 @@ describe("Quo's deliveries", () => {
     expect(data.tables.messages!.find((m) => m.id === "m-both")).toMatchObject({ status: "failed" });
     expect(data.tables.messages!.filter((m) => m.body === "Reminder")).toHaveLength(1);
   });
+
+  it("note a text its sender keeps on a timeline apart from one nobody keeps", async () => {
+    const data = await connectedDb();
+    let n = 0;
+    vi.stubGlobal("fetch", fakeQuo({ "POST /messages": () => ({ status: 202, body: { data: { id: `ACnote${++n}` } } }) }).fetcher);
+    // A sign-in code, or a notice to the team: Crewtavo's, and nothing more.
+    await sendSms(env, { to: ANA, body: "Your code is 123456", company: CO });
+    // A quote's text: its sender saves a message with Quo's id.
+    await sendSms(env, { to: ANA, body: "Here's your quote", company: CO, kept: true });
+    expect(data.tables.quo_sent!.map((row) => row.message_id)).toEqual(["ACnote1", "ACnote2", "ACnote2 kept"]);
+  });
+
+  it("answer Quo at once about a text nobody keeps on a timeline, without filing it as typed in Quo", async () => {
+    const data = await connectedDb({}, { quo_sent: [{ company_id: CO, message_id: "ACcode" }, { company_id: CO, message_id: "ACnotice" }] });
+    const started = Date.now();
+    const delivered = await deliver(messageEvent("message.delivered", { id: "ACcode", direction: "outgoing", text: "Your code is 123456", status: "delivered" }, { senderIdentifier: OWN, recipientIdentifiers: [ANA] }));
+    const failed = await deliver(messageEvent("message.failed", { id: "ACnotice", direction: "outgoing", text: "New request from Ana", errorCode: "30003" }, { senderIdentifier: OWN, recipientIdentifiers: [ANA] }));
+    expect([delivered.status, failed.status]).toEqual([200, 200]);
+    // No three-second wait for a message that isn't coming.
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(data.tables.messages ?? []).toEqual([]);
+    expect(data.tables.quo_events!.every((row) => row.done_at)).toBe(true);
+  });
+
+  it("wait for the message a sender is still saving, and have Quo report again when it isn't there yet", async () => {
+    const data = await connectedDb({}, { quo_sent: [{ company_id: CO, message_id: "ACquote" }, { company_id: CO, message_id: "ACquote kept" }] });
+    const account = (await companyQuo(env, CO))!;
+    const report = messageEvent("message.failed", { id: "ACquote", direction: "outgoing", text: "Here's your quote", errorCode: "30003" }, { senderIdentifier: OWN, recipientIdentifiers: [ANA] });
+    // Not saved after the wait: Quo is asked to send the report again (its webhook answers 500).
+    const waited: number[] = [];
+    await expect(handleQuoEvent(env, data.db, account, report, { wait: async (ms) => void waited.push(ms) })).rejects.toThrow("hasn't saved yet");
+    expect(waited).toEqual([3000]);
+    expect((await deliver(report)).status).toBe(500);
+    expect(data.tables.quo_events ?? []).toEqual([]);
+    expect(data.tables.messages ?? []).toEqual([]);
+    // Saved during the wait: the report lands on it.
+    const save = async () => void (data.tables.messages = [{ id: "m-quote", company_id: CO, client_id: "client-ana", channel: "sms", direction: "out", status: "sent", body: "Here's your quote", external_id: "ACquote", recipients: [{ to: ANA, name: "Ana Alvarez", id: "ACquote" }] }]);
+    await handleQuoEvent(env, data.db, account, report, { wait: save });
+    expect(data.tables.messages).toEqual([expect.objectContaining({ id: "m-quote", status: "failed", recipients: [{ to: ANA, name: "Ana Alvarez", id: "ACquote", failed: true }] })]);
+  }, 15_000);
 
   it("put an answered call on the client's timeline, waiting on nobody", async () => {
     const data = await connectedDb();
