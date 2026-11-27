@@ -22,7 +22,7 @@ import { useMyJobs, waitingCount } from "@/features/field/myJobsData";
 import { signOutNote, subCodeWays } from "@/features/auth/textCode";
 import { inkOn } from "@/features/documents/words";
 import { createItems, foldedGroups, mobileTabs, NAV_GROUP_LABELS, NAV_GROUPS, navVisible, saveFoldedGroups, settingsItem, subCanOpen, type NavItem } from "./nav";
-import { flipSidebar, sidebarClosed } from "./sidebar";
+import { flipSidebar, iconsOnly, sidebarClosed } from "./sidebar";
 import { HelpButton, openHelp } from "./Help";
 import { NotificationsButton } from "./Notifications";
 import { BrandLockup } from "./BrandMark";
@@ -193,19 +193,23 @@ export function AppShell() {
     });
   // The sidebar closed to its icons (the « in the top bar, or ⌘\), so a laptop or an iPad has the room.
   const [closed, setClosed] = useState(sidebarClosed);
+  // Measure keeps the sidebar at its icons whatever was chosen: the « is put away there (features.css) and ⌘\ does nothing.
+  const fixed = iconsOnly(location.pathname);
+  // Showing only its icons, either way: each says its name on hover, beside it.
+  const icons = closed || fixed;
   const mac = navigator.platform.toLowerCase().includes("mac");
   const sidebarWords = `${closed ? t("Open sidebar") : t("Close sidebar")} (${mac ? "⌘\\" : t("Ctrl \\")})`;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.key !== "\\" || e.defaultPrevented) return;
-      // A phone or narrow window has no sidebar, only the tabs: nothing there to open or close.
-      if (window.matchMedia("(max-width: 900px)").matches) return;
+      // A phone or narrow window has no sidebar, only the tabs: nothing there to open or close. Nor on Measure.
+      if (fixed || window.matchMedia("(max-width: 900px)").matches) return;
       e.preventDefault();
       setClosed(flipSidebar);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [fixed]);
   const shownEmail = isPlaceholderEmail(session.profile.email) ? null : session.profile.email;
   const myName = session.profile.full_name || shownEmail || t("Account");
 
@@ -331,8 +335,8 @@ export function AppShell() {
       {!online && <OfflinePill />}
       <RestartBanner />
 
-      {/* Closed, each icon names itself on hover, beside it (Tooltips). */}
-      <aside className="sidebar" id="sidebar" aria-label={t("Primary")} lang={shellLang} data-tip={closed ? "right" : undefined}>
+      {/* Closed, or on Measure, each icon names itself on hover, beside it (Tooltips). */}
+      <aside className="sidebar" id="sidebar" aria-label={t("Primary")} lang={shellLang} data-tip={icons ? "right" : undefined}>
         <Link to={sub ? "/field" : "/"} className="brand" aria-label={t("Crewtavo home")} viewTransition>
           <BrandLockup size={30} />
         </Link>
@@ -353,7 +357,7 @@ export function AppShell() {
               <div className="nav" id={`nav-rows-${i}`}>
                 {/* A folded group still shows the page you're on, so you can see where you are. */}
                 {group.items.filter((item) => closed || !group.label || !folded.includes(group.label) || here(item)).map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} aria-current={current(item)} title={closed ? t(item.label) : undefined} viewTransition>
+                  <NavLink key={item.to} to={item.to} end={item.to === "/"} className={navClass(item)} aria-current={current(item)} title={icons ? t(item.label) : undefined} viewTransition>
                     {({ isActive }) => (
                       <>
                         <Icon name={item.icon} size={18} filled={active(item, isActive)} />
@@ -369,7 +373,7 @@ export function AppShell() {
         </nav>
         <nav className="nav nav-bottom" aria-label={t("Settings")}>
           {[...foot, settings].map((item) => (
-            <NavLink key={item.to} to={item.to} className={navClass(item)} title={closed ? t(item.label) : undefined} viewTransition>
+            <NavLink key={item.to} to={item.to} className={navClass(item)} title={icons ? t(item.label) : undefined} viewTransition>
               {({ isActive }) => (
                 <>
                   <Icon name={item.icon} size={18} filled={active(item, isActive)} />

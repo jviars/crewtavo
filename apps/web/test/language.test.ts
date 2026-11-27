@@ -348,7 +348,7 @@ describe("the language the page says it's in (<html lang>)", () => {
     expect(shell).toContain("showScreenLang(location.pathname, location.search);");
     expect(shell).toContain("}, [location.pathname, location.search]);");
     expect(shell).toContain('const shellLang = getLocale() === "es" ? "es" : undefined;');
-    for (const part of ['<aside className="sidebar" id="sidebar" aria-label={t("Primary")} lang={shellLang} data-tip={closed ? "right" : undefined}>', '<header className="topbar" data-scrolled={scrolled || undefined} lang={shellLang}>', 'lang={shellLang} data-typing']) expect(shell).toContain(part);
+    for (const part of ['<aside className="sidebar" id="sidebar" aria-label={t("Primary")} lang={shellLang} data-tip={icons ? "right" : undefined}>', '<header className="topbar" data-scrolled={scrolled || undefined} lang={shellLang}>', 'lang={shellLang} data-typing']) expect(shell).toContain(part);
     // And the sign-in page says its own.
     expect(readFileSync(new URL("../src/features/auth/LoginPage.tsx", import.meta.url), "utf8")).toContain("useEffect(() => showScreenLang(window.location.pathname, window.location.search, false), []);");
   });

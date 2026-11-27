@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { iconsOnly } from "../src/components/shell/sidebar";
 import { ShellSkeleton } from "../src/components/ui/Skeleton";
 import { CHAT_OFF_TAB, createItems, foldedGroups, MOBILE_TABS, mobileTabs, NAV_GROUPS, saveFoldedGroups, shortcutTarget } from "../src/components/shell/nav";
 import { noticeTone, shortWhen } from "../src/components/shell/Notifications";
@@ -124,6 +125,19 @@ describe("the sidebar closed to its icons", () => {
       vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); } });
       expect(renderToStaticMarkup(createElement(ShellSkeleton))).not.toContain("data-sidebar");
     });
+  });
+
+  it("is always so on Measure, where « is put away and each icon still says its name", () => {
+    expect(["/measure", "/measure/"].map(iconsOnly)).toEqual([true, true]);
+    expect(["/", "/measurements", "/schedule", "/settings/measure"].map(iconsOnly)).toEqual([false, false, false, false]);
+    // The button goes exactly where the stylesheet narrows the sidebar, and keeps its place so the top bar doesn't shift.
+    const features = readFileSync(new URL("../src/styles/features.css", import.meta.url), "utf8");
+    expect(features).toContain(".shell:has(.measure-page) { --sidebar-width: 68px; }");
+    expect(features).toContain(".shell:has(.measure-page) .sidebar-toggle { visibility: hidden; }");
+    const shell = readFileSync(new URL("../src/components/shell/AppShell.tsx", import.meta.url), "utf8");
+    expect(shell.split("title={icons ? t(item.label) : undefined}")).toHaveLength(3);
+    expect(shell).toContain('data-tip={icons ? "right" : undefined}');
+    expect(shell).not.toContain("title={closed ? t(item.label) : undefined}");
   });
 
   it("keeps a dot on the icon of a link that has a count", () => {

@@ -22,3 +22,10 @@ export function flipSidebar(closed: boolean): boolean {
   }
   return !closed;
 }
+
+/**
+ * Measure is a map tool: there the sidebar is always its icons (features.css, wherever the page is
+ * .measure-page), whatever was chosen. So on it nothing opens or closes the sidebar, and each icon
+ * says its name as it does closed.
+ */
+export const iconsOnly = (pathname: string) => /^\/measure\/?$/.test(pathname);
