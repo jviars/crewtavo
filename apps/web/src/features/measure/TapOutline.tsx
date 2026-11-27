@@ -137,6 +137,15 @@ export function withoutBuildings(polygons: Polygons, buildings: Position[][][]):
   return { polygons: cut, osm: Math.abs(areaOf(cut) - areaOf(polygons)) > 1 };
 }
 
+/**
+ * An outline's polygons as the shapes that go on the map: each one's outer ring as an area and its
+ * holes (the house in a lawn, an island in a lot) as cutouts. The map takes no shape with a hole in
+ * it (Terra Draw refuses one), so nothing found is handed to it any other way.
+ */
+export function areasAndCutouts(polygons: Polygons): { areas: Polygons; cutouts: Polygons } {
+  return { areas: polygons.map((p) => [p[0]]), cutouts: polygons.flatMap((p) => p.slice(1).map((hole) => [hole])) };
+}
+
 /** An outline with a guess added to it or taken out of it. */
 export function combine(base: Polygons, guess: Polygons, kind: "add" | "out"): Polygons {
   if (kind === "add") return base.length ? mergePolygons([...base, ...guess]) : guess;
@@ -326,9 +335,10 @@ export function useTapOutline({
     const polygons = tidy(combine(base?.polygons ?? [], guess.polygons, s.kind));
     const osm = Boolean(base?.osm) || guess.osm;
     for (const id of current()?.ids ?? []) handle.remove(id);
-    const areas = handle.add(polygons.map((p) => [p[0]]), "Area");
+    const shapes = areasAndCutouts(polygons);
+    const areas = handle.add(shapes.areas, "Area");
     if (areas.length) live.current.onFound(areas, s.item, osm);
-    const cuts = handle.add(polygons.flatMap((p) => p.slice(1).map((h) => [h])), "Cutout");
+    const cuts = handle.add(shapes.cutouts, "Cutout");
     outline.current = areas.length ? { item: s.item, polygons, ids: [...areas, ...cuts], pins: s.pins, osm } : null;
     last.current = { ...s, index };
     setActive(Boolean(outline.current));

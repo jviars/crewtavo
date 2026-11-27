@@ -22,7 +22,7 @@ import { buildingsIn, lotAt } from "./buildings";
 import { anyOf, centers, GRID, maskGrid, outlines } from "./detect";
 import type { ImageryId } from "./imagery";
 import type { MeasureMapHandle } from "./MeasureMap";
-import { LAWN_TAP, lawnShape } from "./TapOutline";
+import { areasAndCutouts, LAWN_TAP, lawnShape } from "./TapOutline";
 
 /** What the server asks SAM 3 for (DETECT_TARGETS in integrations/fal.ts). */
 type Ask = "asphalt" | "concrete" | "stalls" | "lawn" | "trees" | "trampolines" | "playsets";
@@ -133,9 +133,13 @@ export function FindInView({
         const shapes = areas.map(toMap).filter((ring) => sqft(ring) >= min);
         if (target.id === "lawn") {
           const lawnFound = lawnShape(shapes.map((ring) => [ring]), await buildings);
-          const ids = handle.add(lawnFound.polygons, "Area");
+          // A house inside the lawn leaves a hole in it, and the map takes no shape with a hole: the
+          // lawn goes on as its outline and the house as a cutout, as the free Find does it.
+          const lawnShapes = areasAndCutouts(lawnFound.polygons);
+          const ids = handle.add(lawnShapes.areas, "Area");
           if (ids.length) {
             onFound(ids, target.item, lawnFound.osm);
+            handle.add(lawnShapes.cutouts, "Cutout");
             found.push({ target, count: ids.length });
             onLawn = lawnFound.polygons;
           }

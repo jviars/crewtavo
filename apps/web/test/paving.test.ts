@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { polygonAreaM2, type Section } from "@crewtavo/core/geo";
 import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { describe, expect, it } from "vitest";
@@ -5,7 +6,7 @@ import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from
 import { lotAt } from "../src/features/measure/buildings";
 import { contours, guessPolygons, opened } from "../src/features/measure/maskOutline";
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
-import { combine, lawnShape, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
+import { areasAndCutouts, combine, lawnShape, padBox, tidy, withoutBuildings, withoutScraps } from "../src/features/measure/TapOutline";
 import { feetPerPixel, scaleLength } from "../src/features/measure/takeoffSheet";
 import { currentStep, estimateSums, formulaValue, groupProjects, pavesAsphalt, projectGroup, serviceKind, stageLabel, takeoffVariables, usesDepth, viewedLines, type SumsLine, type TakeoffRow } from "../src/features/paving/data";
 import { lineDestination } from "../src/features/roofing/estimate/rows";
@@ -203,6 +204,28 @@ describe("adding to and taking out of an outline", () => {
     const cut = lawnShape([[lot[0], canopy]], [house]);
     expect(cut.osm).toBe(true);
     expect(polygonAreaM2(cut.polygons[0])).toBeCloseTo(polygonAreaM2(lot) - polygonAreaM2(house), -1);
+  });
+
+  it("puts a lawn with the house inside it on the map as the lawn and a cutout, never one shape with a hole", () => {
+    // The paid Find's lawn: the model's outline, with OpenStreetMap's house in the middle of it cut out.
+    const house = [square(-79.1826, 37.3624, 0.0002)];
+    const found = lawnShape([lot], [house]);
+    expect(found.polygons).toHaveLength(1);
+    expect(found.polygons[0]).toHaveLength(2); // the lawn's outline and the house's hole
+    const { areas, cutouts } = areasAndCutouts(found.polygons);
+    // The map (Terra Draw) refuses a polygon with a hole, so every shape handed to it is one ring.
+    expect([...areas, ...cutouts].every((p) => p.length === 1)).toBe(true);
+    expect(areas).toEqual([[found.polygons[0][0]]]);
+    expect(cutouts).toEqual([[found.polygons[0][1]]]);
+    expect(polygonAreaM2(cutouts[0])).toBeCloseTo(polygonAreaM2(house), 0);
+    // Both ways of finding a lawn hand the map their shapes this way.
+    const paid = readFileSync(new URL("../src/features/measure/FindInView.tsx", import.meta.url), "utf8");
+    expect(paid).toContain("const lawnShapes = areasAndCutouts(lawnFound.polygons);");
+    expect(paid).toContain('handle.add(lawnShapes.areas, "Area")');
+    expect(paid).toContain('handle.add(lawnShapes.cutouts, "Cutout")');
+    expect(paid).not.toContain("handle.add(lawnFound.polygons");
+    const free = readFileSync(new URL("../src/features/measure/TapOutline.tsx", import.meta.url), "utf8");
+    expect(free).toContain('handle.add(shapes.areas, "Area")');
   });
 
   it("drops scraps and car-sized holes", () => {
