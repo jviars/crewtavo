@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { askSummary } from "../src/features/marketing/askForm";
+import { askSendProblems, askSummary } from "../src/features/marketing/askForm";
 import { sourceCounts } from "../src/features/marketing/LeadSources";
 import { referralSummary } from "../src/features/marketing/referralForm";
 import { sourceMark } from "../src/features/marketing/SourceMark";
@@ -16,6 +16,20 @@ describe("folded setup", () => {
     expect(askSummary({ channel: "email", reminders: 2, days: [3, 5], recurring: true, visits: 3 })).toBe("By email · reminders 3 and 5 days after · recurring jobs after the 3rd visit");
     expect(askSummary({ channel: "both", reminders: 1, days: [1, 5], recurring: false, visits: 1 })).toBe("By text and email · a reminder 1 day after · not on recurring work");
     expect(askSummary({ channel: "sms", reminders: 0, days: [3, 5], recurring: true, visits: 1 })).toBe("By text · no reminders · recurring jobs after the 1st visit");
+  });
+
+  it("says under the folded line that asks can't go out, as the open form does under Send by", () => {
+    const on = { sms: true, email: true };
+    expect(askSendProblems("both", on)).toEqual({ text: null, email: null });
+    expect(askSendProblems("sms", { sms: false, email: true })).toEqual({ text: "Texting isn't set up on this Crewtavo, so asks can't go by text.", email: null });
+    expect(askSendProblems("both", { sms: false, email: true }).text).toBe("Texting isn't set up on this Crewtavo, so asks go by email only, or fail for clients with no email.");
+    expect(askSendProblems("both", { sms: false, email: false })).toEqual({ text: "Texting isn't set up on this Crewtavo, so asks can't go by text.", email: "Email isn't connected yet, so asks can't go by email." });
+    expect(askSendProblems("email", { sms: false, email: false })).toEqual({ text: null, email: "Email isn't connected yet, so asks can't go by email." });
+    expect(askSendProblems("email", { sms: false, email: true })).toEqual({ text: null, email: null });
+    // The folded switch turns asking on at once, so what it can't do is said there too, not only once Edit is pressed.
+    const reviews = source("../src/features/marketing/Reviews.tsx");
+    expect(reviews).toContain("<SetupSummary lines={[timing, askSummary(form)]} warnings={sendWarnings}");
+    expect(source("../src/features/marketing/SetupSummary.tsx")).toContain("styles.warnLine");
   });
 
   it("says what clients and friends get from a referral", () => {

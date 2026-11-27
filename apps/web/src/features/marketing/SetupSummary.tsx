@@ -7,11 +7,18 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/Button";
 import styles from "./Presence.module.css";
 
-export function SetupSummary({ lines, onEdit, editLabel = "Edit" }: { lines: ReactNode[]; onEdit: () => void; editLabel?: string }) {
+export function SetupSummary({ lines, warnings = [], onEdit, editLabel = "Edit" }: {
+  lines: ReactNode[];
+  /** What keeps it from working as the lines say (texting isn't set up), so that isn't only in the form. */
+  warnings?: ReactNode[];
+  onEdit: () => void;
+  editLabel?: string;
+}) {
   return (
     <div className={styles.summary}>
       <div className={styles.summaryText}>
         {lines.filter(Boolean).map((line, i) => <p key={i} className={i ? styles.note : styles.summaryLead}>{line}</p>)}
+        {warnings.filter(Boolean).map((warning, i) => <p key={i} className={styles.warnLine}>{warning}</p>)}
       </div>
       <Button size="sm" icon="edit" onClick={onEdit}>{editLabel}</Button>
     </div>

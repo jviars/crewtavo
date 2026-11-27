@@ -58,7 +58,7 @@ import { toast } from "@/lib/toast";
 import { ClientPicker, type PickedClient } from "../clients/ClientForm";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ReviewLinkOffer } from "../apps/GoogleBusinessPanel";
-import { askBody, askRules, askSummary, askToastKind, daysInOrder, reminderDropWords, remindersDroppedWords, type AskForm, type AskResult, type AskRuleRow } from "./askForm";
+import { askBody, askRules, askSendProblems, askSummary, askToastKind, daysInOrder, reminderDropWords, remindersDroppedWords, type AskForm, type AskResult, type AskRuleRow } from "./askForm";
 import { MessageField, renderSample, type Token } from "./EmailEditor";
 import { GoogleNumbers, GoogleReviewList, GoogleSide, useGoogleState, useReviewStats } from "./GoogleReviews";
 import { hasNumbers, hasReviews, showsList, type GoogleState } from "./googleReviewData";
@@ -233,10 +233,11 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
   };
   const saved = useJustDone(save);
   const whenLabel = ASK_WHEN.find((w) => w.verb === form.when)?.label ?? "";
-  const texts = form.channel !== "email";
-  const emails = form.channel !== "sms";
   // With the after-job rule changed in Automations, Send by is the recurring rule's alone.
   const channelShown = !afterCustom || !recurringCustom;
+  // Asks that can't go out as Send by says: under Send by, and under the folded summary.
+  const cantSend = channelShown ? askSendProblems(form.channel, session.config.features) : { text: null, email: null };
+  const sendWarnings = [cantSend.text, cantSend.email && <>{cantSend.email}<ConnectEmailHint /></>];
   const timing = !afterCustom
     ? askTiming("after_job", form.when, afterRule?.delay_minutes ?? 1440)
     : channelShown && form.recurring ? askTiming("recurring", form.when, recurringRule?.delay_minutes ?? 1440) : "";
@@ -259,7 +260,7 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
   if (folded) {
     return (
       <Section title="Ask automatically" action={headSwitch}>
-        <SetupSummary lines={[timing, askSummary(form)]} onEdit={() => setOpen(true)} editLabel={canSave ? "Edit" : "View"} />
+        <SetupSummary lines={[timing, askSummary(form)]} warnings={sendWarnings} onEdit={() => setOpen(true)} editLabel={canSave ? "Edit" : "View"} />
         <FormError error={save.error} />
       </Section>
     );
@@ -299,19 +300,9 @@ function AskAutomatically({ rules, google }: { rules: AskRuleRow[]; google: Goog
             </Field>
           )}
         </div>
-        {channelShown && texts && !session.config.features.sms && (
-          <div className="callout callout-warning">
-            <Icon name="alert" size={16} />
-            <div className="grow">
-              {emails && session.config.features.email
-                ? "Texting isn't set up on this Crewtavo, so asks go by email only, or fail for clients with no email."
-                : "Texting isn't set up on this Crewtavo, so asks can't go by text."}
-            </div>
-          </div>
-        )}
-        {channelShown && emails && !session.config.features.email && (
-          <div className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">Email isn't connected yet, so asks can't go by email.<ConnectEmailHint /></div></div>
-        )}
+        {sendWarnings.map((warning, i) => warning && (
+          <div key={i} className="callout callout-warning"><Icon name="alert" size={16} /><div className="grow">{warning}</div></div>
+        ))}
 
         {recurringCustom ? (
           <CustomRule rule={recurringRule!} />

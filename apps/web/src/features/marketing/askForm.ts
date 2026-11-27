@@ -114,6 +114,21 @@ export interface AskResult {
 export const askToastKind = (r: Pick<AskResult, "warning">): "warning" | "success" => (r.warning ? "warning" : "success");
 
 /**
+ * Why asks can't go out the way Send by says, on this Crewtavo: said under Send by, and under the
+ * folded summary too, where the switch turns asking on at once. How to connect email follows `email`.
+ */
+export function askSendProblems(channel: AskChannel, features: { sms: boolean; email: boolean }): { text: string | null; email: string | null } {
+  const texts = channel !== "email";
+  const emails = channel !== "sms";
+  return {
+    text: !texts || features.sms ? null
+      : emails && features.email ? "Texting isn't set up on this Crewtavo, so asks go by email only, or fail for clients with no email."
+      : "Texting isn't set up on this Crewtavo, so asks can't go by text.",
+    email: emails && !features.email ? "Email isn't connected yet, so asks can't go by email." : null,
+  };
+}
+
+/**
  * The rest of Ask automatically on one line, under its timing, once it's folded (SetupSummary):
  * "By email · reminders 3 and 5 days after · recurring jobs after the 3rd visit".
  */
