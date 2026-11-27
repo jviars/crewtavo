@@ -85,7 +85,7 @@ export const assistantSendSchema = z.object({
 export const notOnFile = (to: string) =>
   `An AI assistant only sends quotes and invoices to the client and their contacts on file, and ${to} isn't one of them. Send it from Crewtavo instead.`;
 
-type Deliverable = { id: string; number: number | null; client_id: string | null; total?: number; balance_due?: number; recurrence_rule?: string | null; client: { display_name: string; email: string | null; phone: string | null } | null };
+type Deliverable = { id: string; number: number | null; status?: string; client_id: string | null; total?: number; balance_due?: number; recurrence_rule?: string | null; client: { display_name: string; email: string | null; phone: string | null } | null };
 
 export const TEMPLATE_NOT_SENT = "A quote template can't be sent. Make a quote from it first.";
 
@@ -241,8 +241,14 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const message = (link: string) => `${greeting}\n\n${intro}\n\n${link}\n\nThanks,\n${company.name}`;
   // The client's own link only to their own email or phone on file; any other address gets the office's copy.
   const linkFor = (channel: "email" | "sms", to: string) => (sentToClient(channel, to, record.client) ? links.own : links.office);
+  // A draft going out (again): what the client opened before was an earlier version (forgetOpens).
+  // Once the send is let through, so one that's refused changes nothing.
+  const forgetEarlier = async () => {
+    if (record.status === "draft") await forgetOpens(s, kind, record.id);
+  };
   if (body.channel === "link") {
     if (s.assistant) throw new HttpError(403, NO_LINKS_FOR_ASSISTANTS);
+    await forgetEarlier();
     return { link: links.office, sent: false, reason: "Link only" };
   }
   const channel = body.channel;
@@ -250,6 +256,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
   const { data: onFile } = await s.db.from("clients").select("id, display_name, email, phone, sms_opt_out_at").eq("id", record.client_id).maybeSingle();
   const client = onFile ?? { id: record.client_id, display_name: record.client?.display_name ?? "This client", email: record.client?.email ?? null, phone: record.client?.phone ?? null, sms_opt_out_at: null };
   const people = await sendTo(admin, s.companyId, channel, client, body, company.settings, s.assistant === true);
+  await forgetEarlier();
   const subject = body.subject || defaults.subject || `${label} from ${company.name}`;
   const footer = [company.name, companyAddress(company.address as Record<string, string>), company.phone].filter(Boolean).join(" · ");
   const email = (to: string, text: string) =>
@@ -304,6 +311,19 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     ...(delivery.went.length && delivery.failed.length ? { not_sent: delivery.failed.map((person) => ({ to: person.to, reason: person.reason })) } : {}),
     ...(copy ? { copy } : {}),
   };
+}
+
+/**
+ * A draft going out is new to the client, or going out again after it was moved back to draft and
+ * changed. When they opened the earlier version (hub_opens) is forgotten, so "Opened" is about what
+ * they're sent now and their next open is a first one again: the line in its history, and the rules
+ * that follow an open. Done before anything goes: nothing opens a draft (routes/public.ts,
+ * hub_opened), so no open of the new one is lost. With the server's key, as only the server writes
+ * hub_opens; one that can't be cleared never stops the send.
+ */
+async function forgetOpens(s: SalesScope, kind: "quote" | "invoice", id: string) {
+  const { error } = await adminClient(s.env).from("hub_opens").delete().eq("company_id", s.companyId).eq(kind === "quote" ? "quote_id" : "invoice_id", id);
+  if (error) console.error("Couldn't forget when an earlier version was opened", error.message);
 }
 
 type SendClient = { id: string; display_name: string; email: string | null; phone: string | null; sms_opt_out_at: string | null };

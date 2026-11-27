@@ -44,13 +44,25 @@ const contacts = [
   { id: "c-2", name: "Sam Spouse", email: "sam@example.com", phone: "540-555-0133", notify_email: false, notify_sms: false },
 ];
 const logged: Array<{ channel: string; body: string; recipients: unknown }> = [];
+/** What was deleted: the table, what it was narrowed to, and how many emails and texts had gone by then. */
+const cleared: Array<Record<string, unknown>> = [];
 
 /** Answers each table with its rows, whatever the filters. */
 function stubDb(tables: Record<string, unknown>): Db {
   const from = (table: string) => {
     const result = { data: tables[table] ?? null, error: null };
     const builder: Record<string, unknown> = {};
-    for (const name of ["select", "eq", "in", "is", "order", "limit", "update", "upsert"]) builder[name] = () => builder;
+    let gone: Record<string, unknown> | null = null;
+    for (const name of ["select", "in", "is", "order", "limit", "update", "upsert"]) builder[name] = () => builder;
+    builder.eq = (column: string, value: unknown) => {
+      if (gone) gone[column] = value;
+      return builder;
+    };
+    builder.delete = () => {
+      gone = { table, sent_before: emails.length + texts.length };
+      cleared.push(gone);
+      return builder;
+    };
     builder.insert = (row: unknown) => {
       if (table === "messages") logged.push(row as (typeof logged)[number]);
       return builder;
@@ -77,7 +89,7 @@ const refusal = async (work: Promise<unknown>) => {
 };
 
 afterEach(() => {
-  emails.length = texts.length = logged.length = 0;
+  emails.length = texts.length = logged.length = cleared.length = 0;
   refuse.to.clear();
   server.tables = {};
 });
@@ -222,6 +234,29 @@ describe("Send me a copy", () => {
     expect(await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"] }))).not.toHaveProperty("copy");
     expect(await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ channel: "sms" }))).not.toHaveProperty("copy");
     expect(emails.map((m) => m.to)).toEqual([]);
+  });
+});
+
+describe("sending again after it was moved back to draft", () => {
+  it("forgets when the client opened the earlier version, before the new one goes out", async () => {
+    await deliver(scope(), "invoice", { ...invoice, status: "draft" }, sendSchema.parse({}));
+    expect(cleared).toEqual([{ table: "hub_opens", sent_before: 0, company_id: CO, invoice_id: "inv-1" }]);
+    expect(emails).toHaveLength(1);
+    // A quote too, and when the office only takes the link to pass on.
+    await deliver(scope(), "quote", { ...invoice, id: "quote-1", status: "draft" }, sendSchema.parse({ channel: "link" }));
+    expect(cleared[1]).toMatchObject({ table: "hub_opens", company_id: CO, quote_id: "quote-1" });
+  });
+
+  it("keeps it when the send is refused", async () => {
+    await refusal(deliver(scope(), "invoice", { ...invoice, status: "draft" }, sendSchema.parse({ recipients: ["mo at example"] })));
+    expect(cleared).toEqual([]);
+  });
+
+  it("keeps it for one the client already has: a reminder, or the same quote sent once more", async () => {
+    await deliver(scope(), "invoice", { ...invoice, status: "sent" }, sendSchema.parse({}));
+    await deliver(scope(), "quote", { ...invoice, id: "quote-1", status: "changes_requested" }, sendSchema.parse({ channel: "sms" }));
+    expect(cleared).toEqual([]);
+    expect([emails.length, texts.length]).toEqual([1, 1]);
   });
 });
 
