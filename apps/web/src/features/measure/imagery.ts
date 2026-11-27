@@ -28,6 +28,7 @@ import {
 } from "@crewtavo/core/imagery";
 import { DEP_SERVICE, STEEP_GRADE, US_BOX } from "@crewtavo/core/elevation";
 import type { RasterSourceSpecification } from "maplibre-gl";
+import { flatPicture, tilePixels } from "./tileCheck";
 
 /** "naip", "usgs-naip", "usgs", "terrain", "esri", "google", "street", or "state:VA". */
 export type ImageryId = "naip" | "usgs-naip" | "usgs" | "terrain" | "esri" | "google" | "street" | `state:${string}`;
@@ -421,7 +422,8 @@ export async function rasterSource(id: ImageryId, keys: MapKeys): Promise<Raster
 
 /**
  * Whether the picture under a point has anything in it: "ok", "empty" (outside what the source
- * covers) or "down" (the server didn't answer). Looks at one tile, so it's cheap to ask after a pan.
+ * covers: no tile, a blank one, or a picture that's one colour all over) or "down" (the server
+ * didn't answer). Looks at one tile, so it's cheap to ask after a pan.
  */
 export async function probeImagery(id: ImageryId, keys: MapKeys, lng: number, lat: number, zoom = 17): Promise<"ok" | "empty" | "down"> {
   if (id === "street") return "ok";
@@ -444,7 +446,12 @@ export async function probeImagery(id: ImageryId, keys: MapKeys, lng: number, la
   if (!res) return "down";
   if (res.status === 204 || res.status === 404) return "empty";
   if (!res.ok) return res.status >= 500 ? "down" : "empty";
-  const bytes = (await res.arrayBuffer().catch(() => new ArrayBuffer(0))).byteLength;
+  const body = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
   // A blank tile is a few hundred bytes; a picture is thousands.
-  return bytes > 1200 ? "ok" : "empty";
+  if (body.byteLength <= 1200) return "empty";
+  // Big enough to be a picture, but a server that draws on request can send a whole one of nothing
+  // (Maryland's: 1,686 bytes of black for a house in Virginia). Looked at where the browser can
+  // decode it (tileCheck.ts); where it can't, its size has to do.
+  const pixels = await tilePixels(new Blob([body], { type: res.headers.get("content-type") ?? "" }));
+  return pixels && flatPicture(pixels) ? "empty" : "ok";
 }
