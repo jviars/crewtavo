@@ -274,7 +274,8 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
       related_type: kind,
       related_id: record.id,
       external_id: delivery.id,
-      recipients: recipientsColumn(delivery),
+      // A text keeps each person's own id, so a report that one of them failed marks that person (services/quo.ts).
+      recipients: recipientsColumn(delivery, channel === "sms"),
     });
   }
   // A separate email, not a Bcc: the client's own link says yes and pays as them, so the sender's

@@ -175,6 +175,15 @@ describe("sending to the people named", () => {
     expect(logged[0]!.recipients).toEqual([{ to: "pat@example.com", name: "Pat Lee" }, { to: "typo@example.con", name: "typo@example.con", failed: true }]);
   });
 
+  it("keeps each person's own text id on a text to several, so a report on one text marks that person", async () => {
+    server.tables = { client_contacts: contacts };
+    await deliver(scope(), "invoice", invoice, sendSchema.parse({ channel: "sms", recipients: ["(540) 555-0111", "540-555-0122"] }));
+    expect(logged[0]).toMatchObject({ channel: "sms", external_id: "SM1", recipients: [{ to: "(540) 555-0111", name: "Pat Lee", id: "SM1" }, { to: "540-555-0122", name: "Mo Manager", id: "SM2" }] });
+    // An email has no report to match, so its ids aren't kept.
+    await deliver(scope(), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com", "mo@example.com"] }));
+    expect(logged[1]!.recipients).toEqual([{ to: "pat@example.com", name: "Pat Lee" }, { to: "mo@example.com", name: "Mo Manager" }]);
+  });
+
   it("says why when it reached nobody, and keeps nothing", async () => {
     refuse.to.add("pat@example.com");
     const result = await deliver(scope(), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"] }));
