@@ -73,7 +73,7 @@ export async function companyLob(env: Env, admin: Db, companyId: string): Promis
   if (error) throw new Error(error.message);
   if (!row || row.status === "disconnected") return null;
   const secret = await loadSecret(env, admin, companyId, "lob");
-  const mode = secret?.api_key ? lobMode(secret.api_key) : null;
+  const mode = secret?.api_key ? lobMode(secret.api_key, env) : null;
   return mode ? { key: secret!.api_key!, mode, labelled: (row.settings as unknown as LobSettings | null)?.mode ?? null } : null;
 }
 

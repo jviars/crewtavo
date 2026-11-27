@@ -33,6 +33,11 @@ describe("Lob keys", () => {
     expect(lobMode("sk_live_0123456789abcdef")).toBeNull();
   });
 
+  it("takes Lookalyke's lk_ key as a test key only while LOOKALYKE_URL is set", () => {
+    expect(lobMode("lk_secret_0123456789ab")).toBeNull();
+    expect(lobMode("lk_secret_0123456789ab", { LOOKALYKE_URL: "http://127.0.0.1:4100" })).toBe("test");
+  });
+
   it("checks a key with a free read of the account's addresses, as Basic auth with no password", async () => {
     const fetcher = vi.fn(async () => answer(200, { data: [], object: "list" }));
     await expect(checkLobKey({}, LIVE_KEY, fetcher as typeof fetch)).resolves.toEqual({ mode: "live" });

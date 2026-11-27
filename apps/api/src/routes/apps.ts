@@ -281,9 +281,9 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
   // The company's own app at the provider when it saved one, otherwise the server's.
   const keys = entry?.appKeys ? appKeysOf((await loadSecret(c.env, adminClient(c.env), c.var.companyId, provider).catch(() => null))?.extra) : {};
   const client = config ? oauthClient(c.env, provider, keys) : null;
-  if (!entry || !config || entry.auth !== "oauth" || !client) throw new HttpError(400, "That app isn't available yet.");
-
+  // Meta has no server app: before its App ID and secret are saved, say so rather than "not available".
   if (provider === "meta" && !keys.client_id) throw new HttpError(400, "Add your Meta app's App ID and secret first.");
+  if (!entry || !config || entry.auth !== "oauth" || !client) throw new HttpError(400, "That app isn't available yet.");
   const nonce = randomId();
   const state = await signToken(c.env, {
     company: c.var.companyId,

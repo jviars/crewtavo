@@ -29,9 +29,13 @@ type FetchLike = typeof fetch;
 
 export type LobMode = "test" | "live";
 
-/** Whether a key is Lob's test or live key, or null when it isn't one of Lob's secret keys. */
-export function lobMode(key: string): LobMode | null {
+/**
+ * Whether a key is Lob's test or live key, or null when it isn't one of Lob's secret keys. With
+ * LOOKALYKE_URL set (development), Lookalyke's lk_ key counts as a test key.
+ */
+export function lobMode(key: string, env?: Where): LobMode | null {
   const k = key.trim();
+  if (env?.LOOKALYKE_URL && /^lk_\w{10,}$/.test(k)) return "test";
   if (/^test_[A-Za-z0-9]{10,}$/.test(k)) return "test";
   if (/^live_[A-Za-z0-9]{10,}$/.test(k)) return "live";
   return null;
@@ -113,7 +117,7 @@ async function problemOf(res: Response): Promise<LobProblem> {
 
 /** Checks a key with Lob before it's kept. The key's mode, or a LobProblem saying what to fix. */
 export async function checkLobKey(env: Where, key: string, fetcher: FetchLike = fetch): Promise<{ mode: LobMode }> {
-  const mode = lobMode(key);
+  const mode = lobMode(key, env);
   if (!mode) throw new LobProblem("That doesn't look like a Lob secret API key. It starts with test_ or live_, under Settings → API Keys in your Lob dashboard.");
   const res = await fetcher(`${api(env)}/addresses?limit=1`, { headers: auth(key), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
   if (!res) throw new LobProblem("Couldn't reach Lob to check the key. Try again in a minute.");

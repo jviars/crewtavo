@@ -2930,3 +2930,9 @@ describe("what the key can do", () => {
     expect(db.rpcs.filter((r) => r.fn === "autopay_account_left").map((r) => r.args)).toEqual([{ p_company: CO, p_livemode: true, p_account: "acct_A" }]);
   });
 });
+
+it("takes Lookalyke's lk_secret_ key only while LOOKALYKE_URL is set, and asks Lookalyke about it", async () => {
+  await expect(connect("lk_secret_0123456789")).rejects.toThrow("That isn't a Stripe key");
+  await connect("lk_secret_0123456789", { ...env, LOOKALYKE_URL: "http://127.0.0.1:4100" }).catch(() => null);
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url))).toContain("http://127.0.0.1:4100/stripe/v1/account");
+});

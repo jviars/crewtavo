@@ -490,6 +490,13 @@ describe("signing in with the business's own Meta app", () => {
     integration_secrets: [{ company_id: CO, provider: "meta", ciphertext: await encryptJson(env, { extra: { ...keys, ...extra } }) }],
   });
 
+  it("asks for the app's keys before Connect, rather than saying Meta isn't available", async () => {
+    serve({ tables: { companies: [companyRow()] } });
+    const res = await request("/apps/meta/connect", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("Add your Meta app's App ID and secret first.");
+  });
+
   it("saves the app's keys with a Configuration ID, and sign-in uses it", async () => {
     const w = serve({ tables: { companies: [companyRow()] } });
     const res = await request("/apps/meta/app-keys", { method: "PUT", body: { ...keys, config_id: "987654321" } });

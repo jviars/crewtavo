@@ -168,7 +168,8 @@ const reachable = (base: string) => /^https:\/\//.test(base) && !/^https:\/\/(lo
  */
 export async function connectStripe(env: Env, admin: Db, input: { companyId: string; userId: string; key: string; baseUrl: string }) {
   const key = input.key.trim();
-  if (!/^(sk|rk)_(live|test)_\w+$/.test(key)) {
+  // Lookalyke's fake takes its own lk_secret_ key, only while development sends Stripe there.
+  if (!/^(sk|rk)_(live|test)_\w+$/.test(key) && !(env.LOOKALYKE_URL && /^lk_secret_\w+$/.test(key))) {
     throw new HttpError(400, "That isn't a Stripe key. Use Get a key from Stripe on this page, then copy the key Stripe shows you.");
   }
   let account: StripeAccount | null = null;
