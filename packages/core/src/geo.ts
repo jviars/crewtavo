@@ -140,6 +140,24 @@ export function lineLengthM(coords: Position[]): number {
   return total;
 }
 
+/**
+ * How fine a shape's points are kept: 9 decimals of a degree, about a tenth of a millimeter. The
+ * measuring map (Terra Draw) refuses a shape with a finer point, so a saved drawing never has one.
+ */
+export const COORDINATE_PLACES = 9;
+
+/**
+ * A geometry's coordinates (a point, a line, a polygon's rings) with each number rounded to
+ * COORDINATE_PLACES. Anything that isn't a number or a list is left as it is, for the shape check
+ * (summarizeFeatureCollection) to turn away.
+ */
+export function roundCoordinates<T>(coordinates: T): T {
+  const scale = 10 ** COORDINATE_PLACES;
+  const round = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(round) : typeof value === "number" && Number.isFinite(value) ? Math.round(value * scale) / scale : value;
+  return round(coordinates) as T;
+}
+
 export const sqmToSqft = (sqm: number) => sqm * SQFT_PER_SQM;
 export const mToFt = (m: number) => m * FT_PER_M;
 

@@ -87,6 +87,31 @@ describe("the assistant's drawings", () => {
     expect(down.sent.some((s) => s.method === "POST")).toBe(true);
   });
 
+  it("keeps every point to the 9 decimals the measuring map takes, so the drawing opens whole in Measure", async () => {
+    // Outlines the way a geocoder or arithmetic gives them: 13 to 15 decimals. Terra Draw's own count of them.
+    const decimals = (n: number) => {
+      let [e, places] = [1, 0];
+      while (Math.round(n * e) / e !== n) [e, places] = [e * 10, places + 1];
+      return places;
+    };
+    const fine = (points: Array<[number, number]>) => points.map(([lng, lat]) => [lng + 1 / 3e7, lat + 1 / 7e7] as [number, number]);
+    const { ctx, sent } = world([]);
+    const save = measurementTools.save_measurement;
+    await save.run(ctx, save.input.parse({
+      areas: [{ outline: fine(YARD) }],
+      cutouts: [{ outline: fine(HOME) }],
+      lines: [{ points: fine([YARD[0], YARD[1]]), item: "edging" }],
+      counts: [{ at: fine([[-79.8699, 37.0502]])[0], item: "tree" }],
+    }));
+    const row = sent.find((s) => s.method === "POST")!.body as { geojson: { features: Array<{ geometry: { coordinates: unknown[] } }> } };
+    const numbers = row.geojson.features.flatMap((f) => f.geometry.coordinates.flat(3) as number[]);
+    expect(numbers).toHaveLength((5 + 5 + 2 + 1) * 2);
+    expect(Math.max(...numbers.map(decimals))).toBeLessThanOrEqual(9);
+    // An outline's last point is still its first.
+    const ring = row.geojson.features[0].geometry.coordinates[0] as number[][];
+    expect(ring[4]).toEqual(ring[0]);
+  });
+
   it("saves a paving lot or a roof just the same, without asking for a lawn's slope", async () => {
     const save = measurementTools.save_measurement;
     const lot = world([]);

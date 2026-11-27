@@ -14,6 +14,7 @@ import {
   normalizePitch,
   pavingQuantities,
   pitchProblem,
+  roundCoordinates,
   savedRoofingQuantities,
   summarizeFeatureCollection,
   usesDepth,
@@ -45,12 +46,18 @@ export interface MeasurementSave {
 /**
  * Save a drawing, new or over the one with `id`. Totals always come from the shapes, worked out
  * again here; nothing the caller worked out is trusted. Cutouts come off the areas under them, and
- * each roof section can have its own pitch. HttpError 400 for shapes or a pitch that don't read.
+ * each roof section can have its own pitch. Points are kept to the 9 decimals Measure's map takes
+ * (roundCoordinates): it refuses a shape with a finer one, so a drawing an assistant or a script sent
+ * would open in Measure with shapes missing. HttpError 400 for shapes or a pitch that don't read.
  */
 export async function saveMeasurement(db: Db, companyId: string, body: MeasurementSave): Promise<{ id: string; summary: MeasurementSummary; squares: number | null }> {
+  const geojson: FeatureCollection = {
+    ...body.geojson,
+    features: (body.geojson.features ?? []).map((f) => (f.geometry ? { ...f, geometry: { ...f.geometry, coordinates: roundCoordinates(f.geometry.coordinates) } } : f)),
+  };
   let summary: MeasurementSummary;
   try {
-    summary = summarizeFeatureCollection(body.geojson, { pitch: body.roof_pitch });
+    summary = summarizeFeatureCollection(geojson, { pitch: body.roof_pitch });
   } catch (error) {
     if (error instanceof RangeError) throw new HttpError(400, error.message);
     throw error;
@@ -69,7 +76,7 @@ export async function saveMeasurement(db: Db, companyId: string, body: Measureme
     // Written the one way ("4/12" for 4-12 or 4:12), so the quote and the client read the same.
     roof_pitch: fields.roof_pitch ? normalizePitch(fields.roof_pitch) : fields.roof_pitch,
     ...(view ? { view: asJson(view) } : {}),
-    geojson: asJson(fields.geojson),
+    geojson: asJson(geojson),
     company_id: companyId,
     sections: asJson(summary.sections),
     total_area_sqft: summary.total_area_sqft,

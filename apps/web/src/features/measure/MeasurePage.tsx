@@ -46,6 +46,7 @@ import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, im
 import { imageryMenu, ImageryPicker, type ImageryPickerProps } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
 import { drawnAs, itemAfterTool } from "./nextShape";
+import { drawable, loadedShapes } from "./reopen";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
 import { useTooLarge } from "../plans/UploadLimit";
 import { isRoofingCompany } from "../roofing/data";
@@ -471,8 +472,10 @@ export function MeasurePage() {
     const m = context.data?.measurement;
     const saved = ((m?.geojson ?? null) as { features?: Feature[] } | null)?.features ?? [];
     if (!saved.length) return;
-    const ids = mapRef.current?.load(saved) ?? [];
-    const kept = saved.filter((f) => f.geometry && ["Polygon", "LineString", "Point"].includes(f.geometry.type));
+    // Each shape on the map with the saved shape it is: ids[i] is kept[i], whatever the map turned away.
+    const loaded = loadedShapes(saved, mapRef.current?.load(saved) ?? []);
+    const ids = loaded.map((l) => l.id);
+    const kept = loaded.map((l) => l.feature);
     setLabels(Object.fromEntries(ids.map((id, i) => {
       const label = String(kept[i]?.properties?.label ?? "");
       return [id, isDefaultName(label) ? "" : label];
@@ -502,7 +505,7 @@ export function MeasurePage() {
     setTool("select");
     mapRef.current?.setTool("select");
     setTimeout(() => mapRef.current?.fitShapes(), 50);
-    if (ids.length < kept.length) toast.error("Some shapes in this drawing couldn't be shown. Check it before saving again.");
+    if (ids.length < saved.filter(drawable).length) toast.error("Some shapes in this drawing couldn't be shown. Check it before saving again.");
   }, [context.data]);
 
   // ----- Imagery: suggestions and problems ----------------------------------------------------

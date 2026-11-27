@@ -78,6 +78,20 @@ describe("saving a measurement", () => {
     expect(state.writes).toEqual([]);
   });
 
+  it("keeps every point to the 9 decimals the measuring map takes, whoever sends the shapes", async () => {
+    const fine = RECT.map(([lng, lat]) => [lng + 1 / 3e7, lat + 1 / 7e7]);
+    const res = await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [fine] }, { type: "Point", coordinates: fine[0] }) });
+    expect(res.status).toBe(201);
+    const saved = (state.writes[0].row as { geojson: { features: Array<{ geometry: { coordinates: unknown[] } }> } }).geojson.features;
+    const numbers = saved.flatMap((f) => f.geometry.coordinates.flat(3) as number[]);
+    expect(numbers).toHaveLength(12);
+    for (const n of numbers) expect(Math.round(n * 1e9) / 1e9).toBe(n);
+    // Shapes drawn in Measure are at 9 decimals already, and saved as they came.
+    state.writes = [];
+    await post("/measurements", { geojson: shapes({ type: "Polygon", coordinates: [RECT] }) });
+    expect((state.writes[0].row as { geojson: unknown }).geojson).toEqual(shapes({ type: "Polygon", coordinates: [RECT] }));
+  });
+
   it("keeps the map picture and where the map was", async () => {
     const snapshot_path = "00000000-0000-4000-8000-000000000001/measurements/0b5c9f1e-1d2a-4c3b-9e8f-7a6b5c4d3e2f.jpg";
     const view = { center: [-79.8717, 37.0547], zoom: 19.2, imagery: "state:VA", attribution: "Virginia imagery" };

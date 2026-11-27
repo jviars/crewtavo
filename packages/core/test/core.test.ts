@@ -20,7 +20,9 @@ import {
   actionsForTrigger,
   variablesForTrigger,
   checkCondition,
+  COORDINATE_PLACES,
   cutOut,
+  haversineM,
   describeAction,
   describeCondition,
   describeRuleSentence,
@@ -72,6 +74,7 @@ import {
   pitchFromDegrees,
   polygonAreaM2,
   ringAreaM2,
+  roundCoordinates,
   roofingSquares,
   routeLengthM,
   scheduleSettings,
@@ -151,6 +154,27 @@ describe("geo", () => {
     // A hip on a 12/12 roof: rises 12 for every 17 across, so about 1.22 times its length from above.
     expect(hipFactor("12/12")).toBeCloseTo(Math.sqrt(1.5), 6);
     expect(() => normalizePitch("6/12/12")).toThrow(RangeError);
+  });
+
+  it("rounds a shape's points to the 9 decimals the measuring map keeps", () => {
+    // Terra Draw's own count of a number's decimals: it refuses a shape with a point finer than 9.
+    const decimals = (n: number) => {
+      let [e, places] = [1, 0];
+      while (Math.round(n * e) / e !== n) [e, places] = [e * 10, places + 1];
+      return places;
+    };
+    const fine = [[[-79.87000000000001, 37.050000000000004], [-79.86954999999999, 37.05], [-79.869550000000004, 37.05027123456789], [-79.87000000000001, 37.050000000000004]]];
+    expect(Math.max(...fine.flat(2).map(decimals))).toBeGreaterThan(9);
+    const rounded = roundCoordinates(fine);
+    expect(Math.max(...rounded.flat(2).map(decimals))).toBeLessThanOrEqual(COORDINATE_PLACES);
+    expect(rounded[0][2]).toEqual([-79.86955, 37.050271235]);
+    // Under a tenth of a millimeter moved, and nothing at all the second time.
+    expect(haversineM(fine[0][2], rounded[0][2])).toBeLessThan(0.0001);
+    expect(roundCoordinates(rounded)).toEqual(rounded);
+    // A point and a line too; what isn't a number is left for the shape check to turn away.
+    expect(roundCoordinates([-79.870000000000012, 37.05])).toEqual([-79.87, 37.05]);
+    expect(roundCoordinates([["a", null], [1.00000000004, 2]])).toEqual([["a", null], [1, 2]]);
+    expect(roundCoordinates("nowhere")).toBe("nowhere");
   });
 
   it("takes cutouts out of the areas under them", () => {

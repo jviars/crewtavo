@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { boxAround, buildingAt, buildingsOn } from "../src/features/measure/buildings";
 import { lasHeader } from "../src/features/measure/lidar";
 import { drawnAs, itemAfterTool } from "../src/features/measure/nextShape";
+import { drawable, loadedShapes } from "../src/features/measure/reopen";
 import { photoAngle, pitchFromAngle, startingHandles, tiltOf } from "../src/features/measure/pitchMath";
 import { groupRows } from "../src/features/measure/TakeoffList";
 
@@ -144,5 +145,33 @@ describe("the next shape's item", () => {
     expect(map.match(/byCode\.current\.add\(/g)).toHaveLength(4);
     expect(map).toContain("...(byCode.current.has(String(f.id)) ? { byCode: true as const } : {})");
     expect(read("MeasurePage.tsx")).toContain("const tagged = drawnAs(fresh, activeItem);");
+  });
+});
+
+describe("reopening a saved drawing", () => {
+  const read = (file: string) => readFileSync(new URL(`../src/features/measure/${file}`, import.meta.url), "utf8");
+  const shape = (label: string, type = "Polygon", properties: Record<string, unknown> = {}) => ({ type: "Feature" as const, geometry: { type, coordinates: [] }, properties: { label, ...properties } });
+
+  it("puts each name, item and slope back on its own shape when the map turns one away", () => {
+    const saved = [shape("Front lawn", "Polygon", { slope: { mean_pct: 4, steep_pct: 0 } }), shape("House", "Polygon", { cutout: true }), shape("Both lots", "MultiPolygon"), shape("Rose bed", "Polygon", { cutout: true, item: "bed" }), shape("Oak", "Point", { item: "tree" })];
+    // The map took the lawn, the bed and the tree: it refused the house, and doesn't draw the two lots.
+    const loaded = loadedShapes(saved, ["1", null, null, "2", "3"]);
+    expect(loaded.map((l) => [l.id, l.feature.properties?.label])).toEqual([["1", "Front lawn"], ["2", "Rose bed"], ["3", "Oak"]]);
+    expect(loaded[1].feature.properties?.item).toBe("bed");
+    // Everything it draws, it took: nothing to warn about. One fewer, and the page says so.
+    expect(saved.filter(drawable)).toHaveLength(4);
+    expect(loadedShapes(saved, ["1", "2", null, "3", "4"])).toHaveLength(4);
+    expect(loadedShapes(saved, [])).toEqual([]);
+  });
+
+  it("rounds a saved shape's points to what the map takes, so a drawing an assistant saved opens whole", () => {
+    const map = read("MeasureMap.tsx");
+    const load = map.slice(map.indexOf("    load(features) {"), map.indexOf("    async capture("));
+    expect(load).toContain("geometry: { ...f.geometry, coordinates: roundCoordinates(f.geometry.coordinates) }");
+    // One answer for every saved shape, so the page never pairs by counting.
+    expect(load).toContain("return rows.map((r) => (r && results[added++]?.valid !== false ? String(r.id) : null));");
+    const page = read("MeasurePage.tsx");
+    expect(page).toContain("const loaded = loadedShapes(saved, mapRef.current?.load(saved) ?? []);");
+    expect(page).toContain("if (ids.length < saved.filter(drawable).length) toast.error(");
   });
 });

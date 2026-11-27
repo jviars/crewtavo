@@ -14,6 +14,7 @@ import {
   pickedSlope,
   readSlope,
   ROOF_EDGES,
+  roundCoordinates,
   SALES,
   SLOPE_CHOICE_IDS,
   type Feature,
@@ -36,8 +37,12 @@ const itemsFor = (geometry: string) => ITEMS.filter((i) => i.geometry === geomet
 const item = (geometry: string) => z.string().optional().describe(`What it is, for a takeoff: one of ${itemsFor(geometry)}.`);
 
 const link = (ctx: ToolContext, id: string) => `${ctx.origin}/measure?measurement=${id}`;
-/** A ring closed the way GeoJSON wants it: back to its first point. */
-const polygon = (ring: Position[]): Geometry => {
+/**
+ * A ring closed the way GeoJSON wants it: back to its first point. Its points at the 9 decimals a
+ * drawing keeps (saveMeasurement), so one that ends a hair off its start still closes on it.
+ */
+const polygon = (outline: Position[]): Geometry => {
+  const ring = roundCoordinates(outline);
   const [first, last] = [ring[0], ring[ring.length - 1]];
   return { type: "Polygon", coordinates: [first[0] === last[0] && first[1] === last[1] ? ring : [...ring, first]] };
 };

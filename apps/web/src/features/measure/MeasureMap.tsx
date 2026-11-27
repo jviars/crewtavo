@@ -7,7 +7,7 @@
  */
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapKeys } from "@crewtavo/core/imagery";
-import { cutOut, lineLengthM, mergePolygons, mToFt, polygonAreaM2, sqmToSqft, type Feature, type Position } from "@crewtavo/core/geo";
+import { cutOut, lineLengthM, mergePolygons, mToFt, polygonAreaM2, roundCoordinates, sqmToSqft, type Feature, type Position } from "@crewtavo/core/geo";
 import { PAVING_ITEMS } from "@crewtavo/core/paving";
 import { LAWN_ITEMS } from "@crewtavo/core/lawn";
 import maplibregl, { type GeoJSONSource, type ImageSource, type LayerSpecification, type Map as MapLibreMap, type Marker, type StyleSpecification } from "maplibre-gl";
@@ -28,6 +28,7 @@ import { PHOSPHOR } from "@/components/ui/phosphor";
 import { googleAttribution, type GoogleAttribution } from "./googleAttribution";
 import { googleViewport, KeyError, OVERLAYS, overlaySource, rasterSource, type ImageryId, type OverlayId } from "./imagery";
 import { fromMercator, toMercator, type Corners, type LngLat } from "./planAlign";
+import { drawable } from "./reopen";
 import { drawSheet, feetPerPixel, type SheetInfo } from "./takeoffSheet";
 
 export type Tool = "polygon" | "cutout" | "linestring" | "point" | "select";
@@ -90,8 +91,11 @@ export interface MeasureMapHandle {
   fitShapes(): void;
   jumpTo(lng: number, lat: number, zoom?: number): void;
   view(): { center: [number, number]; zoom: number };
-  /** Puts saved shapes back on the map (reopening a measurement). Returns their new ids in order. */
-  load(features: Feature[]): string[];
+  /**
+   * Puts saved shapes back on the map (reopening a measurement). Returns one answer for each, in
+   * order: its new id, or null for one that isn't on the map (not a kind it draws, or refused).
+   */
+  load(features: Feature[]): Array<string | null>;
   /**
    * A JPEG of the shapes on the imagery, framed to fit them, or null when nothing is drawn. With
    * `imagery`, the picture is taken on that source instead (for one whose terms don't allow keeping
@@ -1025,18 +1029,18 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
     load(features) {
       const draw = drawRef.current;
       if (!draw) return [];
-      const ids: string[] = [];
-      const rows = features.flatMap((f) => {
-        if (!f.geometry || !["Polygon", "LineString", "Point"].includes(f.geometry.type)) return [];
+      const rows = features.map((f) => {
+        if (!f.geometry || !drawable(f)) return null;
         const id = String(draw.getFeatureId());
         byCode.current.add(id);
-        ids.push(id);
         const mode = f.geometry.type === "Polygon" ? (f.properties?.cutout === true ? "cutout" : "polygon") : f.geometry.type === "LineString" ? "linestring" : "point";
-        return [{ type: "Feature", id, geometry: f.geometry, properties: { mode } } as GeoJSONStoreFeatures];
+        // Rounded as add does: Terra Draw refuses a point finer than 9 decimals, which a drawing an assistant saved could have.
+        return { type: "Feature", id, geometry: { ...f.geometry, coordinates: roundCoordinates(f.geometry.coordinates) }, properties: { mode } } as GeoJSONStoreFeatures;
       });
-      const results = draw.addFeatures(rows);
+      const results = draw.addFeatures(rows.filter((r): r is GeoJSONStoreFeatures => r !== null));
       report();
-      return ids.filter((_, i) => results[i]?.valid !== false);
+      let added = 0;
+      return rows.map((r) => (r && results[added++]?.valid !== false ? String(r.id) : null));
     },
     async capture(options = {}) {
       const map = mapRef.current;
