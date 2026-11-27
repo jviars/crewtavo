@@ -186,3 +186,16 @@ describe("a lawn's slope in Measure", () => {
     expect(page).toContain('select("id, line1, city, region, postal_code, country, lat, lng, client:clients(id, display_name)")');
   });
 });
+
+describe("the Depth card", () => {
+  it("stays as the person left it while a depth is typed: open through 0, 0. and 0.5", () => {
+    const page = readFileSync(new URL("../src/features/measure/MeasurePage.tsx", import.meta.url), "utf8");
+    const card = page.slice(page.indexOf("const depthCard = ("), page.indexOf("const lawnCard = ("));
+    // Whether it's open is the person's doing alone. It used to follow the depth typed (open while it
+    // read as 0, shut once it read as a number), which shut it between "0" and "0.5".
+    expect(card).toContain("<details key=\"depth\" className=\"measure-extra\" open={depthOpen} onToggle={(e) => setDepthOpen(e.currentTarget.open)}>");
+    expect(card).not.toMatch(/open=\{[^}]*depthIn/);
+    expect(card).not.toMatch(/open=\{[^}]*\(depth\)/);
+    expect(page).toContain("const [depthOpen, setDepthOpen] = useState(false);");
+  });
+});

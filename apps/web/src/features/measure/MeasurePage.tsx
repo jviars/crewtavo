@@ -206,6 +206,8 @@ export function MeasurePage() {
   const [finding, setFinding] = useState<"cut" | "outline" | null>(null);
   const [roofOpen, setRoofOpen] = useState(false);
   const [depth, setDepth] = useState("");
+  // The Depth card stays open or shut as the person left it, whatever is typed in it.
+  const [depthOpen, setDepthOpen] = useState(false);
   const [pitch, setPitch] = useState("");
   const [waste, setWaste] = useState("10");
   const [title, setTitle] = useState("Measurement");
@@ -1551,7 +1553,7 @@ export function MeasurePage() {
     </details>
   );
   const depthCard = (
-    <details key="depth" className="measure-extra" open={Boolean(depth) && !depthIn}>
+    <details key="depth" className="measure-extra" open={depthOpen} onToggle={(e) => setDepthOpen(e.currentTarget.open)}>
       <summary>
         <Icon name="ruler" size={17} />
         <span className="measure-extra-text"><strong>Depth</strong><span>{depthIn > 0 ? `${depthIn} in · ${bedSqft > 0 ? `${formatNumber(bedYards, 1)} cu yd of mulch in beds` : `${formatNumber(cubicYards, 1)} cu yd`}${paving ? ` · ${formatNumber(asphaltTons, 1)} tons of asphalt` : ""}` : "For mulch, gravel and asphalt"}</span></span>
