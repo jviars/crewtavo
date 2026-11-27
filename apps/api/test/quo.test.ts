@@ -307,6 +307,20 @@ describe("Quo's deliveries", () => {
     expect(data.tables.messages!.find((m) => m.id === "m-ours")).toMatchObject({ status: "failed", recipients: [{ to: ANA, name: "Ana Alvarez", failed: true }] });
   });
 
+  it("mark only the person whose text failed, in a text to several people", async () => {
+    const BO = "+15405550188";
+    const data = await connectedDb({}, {
+      quo_sent: [{ company_id: CO, message_id: "ACana" }, { company_id: CO, message_id: "ACbo" }],
+      messages: [{ id: "m-both", company_id: CO, client_id: "client-ana", channel: "sms", direction: "out", status: "sent", body: "Reminder", external_id: "ACana", recipients: [{ to: ANA, name: "Ana Alvarez", id: "ACana" }, { to: BO, name: "Bo Brown", id: "ACbo" }] }],
+    });
+    await deliver(messageEvent("message.undelivered", { id: "ACbo", direction: "outgoing", text: "Reminder", errorCode: "30003" }, { senderIdentifier: OWN, recipientIdentifiers: [BO] }));
+    expect(data.tables.messages!.find((m) => m.id === "m-both")).toMatchObject({ status: "sent", recipients: [{ to: ANA, id: "ACana" }, { to: BO, id: "ACbo", failed: true }] });
+    expect(data.tables.messages!.find((m) => m.id === "m-both")!.recipients[0].failed).toBeUndefined();
+    await deliver(messageEvent("message.failed", { id: "ACana", direction: "outgoing", text: "Reminder", errorCode: "30003" }, { senderIdentifier: OWN, recipientIdentifiers: [ANA] }));
+    expect(data.tables.messages!.find((m) => m.id === "m-both")).toMatchObject({ status: "failed" });
+    expect(data.tables.messages!.filter((m) => m.body === "Reminder")).toHaveLength(1);
+  });
+
   it("put an answered call on the client's timeline, waiting on nobody", async () => {
     const data = await connectedDb();
     const call = messageEvent("call.completed", { id: "ACcall1", direction: "incoming", status: "answered", answeredAt: "2026-11-20T15:00:05.000Z", duration: 240, hasVoicemail: false, createdAt: "2026-11-20T15:00:00.000Z" }, callContext(ANA));

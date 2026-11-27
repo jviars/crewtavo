@@ -83,7 +83,7 @@ chatgpt.put("/apps/chatgpt/model", requireUser, requireCompany(ADMINS, "apps"), 
 /** Check for new models: the list is OpenAI's own for the key, read again (which costs nothing). */
 chatgpt.post("/apps/chatgpt/models", requireUser, requireCompany(ADMINS, "apps"), async (c) => {
   const { admin, apiKey, settings } = await openAiKey(c);
-  const checked = await checkOpenAiKey(apiKey);
+  const checked = await checkOpenAiKey(c.env, apiKey);
   if ("problem" in checked) throw new HttpError(502, checked.problem);
   const model = pickModel(c.env, checked.models, settings.model);
   const { error } = await admin.from("integrations").update({ settings: asJson({ ...settings, model: c.env.OPENAI_MODEL ? (settings.model ?? null) : model, models: checked.models }) }).eq("company_id", c.var.companyId).eq("provider", "chatgpt");

@@ -297,7 +297,7 @@ apps.post("/apps/:provider/connect", requireUser, requireCompany(ADMINS, "apps")
   // the two a Page in a business portfolio needs for Instagram when asked (?ads=1).
   if (provider === "meta") {
     const options = { ads: c.req.query("ads") === "1", again: c.req.query("again") === "1" };
-    return c.json({ authorization_url: metaAuthorizeUrl(keys as unknown as MetaKeys, state, callbackUrl(appUrl(c), provider), options) });
+    return c.json({ authorization_url: metaAuthorizeUrl(c.env, keys as unknown as MetaKeys, state, callbackUrl(appUrl(c), provider), options) });
   }
 
   const params = new URLSearchParams({
@@ -338,7 +338,7 @@ apps.get("/apps/:provider/callback", async (c) => {
     const secret = await exchangeCode(c.env, provider, query.code, callbackUrl(appUrl(c), provider), { query }, saved?.extra);
     // Google Business Profile names itself after the location once one is picked.
     const account = provider === "google_calendar"
-      ? await describeGoogleAccount(secret.access_token!)
+      ? await describeGoogleAccount(c.env, secret.access_token!)
       : provider === "google_business"
         ? { account_label: null, external_account_id: null }
         : await describeAccount(c.env, provider, secret.access_token!, query, secret.extra);
@@ -548,7 +548,7 @@ apps.put("/apps/:provider/app-keys", requireUser, requireCompany(ADMINS, "apps")
   let accountsServer: string | undefined;
   if (provider === "zoho_books") {
     try {
-      accountsServer = zohoAccountsServer(body.accounts_server ?? "https://accounts.zoho.com");
+      accountsServer = zohoAccountsServer(c.env, body.accounts_server ?? "https://accounts.zoho.com");
     } catch {
       throw new HttpError(400, "Pick where your Zoho account is.");
     }
@@ -660,7 +660,7 @@ apps.put("/apps/twilio/account", requireUser, requireCompany(ADMINS, "apps"), as
   );
   let checked;
   try {
-    checked = await checkTwilio({ ...body, country: await textingCountry(c.env, c.var.companyId).catch(() => null) });
+    checked = await checkTwilio(c.env, { ...body, country: await textingCountry(c.env, c.var.companyId).catch(() => null) });
   } catch (error) {
     if (error instanceof TwilioProblem) throw new HttpError(400, error.message);
     throw error;
@@ -701,7 +701,7 @@ apps.post("/apps/twilio/webhook", requireUser, requireCompany(ADMINS, "apps"), a
   const settings = (row?.settings ?? null) as unknown as TwilioSettings | null;
   if (!account || !settings?.phone_sid) throw new HttpError(409, "Connect your Twilio account first.");
   try {
-    await setSmsWebhook(account, settings.phone_sid, twilioWebhook(base));
+    await setSmsWebhook(c.env, account, settings.phone_sid, twilioWebhook(base));
   } catch (error) {
     if (error instanceof TwilioProblem) throw new HttpError(502, error.message);
     throw error;
@@ -816,7 +816,7 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   }
   // fal.ai: checked against its free price list first, so a key pasted wrong says so now.
   if (provider === "fal") {
-    const problem = await checkFalKey(body.api_key);
+    const problem = await checkFalKey(c.env, body.api_key);
     if (problem) throw new HttpError(400, problem);
   }
   // Open-Meteo's paid service: asked one small question with the key, for the same reason.
@@ -828,7 +828,7 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   // pick from, with one picked to begin with: the one picked before, if it's still there.
   let openai: OpenAiSettings | null = null;
   if (provider === "chatgpt") {
-    const checked = await checkOpenAiKey(body.api_key);
+    const checked = await checkOpenAiKey(c.env, body.api_key);
     if ("problem" in checked) throw new HttpError(400, checked.problem);
     const { data: was } = await admin.from("integrations").select("settings").match({ company_id: c.var.companyId, provider }).maybeSingle();
     openai = { model: pickModel(c.env, checked.models, (was?.settings as OpenAiSettings | null)?.model), models: checked.models };
@@ -837,7 +837,7 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   let lob: LobSettings | null = null;
   if (provider === "lob") {
     try {
-      lob = await checkLobKey(body.api_key);
+      lob = await checkLobKey(c.env, body.api_key);
     } catch (error) {
       if (error instanceof LobProblem) throw new HttpError(400, error.message);
       throw error;

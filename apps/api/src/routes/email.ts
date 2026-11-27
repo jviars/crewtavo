@@ -143,7 +143,7 @@ email.put("/email", ...requireEmailOwner, async (c) => {
   // Then a real test email to the person setting it up, which proves the whole path works.
   const to = me.email;
   if (to) {
-    const result = await sendWithMailbox(settings, secret, {
+    const result = await sendWithMailbox(c.env, settings, secret, {
       to,
       subject: `Email is connected for ${company.name}`,
       ...renderEmail({ companyName: company.name, logo: logoImage(appUrl(c), c.var.companyId, company.settings), text: `This is a test from Crewtavo.\n\nQuotes, invoices, reminders and team notifications for ${company.name} will now be sent from ${settings.from_email}. Replies go to ${company.email || settings.from_email}.` }),

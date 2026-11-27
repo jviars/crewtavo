@@ -252,7 +252,7 @@ export async function confirmBooking(
           result.texted = true;
           await admin.from("messages").insert({
             company_id: co.id, client_id: client.id, channel: "sms", direction: "out", status: "sent", body,
-            ...about, external_id: delivery.id, sent_by: booking.sentBy ?? null, recipients: recipientsColumn(delivery),
+            ...about, external_id: delivery.id, sent_by: booking.sentBy ?? null, recipients: recipientsColumn(delivery, true),
           });
         }
       }

@@ -87,8 +87,8 @@ export async function exchangeCode(env: Env, provider: Provider, code: string, r
   const extra: Record<string, string> = { ...keys };
   if (provider === "zoho_books") {
     // Both come from outside (the callback URL and the token response): only Zoho's servers are kept.
-    if (ctx.query["accounts-server"]) extra.accounts_server = zohoAccountsServer(ctx.query["accounts-server"]);
-    extra.api_domain = zohoApiDomain(json.api_domain);
+    if (ctx.query["accounts-server"]) extra.accounts_server = zohoAccountsServer(env, ctx.query["accounts-server"]);
+    extra.api_domain = zohoApiDomain(env, json.api_domain);
   }
   return {
     access_token: json.access_token,

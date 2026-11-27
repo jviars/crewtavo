@@ -282,7 +282,7 @@ describe("Google Calendar", () => {
   it("gives up on Google after a while when asking which account was connected", async () => {
     const fetched = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ id: "office@example.com", summary: "Office" }));
     vi.stubGlobal("fetch", fetched);
-    expect(await describeGoogleAccount("token")).toEqual({ external_account_id: null, account_label: "office@example.com" });
+    expect(await describeGoogleAccount({}, "token")).toEqual({ external_account_id: null, account_label: "office@example.com" });
     expect(fetched.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal);
   });
 

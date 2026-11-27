@@ -204,7 +204,7 @@ describe("sender names", () => {
   it("quotes the company name for Resend, so a comma doesn't make two senders", async () => {
     const calls = serve(() => Response.json({ id: "email-1" }));
     const settings = { preset: "resend", kind: "resend" as const, from_email: "office@acme.example", from_name: 'Acme Lawn Care, LLC "Pros"' };
-    const result = await sendWithMailbox(settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" });
+    const result = await sendWithMailbox({}, settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" });
     expect(result).toEqual({ sent: true, id: "email-1" });
     expect(calls[0]!.body.from).toBe('"Acme Lawn Care, LLC \\"Pros\\"" <office@acme.example>');
     expect(calls[0]!.signal).toBeInstanceOf(AbortSignal);
@@ -215,7 +215,7 @@ describe("sender names", () => {
       throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     });
     const settings = { preset: "resend", kind: "resend" as const, from_email: "office@acme.example" };
-    expect(await sendWithMailbox(settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" })).toEqual({
+    expect(await sendWithMailbox({}, settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" })).toEqual({
       sent: false,
       reason: "Couldn't reach Resend. Try again.",
     });
@@ -266,17 +266,26 @@ describe("review requests", () => {
 
 describe("Zoho data centers", () => {
   it("accepts only Zoho's own accounts and API servers over https", () => {
-    expect(zohoAccountsServer("https://accounts.zoho.eu")).toBe("https://accounts.zoho.eu");
-    expect(zohoAccountsServer("https://accounts.zoho.com.au/")).toBe("https://accounts.zoho.com.au");
-    expect(zohoAccountsServer("https://accounts.zohocloud.ca")).toBe("https://accounts.zohocloud.ca");
+    expect(zohoAccountsServer({}, "https://accounts.zoho.eu")).toBe("https://accounts.zoho.eu");
+    expect(zohoAccountsServer({}, "https://accounts.zoho.com.au/")).toBe("https://accounts.zoho.com.au");
+    expect(zohoAccountsServer({}, "https://accounts.zohocloud.ca")).toBe("https://accounts.zohocloud.ca");
     for (const bad of ["https://attacker.example", "http://accounts.zoho.com", "https://accounts.zoho.com.attacker.example", "https://accounts.zoho.com:8443", "https://x@accounts.zoho.com", "not a url", "https://www.zohoapis.com"]) {
-      expect(() => zohoAccountsServer(bad), bad).toThrow("isn't Zoho's");
+      expect(() => zohoAccountsServer({}, bad), bad).toThrow("isn't Zoho's");
     }
-    expect(zohoApiDomain("https://www.zohoapis.in")).toBe("https://www.zohoapis.in");
-    expect(zohoApiDomain(undefined)).toBe("https://www.zohoapis.com");
+    expect(zohoApiDomain({}, "https://www.zohoapis.in")).toBe("https://www.zohoapis.in");
+    expect(zohoApiDomain({}, undefined)).toBe("https://www.zohoapis.com");
     for (const bad of ["http://169.254.169.254/latest/meta-data", "https://www.zohoapis.com.attacker.example", "http://www.zohoapis.com", "https://accounts.zoho.com"]) {
-      expect(() => zohoApiDomain(bad), bad).toThrow("isn't one of Zoho's");
+      expect(() => zohoApiDomain({}, bad), bad).toThrow("isn't one of Zoho's");
     }
+  });
+
+  it("also takes Lookalyke's Zoho while LOOKALYKE_URL is set, and only that address", () => {
+    const dev = { LOOKALYKE_URL: "http://127.0.0.1:4100/" };
+    expect(zohoAccountsServer(dev, "http://127.0.0.1:4100/zoho")).toBe("http://127.0.0.1:4100/zoho");
+    expect(zohoApiDomain(dev, "http://127.0.0.1:4100/zoho/")).toBe("http://127.0.0.1:4100/zoho");
+    expect(zohoApiDomain(dev, undefined)).toBe("http://127.0.0.1:4100/zoho");
+    expect(() => zohoAccountsServer(dev, "http://127.0.0.1:4100/other")).toThrow("isn't Zoho's");
+    expect(() => zohoAccountsServer({}, "http://127.0.0.1:4100/zoho")).toThrow("isn't Zoho's");
   });
 
   const zohoEnv: Env = { ...env, ZOHO_CLIENT_ID: "zoho-client", ZOHO_CLIENT_SECRET: "zoho-secret" };

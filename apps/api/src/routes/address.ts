@@ -86,7 +86,7 @@ address.post("/address/cloudflare", ...admins, async (c) => {
   const { token } = await readJson(c, z.object({ token: z.string().trim().min(20, "Paste the whole token.").max(400) }));
   const admin = adminClient(c.env);
   const { zone, records } = await recordsToAdd(admin, c.var.companyId);
-  const added = await addCloudflareRecords(token, zone, records).catch(plain);
+  const added = await addCloudflareRecords(c.env, token, zone, records).catch(plain);
   return c.json({ added, overview: await addressOverview(c.env, admin, c.var.companyId) });
 });
 

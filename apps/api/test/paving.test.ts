@@ -85,12 +85,12 @@ async function paver({ falKey }: { falKey?: string } = {}) {
 describe("fal.ai", () => {
   it("checks a key against fal's free price list", async () => {
     const ok = vi.fn(async () => new Response("{}", { status: 200 }));
-    expect(await checkFalKey("abc:def", ok as never)).toBeNull();
+    expect(await checkFalKey({}, "abc:def", ok as never)).toBeNull();
     const [url, init] = ok.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toContain("api.fal.ai/v1/models/pricing");
     expect((init.headers as Record<string, string>).Authorization).toBe("Key abc:def");
-    expect(await checkFalKey("nope", (async () => new Response("{}", { status: 401 })) as never)).toMatch(/didn't accept that key/);
-    expect(await checkFalKey("abc:def", (async () => { throw new Error("offline"); }) as never)).toMatch(/Couldn't reach fal\.ai/);
+    expect(await checkFalKey({}, "nope", (async () => new Response("{}", { status: 401 })) as never)).toMatch(/didn't accept that key/);
+    expect(await checkFalKey({}, "abc:def", (async () => { throw new Error("offline"); }) as never)).toMatch(/Couldn't reach fal\.ai/);
   });
 
   it("explains fal's errors to an office manager", () => {
@@ -102,7 +102,7 @@ describe("fal.ai", () => {
 
   it("asks SAM 3 for each target and keeps the masks it sends inline", async () => {
     fal.mockImplementation(async () => Response.json({ masks: [{ url: MASK }, { url: "https://example.com/not-fal.png" }], scores: [0.9, 0.8] }));
-    const results = await detect("abc:def", IMAGE, ["asphalt", "stalls"], fal as never);
+    const results = await detect({}, "abc:def", IMAGE, ["asphalt", "stalls"], fal as never);
     expect(results).toEqual([
       { target: "asphalt", masks: [MASK], scores: [0.9] },
       { target: "stalls", masks: [MASK], scores: [0.9] },

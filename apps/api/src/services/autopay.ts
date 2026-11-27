@@ -1121,7 +1121,7 @@ export async function confirmAutopay(
   try {
     const access = await stripeAccess(env, admin, input.companyId);
     if (access?.own) {
-      await stripeApi(access.key, "POST", `/v1/customers/${method.stripe_customer_id}`, { invoice_settings: { default_payment_method: method.stripe_payment_method_id } }, {
+      await stripeApi(env, access.key, "POST", `/v1/customers/${method.stripe_customer_id}`, { invoice_settings: { default_payment_method: method.stripe_payment_method_id } }, {
         idempotencyKey: `crewtavo-default-${method.stripe_payment_method_id}`,
       });
     }

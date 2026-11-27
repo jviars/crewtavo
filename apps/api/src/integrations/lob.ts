@@ -18,8 +18,10 @@
  * deliver comes back refused with the reason, which the campaign shows for that client.
  */
 import type { MailingAddress, PostcardSize } from "@crewtavo/core/postcards";
+import { serviceUrl, type Env } from "../env";
 
-const API = "https://api.lob.com/v1";
+type Where = Pick<Env, "LOOKALYKE_URL">;
+const api = (env: Where) => `${serviceUrl(env, "lob", "https://api.lob.com")}/v1`;
 /** Lob not answering in time counts as unreachable. */
 const TIMEOUT_MS = 20_000;
 
@@ -110,10 +112,10 @@ async function problemOf(res: Response): Promise<LobProblem> {
 }
 
 /** Checks a key with Lob before it's kept. The key's mode, or a LobProblem saying what to fix. */
-export async function checkLobKey(key: string, fetcher: FetchLike = fetch): Promise<{ mode: LobMode }> {
+export async function checkLobKey(env: Where, key: string, fetcher: FetchLike = fetch): Promise<{ mode: LobMode }> {
   const mode = lobMode(key);
   if (!mode) throw new LobProblem("That doesn't look like a Lob secret API key. It starts with test_ or live_, under Settings → API Keys in your Lob dashboard.");
-  const res = await fetcher(`${API}/addresses?limit=1`, { headers: auth(key), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
+  const res = await fetcher(`${api(env)}/addresses?limit=1`, { headers: auth(key), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
   if (!res) throw new LobProblem("Couldn't reach Lob to check the key. Try again in a minute.");
   if (res.ok) return { mode };
   const { said, code } = await lobSaid(res);
@@ -227,7 +229,7 @@ const MAX_PAGES = 60;
  * account's cards are listed without it. Either way the cards may include other campaigns': the
  * caller matches each by Lob's id or by the metadata on it, never by being listed.
  */
-export async function listCards(key: string, about: { campaign: string; failed?: boolean }, fetcher: FetchLike = fetch): Promise<{ cards: LobCard[]; complete: boolean }> {
+export async function listCards(env: Where, key: string, about: { campaign: string; failed?: boolean }, fetcher: FetchLike = fetch): Promise<{ cards: LobCard[]; complete: boolean }> {
   const read = async (byCampaign: boolean): Promise<{ cards: LobCard[]; complete: boolean; refused: boolean }> => {
     const cards: LobCard[] = [];
     let after: string | null = null;
@@ -236,14 +238,14 @@ export async function listCards(key: string, about: { campaign: string; failed?:
       if (about.failed) query.set("status", "failed");
       if (byCampaign) query.set("metadata[crewtavo_campaign]", about.campaign);
       if (after) query.set("after", after);
-      const res = await fetcher(`${API}/postcards?${query}`, { headers: auth(key), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
+      const res = await fetcher(`${api(env)}/postcards?${query}`, { headers: auth(key), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
       if (!res) return { cards, complete: false, refused: false };
       if (res.status === 422 || res.status === 400) return { cards, complete: false, refused: true };
       if (!res.ok) throw await problemOf(res);
       const body = (await res.json().catch(() => null)) as { data?: unknown; next_url?: unknown } | null;
       if (!body || !Array.isArray(body.data)) return { cards, complete: false, refused: false };
       cards.push(...body.data.map(toCard).filter((c): c is LobCard => c !== null));
-      after = typeof body.next_url === "string" ? new URL(body.next_url, API).searchParams.get("after") : null;
+      after = typeof body.next_url === "string" ? new URL(body.next_url, api(env)).searchParams.get("after") : null;
       if (!after) return { cards, complete: true, refused: false };
     }
     return { cards, complete: false, refused: false };
@@ -267,8 +269,8 @@ export interface MadePostcard {
  * Makes one postcard. Throws a LobProblem when Lob refuses it, or when Lob can't be reached (retry:
  * the same idempotency key makes a second try safe).
  */
-export async function createPostcard(key: string, input: PostcardRequest, fetcher: FetchLike = fetch): Promise<MadePostcard> {
-  const res = await fetcher(`${API}/postcards`, {
+export async function createPostcard(env: Where, key: string, input: PostcardRequest, fetcher: FetchLike = fetch): Promise<MadePostcard> {
+  const res = await fetcher(`${api(env)}/postcards`, {
     method: "POST",
     headers: { ...auth(key), "Content-Type": "application/json", "Idempotency-Key": input.idempotencyKey },
     body: JSON.stringify(postcardBody(input)),

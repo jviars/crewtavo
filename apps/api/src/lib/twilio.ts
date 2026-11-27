@@ -13,7 +13,7 @@
  */
 import { internationalPhone, phoneE164, phoneExample } from "@crewtavo/core/phone";
 import { phoneMatchKey } from "@crewtavo/core/recipients";
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
 import { adminClient, type Db } from "./supabase";
@@ -44,7 +44,7 @@ export interface TwilioAccount {
   status?: string;
 }
 
-const API = "https://api.twilio.com/2010-04-01";
+const api = (env: Pick<Env, "LOOKALYKE_URL">) => `${serviceUrl(env, "twilio", "https://api.twilio.com")}/2010-04-01`;
 const CACHE_MS = 60_000;
 /** Twilio not answering in time counts as unreachable. */
 const TIMEOUT_MS = 15_000;
@@ -138,8 +138,8 @@ export async function anyTwilio(env: Env): Promise<boolean | null> {
 const auth = (sid: string, token: string) => ({ Authorization: `Basic ${btoa(`${sid}:${token}`)}` });
 
 /** One text through an account. Twilio's answer, or null when it couldn't be reached. */
-export function postMessage(account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string }): Promise<Response | null> {
-  return fetch(`${API}/Accounts/${account.sid}/Messages.json`, {
+export function postMessage(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string }): Promise<Response | null> {
+  return fetch(`${api(env)}/Accounts/${account.sid}/Messages.json`, {
     method: "POST",
     headers: { ...auth(account.sid, account.token), "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ To: message.to, From: account.from, Body: message.body }),
@@ -170,14 +170,14 @@ const SID = /^AC[0-9a-fA-F]{32}$/;
  * Throws a TwilioProblem that says what to fix. `country` is the company's (companies.country): a
  * number typed as it's written there ("07700 900123" in the UK) is completed with its country code.
  */
-export async function checkTwilio(input: { account_sid: string; auth_token: string; from_number: string; country?: string | null }, fetcher: FetchLike = fetch): Promise<TwilioCheck> {
+export async function checkTwilio(env: Pick<Env, "LOOKALYKE_URL">, input: { account_sid: string; auth_token: string; from_number: string; country?: string | null }, fetcher: FetchLike = fetch): Promise<TwilioCheck> {
   const sid = input.account_sid.trim();
   const token = input.auth_token.trim();
   if (!SID.test(sid)) throw new TwilioProblem("That doesn't look like an Account SID. It starts with AC and is 34 characters long, on your Twilio console's first page.");
   const from = phoneE164(internationalPhone(input.from_number, input.country));
   if (!from) throw new TwilioProblem(`Enter your Twilio number in full, with its area code, like ${phoneExample(input.country) ?? "(540) 555-0100"}.`);
   const read = async (path: string) => {
-    const res = await fetcher(`${API}/Accounts/${sid}${path}`, { headers: auth(sid, token), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
+    const res = await fetcher(`${api(env)}/Accounts/${sid}${path}`, { headers: auth(sid, token), signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => null);
     if (!res) throw new TwilioProblem("Couldn't reach Twilio to check these. Try again in a minute.");
     if (res.status === 401 || res.status === 403 || res.status === 404) {
       throw new TwilioProblem("Twilio didn't accept that Account SID and Auth Token. Copy both again from your Twilio console's first page (click the eye to show the token).");
@@ -195,8 +195,8 @@ export async function checkTwilio(input: { account_sid: string; auth_token: stri
 }
 
 /** Points the number's incoming texts at `url` (the number's "A message comes in" webhook, HTTP POST). */
-export async function setSmsWebhook(account: Pick<TwilioAccount, "sid" | "token">, phoneSid: string, url: string, fetcher: FetchLike = fetch): Promise<void> {
-  const res = await fetcher(`${API}/Accounts/${account.sid}/IncomingPhoneNumbers/${phoneSid}.json`, {
+export async function setSmsWebhook(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token">, phoneSid: string, url: string, fetcher: FetchLike = fetch): Promise<void> {
+  const res = await fetcher(`${api(env)}/Accounts/${account.sid}/IncomingPhoneNumbers/${phoneSid}.json`, {
     method: "POST",
     headers: { ...auth(account.sid, account.token), "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ SmsUrl: url, SmsMethod: "POST" }),

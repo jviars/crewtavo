@@ -18,7 +18,7 @@
  * exactly what it had before OpenAI could be used at all.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { ELIGIBLE, loadPlan, notePlanProblem, notePlanUnsupported, planAccess, PlanTrouble, refreshPlanModels, USAGE_URL, type Person, type PlanRow } from "../integrations/chatgptPlan";
 import { askWithKey, askWithPlan, checkOpenAiKey, listKeyModels, OpenAiProblem, pickModel, type OpenAiAsk, type OpenAiModel } from "../integrations/openai";
 import { loadSecret } from "../integrations/tokens";
@@ -136,12 +136,14 @@ export async function allowReceiptRead(env: Env, companyId: string, userId: stri
 /** The Claude model in-app AI uses. */
 export const aiModel = (env: Env) => env.AI_MODEL || "claude-opus-5-5";
 
+const claudeApi = (env: Env) => serviceUrl(env, "anthropic", "https://api.anthropic.com");
+
 /**
  * Whether a Claude key works, asked of Anthropic before a feature that spends it is turned on: null
  * when it does, else what to fix. Reading the model's details costs nothing.
  */
 export async function checkAnthropicKey(env: Env, apiKey: string): Promise<string | null> {
-  const client = new Anthropic({ apiKey, timeout: 15_000, maxRetries: 1 });
+  const client = new Anthropic({ apiKey, baseURL: claudeApi(env), timeout: 15_000, maxRetries: 1 });
   try {
     await client.models.retrieve(aiModel(env));
     return null;
@@ -165,7 +167,7 @@ export async function checkCompanyAi(env: Env, admin: Db, companyId: string): Pr
   const ai = await companyAi(env, admin, companyId);
   if (!ai) return "Add a Claude or OpenAI key on the Apps page first, then turn this on.";
   if (ai.service === "claude") return checkAnthropicKey(env, ai.apiKey);
-  const checked = await checkOpenAiKey(ai.apiKey);
+  const checked = await checkOpenAiKey(env, ai.apiKey);
   return "problem" in checked ? `${checked.problem} The key is under Apps → ChatGPT.` : null;
 }
 
@@ -225,7 +227,7 @@ async function answer(env: Env, asker: Asker, ask: Ask): Promise<string> {
 // ---------------------------------------------------------------------------------------------
 
 async function readWithClaude(env: Env, apiKey: string, ask: Ask): Promise<string> {
-  const client = new Anthropic({ apiKey, timeout: ask.timeoutMs, maxRetries: 0 });
+  const client = new Anthropic({ apiKey, baseURL: claudeApi(env), timeout: ask.timeoutMs, maxRetries: 0 });
   const file: Anthropic.Beta.BetaContentBlockParam =
     ask.file!.mediaType === "application/pdf"
       ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: ask.file!.data } }
@@ -260,7 +262,7 @@ async function readWithClaude(env: Env, apiKey: string, ask: Ask): Promise<strin
 }
 
 async function completeWithClaude(env: Env, apiKey: string, ask: Ask): Promise<string> {
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({ apiKey, baseURL: claudeApi(env) });
 
   try {
     const response = await client.beta.messages.create({
@@ -351,7 +353,7 @@ async function askOpenAiKey(env: Env, admin: Db, companyId: string, ai: Extract<
   let strict = true;
   for (let tries = 0; ; tries++) {
     try {
-      return await askWithKey(ai.apiKey, { ...ask, model, effort, strict });
+      return await askWithKey(env, ai.apiKey, { ...ask, model, effort, strict });
     } catch (error) {
       if (!(error instanceof OpenAiProblem)) throw error;
       if (tries < 3 && error.kind === "unsupported" && error.param?.startsWith("reasoning") && effort) {
@@ -366,7 +368,7 @@ async function askOpenAiKey(env: Env, admin: Db, companyId: string, ai: Extract<
       }
       if (tries < 3 && error.kind === "model" && !env.OPENAI_MODEL) {
         const gone = model;
-        const models = await listKeyModels(ai.apiKey).catch(() => null);
+        const models = await listKeyModels(env, ai.apiKey).catch(() => null);
         const next: string | null = models ? pickModel(env, models, models.some((m) => m.slug === gone) ? gone : null) : null;
         if (models && next && next !== model) {
           settings = { ...settings, model: next, models };

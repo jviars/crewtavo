@@ -13,16 +13,19 @@
  * price list they belong to, never next to another supplier's.
  */
 import type { Db } from "../lib/supabase";
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { IntegrationError, providerTimeout } from "./registry";
 import { loadSecret, saveSecret, type StoredSecret } from "./tokens";
 
 export type AbcEnvironment = "production" | "sandbox";
 
-const ENVIRONMENTS: Record<AbcEnvironment, { api: string; token: string }> = {
-  production: { api: "https://partners.abcsupply.com", token: "https://auth.partners.abcsupply.com/oauth2/ausvvp0xuwGKLenYy357/v1/token" },
-  sandbox: { api: "https://partners-sb.abcsupply.com", token: "https://sandbox.auth.partners.abcsupply.com/oauth2/aus1vp07knpuqf6Xz0h8/v1/token" },
+const ENVIRONMENTS: Record<AbcEnvironment, { api: string; auth: string; token: string }> = {
+  production: { api: "https://partners.abcsupply.com", auth: "https://auth.partners.abcsupply.com", token: "/oauth2/ausvvp0xuwGKLenYy357/v1/token" },
+  sandbox: { api: "https://partners-sb.abcsupply.com", auth: "https://sandbox.auth.partners.abcsupply.com", token: "/oauth2/aus1vp07knpuqf6Xz0h8/v1/token" },
 };
+type Where = Pick<Env, "LOOKALYKE_URL">;
+const apiOf = (env: Where, environment: AbcEnvironment) => serviceUrl(env, "abc-supply", ENVIRONMENTS[environment].api);
+const tokenUrlOf = (env: Where, environment: AbcEnvironment) => `${serviceUrl(env, "abc-supply", ENVIRONMENTS[environment].auth)}${ENVIRONMENTS[environment].token}`;
 
 /** What Crewtavo asks ABC for: the account and its branches, the catalog and prices. No orders or invoices. */
 const SCOPES = "account.read location.read product.read pricing.read";
@@ -165,8 +168,8 @@ const SCOPE_REFUSED =
   "ABC Supply won't give this app prices. It has to be an app for your own company, not a software company's: in ABC's developer portal, make a new app, answer No when ABC asks if it will be used by multiple ABC customers, and paste its keys.";
 
 /** A token for the app, from ABC's sign-in server (they last 30 minutes). */
-export async function requestToken(keys: AbcKeys, fetcher: FetchLike = fetch): Promise<{ access_token: string; expires_at: number }> {
-  const res = await fetcher(ENVIRONMENTS[keys.environment].token, {
+export async function requestToken(env: Where, keys: AbcKeys, fetcher: FetchLike = fetch): Promise<{ access_token: string; expires_at: number }> {
+  const res = await fetcher(tokenUrlOf(env, keys.environment), {
     method: "POST",
     headers: {
       Authorization: `Basic ${btoa(`${keys.client_id}:${keys.client_secret}`)}`,
@@ -398,6 +401,7 @@ export function firstAnswer<T>(ask: () => Promise<T>, after: number): Promise<T>
  */
 export class AbcClient {
   constructor(
+    private readonly env: Where,
     private readonly environment: AbcEnvironment,
     private token: string,
     private readonly fetcher: FetchLike = fetch,
@@ -409,7 +413,7 @@ export class AbcClient {
     if (this.lane) await pace(this.lane);
     const started = Date.now();
     let timedOut = false;
-    const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}${path}`, {
+    const res = await this.fetcher(`${apiOf(this.env, this.environment)}${path}`, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
       headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json", ...(init.body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -572,7 +576,7 @@ export class AbcClient {
   /** ABC's picture of an item (its docs say a PNG up to 250 px; production sends larger JPEGs), or null when it has none. */
   async image(assetId: string, retried = false): Promise<{ body: ArrayBuffer; type: string } | null> {
     if (this.lane) await pace(this.lane);
-    const res = await this.fetcher(`${ENVIRONMENTS[this.environment].api}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
+    const res = await this.fetcher(`${apiOf(this.env, this.environment)}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
       headers: { Authorization: `Bearer ${this.token}`, Accept: "image/png, image/*" },
       signal: providerTimeout(),
     }).catch(() => null);
@@ -653,8 +657,8 @@ const labelOf = (s: Pick<AbcSettings, "ship_to_name" | "branch_name">) => `${s.s
  * branch. Saves it all, the keys encrypted, so prices can come from it.
  */
 export async function connectAbc(env: Env, admin: Db, opts: { companyId: string; userId: string; keys: AbcKeys }, fetcher: FetchLike = fetch): Promise<AbcSettings> {
-  const token = await requestToken(opts.keys, fetcher);
-  const accounts = await new AbcClient(opts.keys.environment, token.access_token, fetcher).accounts();
+  const token = await requestToken(env, opts.keys, fetcher);
+  const accounts = await new AbcClient(env, opts.keys.environment, token.access_token, fetcher).accounts();
   const choice = defaultChoice(accounts);
   if (!choice) throw new AbcProblem(NO_ACCOUNTS[opts.keys.environment], 400);
   const settings: AbcSettings = {
@@ -694,7 +698,7 @@ export async function abcConnection(env: Env, admin: Db, companyId: string, fetc
   if (!row || row.status === "disconnected" || !settings || !keys) throw new AbcProblem("Material prices come from ABC Supply. An owner or admin can install it on the Apps page.", 409);
   const renew = async () => {
     try {
-      const token = await requestToken(keys, fetcher);
+      const token = await requestToken(env, keys, fetcher);
       await saveSecret(env, admin, companyId, "abc_supply", { ...secret, ...token });
       if (row.status === "error") await admin.from("integrations").update({ status: "connected", last_error: null }).match({ company_id: companyId, provider: "abc_supply" });
       return token.access_token;
@@ -707,7 +711,7 @@ export async function abcConnection(env: Env, admin: Db, companyId: string, fetc
     }
   };
   const fresh = secret?.access_token && secret.expires_at && secret.expires_at - Date.now() > 120_000 ? secret.access_token : await renew();
-  return { client: new AbcClient(settings.environment, fresh, fetcher, renew, companyId), settings };
+  return { client: new AbcClient(env, settings.environment, fresh, fetcher, renew, companyId), settings };
 }
 
 function keysOf(secret: StoredSecret | null): AbcKeys | null {

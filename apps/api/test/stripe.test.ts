@@ -160,7 +160,7 @@ describe("stripe api", () => {
   it("pins the API version, sends idempotency keys and reads Stripe's errors", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "No such customer: 'cus_x'", code: "resource_missing", param: "customer" } }), { status: 400 }));
     vi.stubGlobal("fetch", fetch);
-    const error = await stripeApi("sk_test_1", "POST", "/v1/invoices", { customer: "cus_x" }, { idempotencyKey: "k1" }).catch((e) => e);
+    const error = await stripeApi({}, "sk_test_1", "POST", "/v1/invoices", { customer: "cus_x" }, { idempotencyKey: "k1" }).catch((e) => e);
     expect(error).toBeInstanceOf(StripeError);
     expect(error).toMatchObject({ status: 400, code: "resource_missing", param: "customer" });
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
@@ -178,7 +178,7 @@ describe("stripe api", () => {
     };
     const fetch = vi.fn(async () => new Response(JSON.stringify(declined), { status: 402 }));
     vi.stubGlobal("fetch", fetch);
-    const error = await stripeApi("sk_test_1", "POST", "/v1/invoices/in_1/pay", { off_session: true }, { idempotencyKey: "k1" }).catch((e) => e);
+    const error = await stripeApi({}, "sk_test_1", "POST", "/v1/invoices/in_1/pay", { off_session: true }, { idempotencyKey: "k1" }).catch((e) => e);
     expect(error).toBeInstanceOf(StripeError);
     expect(error).toMatchObject({
       status: 402, code: "card_declined", declineCode: "insufficient_funds", type: "card_error", paymentIntent: "pi_1", paymentIntentStatus: "requires_payment_method",
@@ -193,14 +193,14 @@ describe("stripe api", () => {
     const fetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason))));
     vi.stubGlobal("fetch", fetch);
     timeout.ms = 20;
-    const error = await stripeApi("sk_test_1", "POST", "/v1/invoices", { customer: "cus_1" }, { idempotencyKey: "k1" }).catch((e) => e);
+    const error = await stripeApi({}, "sk_test_1", "POST", "/v1/invoices", { customer: "cus_1" }, { idempotencyKey: "k1" }).catch((e) => e);
     expect(error).toBeInstanceOf(StripeError);
     expect(error).toMatchObject({ status: 0 });
     // Tried three times with the same idempotency key, so Stripe does it at most once.
     expect(fetch.mock.calls.map(([, init]) => (init.headers as Record<string, string>)["Idempotency-Key"])).toEqual(["k1", "k1", "k1"]);
 
     fetch.mockClear();
-    expect(await stripeApi("sk_test_1", "POST", "/v1/customers", { email: "pat@example.com" }).catch((e) => e)).toBeInstanceOf(StripeError);
+    expect(await stripeApi({}, "sk_test_1", "POST", "/v1/customers", { email: "pat@example.com" }).catch((e) => e)).toBeInstanceOf(StripeError);
     // No idempotency key: it may have gone through, so it isn't sent again.
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -210,19 +210,19 @@ describe("stripe api", () => {
     vi.stubGlobal("fetch", fetch);
     // Yen has no cents (¥5,000 sent as 500000 would be ¥500,000), dinars have thousandths, and nobody has checked "xxx".
     for (const currency of ["jpy", "JPY", "krw", "kwd", "xxx"]) {
-      const error = await stripeApi("sk_test_1", "POST", "/v1/invoiceitems", { customer: "cus_1", currency, amount: 500000 }, { idempotencyKey: "k1" }).catch((e) => e);
+      const error = await stripeApi({}, "sk_test_1", "POST", "/v1/invoiceitems", { customer: "cus_1", currency, amount: 500000 }, { idempotencyKey: "k1" }).catch((e) => e);
       expect(error).toBeInstanceOf(StripeError);
       expect(error).toMatchObject({ status: 400, code: "currency_not_supported", param: "currency" });
       expect((error as StripeError).message).toBe(`Crewtavo can't bill through Stripe in ${currency.toUpperCase()}: it only knows currencies counted in cents, like USD. Change the currency in Settings → Company.`);
     }
     expect(fetch).not.toHaveBeenCalled();
     // Every currency a business can pick goes through, and so do the others its smallest charge is known for.
-    for (const { code } of CURRENCIES) expect(await stripeApi("sk_test_1", "POST", "/v1/invoices", { customer: "cus_1", currency: code.toLowerCase() })).toEqual({ id: "in_1" });
+    for (const { code } of CURRENCIES) expect(await stripeApi({}, "sk_test_1", "POST", "/v1/invoices", { customer: "cus_1", currency: code.toLowerCase() })).toEqual({ id: "in_1" });
     for (const currency of ["mxn", "sek", "chf"]) expect(centsCurrency(currency)).toBe(currency);
     expect(centsCurrency("CAD")).toBe("cad");
     expect(fetch).toHaveBeenCalledTimes(CURRENCIES.length);
     // Reading from Stripe isn't held back: what's there in another currency can still be looked at.
-    expect(await stripeApi("sk_test_1", "GET", "/v1/invoices", { currency: "jpy" })).toEqual({ id: "in_1" });
+    expect(await stripeApi({}, "sk_test_1", "GET", "/v1/invoices", { currency: "jpy" })).toEqual({ id: "in_1" });
   });
 
   it("retries a read that timed out", async () => {
@@ -231,7 +231,7 @@ describe("stripe api", () => {
       .mockRejectedValueOnce(new DOMException("The operation was aborted due to timeout", "TimeoutError"))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "in_1" })));
     vi.stubGlobal("fetch", fetch);
-    expect(await stripeApi("sk_test_1", "GET", "/v1/invoices/in_1")).toEqual({ id: "in_1" });
+    expect(await stripeApi({}, "sk_test_1", "GET", "/v1/invoices/in_1")).toEqual({ id: "in_1" });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].signal).toBeInstanceOf(AbortSignal);
   });
@@ -244,7 +244,7 @@ describe("stripe api", () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(pages.shift())));
     vi.stubGlobal("fetch", fetch);
     const ids: string[] = [];
-    for await (const item of stripeList<{ id: string }>("sk_test_1", "/v1/invoices", { created: { gte: 100 } })) ids.push(item.id);
+    for await (const item of stripeList<{ id: string }>({}, "sk_test_1", "/v1/invoices", { created: { gte: 100 } })) ids.push(item.id);
     expect(ids).toEqual(["in_1", "in_2", "in_3"]);
     expect(String((fetch.mock.calls[1] as unknown as [string])[0])).toContain("starting_after=in_2");
     expect(String((fetch.mock.calls[0] as unknown as [string])[0])).toContain("created%5Bgte%5D=100");

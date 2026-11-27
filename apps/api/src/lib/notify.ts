@@ -13,7 +13,7 @@
  */
 import { isPersonalMailDomain, isPlaceholderEmail } from "@crewtavo/core/email";
 import { phoneE164, textedNumber } from "@crewtavo/core/phone";
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { decryptJson } from "./crypto";
 import { reportError } from "./monitoring";
 import { smtpReach, smtpSend, SmtpError, type SmtpReach, type SmtpSettings } from "./smtp";
@@ -144,10 +144,10 @@ const smtpOf = (settings: MailboxSettings, secret: MailboxSecret): SmtpSettings 
  * Send through a mailbox's settings (also used by Settings → Email to test before saving). `reach`
  * is smtpReach(env): a mail server on a private network only when the server allows that one.
  */
-export async function sendWithMailbox(settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage, reach: SmtpReach = "public"): Promise<SendResult> {
+export async function sendWithMailbox(env: Pick<Env, "LOOKALYKE_URL">, settings: MailboxSettings, secret: MailboxSecret, message: EmailMessage, reach: SmtpReach = "public"): Promise<SendResult> {
   const fromName = settings.from_name || message.fromName || null;
   if (settings.kind === "resend") {
-    return resendSend(secret.api_key ?? "", fromAddress(fromName, settings.from_email), message);
+    return resendSend(env, secret.api_key ?? "", fromAddress(fromName, settings.from_email), message);
   }
   const smtp = smtpOf(settings, secret);
   try {
@@ -220,7 +220,7 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
   if (companyId) {
     const mailbox = await loadMailbox(env, companyId).catch(() => null);
     if (mailbox && (!options.adminAccount || (await mailboxOwnerSet(env, companyId)))) {
-      const result = await sendWithMailbox(mailbox.settings, mailbox.secret, message, smtpReach(env));
+      const result = await sendWithMailbox(env, mailbox.settings, mailbox.secret, message, smtpReach(env));
       await noteMailboxHealth(env, companyId, mailbox, result);
       await noteSending(env, companyId, "email", result);
       return result;
@@ -230,7 +230,7 @@ export async function sendEmail(env: Env, message: EmailMessage, companyId?: str
   if ((!env.RESEND_API_KEY || !env.EMAIL_FROM) && env.MAILPIT_URL) return mailpit(env, { ...message, from: env.EMAIL_FROM });
   if (passedOver && (!env.RESEND_API_KEY || !env.EMAIL_FROM)) return { sent: false, reason: NOT_OWNERS_MAILBOX };
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return { sent: false, reason: "Email isn't set up yet. An owner can connect the company's email in Settings → Email." };
-  const result = await resendSend(env.RESEND_API_KEY, env.EMAIL_FROM, message);
+  const result = await resendSend(env, env.RESEND_API_KEY, env.EMAIL_FROM, message);
   if (companyId) await noteSending(env, companyId, "email", result);
   return result;
 }
@@ -329,8 +329,8 @@ async function noteMailboxHealth(env: Env, companyId: string, mailbox: Mailbox, 
     .eq("provider", "email");
 }
 
-async function resendSend(apiKey: string, from: string, message: EmailMessage): Promise<SendResult> {
-  const response = await fetch("https://api.resend.com/emails", {
+async function resendSend(env: Pick<Env, "LOOKALYKE_URL">, apiKey: string, from: string, message: EmailMessage): Promise<SendResult> {
+  const response = await fetch(`${serviceUrl(env, "resend", "https://api.resend.com")}/emails`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -495,7 +495,8 @@ async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): P
     if (error) reportError(new Error(`Couldn't note a text sent through Quo: ${error.message}`), { feature: "quo" });
     return { sent: true, id: sent.id };
   }
-  if (sent.status === 0) return { sent: false, reason: "Couldn't reach Quo. Try again." };
+  // No answer can mean Quo sent it anyway: say so, so nobody texts the client twice.
+  if (sent.status === 0) return { sent: false, reason: "Quo didn't answer, so this text may or may not have gone out. Check the conversation in Quo before sending it again." };
   const code = sent.title ? QUO_CODES[sent.title] : undefined;
   const words = (sent.title && QUO_WORDS[sent.title]) || sent.message;
   return {
@@ -580,7 +581,7 @@ async function textOut(env: Env, account: TwilioAccount | null, message: { to: s
     return mailpit(env, { to: `sms-${digits}@sms.local`, subject: `Text to ${message.to}`, text: message.body });
   }
   if (!account) return { sent: false, reason: "Texting isn't set up yet. An admin can connect Quo or Twilio in Apps." };
-  const response = await postMessage(account, message);
+  const response = await postMessage(env, account, message);
   if (!response) return { sent: false, reason: "Couldn't reach the text provider. Try again." };
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string; code?: number };

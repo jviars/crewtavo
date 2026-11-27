@@ -4,11 +4,13 @@
  * the masks come back in the same answer (sync_mode: data URIs), so nothing is kept at fal's end
  * for us to fetch. Each target is one request, half a cent to the business (fal's price, October 2026).
  */
+import { serviceUrl, type Env } from "../env";
 import { HttpError } from "../lib/http";
 
 export const SAM3_ENDPOINT = "fal-ai/sam-3/image";
-const RUN_URL = `https://fal.run/${SAM3_ENDPOINT}`;
-const PRICING_URL = `https://api.fal.ai/v1/models/pricing?endpoint_id=${encodeURIComponent(SAM3_ENDPOINT)}`;
+type Where = Pick<Env, "LOOKALYKE_URL">;
+const runUrl = (env: Where) => `${serviceUrl(env, "fal", "https://fal.run")}/${SAM3_ENDPOINT}`;
+const pricingUrl = (env: Where) => `${serviceUrl(env, "fal", "https://api.fal.ai")}/v1/models/pricing?endpoint_id=${encodeURIComponent(SAM3_ENDPOINT)}`;
 
 /** What Find everything in view looks for, and the words SAM 3 is given for each. */
 export const DETECT_TARGETS = {
@@ -42,8 +44,8 @@ export function falProblem(status: number, body: string): string {
 }
 
 /** Checks a key with fal.ai's price list, which costs nothing. Returns a sentence to show, or null when it works. */
-export async function checkFalKey(key: string, fetcher: FetchLike = fetch): Promise<string | null> {
-  const res = await fetcher(PRICING_URL, { headers: { Authorization: `Key ${key}` }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
+export async function checkFalKey(env: Where, key: string, fetcher: FetchLike = fetch): Promise<string | null> {
+  const res = await fetcher(pricingUrl(env), { headers: { Authorization: `Key ${key}` }, signal: AbortSignal.timeout(10_000) }).catch(() => null);
   if (!res) return "Couldn't reach fal.ai to check the key. Check the server's internet connection and try again.";
   if (res.ok) return null;
   if (res.status === 401 || res.status === 403) return "fal.ai didn't accept that key. Copy the whole key from fal.ai (it has a colon in the middle) and paste it again.";
@@ -51,11 +53,11 @@ export async function checkFalKey(key: string, fetcher: FetchLike = fetch): Prom
 }
 
 /** Finds each target on the picture (a data:image/jpeg URI). The targets run side by side. */
-export async function detect(key: string, image: string, targets: DetectTarget[], fetcher: FetchLike = fetch): Promise<DetectResult[]> {
+export async function detect(env: Where, key: string, image: string, targets: DetectTarget[], fetcher: FetchLike = fetch): Promise<DetectResult[]> {
   return Promise.all(
     targets.map(async (target) => {
       const { prompt, masks } = DETECT_TARGETS[target];
-      const res = await fetcher(RUN_URL, {
+      const res = await fetcher(runUrl(env), {
         method: "POST",
         headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({

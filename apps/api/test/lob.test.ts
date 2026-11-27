@@ -35,7 +35,7 @@ describe("Lob keys", () => {
 
   it("checks a key with a free read of the account's addresses, as Basic auth with no password", async () => {
     const fetcher = vi.fn(async () => answer(200, { data: [], object: "list" }));
-    await expect(checkLobKey(LIVE_KEY, fetcher as typeof fetch)).resolves.toEqual({ mode: "live" });
+    await expect(checkLobKey({}, LIVE_KEY, fetcher as typeof fetch)).resolves.toEqual({ mode: "live" });
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.lob.com/v1/addresses?limit=1");
     expect((init.headers as Record<string, string>).Authorization).toBe(`Basic ${btoa(`${LIVE_KEY}:`)}`);
@@ -43,18 +43,18 @@ describe("Lob keys", () => {
   });
 
   it("says what to fix when Lob refuses the key, or it isn't a secret key at all", async () => {
-    await expect(checkLobKey(TEST_KEY, (async () => answer(401, { error: { message: "Unauthorized" } })) as typeof fetch)).rejects.toThrow(/didn't accept that key/);
+    await expect(checkLobKey({}, TEST_KEY, (async () => answer(401, { error: { message: "Unauthorized" } })) as typeof fetch)).rejects.toThrow(/didn't accept that key/);
     const never = vi.fn();
-    await expect(checkLobKey("pk_live_abcdefghijklmnop", never as typeof fetch)).rejects.toThrow(/starts with test_ or live_/);
+    await expect(checkLobKey({}, "pk_live_abcdefghijklmnop", never as typeof fetch)).rejects.toThrow(/starts with test_ or live_/);
     expect(never).not.toHaveBeenCalled();
-    await expect(checkLobKey(TEST_KEY, (async () => null as unknown as Response) as unknown as typeof fetch)).rejects.toThrow(/Couldn't reach Lob/);
+    await expect(checkLobKey({}, TEST_KEY, (async () => null as unknown as Response) as unknown as typeof fetch)).rejects.toThrow(/Couldn't reach Lob/);
   });
 });
 
 describe("making a postcard", () => {
   it("sends both sides, the size, both addresses and marketing mail, with the recipient's idempotency key", async () => {
     const fetcher = vi.fn(async () => answer(200, { id: "psc_208e2a4b8e2a8a7a", expected_delivery_date: "2026-11-20", url: "https://lob-assets.com/postcards/psc.pdf" }));
-    const made = await createPostcard(TEST_KEY, request(), fetcher as typeof fetch);
+    const made = await createPostcard({}, TEST_KEY, request(), fetcher as typeof fetch);
     expect(made).toEqual({ id: "psc_208e2a4b8e2a8a7a", expected_delivery_date: "2026-11-20", url: "https://lob-assets.com/postcards/psc.pdf" });
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.lob.com/v1/postcards");
@@ -83,10 +83,10 @@ describe("making a postcard", () => {
       keys.push((init.headers as Record<string, string>)["Idempotency-Key"]!);
       return keys.length === 1 ? answer(503, { error: { message: "unavailable" } }) : answer(200, { id: "psc_same" });
     });
-    const first = await createPostcard(LIVE_KEY, request(), fetcher as unknown as typeof fetch).catch((e: unknown) => e);
+    const first = await createPostcard({}, LIVE_KEY, request(), fetcher as unknown as typeof fetch).catch((e: unknown) => e);
     expect(first).toBeInstanceOf(LobProblem);
     expect((first as LobProblem).retry).toBe(true);
-    await expect(createPostcard(LIVE_KEY, request(), fetcher as unknown as typeof fetch)).resolves.toMatchObject({ id: "psc_same", expected_delivery_date: null });
+    await expect(createPostcard({}, LIVE_KEY, request(), fetcher as unknown as typeof fetch)).resolves.toMatchObject({ id: "psc_same", expected_delivery_date: null });
     expect(keys).toEqual([keys[0], keys[0]]);
   });
 
@@ -96,61 +96,61 @@ describe("making a postcard", () => {
       used.push(atob(String((init.headers as Record<string, string>).Authorization).replace("Basic ", "")));
       return answer(200, { id: "psc_x" });
     });
-    await createPostcard(TEST_KEY, request(), fetcher as unknown as typeof fetch);
-    await createPostcard(LIVE_KEY, request(), fetcher as unknown as typeof fetch);
+    await createPostcard({}, TEST_KEY, request(), fetcher as unknown as typeof fetch);
+    await createPostcard({}, LIVE_KEY, request(), fetcher as unknown as typeof fetch);
     expect(used).toEqual([`${TEST_KEY}:`, `${LIVE_KEY}:`]);
   });
 
   it("turns Lob's refusals into what to do: the key, slowing down, the address, and an answer with no card", async () => {
     const once = (status: number, body: unknown) => (async () => answer(status, body)) as typeof fetch;
-    const refused = (await createPostcard(LIVE_KEY, request(), once(401, { error: { message: "Your API key is not valid. Please sign up on lob.com to get a valid api key.", status_code: 401, code: "invalid_api_key" } })).catch((e: unknown) => e)) as LobProblem;
+    const refused = (await createPostcard({}, LIVE_KEY, request(), once(401, { error: { message: "Your API key is not valid. Please sign up on lob.com to get a valid api key.", status_code: 401, code: "invalid_api_key" } })).catch((e: unknown) => e)) as LobProblem;
     expect(refused).toMatchObject({ key: true, account: false, retry: false });
     expect(refused.message).toMatch(/Lob says this API key isn't valid/);
-    const slow = (await createPostcard(LIVE_KEY, request(), once(429, {})).catch((e: unknown) => e)) as LobProblem;
+    const slow = (await createPostcard({}, LIVE_KEY, request(), once(429, {})).catch((e: unknown) => e)) as LobProblem;
     expect(slow.retry).toBe(true);
-    const bad = (await createPostcard(LIVE_KEY, request(), once(422, { error: { message: "address_zip must be a valid US zip code", status_code: 422 } })).catch((e: unknown) => e)) as LobProblem;
+    const bad = (await createPostcard({}, LIVE_KEY, request(), once(422, { error: { message: "address_zip must be a valid US zip code", status_code: 422 } })).catch((e: unknown) => e)) as LobProblem;
     expect(bad.message).toBe("Lob refused this card: address_zip must be a valid US zip code");
     expect(bad.retry).toBe(false);
-    const empty = (await createPostcard(LIVE_KEY, request(), once(200, {})).catch((e: unknown) => e)) as LobProblem;
+    const empty = (await createPostcard({}, LIVE_KEY, request(), once(200, {})).catch((e: unknown) => e)) as LobProblem;
     expect(empty.retry).toBe(true);
-    const gone = (await createPostcard(LIVE_KEY, request(), (async () => { throw new Error("socket hang up"); }) as typeof fetch).catch((e: unknown) => e)) as LobProblem;
+    const gone = (await createPostcard({}, LIVE_KEY, request(), (async () => { throw new Error("socket hang up"); }) as typeof fetch).catch((e: unknown) => e)) as LobProblem;
     expect(gone.retry).toBe(true);
   });
 
   it("says Lob's own reason when it refuses the account, and doesn't call a good key bad", async () => {
     const once = (status: number, body: unknown) => (async () => answer(status, body)) as typeof fetch;
     // Lob's error reference: these come back 401 and 403, like a bad key, and aren't one.
-    const unpaid = (await createPostcard(LIVE_KEY, request(), once(401, { error: { message: "You must have a verified bank account or credit card to submit live requests.", status_code: 401, code: "payment_method_unverified" } })).catch((e: unknown) => e)) as LobProblem;
+    const unpaid = (await createPostcard({}, LIVE_KEY, request(), once(401, { error: { message: "You must have a verified bank account or credit card to submit live requests.", status_code: 401, code: "payment_method_unverified" } })).catch((e: unknown) => e)) as LobProblem;
     expect(unpaid).toMatchObject({ key: false, account: true, retry: false });
     expect(unpaid.message).toBe("Lob needs a verified payment method on your account before it mails cards. Add a card or bank account in your Lob dashboard. Lob says: You must have a verified bank account or credit card to submit live requests.");
-    const limit = (await createPostcard(LIVE_KEY, request(), once(403, { error: { message: "You have reached the maximum number of postcards for your plan.", status_code: 403, code: "feature_limit_reached" } })).catch((e: unknown) => e)) as LobProblem;
+    const limit = (await createPostcard({}, LIVE_KEY, request(), once(403, { error: { message: "You have reached the maximum number of postcards for your plan.", status_code: 403, code: "feature_limit_reached" } })).catch((e: unknown) => e)) as LobProblem;
     expect(limit).toMatchObject({ key: false, account: true });
     expect(limit.message).toMatch(/Your Lob plan has reached its limit\..* Lob says: You have reached the maximum number of postcards for your plan\./);
-    const email = (await createPostcard(LIVE_KEY, request(), once(401, { error: { message: "Please verify your email.", code: "EMAIL_REQUIRED" } })).catch((e: unknown) => e)) as LobProblem;
+    const email = (await createPostcard({}, LIVE_KEY, request(), once(401, { error: { message: "Please verify your email.", code: "EMAIL_REQUIRED" } })).catch((e: unknown) => e)) as LobProblem;
     expect(email).toMatchObject({ key: false, account: true });
     // A refusal Lob gives no reason for isn't put down to the key either.
-    const bare = (await createPostcard(LIVE_KEY, request(), once(403, {})).catch((e: unknown) => e)) as LobProblem;
+    const bare = (await createPostcard({}, LIVE_KEY, request(), once(403, {})).catch((e: unknown) => e)) as LobProblem;
     expect(bare).toMatchObject({ key: false, account: true });
     expect(bare.message).toMatch(/Lob says: error 403/);
     // No code, but Lob's words say it's the key.
-    const worded = (await createPostcard(LIVE_KEY, request(), once(401, { error: { message: "Your API key is not valid." } })).catch((e: unknown) => e)) as LobProblem;
+    const worded = (await createPostcard({}, LIVE_KEY, request(), once(401, { error: { message: "Your API key is not valid." } })).catch((e: unknown) => e)) as LobProblem;
     expect(worded).toMatchObject({ key: true, account: false });
   });
 
   it("has words for a card that was tried for the last time, which don't promise another try", async () => {
     const once = (status: number, body: unknown) => (async () => answer(status, body)) as typeof fetch;
-    const busy = (await createPostcard(LIVE_KEY, request(), once(503, {})).catch((e: unknown) => e)) as LobProblem;
+    const busy = (await createPostcard({}, LIVE_KEY, request(), once(503, {})).catch((e: unknown) => e)) as LobProblem;
     expect(busy.message).toMatch(/tried again shortly/);
     expect(busy.final).toBe("Lob had a problem on its end each time this card was tried, so it wasn't made.");
-    const slow = (await createPostcard(LIVE_KEY, request(), once(429, {})).catch((e: unknown) => e)) as LobProblem;
+    const slow = (await createPostcard({}, LIVE_KEY, request(), once(429, {})).catch((e: unknown) => e)) as LobProblem;
     expect(slow.final).not.toMatch(/again|minute/);
-    const gone = (await createPostcard(LIVE_KEY, request(), (async () => { throw new Error("socket hang up"); }) as typeof fetch).catch((e: unknown) => e)) as LobProblem;
+    const gone = (await createPostcard({}, LIVE_KEY, request(), (async () => { throw new Error("socket hang up"); }) as typeof fetch).catch((e: unknown) => e)) as LobProblem;
     expect(gone.final).not.toMatch(/again shortly/);
   });
 
   it("tells a new account its payment method is missing when the key is checked, not that the key is wrong", async () => {
-    await expect(checkLobKey(LIVE_KEY, (async () => answer(401, { error: { message: "You must have a verified bank account or credit card to submit live requests.", code: "payment_method_unverified" } })) as typeof fetch)).rejects.toThrow(/verified payment method/);
-    await expect(checkLobKey(LIVE_KEY, (async () => answer(401, { error: { message: "Your API key is not valid.", code: "invalid_api_key" } })) as typeof fetch)).rejects.toThrow(/didn't accept that key/);
+    await expect(checkLobKey({}, LIVE_KEY, (async () => answer(401, { error: { message: "You must have a verified bank account or credit card to submit live requests.", code: "payment_method_unverified" } })) as typeof fetch)).rejects.toThrow(/verified payment method/);
+    await expect(checkLobKey({}, LIVE_KEY, (async () => answer(401, { error: { message: "Your API key is not valid.", code: "invalid_api_key" } })) as typeof fetch)).rejects.toThrow(/didn't accept that key/);
   });
 
   it("keeps names, lines and metadata within Lob's limits", () => {
@@ -165,7 +165,7 @@ describe("making a postcard", () => {
         ? answer(200, { object: "list", next_url: "https://api.lob.com/v1/postcards?limit=100&after=tok_2", data: [{ id: "psc_1", status: "failed", failure_reason: { code: "INVALID_FILE_URL", message: "The file URL when creating this resource is invalid." }, metadata: { crewtavo_campaign: "c1", crewtavo_recipient: "7" } }] })
         : answer(200, { object: "list", next_url: null, data: [{ id: "psc_2", status: "failed", failure_reason: "Asset could not be fetched", metadata: { crewtavo_campaign: "c1", crewtavo_recipient: "8" } }, { nonsense: true }] });
     });
-    const found = await listCards(TEST_KEY, { campaign: "c1", failed: true }, fetcher as unknown as typeof fetch);
+    const found = await listCards({}, TEST_KEY, { campaign: "c1", failed: true }, fetcher as unknown as typeof fetch);
     expect(found.complete).toBe(true);
     expect(found.cards).toEqual([
       { id: "psc_1", status: "failed", failure: "The file URL when creating this resource is invalid.", metadata: { crewtavo_campaign: "c1", crewtavo_recipient: "7" }, url: null },
@@ -182,11 +182,11 @@ describe("making a postcard", () => {
       asked.push(new URL(url));
       return asked.length === 1 ? answer(422, { error: { message: "metadata is invalid" } }) : answer(200, { data: [{ id: "psc_9", status: "failed", metadata: { crewtavo_campaign: "other" } }], next_url: null });
     });
-    const found = await listCards(TEST_KEY, { campaign: "c1", failed: true }, fetcher as unknown as typeof fetch);
+    const found = await listCards({}, TEST_KEY, { campaign: "c1", failed: true }, fetcher as unknown as typeof fetch);
     expect(asked[1]!.searchParams.has("metadata[crewtavo_campaign]")).toBe(false);
     // Another campaign's card comes back too: it's the caller that matches cards, by id or metadata.
     expect(found).toMatchObject({ complete: true, cards: [{ id: "psc_9", metadata: { crewtavo_campaign: "other" } }] });
-    const cut = await listCards(TEST_KEY, { campaign: "c1" }, (async () => { throw new Error("socket hang up"); }) as typeof fetch);
+    const cut = await listCards({}, TEST_KEY, { campaign: "c1" }, (async () => { throw new Error("socket hang up"); }) as typeof fetch);
     expect(cut).toEqual({ cards: [], complete: false });
     expect(failureWords({ code: "X" })).toBe("X");
     expect(failureWords(null)).toBeNull();

@@ -103,7 +103,9 @@ quo.post("/webhooks/quo/:company", async (c) => {
   const claim = await admin.from("quo_events").insert({ company_id: companyId, event_id: eventId });
   if (claim.error?.code === "23505") {
     const { data: seen } = await admin.from("quo_events").select("received_at, done_at").match({ company_id: companyId, event_id: eventId }).maybeSingle();
-    if (!seen || seen.done_at) return c.json({ ok: true, again: true });
+    // Gone between the two reads: the other try gave up, so this one has to be tried again too.
+    if (!seen) return c.json({ error: "Try this delivery again later." }, 409);
+    if (seen.done_at) return c.json({ ok: true, again: true });
     if (Date.now() - Date.parse(seen.received_at) < HANDLING_MS) return c.json({ error: "Still handling this delivery. Try it again later." }, 409);
     const { data: taken } = await admin.from("quo_events").update({ received_at: new Date().toISOString() }).match({ company_id: companyId, event_id: eventId, received_at: seen.received_at }).is("done_at", null).select("event_id");
     if (!taken?.length) return c.json({ error: "Still handling this delivery. Try it again later." }, 409);

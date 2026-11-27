@@ -92,8 +92,15 @@ export interface Env {
   TWILIO_AUTH_TOKEN?: string;
   TWILIO_FROM_NUMBER?: string;
   /**
-   * Testing only: where Quo's API is, for a stand-in (lib/quo.ts). Unset is Quo's own
-   * (https://api.quo.com). Set, the Apps page also makes Quo's webhook on a plain http address.
+   * Development and tests only: a Lookalyke server's address (http://127.0.0.1:4100, or a hosted copy). Every outside
+   * service Lookalyke has a fake of then goes to it at <address>/<app> (serviceUrl; Quo through QUO_API_URL).
+   * Ignored when NODE_ENV is "production", as in the Docker image (readEnv).
+   */
+  LOOKALYKE_URL?: string;
+  /**
+   * Testing only: where Quo's API is, for a stand-in such as Lookalyke's <address>/quo (lib/quo.ts).
+   * Unset is Quo's own (https://api.quo.com). Set, the Apps page also makes Quo's webhook on a plain
+   * http address. Ignored when NODE_ENV is "production", as in the Docker image (readEnv).
    */
   QUO_API_URL?: string;
   /** Development only: deliver email and texts to a local Mailpit inbox (e.g. http://localhost:56324). */
@@ -136,6 +143,9 @@ const normalized = new WeakMap<object, Env>();
  * .env.example, or a field left empty in a deploy form), and APP_URL falls back to the address the
  * platform gives the deployment, so emails sent by background tasks have working links.
  */
+/** Settings that point an outside service at a stand-in. Never honored in production (readEnv). */
+const STAND_INS = ["LOOKALYKE_URL", "QUO_API_URL"];
+
 export function readEnv(source: object): Env {
   const cached = normalized.get(source);
   if (cached) return cached;
@@ -145,8 +155,26 @@ export function readEnv(source: object): Env {
     env[name] = value;
   }
   env.APP_URL ??= platformUrl(env);
+  // Stand-ins for outside services (Lookalyke) are for development and tests: a production build talks to the real ones.
+  if (env.NODE_ENV === "production") {
+    for (const name of STAND_INS) {
+      if (!env[name]) continue;
+      console.warn(`${name} is ignored in a production build: Crewtavo talks to the real services.`);
+      delete env[name];
+    }
+  }
+  // One switch: each service that can use a stand-in goes to its Lookalyke fake, unless its own setting names another.
+  if (typeof env.LOOKALYKE_URL === "string") env.QUO_API_URL ??= serviceUrl(env, "quo", "");
   normalized.set(source, env as unknown as Env);
   return env as unknown as Env;
+}
+
+/**
+ * Where an outside service is: `real` (its own base address), or Lookalyke's fake of it at <LOOKALYKE_URL>/<app> when
+ * that development setting is on. readEnv has already dropped LOOKALYKE_URL in a production build.
+ */
+export function serviceUrl(env: Pick<Env, "LOOKALYKE_URL">, app: string, real: string): string {
+  return env.LOOKALYKE_URL ? `${env.LOOKALYKE_URL.replace(/\/+$/, "")}/${app}` : real;
 }
 
 function platformUrl(env: Record<string, unknown>): string | undefined {

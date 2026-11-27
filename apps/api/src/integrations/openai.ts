@@ -6,9 +6,11 @@
  *
  * Nothing here logs or returns a key or a token: a problem carries only what OpenAI called it.
  */
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 
 export const OPENAI_API = "https://api.openai.com/v1";
+/** An API key's calls go to Lookalyke's fake while LOOKALYKE_URL is set. A ChatGPT plan's stay with OpenAI: the fake has no ChatGPT sign-in to issue its tokens. */
+const keyApi = (env: Pick<Env, "LOOKALYKE_URL">) => `${serviceUrl(env, "openai", "https://api.openai.com")}/v1`;
 
 /** What went wrong, as the rest of the app needs to tell them apart. */
 export type OpenAiKind =
@@ -171,8 +173,8 @@ export function answerOf(response: ResponseObject | null | undefined, route: "ke
 const headers = (bearer: string) => ({ Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" });
 
 /** Ask with a company's API key: one request, one answer. */
-export async function askWithKey(apiKey: string, ask: OpenAiAsk): Promise<string> {
-  const response = await reach(`${OPENAI_API}/responses`, { method: "POST", headers: headers(apiKey), body: JSON.stringify(responsesBody(ask, "key")) }, ask.timeoutMs);
+export async function askWithKey(env: Pick<Env, "LOOKALYKE_URL">, apiKey: string, ask: OpenAiAsk): Promise<string> {
+  const response = await reach(`${keyApi(env)}/responses`, { method: "POST", headers: headers(apiKey), body: JSON.stringify(responsesBody(ask, "key")) }, ask.timeoutMs);
   if (!response.ok) throw await httpProblem(response, "key");
   return answerOf((await response.json().catch(() => null)) as ResponseObject | null, "key");
 }
@@ -284,15 +286,15 @@ export function pickModel(env: Env, models: readonly OpenAiModel[], saved?: stri
   return PREFERRED_MODELS.find((slug) => models.some((m) => m.slug === slug)) ?? models[0]?.slug ?? null;
 }
 
-async function list(bearer: string, route: "key" | "plan"): Promise<Record<string, unknown>> {
-  const response = await reach(`${OPENAI_API}/models`, { headers: { Authorization: `Bearer ${bearer}` } }, 15_000);
+async function list(api: string, bearer: string, route: "key" | "plan"): Promise<Record<string, unknown>> {
+  const response = await reach(`${api}/models`, { headers: { Authorization: `Bearer ${bearer}` } }, 15_000);
   if (!response.ok) throw await httpProblem(response, route);
   return ((await response.json().catch(() => null)) ?? {}) as Record<string, unknown>;
 }
 
 /** The text models a key can use (GET /v1/models costs nothing), the preferred ones first, then newest first. */
-export async function listKeyModels(apiKey: string): Promise<OpenAiModel[]> {
-  const data = ((await list(apiKey, "key")).data ?? []) as Array<{ id?: unknown; created?: unknown }>;
+export async function listKeyModels(env: Pick<Env, "LOOKALYKE_URL">, apiKey: string): Promise<OpenAiModel[]> {
+  const data = ((await list(keyApi(env), apiKey, "key")).data ?? []) as Array<{ id?: unknown; created?: unknown }>;
   const rank = (slug: string) => (PREFERRED_MODELS.includes(slug) ? PREFERRED_MODELS.indexOf(slug) : PREFERRED_MODELS.length);
   return data
     .filter((m): m is { id: string; created?: unknown } => typeof m.id === "string" && m.id.length <= 200 && !NOT_TEXT.test(m.id))
@@ -303,7 +305,7 @@ export async function listKeyModels(apiKey: string): Promise<OpenAiModel[]> {
 
 /** The models a ChatGPT plan offers here, in OpenAI's order: the ones marked for listing, by the name OpenAI shows. */
 export async function listPlanModels(accessToken: string): Promise<OpenAiModel[]> {
-  const models = ((await list(accessToken, "plan")).models ?? []) as Array<{ slug?: unknown; display_name?: unknown; visibility?: unknown }>;
+  const models = ((await list(OPENAI_API, accessToken, "plan")).models ?? []) as Array<{ slug?: unknown; display_name?: unknown; visibility?: unknown }>;
   return models
     .filter((m): m is { slug: string; display_name?: unknown; visibility: "list" } => m.visibility === "list" && typeof m.slug === "string" && m.slug.length > 0 && m.slug.length <= 200)
     .slice(0, 200)
@@ -314,9 +316,9 @@ export async function listPlanModels(accessToken: string): Promise<OpenAiModel[]
  * Whether an OpenAI key works, asked of OpenAI before it's saved or a feature that spends it is
  * turned on: the models it can use, or what to fix. Listing models costs nothing.
  */
-export async function checkOpenAiKey(apiKey: string): Promise<{ models: OpenAiModel[] } | { problem: string }> {
+export async function checkOpenAiKey(env: Pick<Env, "LOOKALYKE_URL">, apiKey: string): Promise<{ models: OpenAiModel[] } | { problem: string }> {
   try {
-    const models = await listKeyModels(apiKey);
+    const models = await listKeyModels(env, apiKey);
     if (!models.length) return { problem: "That OpenAI key can't use any of OpenAI's text models. Check the key's project and permissions at platform.openai.com." };
     return { models };
   } catch (error) {

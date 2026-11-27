@@ -95,7 +95,8 @@ export async function sendChoicesFor(admin: Db, companyId: string, client: Recip
 
 /** How one send to several people went: who it reached, who it didn't and why. */
 export interface Delivery {
-  went: Recipient[];
+  /** Each with the provider's id for its own text, when there is one. */
+  went: Array<Recipient & { id?: string }>;
   failed: Array<Recipient & { reason: string; result: SendResult }>;
   /** The provider's id of the first one that went, kept on the message. */
   id: string | null;
@@ -107,7 +108,7 @@ export async function sendToEach(recipients: readonly Recipient[], send: (recipi
   for (const recipient of recipients) {
     const result = await send(recipient);
     if (result.sent) {
-      delivery.went.push(recipient);
+      delivery.went.push(result.id ? { ...recipient, id: result.id } : recipient);
       delivery.id ??= result.id ?? null;
     } else delivery.failed.push({ ...recipient, reason: result.reason ?? fallback, result });
   }
@@ -115,8 +116,9 @@ export async function sendToEach(recipients: readonly Recipient[], send: (recipi
 }
 
 /** messages.recipients for a send: who it went to, then who it didn't reach (marked failed). Null when it went to nobody. */
-export function recipientsColumn(delivery: Pick<Delivery, "went" | "failed">): Array<{ to: string; name: string; failed?: true }> | null {
-  const all = [...delivery.went.map((r) => ({ to: r.to, name: r.name })), ...delivery.failed.map((r) => ({ to: r.to, name: r.name, failed: true as const }))];
+export function recipientsColumn(delivery: Pick<Delivery, "went" | "failed">, ids = false): Array<{ to: string; name: string; id?: string; failed?: true }> | null {
+  // `ids` (texts): each one's id lets a report on one person's text mark that person (services/quo.ts).
+  const all = [...delivery.went.map((r) => ({ to: r.to, name: r.name, ...(ids && r.id ? { id: r.id } : {}) })), ...delivery.failed.map((r) => ({ to: r.to, name: r.name, failed: true as const }))];
   return all.length ? all : null;
 }
 

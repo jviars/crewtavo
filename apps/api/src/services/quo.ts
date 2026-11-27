@@ -24,7 +24,7 @@ import { phoneMatchKey } from "@crewtavo/core/recipients";
 import type { Env } from "../env";
 import { allow } from "../lib/limit";
 import { reportError } from "../lib/monitoring";
-import { quoRequest, type QuoAccount } from "../lib/quo";
+import { QuoError, quoRequest, type QuoAccount } from "../lib/quo";
 import type { Db } from "../lib/supabase";
 import { receiveText, tellOffice, UNKNOWN_PER_COMPANY, UNKNOWN_PER_NUMBER } from "./inboundTexts";
 import { lastDigits, phoneKey } from "./textsOff";
@@ -218,7 +218,8 @@ export async function fileSentText(admin: Db, companyId: string, text: SentText,
   for (const to of text.to.filter(isPhone).slice(0, 10)) {
     const parties = await resolve(to);
     if (!parties.length) continue;
-    const { data: already } = await admin.from("messages").select("client_id").eq("company_id", companyId).eq("external_id", text.id).in("client_id", parties.map((p) => p.client_id));
+    const { data: already, error: lookError } = await admin.from("messages").select("client_id").eq("company_id", companyId).eq("external_id", text.id).in("client_id", parties.map((p) => p.client_id));
+    if (lookError) throw new Error(`Couldn't check whether a Quo text is already here: ${lookError.message}`);
     for (const party of parties) {
       if (already?.some((row) => row.client_id === party.client_id)) continue;
       const { error } = await admin.from("messages").insert({
@@ -245,25 +246,41 @@ async function textWentOut(admin: Db, account: QuoAccount, event: QuoEvent, wait
   if (!id) return;
   const failed = event.type !== "message.delivered";
   const ours = async () => {
-    const [{ data: sent }, { data: kept }] = await Promise.all([
+    const [sent, byId, byRecipient] = await Promise.all([
       admin.from("quo_sent").select("message_id").eq("company_id", account.companyId).eq("message_id", id).maybeSingle(),
       admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("external_id", id).eq("channel", "sms").limit(10),
+      // A text to several people keeps each one's Quo id on that recipient (services/recipients.ts).
+      admin.from("messages").select("id, status, recipients").eq("company_id", account.companyId).eq("channel", "sms").contains("recipients", [{ id }]).limit(10),
     ]);
-    return { sent: Boolean(sent), kept: kept ?? [] };
+    // Unread isn't "not ours": it would be filed again as typed in Quo.
+    const error = sent.error ?? byId.error ?? byRecipient.error;
+    if (error) throw new Error(`Couldn't look up the text Quo reported on: ${error.message}`);
+    const kept = [...(byId.data ?? []), ...(byRecipient.data ?? []).filter((row) => !byId.data?.some((k) => k.id === row.id))];
+    return { sent: Boolean(sent.data), kept };
   };
   let found = await ours();
-  if (!found.sent && !found.kept.length && Date.now() - Date.parse(isoOr(r.createdAt, new Date(0).toISOString())) < 60_000) {
+  // Crewtavo saves its message once everyone is texted, and notes the text as its own just after Quo
+  // takes it: a report can come first. Wait a moment; if it's ours and still not saved, Quo sends it again.
+  if (!found.kept.length && Date.now() - Date.parse(isoOr(r.createdAt, new Date(0).toISOString())) < 60_000) {
     await wait(3000);
     found = await ours();
+    if (found.sent && !found.kept.length) throw new Error("Quo reported on a text Crewtavo hasn't saved yet. Quo will send the report again.");
   }
   if (found.kept.length) {
     for (const row of found.kept) {
+      const list = Array.isArray(row.recipients) ? (row.recipients as Array<Record<string, unknown>>) : null;
+      // The report is about one person's text when each person's id was kept; otherwise about the whole send.
+      const each = Boolean(list?.some((p) => p.id));
+      let update: { status: string; recipients?: typeof row.recipients } | null = null;
       if (failed) {
-        const recipients = Array.isArray(row.recipients) ? (row.recipients as Array<Record<string, unknown>>).map((p) => ({ ...p, failed: true })) : row.recipients;
-        await admin.from("messages").update({ status: "failed", recipients }).eq("id", row.id);
+        const recipients = list?.map((p) => (!each || p.id === id ? { ...p, failed: true } : p));
+        update = { status: !recipients || recipients.every((p) => p.failed) ? "failed" : row.status, ...(recipients ? { recipients: recipients as typeof row.recipients } : {}) };
       } else if (row.status === "sent" || row.status === "queued") {
-        await admin.from("messages").update({ status: "delivered" }).eq("id", row.id);
+        update = { status: "delivered" };
       }
+      if (!update) continue;
+      const { error } = await admin.from("messages").update(update).eq("id", row.id);
+      if (error) throw new Error(`Couldn't note what Quo said about a text: ${error.message}`);
     }
     return;
   }
@@ -507,8 +524,14 @@ async function markDoneAfterCall(admin: Db, companyId: string, clientId: string,
 
 /** Quo's call by its id, with its summary and voicemail, in the shape it's filed in. */
 export async function fetchCall(env: Env, account: QuoAccount, id: string, fetcher: FetchLike = fetch): Promise<CallInfo | null> {
-  const got = await quoRequest<{ data?: QuoApiCall }>(env, account.key, `/calls/${encodeURIComponent(id)}`, { query: { include: "summary,voicemail" } }, fetcher);
-  return got?.data ? callFromApi(got.data, account.settings.from_number) : null;
+  try {
+    const got = await quoRequest<{ data?: QuoApiCall }>(env, account.key, `/calls/${encodeURIComponent(id)}`, { query: { include: "summary,voicemail" } }, fetcher);
+    return got?.data ? callFromApi(got.data, account.settings.from_number) : null;
+  } catch (error) {
+    // A call Quo won't show (gone, or not this key's to see) isn't worth a day of retries: the report's own details stand.
+    if (error instanceof QuoError && (error.status === 403 || error.status === 404)) return null;
+    throw error;
+  }
 }
 
 /**

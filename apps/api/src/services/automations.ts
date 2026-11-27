@@ -823,7 +823,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
       if (!delivery.went.length) throw new Error(delivery.failed[0]!.reason);
       await admin.from("messages").insert({
         company_id: ctx.company.id, client_id: client.id, channel: "sms", direction: "out", body: render(action.body, kept),
-        ...messageAbout(ctx, client.id), external_id: delivery.id, sent_by: null, recipients: recipientsColumn(delivery),
+        ...messageAbout(ctx, client.id), external_id: delivery.id, sent_by: null, recipients: recipientsColumn(delivery, true),
       });
       return `Texted ${addressList(delivery.went)}${late}${missed(delivery)}`;
     }

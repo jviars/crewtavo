@@ -11,6 +11,8 @@ APP_URL=http://localhost:5173
 
 # Deliver email and texts to the local Mailpit inbox (open http://localhost:56324).
 MAILPIT_URL=http://localhost:56324
+# Send outside services to Lookalyke's fakes (each at <address>/<app>). Ignored by production builds.
+# LOOKALYKE_URL=http://127.0.0.1:4100
 
 # Lets scripts and tests run a background task by hand: POST /api/cron/<task>.
 CRON_SECRET=

@@ -112,12 +112,15 @@ async function importTexts(env: Env, admin: Db, account: QuoAccount, state: QuoI
     const items = (page.data ?? []).filter((m): m is QuoMessage & { id: string } => Boolean(m.id));
     const ids = items.map((m) => m.id);
     // Already here: filed by the webhook, sent by Crewtavo, or brought in before.
-    const [{ data: kept }, { data: ours }] = ids.length
+    const [{ data: kept, error: keptError }, { data: ours, error: oursError }] = ids.length
       ? await Promise.all([
           admin.from("messages").select("external_id").eq("company_id", account.companyId).in("external_id", ids),
           admin.from("quo_sent").select("message_id").eq("company_id", account.companyId).in("message_id", ids),
         ])
-      : [{ data: [] }, { data: [] }];
+      : [{ data: [], error: null }, { data: [], error: null }];
+    // Unread isn't "none here": counting every text as new would bring them in twice.
+    const lookError = keptError ?? oursError;
+    if (lookError) throw new Error(`Couldn't check which texts are already here: ${lookError.message}`);
     const known = new Set([...(kept ?? []).map((r) => r.external_id), ...(ours ?? []).map((r) => r.message_id)]);
     for (const m of items) {
       if (known.has(m.id)) continue;

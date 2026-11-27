@@ -14,7 +14,7 @@
  */
 import type { IncomingMessage } from "node:http";
 import { addDays, eventDays, localDate, looksLikeIcs, parseIcs, plainText, type IcsItem } from "@crewtavo/core";
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { decryptJson } from "../lib/crypto";
 import { NameNotFoundError, PrivateAddressError, privateHost, publicGet, readLimited, TooLargeError } from "../lib/publicHttp";
 import type { Db } from "../lib/supabase";
@@ -141,7 +141,7 @@ export async function fetchIcs(link: string | URL): Promise<string> {
 // Google Calendar API
 // ---------------------------------------------------------------------------------------------
 
-const GCAL = "https://www.googleapis.com/calendar/v3";
+const gcalApi = (env: Pick<Env, "LOOKALYKE_URL">) => `${serviceUrl(env, "google", "https://www.googleapis.com")}/calendar/v3`;
 
 type GoogleJson = Record<string, any>;
 
@@ -154,7 +154,7 @@ export class GoogleError extends IntegrationError {
 
 async function gcal(env: Env, admin: Db, companyId: string, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<GoogleJson | null> {
   const { token } = await accessToken(env, admin, companyId, "google_calendar");
-  const response = await fetch(`${GCAL}${path}`, {
+  const response = await fetch(`${gcalApi(env)}${path}`, {
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -201,8 +201,8 @@ export async function listGoogleCalendars(env: Env, admin: Db, companyId: string
 }
 
 /** After connecting: which Google account it is (its main calendar's ID is the address). */
-export async function describeGoogleAccount(token: string) {
-  const response = await fetch(`${GCAL}/users/me/calendarList/primary?fields=id,summary`, {
+export async function describeGoogleAccount(env: Pick<Env, "LOOKALYKE_URL">, token: string) {
+  const response = await fetch(`${gcalApi(env)}/users/me/calendarList/primary?fields=id,summary`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
     signal: AbortSignal.timeout(20_000),
   });

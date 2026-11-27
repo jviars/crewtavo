@@ -142,6 +142,7 @@ export function memoryDb(seed: Record<string, Row[]> = {}, emails: Record<string
       lte: (c: string, v: unknown) => (tests.push((r) => r[c] <= (v as never)), builder),
       gt: (c: string, v: unknown) => (tests.push((r) => r[c] > (v as never)), builder),
       gte: (c: string, v: unknown) => (tests.push((r) => r[c] >= (v as never)), builder),
+      contains: (c: string, v: unknown) => (tests.push((r) => Array.isArray(v) && Array.isArray(r[c]) && v.every((want: Row) => (r[c] as Row[]).some((have) => Object.entries(want).every(([k, x]) => have?.[k] === x)))), builder),
       match: (values: Row) => (tests.push((r) => Object.entries(values).every(([k, v]) => r[k] === v)), builder),
       filter: (c: string, operator: string, v: string | null) => {
         if (operator === "match") tests.push((r) => typeof r[c] === "string" && new RegExp(v!).test(r[c]));

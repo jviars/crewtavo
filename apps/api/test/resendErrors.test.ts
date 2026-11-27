@@ -51,7 +51,7 @@ describe("Resend's refusals", () => {
   it("come back from a send with the status, so callers can tell a bad key from a limit", async () => {
     vi.stubGlobal("fetch", async () => Response.json({ name: "validation_error", message: "This API key is not authorized to send emails from acme.example" }, { status: 403 }));
     const settings = { preset: "resend", kind: "resend" as const, from_email: "office@acme.example" };
-    const result = await sendWithMailbox(settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" });
+    const result = await sendWithMailbox({}, settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" });
     expect(result).toMatchObject({ sent: false, status: 403, reason: expect.stringContaining("can only send from a different domain, not acme.example") });
   });
 });

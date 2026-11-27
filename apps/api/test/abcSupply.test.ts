@@ -140,7 +140,7 @@ async function roofer({ connected = true }: { connected?: boolean } = {}) {
 describe("ABC Supply", () => {
   it("signs in as the business's own app, asking only for what pricing needs", async () => {
     answer();
-    const token = await requestToken(KEYS, abc as never);
+    const token = await requestToken({}, KEYS, abc as never);
     expect(token.access_token).toBe("token-1");
     const [url, init] = abc.mock.calls[0]!;
     expect(url).toBe("https://sandbox.auth.partners.abcsupply.com/oauth2/aus1vp07knpuqf6Xz0h8/v1/token");
@@ -152,11 +152,11 @@ describe("ABC Supply", () => {
 
   it("says why ABC turned the keys down", async () => {
     abc.mockImplementation(async () => Response.json({ error: "invalid_client" }, { status: 401 }));
-    await expect(requestToken({ ...KEYS, environment: "production" }, abc as never)).rejects.toThrow(/didn't accept that Client ID and secret for your real prices/);
+    await expect(requestToken({}, { ...KEYS, environment: "production" }, abc as never)).rejects.toThrow(/didn't accept that Client ID and secret for your real prices/);
     abc.mockImplementation(async () => Response.json({ error: "invalid_scope" }, { status: 400 }));
-    await expect(requestToken(KEYS, abc as never)).rejects.toThrow(/multiple ABC customers/);
+    await expect(requestToken({}, KEYS, abc as never)).rejects.toThrow(/multiple ABC customers/);
     abc.mockImplementation(async () => { throw new Error("offline"); });
-    await expect(requestToken(KEYS, abc as never)).rejects.toThrow(/Couldn't reach ABC Supply/);
+    await expect(requestToken({}, KEYS, abc as never)).rejects.toThrow(/Couldn't reach ABC Supply/);
   });
 
   it("passes on ABC's own words when it can't use a request, whatever shape they come in", async () => {
@@ -173,7 +173,7 @@ describe("ABC Supply", () => {
 
     vi.spyOn(console, "warn").mockImplementation(() => {});
     abc.mockImplementation(async () => Response.json({ title: "One or more validation errors occurred.", errors: { purpose: ["The purpose field is invalid."] } }, { status: 400 }));
-    await expect(new AbcClient("production", "token-1", abc as never).prices("2142885-2", "525", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
+    await expect(new AbcClient({}, "production", "token-1", abc as never).prices("2142885-2", "525", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
       "ABC Supply couldn't use that: One or more validation errors occurred. The purpose field is invalid.",
     );
     expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/^ABC Supply answered 400 to \/api\/pricing\/v2\/prices: .*purpose field.*\(sent .*"shipToNumber":"2142885-2"/));
@@ -181,7 +181,7 @@ describe("ABC Supply", () => {
 
   it("lists the ship-to accounts it can price for, without retired ones", async () => {
     answer();
-    const accounts = await new AbcClient("sandbox", "token-1", abc as never).accounts();
+    const accounts = await new AbcClient({}, "sandbox", "token-1", abc as never).accounts();
     expect(accounts).toEqual([{ number: "1163698", name: "EASY ROOFING", city: "MADISON", state: "WI", bill_to: "116660", branches: [{ number: "18", name: "ABC Supply - Madison, WI", home: true }] }]);
     expect(sent("/search/accounts")[0].filters).toEqual([{ key: "accountType", condition: "equals", values: ["Ship-To"] }]);
   });
@@ -197,7 +197,7 @@ describe("ABC Supply", () => {
         ],
       });
     });
-    const items = await new AbcClient("sandbox", "token-1", abc as never).searchItems("timberline charcoal", "18");
+    const items = await new AbcClient({}, "sandbox", "token-1", abc as never).searchItems("timberline charcoal", "18");
     expect(items.map((i) => i.item_number)).toEqual(["02GATZ3CH"]);
     expect(items[0]).toMatchObject({ stocking_uom: "BD", uoms: [{ code: "SQ", name: "Square", role: "costing" }, { code: "BD", name: "Bundle", role: "stocking" }] });
     expect(sent("/search/items")[0].filters[1]).toEqual({ key: "branchNumber", condition: "equals", values: ["18"], joinCondition: null });
@@ -206,7 +206,7 @@ describe("ABC Supply", () => {
   it("prices 50 lines at a time, and doesn't take a branch's 0.00 as a price", async () => {
     answer({ A: 12.345 });
     const lines = Array.from({ length: 51 }, (_, i) => ({ id: String(i), item_number: i === 50 ? "B" : "A", quantity: 2.2, uom: "BD" }));
-    const prices = await new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", lines);
+    const prices = await new AbcClient({}, "sandbox", "token-1", abc as never).prices("1163698", "18", lines);
     expect(sent("/pricing/v2/prices").map((b) => b.lines.length)).toEqual([50, 1]);
     expect(sent("/pricing/v2/prices")[0]).toMatchObject({ shipToNumber: "1163698", branchNumber: "18", purpose: "quoting", lines: expect.arrayContaining([{ id: "0", itemNumber: "A", quantity: 3, uom: "BD" }]) });
     // Production ABC turns a price request without a requestId down; each one gets its own.
@@ -225,7 +225,7 @@ describe("ABC Supply", () => {
     abc.mockImplementation((url, init) => (String(url).includes("/pricing/v2/prices") && asked++ === 0 ? new Promise<Response>(() => {}) : answers(url, init)));
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const pending = new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }], "estimating");
+      const pending = new AbcClient({}, "sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }], "estimating");
       await vi.advanceTimersByTimeAsync(5_900);
       expect(sent("/pricing/v2/prices")).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(100);
@@ -242,7 +242,7 @@ describe("ABC Supply", () => {
     const answers = abc.getMockImplementation()!;
     let asked = 0;
     abc.mockImplementation((url, init) => (String(url).includes("/pricing/v2/prices") && asked++ === 0 ? Promise.resolve(new Response("upstream error", { status: 500 })) : answers(url, init)));
-    const client = new AbcClient("sandbox", "token-1", abc as never);
+    const client = new AbcClient({}, "sandbox", "token-1", abc as never);
     const line = [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }];
     expect((await client.prices("1163698", "18", line)).get("1")!.unit_price).toBe(12);
     expect(sent("/pricing/v2/prices")).toHaveLength(2);
@@ -258,7 +258,7 @@ describe("ABC Supply", () => {
     abc.mockImplementation(async () => {
       throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
     });
-    await expect(new AbcClient("sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
+    await expect(new AbcClient({}, "sandbox", "token-1", abc as never).prices("1163698", "18", [{ id: "1", item_number: "A", quantity: 1, uom: "BD" }])).rejects.toThrow(
       "ABC Supply didn't answer in time. Try again in a minute.",
     );
     expect(sent("/pricing/v2/prices")).toHaveLength(2);
@@ -269,7 +269,7 @@ describe("ABC Supply", () => {
     let calls = 0;
     abc.mockImplementation(async () => (calls++ === 0 ? new Response("", { status: 401 }) : Response.json({ shipTos: [] })));
     const renew = vi.fn(async () => "token-2");
-    await new AbcClient("sandbox", "token-1", abc as never, renew).accounts();
+    await new AbcClient({}, "sandbox", "token-1", abc as never, renew).accounts();
     expect(renew).toHaveBeenCalledOnce();
     expect((abc.mock.calls[1]![1]!.headers as Record<string, string>).Authorization).toBe("Bearer token-2");
   });
@@ -360,7 +360,7 @@ describe("ABC Supply's catalog", () => {
       if (u.includes("/search/items")) return Response.json({ items: [ITEM, { ...ITEM, itemNumber: "OLD1", status: "Inactive" }, { ...ITEM, itemNumber: "02OCTDDGT", supplierName: "OWENS CORNING SALES LLC", color: { name: "N/A" } }, { ...ITEM, itemNumber: "07DRIP", color: { description: "Product Color", name: null } }] });
       return Response.json(ITEM);
     });
-    const client = new AbcClient("sandbox", "token-1", abc as never);
+    const client = new AbcClient({}, "sandbox", "token-1", abc as never);
     const found = await client.searchItems("timberline", "18");
     expect(found.map((i) => i.item_number)).toEqual(["02GATZ3CH", "02OCTDDGT", "07DRIP"]);
     expect(found[0]).toMatchObject({ brand: "GAF Materials", kind: "Laminated Shingles", image: "IMG-77", family_id: "FAM-HDZ", color: "Charcoal", active: true });
@@ -572,7 +572,7 @@ describe("ABC Supply's catalog", () => {
 
   it("keeps a company's calls to ABC under its limit of 10 a second", async () => {
     abc.mockImplementation(async () => Response.json({ shipTos: [] }));
-    const client = new AbcClient("sandbox", "token-1", abc as never, undefined, "pace-test");
+    const client = new AbcClient({}, "sandbox", "token-1", abc as never, undefined, "pace-test");
     const started = Date.now();
     await Promise.all(Array.from({ length: 12 }, () => client.accounts()));
     // A burst of 8 goes at once; the next 4 wait an eighth of a second each.

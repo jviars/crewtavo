@@ -333,7 +333,7 @@ describe("Cloudflare", () => {
       if (call.method === "GET") return ok(call.url.searchParams.get("name") === "app.greenlawn.com" ? [{ type: "CNAME", content: "abc123.up.railway.app" }] : []);
       return ok({ id: "r1" });
     });
-    expect(await addCloudflareRecords(" cf-token ", "greenlawn.com", records)).toBe(1);
+    expect(await addCloudflareRecords({}, " cf-token ", "greenlawn.com", records)).toBe(1);
     const posted = calls.filter((c) => c.method === "POST");
     expect(posted.map((c) => c.body)).toEqual([expect.objectContaining({ type: "TXT", name: "_railway-verify.app.greenlawn.com", content: "railway-verify=tok" })]);
   });
@@ -344,13 +344,13 @@ describe("Cloudflare", () => {
       if (call.method === "GET") return ok(call.url.searchParams.get("name") === "app.greenlawn.com" ? [{ type: "A", content: "192.0.2.10" }] : []);
       return ok({});
     });
-    await expect(addCloudflareRecords("cf-token", "greenlawn.com", records)).rejects.toThrow("already has a A record");
+    await expect(addCloudflareRecords({}, "cf-token", "greenlawn.com", records)).rejects.toThrow("already has a A record");
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
   it("explains a token that can't see the domain", async () => {
     serve(() => ok([]));
-    await expect(addCloudflareRecords("cf-token", "greenlawn.com", records)).rejects.toThrow("can't see greenlawn.com");
+    await expect(addCloudflareRecords({}, "cf-token", "greenlawn.com", records)).rejects.toThrow("can't see greenlawn.com");
   });
 });
 

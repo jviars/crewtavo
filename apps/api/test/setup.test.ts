@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
-import { readEnv, type Env } from "../src/env";
+import { readEnv, serviceUrl, type Env } from "../src/env";
 import { decryptJson, encryptJson, signToken, verifyToken } from "../src/lib/crypto";
 import { createHmac } from "node:crypto";
 import { emailAuthLink } from "../src/lib/auth";
@@ -57,6 +57,26 @@ describe("readEnv", () => {
   it("uses the platform's production address when APP_URL isn't set", () => {
     expect(readEnv({ RAILWAY_PUBLIC_DOMAIN: "crewtavo.up.railway.app" }).APP_URL).toBe("https://crewtavo.up.railway.app");
     expect(readEnv({ APP_URL: "https://ops.example.com", RAILWAY_PUBLIC_DOMAIN: "x.up.railway.app" }).APP_URL).toBe("https://ops.example.com");
+  });
+
+  it("sends Quo to Lookalyke with one switch, and keeps stand-ins out of a production build", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(readEnv({ LOOKALYKE_URL: "http://127.0.0.1:4100/" }).QUO_API_URL).toBe("http://127.0.0.1:4100/quo");
+    expect(readEnv({ LOOKALYKE_URL: "http://127.0.0.1:4100", QUO_API_URL: "http://127.0.0.1:9999/quo" }).QUO_API_URL).toBe("http://127.0.0.1:9999/quo");
+    expect(readEnv({ QUO_API_URL: "http://127.0.0.1:4100/quo" }).QUO_API_URL).toBe("http://127.0.0.1:4100/quo");
+    const live = readEnv({ NODE_ENV: "production", LOOKALYKE_URL: "http://127.0.0.1:4100", QUO_API_URL: "http://127.0.0.1:4100/quo" });
+    expect(live.QUO_API_URL).toBeUndefined();
+    expect(live.LOOKALYKE_URL).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it("sends each outside service to its Lookalyke fake while LOOKALYKE_URL is set", () => {
+    expect(serviceUrl({ LOOKALYKE_URL: "http://127.0.0.1:4100//" }, "stripe", "https://api.stripe.com")).toBe("http://127.0.0.1:4100/stripe");
+    expect(serviceUrl({}, "stripe", "https://api.stripe.com")).toBe("https://api.stripe.com");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(serviceUrl(readEnv({ NODE_ENV: "production", LOOKALYKE_URL: "http://127.0.0.1:4100" }), "stripe", "https://api.stripe.com")).toBe("https://api.stripe.com");
+    warn.mockRestore();
   });
 });
 

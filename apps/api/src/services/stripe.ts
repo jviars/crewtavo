@@ -7,6 +7,7 @@
  * directly (apps/api/test/stripe.test.ts).
  */
 import { taxLineLabel } from "@crewtavo/core";
+import { serviceUrl, type Env } from "../env";
 import { providerTimeout } from "../integrations/registry";
 import { hmacSha256Hex, safeEqual } from "../lib/crypto";
 
@@ -62,6 +63,7 @@ export function stripeForm(params: Record<string, Param>, prefix = "", out = new
  * sent again, since Stripe may have done them anyway.
  */
 export async function stripeApi<T>(
+  env: Pick<Env, "LOOKALYKE_URL">,
   key: string,
   method: "GET" | "POST" | "DELETE",
   path: string,
@@ -71,7 +73,7 @@ export async function stripeApi<T>(
   // Nothing is billed in a currency cents() can't convert: refused here, before it's sent.
   if (method === "POST" && typeof params.currency === "string") centsCurrency(params.currency);
   const form = stripeForm(params).toString();
-  const url = `https://api.stripe.com${path}${method !== "POST" && form ? `?${form}` : ""}`;
+  const url = `${serviceUrl(env, "stripe", "https://api.stripe.com")}${path}${method !== "POST" && form ? `?${form}` : ""}`;
   const headers: Record<string, string> = { Authorization: `Bearer ${key}`, "Stripe-Version": STRIPE_VERSION };
   if (method === "POST") headers["Content-Type"] = "application/x-www-form-urlencoded";
   if (options.idempotencyKey) headers["Idempotency-Key"] = options.idempotencyKey;
@@ -111,10 +113,10 @@ function readJson(text: string): unknown {
 }
 
 /** Every item of a list endpoint, 100 at a time. */
-export async function* stripeList<T extends { id: string }>(key: string, path: string, params: Record<string, Param> = {}): AsyncGenerator<T> {
+export async function* stripeList<T extends { id: string }>(env: Pick<Env, "LOOKALYKE_URL">, key: string, path: string, params: Record<string, Param> = {}): AsyncGenerator<T> {
   let after: string | undefined;
   for (;;) {
-    const page = await stripeApi<{ data: T[]; has_more: boolean }>(key, "GET", path, { ...params, limit: 100, starting_after: after });
+    const page = await stripeApi<{ data: T[]; has_more: boolean }>(env, key, "GET", path, { ...params, limit: 100, starting_after: after });
     yield* page.data;
     if (!page.has_more || !page.data.length) return;
     after = page.data.at(-1)!.id;

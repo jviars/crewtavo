@@ -103,6 +103,7 @@ export async function stripeAccess(env: Env, admin: Db, companyId: string): Prom
 }
 
 interface Ctx {
+  env: Env;
   admin: Db;
   companyId: string;
   key: string;
@@ -129,7 +130,7 @@ async function context(env: Env, admin: Db, companyId: string, access?: StripeAc
     account = data?.external_account_id ?? null;
   }
   return {
-    admin, companyId, key: found.key, own: found.own, account, livemode: found.key.includes("_live_"),
+    env, admin, companyId, key: found.key, own: found.own, account, livemode: found.key.includes("_live_"),
     timezone: company.timezone || "UTC", currency: (company.currency || "USD").toLowerCase(),
     taxName: taxName(company, company.country), taxNumber: taxNumber(company),
   };
@@ -172,7 +173,7 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
   }
   let account: StripeAccount | null = null;
   try {
-    account = await stripeApi<StripeAccount>(key, "GET", "/v1/account");
+    account = await stripeApi<StripeAccount>(env, key, "GET", "/v1/account");
   } catch (error) {
     if (error instanceof StripeError && error.status === 401) throw new HttpError(400, "Stripe didn't accept that key. Copy it again, or make a new one with Get a key from Stripe.");
     // A restricted key may not be allowed to read the account. Adding the webhook still tests it.
@@ -189,13 +190,13 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
     const endpoint = { url, enabled_events: STRIPE_EVENTS, description: "Crewtavo: invoices, payments and deposits", metadata: { crewtavo_company_id: input.companyId } };
     try {
       // Webhooks an earlier try left at this address go. The one in use stays until the new one is saved.
-      for await (const found of stripeList<{ id: string; url: string }>(key, "/v1/webhook_endpoints")) {
-        if (found.url === url && found.id !== previous?.extra?.webhook_id) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${found.id}`);
+      for await (const found of stripeList<{ id: string; url: string }>(env, key, "/v1/webhook_endpoints")) {
+        if (found.url === url && found.id !== previous?.extra?.webhook_id) await stripeApi(env, key, "DELETE", `/v1/webhook_endpoints/${found.id}`);
       }
-      webhook = await stripeApi<{ id: string; secret: string }>(key, "POST", "/v1/webhook_endpoints", { ...endpoint, api_version: STRIPE_VERSION }).catch(async (error) => {
+      webhook = await stripeApi<{ id: string; secret: string }>(env, key, "POST", "/v1/webhook_endpoints", { ...endpoint, api_version: STRIPE_VERSION }).catch(async (error) => {
         // Stripe has no room for another (16 in an account), say: a key rolled in the same account
         // takes over the one in use instead, which keeps its secret. Another account's key can't reach it.
-        const reused = await sameWebhook(key, previous, endpoint);
+        const reused = await sameWebhook(env, key, previous, endpoint);
         if (!reused) throw error;
         return reused;
       });
@@ -209,7 +210,7 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
 
   const label = account?.settings?.dashboard?.display_name || account?.business_profile?.name || account?.email || "Stripe account";
   // What this key can do for autopay and refunds (an older key's answers don't carry over).
-  const can = await probeKey(key);
+  const can = await probeKey(env, key);
   try {
     const { data: existing } = await admin.from("integrations").select("settings, external_account_id").match({ company_id: input.companyId, provider: "stripe" }).maybeSingle();
     // The last import's summary belongs to the account it came from.
@@ -236,14 +237,14 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
     await saveSecret(env, admin, input.companyId, "stripe", { api_key: key, extra });
   } catch (error) {
     // Not saved, so the old key and its webhook are still the ones in use: take the new webhook out.
-    if (webhook && webhook.id !== previous?.extra?.webhook_id) await stripeApi(key, "DELETE", `/v1/webhook_endpoints/${webhook.id}`).catch(() => undefined);
+    if (webhook && webhook.id !== previous?.extra?.webhook_id) await stripeApi(env, key, "DELETE", `/v1/webhook_endpoints/${webhook.id}`).catch(() => undefined);
     throw error;
   }
 
   const moved = before ? await movesAccount(before, key, account?.id ?? null) : null;
   const { settled } = before && moved ? await leaveAccount(before) : { settled: Promise.resolve() };
   // With the old key, or the new one when the old one was rolled in the same account.
-  if (previous && previous.extra?.webhook_id !== webhook?.id) await removeStripeWebhook(previous, key);
+  if (previous && previous.extra?.webhook_id !== webhook?.id) await removeStripeWebhook(env, previous, key);
   return { account_label: label, webhook: Boolean(webhook), settled, change: { from: before?.account ?? null, to: account?.id ?? null, moved } };
 }
 
@@ -255,7 +256,7 @@ export async function connectStripe(env: Env, admin: Db, input: { companyId: str
 export async function disconnectStripe(env: Env, admin: Db, companyId: string, secret: StoredSecret): Promise<{ settled: Promise<void> }> {
   const before = secret.api_key ? await context(env, admin, companyId, { key: secret.api_key, own: true, account: secret.extra?.account_id ?? null }) : null;
   const left = before && (!env.STRIPE_SECRET_KEY || (await movesAccount(before, env.STRIPE_SECRET_KEY, null))) ? await leaveAccount(before) : { settled: Promise.resolve() };
-  await removeStripeWebhook(secret);
+  await removeStripeWebhook(env, secret);
   return left;
 }
 
@@ -263,22 +264,22 @@ export async function disconnectStripe(env: Env, admin: Db, companyId: string, s
  * The webhook in use, brought up to date with `key`, when `key` can reach it: Stripe only finds a
  * webhook with a key for its own account (and mode). Null otherwise.
  */
-async function sameWebhook(key: string, previous: StoredSecret | null, endpoint: Record<string, string | string[] | Record<string, string>>) {
+async function sameWebhook(env: Env, key: string, previous: StoredSecret | null, endpoint: Record<string, string | string[] | Record<string, string>>) {
   const id = previous?.extra?.webhook_id;
   const secret = previous?.extra?.webhook_secret;
   if (!id || !secret) return null;
-  return stripeApi(key, "POST", `/v1/webhook_endpoints/${id}`, endpoint).then(
+  return stripeApi(env, key, "POST", `/v1/webhook_endpoints/${id}`, endpoint).then(
     () => ({ id, secret }),
     () => null,
   );
 }
 
 /** Best effort: take Crewtavo's webhook out of the Stripe account (with `fallbackKey` if the secret's key no longer works). */
-export async function removeStripeWebhook(secret: StoredSecret, fallbackKey?: string) {
+export async function removeStripeWebhook(env: Env, secret: StoredSecret, fallbackKey?: string) {
   if (!secret.api_key || !secret.extra?.webhook_id) return;
   const path = `/v1/webhook_endpoints/${secret.extra.webhook_id}`;
-  await stripeApi(secret.api_key, "DELETE", path)
-    .catch(() => (fallbackKey ? stripeApi(fallbackKey, "DELETE", path) : undefined))
+  await stripeApi(env, secret.api_key, "DELETE", path)
+    .catch(() => (fallbackKey ? stripeApi(env, fallbackKey, "DELETE", path) : undefined))
     .catch(() => undefined);
 }
 
@@ -302,7 +303,7 @@ async function movesAccount(before: Ctx, key: string, account: string | null): P
     .not("stripe_id", "is", null);
   const sample = (data ?? []).find((row) => inUse(before, row));
   if (sample) {
-    return stripeApi(key, "GET", `/v1/invoices/${sample.stripe_id}`).then(
+    return stripeApi(before.env, key, "GET", `/v1/invoices/${sample.stripe_id}`).then(
       () => false,
       (error) => (missing(error) ? true : null),
     );
@@ -317,7 +318,7 @@ async function movesAccount(before: Ctx, key: string, account: string | null): P
     .limit(5);
   const card = (methods ?? []).find((m) => !m.stripe_account || !before.account || m.stripe_account === before.account);
   if (!card) return null;
-  return stripeApi(key, "GET", `/v1/payment_methods/${card.stripe_payment_method_id}`).then(
+  return stripeApi(before.env, key, "GET", `/v1/payment_methods/${card.stripe_payment_method_id}`).then(
     () => false,
     (error) => (missing(error) ? true : null),
   );
@@ -364,7 +365,7 @@ async function settleLeft(old: Ctx, rows: Array<Linked & { invoice_id: string | 
 /** A bank payment on its way in a Stripe account Crewtavo is leaving: recorded if it's done, otherwise the office follows it. */
 async function stillClearing(old: Ctx, row: Linked & { invoice_id: string | null }) {
   if (!row.stripe_id || !row.invoice_id) return;
-  const current = await fetchInvoice(old.key, row.stripe_id);
+  const current = await fetchInvoice(old.env, old.key, row.stripe_id);
   if (current.status !== "open") return applyInvoice(old, current);
   const { data: invoice } = await old.admin.from("invoices").select("id, number, client_id").eq("company_id", old.companyId).eq("id", row.invoice_id).maybeSingle();
   if (!invoice) return;
@@ -465,7 +466,7 @@ async function linkedTo(ctx: Ctx, invoiceId: string): Promise<{ linked: Linked[]
   // Still "creating" after two minutes: the server stopped partway. Clear it so it can be made again.
   if (live?.status === "creating" && Date.now() - Date.parse(live.created_at) > 2 * 60_000) {
     if (live.stripe_id) {
-      await stripeApi(ctx.key, "DELETE", `/v1/invoices/${live.stripe_id}`).catch(() => stripeApi(ctx.key, "POST", `/v1/invoices/${live.stripe_id}/void_invoice`).catch(() => undefined));
+      await stripeApi(ctx.env, ctx.key, "DELETE", `/v1/invoices/${live.stripe_id}`).catch(() => stripeApi(ctx.env, ctx.key, "POST", `/v1/invoices/${live.stripe_id}/void`).catch(() => undefined));
     }
     await ctx.admin.from("stripe_invoices").delete().eq("id", live.id).eq("status", "creating");
     return { linked: linked.filter((row) => row.id !== live.id), live: undefined };
@@ -484,8 +485,8 @@ async function customerFor(ctx: Ctx, clientId: string, again = false): Promise<s
   fail(error);
   if (!client) throw new IntegrationError("Client not found");
   // Businesses moving from Stripe invoicing already have their clients there.
-  let id = client.email ? (await stripeApi<{ data: Array<{ id: string }> }>(ctx.key, "GET", "/v1/customers", { email: client.email, limit: 1 })).data[0]?.id : undefined;
-  id ??= (await stripeApi<{ id: string }>(ctx.key, "POST", "/v1/customers", { name: client.display_name, email: client.email, phone: client.phone, metadata: { crewtavo_client_id: clientId } })).id;
+  let id = client.email ? (await stripeApi<{ data: Array<{ id: string }> }>(ctx.env, ctx.key, "GET", "/v1/customers", { email: client.email, limit: 1 })).data[0]?.id : undefined;
+  id ??= (await stripeApi<{ id: string }>(ctx.env, ctx.key, "POST", "/v1/customers", { name: client.display_name, email: client.email, phone: client.phone, metadata: { crewtavo_client_id: clientId } })).id;
   fail((await ctx.admin.from("sync_links").upsert({ ...link, external_id: id, synced_at: new Date().toISOString() })).error);
   return id;
 }
@@ -553,20 +554,20 @@ async function createStripeInvoice(
     let customer = automatic && options.customer ? options.customer : await customerFor(ctx, invoice.client_id);
     let draft: StripeInvoice;
     try {
-      draft = await stripeApi<StripeInvoice>(ctx.key, "POST", "/v1/invoices", params(customer), { idempotencyKey: `crewtavo-invoice-${row.id}` });
+      draft = await stripeApi<StripeInvoice>(ctx.env, ctx.key, "POST", "/v1/invoices", params(customer), { idempotencyKey: `crewtavo-invoice-${row.id}` });
     } catch (error) {
       if (automatic || !(error instanceof StripeError && error.code === "resource_missing" && error.param === "customer")) throw error;
       // The customer was deleted in Stripe: make a new one.
       customer = await customerFor(ctx, invoice.client_id, true);
-      draft = await stripeApi<StripeInvoice>(ctx.key, "POST", "/v1/invoices", params(customer), { idempotencyKey: `crewtavo-invoice-${row.id}-again` });
+      draft = await stripeApi<StripeInvoice>(ctx.env, ctx.key, "POST", "/v1/invoices", params(customer), { idempotencyKey: `crewtavo-invoice-${row.id}-again` });
     }
     stripeId = draft.id;
     fail((await ctx.admin.from("stripe_invoices").update({ stripe_id: draft.id, livemode: draft.livemode }).eq("id", row.id)).error);
     for (const [i, item] of stripeLineItems(invoice, tipCents, ctx.currency.toUpperCase(), ctx.taxName).entries()) {
       // Not discountable either, so a discount that reached the invoice some other way has nothing to come off.
-      await stripeApi(ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: item.amount, description: item.description, discountable: false }, { idempotencyKey: `crewtavo-item-${row.id}-${i}` });
+      await stripeApi(ctx.env, ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: item.amount, description: item.description, discountable: false }, { idempotencyKey: `crewtavo-item-${row.id}-${i}` });
     }
-    final = await stripeApi<StripeInvoice>(ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `crewtavo-finalize-${row.id}` });
+    final = await stripeApi<StripeInvoice>(ctx.env, ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `crewtavo-finalize-${row.id}` });
     // Finalizing puts the client's balance in Stripe on it, so Stripe can ask for more or less than
     // was sent (recordPayment books each part where it belongs). Credit that covers it all, or leaves
     // less than Stripe charges, has it paid at once.
@@ -576,7 +577,7 @@ async function createStripeInvoice(
     // Leave nothing half made. Drafts can be deleted outright, and one finalized before the
     // failure is voided, so a charge_automatically one can't be charged later.
     if (stripeId) {
-      await stripeApi(ctx.key, "DELETE", `/v1/invoices/${stripeId}`).catch(() => stripeApi(ctx.key, "POST", `/v1/invoices/${stripeId}/void_invoice`).catch(() => undefined));
+      await stripeApi(ctx.env, ctx.key, "DELETE", `/v1/invoices/${stripeId}`).catch(() => stripeApi(ctx.env, ctx.key, "POST", `/v1/invoices/${stripeId}/void`).catch(() => undefined));
     }
     await ctx.admin.from("stripe_invoices").delete().eq("id", row.id);
     throw error;
@@ -591,7 +592,7 @@ async function createStripeInvoice(
   return { ...made, stripe: final };
 }
 
-const fetchInvoice = (key: string, id: string) => stripeApi<StripeInvoice>(key, "GET", `/v1/invoices/${id}`, { expand: ["charge.balance_transaction"] });
+const fetchInvoice = (env: Env, key: string, id: string) => stripeApi<StripeInvoice>(env, key, "GET", `/v1/invoices/${id}`, { expand: ["charge.balance_transaction"] });
 
 /**
  * Void an open Stripe invoice. False when it turns out to be paid (and that's recorded instead).
@@ -601,13 +602,13 @@ const fetchInvoice = (key: string, id: string) => stripeApi<StripeInvoice>(key, 
 async function voidStripeInvoice(ctx: Ctx, row: Linked): Promise<boolean> {
   if (!row.stripe_id) return false;
   try {
-    await stripeApi(ctx.key, "POST", `/v1/invoices/${row.stripe_id}/void_invoice`);
+    await stripeApi(ctx.env, ctx.key, "POST", `/v1/invoices/${row.stripe_id}/void`);
   } catch (error) {
     if (missing(error)) {
       await detach(ctx.admin, [row.id]);
       return true;
     }
-    const current = await fetchInvoice(ctx.key, row.stripe_id).catch(() => null);
+    const current = await fetchInvoice(ctx.env, ctx.key, row.stripe_id).catch(() => null);
     if (current?.status === "paid") {
       await applyInvoice(ctx, current);
       return false;
@@ -625,13 +626,13 @@ async function voidStripeInvoice(ctx: Ctx, row: Linked): Promise<boolean> {
 async function writeOffStripeInvoice(ctx: Ctx, row: Linked): Promise<boolean> {
   if (!row.stripe_id) return false;
   try {
-    await stripeApi(ctx.key, "POST", `/v1/invoices/${row.stripe_id}/mark_uncollectible`);
+    await stripeApi(ctx.env, ctx.key, "POST", `/v1/invoices/${row.stripe_id}/mark_uncollectible`);
   } catch (error) {
     if (missing(error)) {
       await detach(ctx.admin, [row.id]);
       return true;
     }
-    const current = await fetchInvoice(ctx.key, row.stripe_id).catch(() => null);
+    const current = await fetchInvoice(ctx.env, ctx.key, row.stripe_id).catch(() => null);
     if (current?.status === "paid") {
       await applyInvoice(ctx, current);
       return false;
@@ -699,7 +700,7 @@ export async function syncStripeInvoice(env: Env, admin: Db, companyId: string, 
 async function stillThere(ctx: Ctx, row: Linked): Promise<boolean> {
   if (!row.stripe_id || (row.stripe_account && ctx.account)) return true;
   try {
-    await stripeApi(ctx.key, "GET", `/v1/invoices/${row.stripe_id}`);
+    await stripeApi(ctx.env, ctx.key, "GET", `/v1/invoices/${row.stripe_id}`);
   } catch (error) {
     if (!missing(error)) throw error;
     await detach(ctx.admin, [row.id]);
@@ -858,7 +859,7 @@ async function settleOwnInvoice(ctx: Ctx, invoice: StripeInvoice) {
 /** The card or bank account paying one of our Stripe invoices (its PaymentIntent's), or null for none (marked paid in Stripe). */
 async function paidWith(ctx: Ctx, invoice: StripeInvoice): Promise<string | null> {
   if (invoice.paid_out_of_band || !invoice.payment_intent) return null;
-  const intent = await stripeApi<StripePaymentIntent & { payment_method: string | null }>(ctx.key, "GET", `/v1/payment_intents/${invoice.payment_intent}`);
+  const intent = await stripeApi<StripePaymentIntent & { payment_method: string | null }>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${invoice.payment_intent}`);
   return intent.payment_method;
 }
 
@@ -1018,7 +1019,7 @@ async function bankPaymentFailed(env: Env, ctx: Ctx, invoice: StripeInvoice) {
 /** An invoice made in Stripe, brought in or brought up to date. History comes in quietly. */
 async function importInvoice(ctx: Ctx, invoice: StripeInvoice, quiet: boolean) {
   if (invoice.status === "draft" || (!invoice.total && !invoice.amount_due)) return;
-  const lines = invoice.lines.has_more ? await allLines(ctx.key, invoice.id) : invoice.lines.data;
+  const lines = invoice.lines.has_more ? await allLines(ctx.env, ctx.key, invoice.id) : invoice.lines.data;
   const { charge, fee } = chargeOf(invoice);
   const paidAt = isoAt(invoice.status_transitions.paid_at);
   // A credit note issued there before it was paid is how part of a payment is recorded in Stripe
@@ -1059,9 +1060,9 @@ async function importInvoice(ctx: Ctx, invoice: StripeInvoice, quiet: boolean) {
   }
 }
 
-async function allLines(key: string, invoiceId: string): Promise<StripeInvoiceLine[]> {
+async function allLines(env: Env, key: string, invoiceId: string): Promise<StripeInvoiceLine[]> {
   const lines: StripeInvoiceLine[] = [];
-  for await (const line of stripeList<StripeInvoiceLine>(key, `/v1/invoices/${invoiceId}/lines`)) lines.push(line);
+  for await (const line of stripeList<StripeInvoiceLine>(env, key, `/v1/invoices/${invoiceId}/lines`)) lines.push(line);
   return lines;
 }
 
@@ -1109,7 +1110,7 @@ export async function handleStripeEvent(env: Env, admin: Db, route: WebhookRoute
   }
 
   if (event.type.startsWith("invoice.")) {
-    const invoice = await fetchInvoice(key, object.id as string);
+    const invoice = await fetchInvoice(env, key, object.id as string);
     const companyId = await companyFor(env, admin, route, invoice.metadata?.crewtavo_company_id);
     const ctx = companyId ? await context(env, admin, companyId, access) : null;
     if (!ctx) return null;
@@ -1121,7 +1122,7 @@ export async function handleStripeEvent(env: Env, admin: Db, route: WebhookRoute
     const companyId = await companyFor(env, admin, route);
     const ctx = companyId ? await context(env, admin, companyId, access) : null;
     if (!ctx) return null;
-    await savePayout(ctx, await stripeApi<StripePayout>(key, "GET", `/v1/payouts/${object.id}`));
+    await savePayout(ctx, await stripeApi<StripePayout>(env, key, "GET", `/v1/payouts/${object.id}`));
     return null;
   }
   return null;
@@ -1332,7 +1333,7 @@ async function itemizePayout(ctx: Ctx, payoutRowId: string, payoutId: string) {
   let fees = 0;
   const charges = new Map<string, number>();
   const refunds = new Set<string>();
-  for await (const bt of stripeList<StripeBalanceTransaction>(ctx.key, "/v1/balance_transactions", { payout: payoutId, expand: ["data.source"] })) {
+  for await (const bt of stripeList<StripeBalanceTransaction>(ctx.env, ctx.key, "/v1/balance_transactions", { payout: payoutId, expand: ["data.source"] })) {
     if (bt.type === "payout") continue;
     fees += bt.fee;
     const source = bt.source && typeof bt.source === "object" ? bt.source : null;
@@ -1411,7 +1412,7 @@ export async function importFromStripe(env: Env, admin: Db, companyId: string, s
     if (!(await canImportStripe(env, admin, companyId, ctx))) throw new IntegrationError(SHARED_STRIPE_IMPORT);
     const created = since ? { gte: Math.floor(Date.parse(`${since}T00:00:00Z`) / 1000) } : undefined;
     const invoices: StripeInvoice[] = [];
-    for await (const invoice of stripeList<StripeInvoice>(ctx.key, "/v1/invoices", { created, expand: ["data.charge.balance_transaction"] })) {
+    for await (const invoice of stripeList<StripeInvoice>(ctx.env, ctx.key, "/v1/invoices", { created, expand: ["data.charge.balance_transaction"] })) {
       if (invoice.status !== "draft") invoices.push(invoice);
     }
     // Oldest first, so Crewtavo's invoice numbers follow the order they were sent.
@@ -1438,7 +1439,7 @@ export async function importFromStripe(env: Env, admin: Db, companyId: string, s
       }
       await saveImportState(admin, companyId, state);
     }
-    for await (const payout of stripeList<StripePayout>(ctx.key, "/v1/payouts", { created })) {
+    for await (const payout of stripeList<StripePayout>(ctx.env, ctx.key, "/v1/payouts", { created })) {
       if (await savePayout(ctx, payout)) state.counts.payouts++;
     }
     const { count } = await admin.from("clients").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("lead_source", "Stripe").gte("created_at", state.started_at);
@@ -1557,12 +1558,12 @@ async function allowed(call: Promise<unknown>): Promise<boolean | null> {
  * What a key may do for autopay (save cards on Stripe's page, read the setups, take cards off) and
  * for refunds. A question Stripe didn't answer is left out, to be asked again later.
  */
-async function probeKey(key: string): Promise<{ autopay?: boolean; refunds?: boolean }> {
+async function probeKey(env: Env, key: string): Promise<{ autopay?: boolean; refunds?: boolean }> {
   const [checkout, detach, refund, setups] = await Promise.all([
-    allowed(stripeApi(key, "POST", "/v1/checkout/sessions", {})),
-    allowed(stripeApi(key, "POST", "/v1/payment_methods/pm_crewtavo_probe/detach")),
-    allowed(stripeApi(key, "POST", "/v1/refunds", { payment_intent: "pi_crewtavo_probe" })),
-    allowed(stripeApi(key, "GET", "/v1/setup_intents", { limit: 1 })),
+    allowed(stripeApi(env, key, "POST", "/v1/checkout/sessions", {})),
+    allowed(stripeApi(env, key, "POST", "/v1/payment_methods/pm_crewtavo_probe/detach")),
+    allowed(stripeApi(env, key, "POST", "/v1/refunds", { payment_intent: "pi_crewtavo_probe" })),
+    allowed(stripeApi(env, key, "GET", "/v1/setup_intents", { limit: 1 })),
   ]);
   const answers = [checkout, detach, setups];
   const autopay = answers.includes(false) ? false : answers.includes(null) ? undefined : true;
@@ -1595,7 +1596,7 @@ export async function stripeCapabilities(env: Env, admin: Db, companyId: string,
     const unknown = typeof settings.autopay !== "boolean" || typeof settings.refunds !== "boolean";
     const due = !settings.checked_at || Date.now() - Date.parse(settings.checked_at) > PROBE_EVERY_MS;
     if (options.refresh || (unknown && due)) {
-      const patch = { ...(await probeKey(access.key)), checked_at: new Date().toISOString() };
+      const patch = { ...(await probeKey(env, access.key)), checked_at: new Date().toISOString() };
       await saveStripeSettings(admin, companyId, patch);
       settings = { ...settings, ...patch };
     }
@@ -1612,7 +1613,7 @@ export async function refreshStripeWebhook(env: Env, admin: Db, companyId: strin
     const secret = await loadSecret(env, admin, companyId, "stripe");
     const id = secret?.extra?.webhook_id;
     if (!secret?.api_key || !id) return false;
-    await stripeApi(secret.api_key, "POST", `/v1/webhook_endpoints/${id}`, { enabled_events: STRIPE_EVENTS });
+    await stripeApi(env, secret.api_key, "POST", `/v1/webhook_endpoints/${id}`, { enabled_events: STRIPE_EVENTS });
     await saveStripeSettings(admin, companyId, { events_version: STRIPE_EVENTS_VERSION });
     return true;
   } catch (error) {
@@ -1698,7 +1699,7 @@ export async function stripeSetupSession(
     // stripeApi's own tries get the same page, and each tap its own (its return links carry a Hub
     // link signed afresh, and a new customer is another request).
     const sent = await digest(stripeForm(params).toString());
-    return stripeApi<StripeCheckoutSession>(ctx.key, "POST", "/v1/checkout/sessions", params, {
+    return stripeApi<StripeCheckoutSession>(ctx.env, ctx.key, "POST", "/v1/checkout/sessions", params, {
       idempotencyKey: `crewtavo-setup-${clientId}-${Math.floor(Date.now() / 60_000)}-${sent}`,
     });
   };
@@ -1736,7 +1737,7 @@ export async function finishStripeSetup(env: Env, admin: Db, companyId: string, 
   if (!ctx?.own) throw new HttpError(501, "Autopay isn't set up for this business.");
   let session: StripeCheckoutSession;
   try {
-    session = await stripeApi<StripeCheckoutSession>(ctx.key, "GET", `/v1/checkout/sessions/${sessionId}`, { expand: ["setup_intent.payment_method"] });
+    session = await stripeApi<StripeCheckoutSession>(ctx.env, ctx.key, "GET", `/v1/checkout/sessions/${sessionId}`, { expand: ["setup_intent.payment_method"] });
   } catch (error) {
     if (missing(error)) throw new HttpError(404, "That setup isn't for this client.");
     if (keyTurnedDown(error)) {
@@ -1768,7 +1769,7 @@ const setupVia = (metadata: Record<string, string> | null | undefined): SetupVia
 async function setupIntentOf(ctx: Ctx, si: string | StripeSetupIntent | null): Promise<StripeSetupIntent | null> {
   if (!si) return null;
   if (typeof si === "object") return si;
-  return stripeApi<StripeSetupIntent>(ctx.key, "GET", `/v1/setup_intents/${si}`, { expand: ["payment_method"] });
+  return stripeApi<StripeSetupIntent>(ctx.env, ctx.key, "GET", `/v1/setup_intents/${si}`, { expand: ["payment_method"] });
 }
 
 /** The columns a saved method keeps of Stripe's payment method. */
@@ -1795,7 +1796,7 @@ function methodFields(pm: StripePaymentMethod) {
  */
 async function saveSetup(ctx: Ctx, clientId: string, si: StripeSetupIntent, via: SetupVia): Promise<SetupOutcome> {
   let pm = si.payment_method;
-  if (typeof pm === "string") pm = await stripeApi<StripePaymentMethod>(ctx.key, "GET", `/v1/payment_methods/${pm}`);
+  if (typeof pm === "string") pm = await stripeApi<StripePaymentMethod>(ctx.env, ctx.key, "GET", `/v1/payment_methods/${pm}`);
   const waitsOnBank = (si.status === "requires_action" || si.status === "processing") && pm?.type !== "card";
   if (!pm || (si.status !== "succeeded" && !waitsOnBank)) return { status: "refused", reason: si.last_setup_error?.message ?? NOT_SAVED };
   const customer = pm.customer ?? si.customer;
@@ -1865,13 +1866,13 @@ async function setupFinished(
   let clientId: string;
   let via: SetupVia;
   if (from.session) {
-    const session = await stripeApi<StripeCheckoutSession>(ctx.key, "GET", `/v1/checkout/sessions/${from.session}`, { expand: ["setup_intent.payment_method"] });
+    const session = await stripeApi<StripeCheckoutSession>(ctx.env, ctx.key, "GET", `/v1/checkout/sessions/${from.session}`, { expand: ["setup_intent.payment_method"] });
     if (session.mode !== "setup" || !setupFor(session.metadata, companyId)) return false;
     clientId = session.metadata!.crewtavo_client_id!;
     via = setupVia(session.metadata);
     si = await setupIntentOf(ctx, session.setup_intent);
   } else {
-    si = await stripeApi<StripeSetupIntent>(ctx.key, "GET", `/v1/setup_intents/${from.setupIntent}`, { expand: ["payment_method"] });
+    si = await stripeApi<StripeSetupIntent>(ctx.env, ctx.key, "GET", `/v1/setup_intents/${from.setupIntent}`, { expand: ["payment_method"] });
     if (!setupFor(si.metadata, companyId)) return false;
     clientId = si.metadata!.crewtavo_client_id!;
     via = setupVia(si.metadata);
@@ -1904,7 +1905,7 @@ async function setupFinished(
 /** Take a payment method off its customer in Stripe. Gone already counts as done. Never throws. */
 async function detachInStripe(ctx: Ctx, stripeId: string) {
   try {
-    await stripeApi(ctx.key, "POST", `/v1/payment_methods/${stripeId}/detach`);
+    await stripeApi(ctx.env, ctx.key, "POST", `/v1/payment_methods/${stripeId}/detach`);
   } catch (error) {
     if (missing(error) || (error instanceof StripeError && /not attached/i.test(error.message))) return;
     if (keyTurnedDown(error)) return keyRefused(ctx, "autopay", error as StripeError);
@@ -1967,7 +1968,7 @@ async function methodUpdated(ctx: Ctx, stripeId: string) {
     .maybeSingle();
   fail(error);
   if (!row || row.status === "removed") return;
-  const pm = await stripeApi<StripePaymentMethod>(ctx.key, "GET", `/v1/payment_methods/${stripeId}`);
+  const pm = await stripeApi<StripePaymentMethod>(ctx.env, ctx.key, "GET", `/v1/payment_methods/${stripeId}`);
   const { brand, last4, exp_month, exp_year, wallet } = methodFields(pm);
   let status = row.status;
   if (row.status === "needs_update") {
@@ -2024,7 +2025,7 @@ const CONFIRM = "Their bank wants them to confirm the payment";
  */
 async function voidOrPaid(ctx: Ctx, row: Linked): Promise<StripeInvoice | null> {
   if (await voidStripeInvoice(ctx, row)) return null;
-  return fetchInvoice(ctx.key, row.stripe_id!);
+  return fetchInvoice(ctx.env, ctx.key, row.stripe_id!);
 }
 
 /**
@@ -2069,7 +2070,7 @@ export async function chargeInvoiceAutomatically(
       // This charge's own bank payment, on its way though its answer was lost: it's this charge's
       // to follow (the webhook settles or bounces it), not one the client made on Stripe's page.
       const own = clearing.find((r) => r.collection === "charge_automatically" && r.stripe_id && inUse(ctx, r));
-      const found = own ? await fetchInvoice(ctx.key, own.stripe_id!) : null;
+      const found = own ? await fetchInvoice(ctx.env, ctx.key, own.stripe_id!) : null;
       if (found?.metadata?.crewtavo_autopay === input.chargeId && (await paidWith(ctx, found)) === method.stripe_payment_method_id) {
         return { outcome: "processing", amountCents: found.amount_due };
       }
@@ -2084,7 +2085,7 @@ export async function chargeInvoiceAutomatically(
     // (Stripe's page, another card) was paid another way. One booked long ago (refunded since, so
     // owed again) takes nothing off, and is left alone.
     for (const done of linked.filter((r) => r.status === "paid" && r.stripe_id && inUse(ctx, r))) {
-      const found = await fetchInvoice(ctx.key, done.stripe_id!);
+      const found = await fetchInvoice(ctx.env, ctx.key, done.stripe_id!);
       if (found.status !== "paid") continue;
       const own = done.collection === "charge_automatically" && found.metadata?.crewtavo_autopay === input.chargeId && (await paidBy(ctx, found, method.stripe_payment_method_id));
       // Sent first, should it still be a draft (credit paid it all before it was sent).
@@ -2099,7 +2100,7 @@ export async function chargeInvoiceAutomatically(
       // One a try before this made (the worker stopped partway) is charged only while it's still
       // exactly this charge: its own (crewtavo_autopay), the amount, the customer and the card. One an
       // earlier charge left is voided, as the database never counts it as this charge's.
-      const found = live.collection === "charge_automatically" && live.stripe_id ? await fetchInvoice(ctx.key, live.stripe_id) : null;
+      const found = live.collection === "charge_automatically" && live.stripe_id ? await fetchInvoice(ctx.env, ctx.key, live.stripe_id) : null;
       if (found?.status === "paid") {
         await settleOwnInvoice(ctx, found);
         // Paid on Stripe's page with another card or bank account while this waited to try again, or
@@ -2124,7 +2125,7 @@ export async function chargeInvoiceAutomatically(
       });
       if (!made) return { outcome: "busy", message: STILL_MAKING };
       if (made.owedBefore) return { outcome: "unusable", message: "Their balance in Stripe would change the charge. Send it the usual way" };
-      current = made.stripe ?? (await fetchInvoice(ctx.key, made.stripe_id!));
+      current = made.stripe ?? (await fetchInvoice(ctx.env, ctx.key, made.stripe_id!));
       row = made;
     }
   } catch (error) {
@@ -2160,14 +2161,14 @@ export async function chargeInvoiceAutomatically(
     // answers "already paid") and with the card (no clash after the client changes it). The charge
     // comes back with its fee for recordPayment; the PaymentIntent stays an id.
     paid = await stripeApi<StripeInvoice>(
-      ctx.key, "POST", `/v1/invoices/${current.id}/pay`,
+      ctx.env, ctx.key, "POST", `/v1/invoices/${current.id}/pay`,
       { off_session: true, payment_method: method.stripe_payment_method_id, expand: ["charge.balance_transaction"] },
       { idempotencyKey: `crewtavo-autopay-${input.chargeId}-${input.attempt}-${method.stripe_payment_method_id}` },
     );
   } catch (error) {
     if (!(error instanceof StripeError)) throw error;
     if (error.code === "invoice_already_paid" || /already paid/i.test(error.message)) {
-      const fresh = await fetchInvoice(ctx.key, current.id);
+      const fresh = await fetchInvoice(ctx.env, ctx.key, current.id);
       await applyInvoice(ctx, fresh);
       return fresh.status === "paid" ? { outcome: "paid", amountCents: fresh.amount_paid } : { outcome: "retry", message: reason(error) };
     }
@@ -2191,14 +2192,14 @@ export async function chargeInvoiceAutomatically(
     return { outcome: "paid", amountCents: paid.amount_paid };
   }
   if (!paid.payment_intent) return { outcome: "needs_client", code: null, message: "Stripe couldn't finish the charge" };
-  const intent = await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${paid.payment_intent}`);
+  const intent = await stripeApi<StripePaymentIntent>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${paid.payment_intent}`);
   if (intent.status === "processing") {
     // A bank payment, which takes a few days. A bounce that came first reopened the row already.
     fail((await ctx.admin.from("stripe_invoices").update({ status: "processing", processing_at: new Date().toISOString() }).eq("id", row.id).eq("status", "open")).error);
     return { outcome: "processing", amountCents: paid.amount_due };
   }
   if (intent.status === "succeeded") {
-    const fresh = await fetchInvoice(ctx.key, current.id);
+    const fresh = await fetchInvoice(ctx.env, ctx.key, current.id);
     await applyInvoice(ctx, fresh);
     return { outcome: "paid", amountCents: fresh.amount_paid };
   }
@@ -2238,7 +2239,7 @@ export async function autopayStripeCheck(env: Env, admin: Db, companyId: string,
   if (!row) return "none";
   let current: StripeInvoice;
   try {
-    current = await fetchInvoice(ctx.key, row.stripe_id!);
+    current = await fetchInvoice(ctx.env, ctx.key, row.stripe_id!);
   } catch (error) {
     if (missing(error)) return "none";
     throw error;
@@ -2253,7 +2254,7 @@ export async function autopayStripeCheck(env: Env, admin: Db, companyId: string,
       : { data: null };
     return method && (await paidBy(ctx, current, method.stripe_payment_method_id)) ? "paid" : "other";
   }
-  const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
+  const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
   if (intent?.status === "processing") {
     fail((await ctx.admin.from("stripe_invoices").update({ status: "processing", processing_at: new Date().toISOString() }).eq("id", row.id).eq("status", "open")).error);
     return "processing";
@@ -2305,14 +2306,14 @@ export async function reconcileAutopayProcessing(env: Env, admin: Db): Promise<n
         if (off?.length) changed++;
         continue;
       }
-      const current = await fetchInvoice(ctx.key, row.stripe_id!);
+      const current = await fetchInvoice(ctx.env, ctx.key, row.stripe_id!);
       if (current.status !== "open") {
         // Paid: settling it finishes the charge (or the invoice trigger did, as the invoice turned paid).
         await applyInvoice(ctx, current);
         changed++;
         continue;
       }
-      const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
+      const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
       if (intent?.status !== "requires_payment_method") continue;
       // It bounced and the webhook never said.
       if (row.status === "processing") fail((await ctx.admin.from("stripe_invoices").update({ status: "open" }).eq("id", row.id).eq("status", "processing")).error);
@@ -2362,13 +2363,13 @@ export async function reconcileBankPayments(env: Env, admin: Db): Promise<number
       if (!contexts.has(row.company_id)) contexts.set(row.company_id, await context(env, admin, row.company_id));
       const ctx = contexts.get(row.company_id);
       if (!ctx || !row.stripe_id || !inUse(ctx, row)) continue;
-      const current = await fetchInvoice(ctx.key, row.stripe_id);
+      const current = await fetchInvoice(ctx.env, ctx.key, row.stripe_id);
       if (current.status !== "open") {
         await applyInvoice(ctx, current);
         changed++;
         continue;
       }
-      const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
+      const intent = current.payment_intent ? await stripeApi<StripePaymentIntent>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${current.payment_intent}`) : null;
       if (intent?.status !== "requires_payment_method") continue;
       // It bounced and the webhook never said.
       await bankPaymentFailed(env, ctx, current);
@@ -2389,7 +2390,7 @@ async function autopayBounced(ctx: Ctx, invoiceId: string, paymentIntent: string
   if (!charge) return;
   let decline = "bank_failed";
   if (paymentIntent) {
-    const intent = await stripeApi<StripePaymentIntent>(ctx.key, "GET", `/v1/payment_intents/${paymentIntent}`).catch(() => null);
+    const intent = await stripeApi<StripePaymentIntent>(ctx.env, ctx.key, "GET", `/v1/payment_intents/${paymentIntent}`).catch(() => null);
     decline = intent?.last_payment_error?.code ?? decline;
   }
   fail(
@@ -2453,7 +2454,7 @@ export async function chargeTip(
   const discard = async () => {
     if (stripeId) {
       const id = stripeId;
-      await stripeApi(ctx.key, "DELETE", `/v1/invoices/${id}`).catch(() => stripeApi(ctx.key, "POST", `/v1/invoices/${id}/void_invoice`)).catch(() => undefined);
+      await stripeApi(ctx.env, ctx.key, "DELETE", `/v1/invoices/${id}`).catch(() => stripeApi(ctx.env, ctx.key, "POST", `/v1/invoices/${id}/void`)).catch(() => undefined);
     }
     await admin.from("stripe_invoices").delete().eq("id", row.id);
   };
@@ -2461,7 +2462,7 @@ export async function chargeTip(
   const customer = method.stripe_customer_id;
   try {
     const draft = await stripeApi<StripeInvoice>(
-      ctx.key, "POST", "/v1/invoices",
+      ctx.env, ctx.key, "POST", "/v1/invoices",
       {
         customer, currency: ctx.currency, collection_method: "charge_automatically", default_payment_method: method.stripe_payment_method_id, auto_advance: false,
         pending_invoice_items_behavior: "exclude", custom_fields: [{ name: "Invoice", value: `#${invoice.number}` }],
@@ -2474,8 +2475,8 @@ export async function chargeTip(
     );
     stripeId = draft.id;
     fail((await admin.from("stripe_invoices").update({ stripe_id: draft.id, livemode: draft.livemode }).eq("id", row.id)).error);
-    await stripeApi(ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: tipCents, description: `Tip for the crew, invoice #${invoice.number}` }, { idempotencyKey: `${key}-item` });
-    const final = await stripeApi<StripeInvoice>(ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `${key}-finalize` });
+    await stripeApi(ctx.env, ctx.key, "POST", "/v1/invoiceitems", { customer, invoice: draft.id, currency: ctx.currency, amount: tipCents, description: `Tip for the crew, invoice #${invoice.number}` }, { idempotencyKey: `${key}-item` });
+    const final = await stripeApi<StripeInvoice>(ctx.env, ctx.key, "POST", `/v1/invoices/${draft.id}/finalize`, { auto_advance: false }, { idempotencyKey: `${key}-finalize` });
     fail((await admin.from("stripe_invoices").update({ status: final.status === "paid" ? "paid" : "open", number: final.number, hosted_url: final.hosted_invoice_url }).eq("id", row.id)).error);
     // Credit they had in Stripe paid the tip: booked as it is.
     if (final.status === "paid") {
@@ -2489,7 +2490,7 @@ export async function chargeTip(
     }
     paying = true;
     const paid = await stripeApi<StripeInvoice>(
-      ctx.key, "POST", `/v1/invoices/${final.id}/pay`,
+      ctx.env, ctx.key, "POST", `/v1/invoices/${final.id}/pay`,
       { off_session: true, payment_method: method.stripe_payment_method_id, expand: ["charge.balance_transaction"] },
       { idempotencyKey: `${key}-pay` },
     );
@@ -2517,7 +2518,7 @@ export async function chargeTip(
       throw error;
     }
     // It may have been charged: ask Stripe before undoing anything.
-    const current = await fetchInvoice(ctx.key, stripeId).catch(() => null);
+    const current = await fetchInvoice(ctx.env, ctx.key, stripeId).catch(() => null);
     if (current?.status === "paid") {
       await applyInvoice(ctx, current);
       return { status: "paid" };
@@ -2553,7 +2554,7 @@ export async function refundStripePayment(env: Env, admin: Db, companyId: string
   try {
     // Two clicks at once ask for the same refund, which Stripe makes once.
     refund = await stripeApi<StripeRefund>(
-      ctx.key, "POST", "/v1/refunds",
+      ctx.env, ctx.key, "POST", "/v1/refunds",
       { payment_intent: ref, amount: amountCents, metadata: { crewtavo_company_id: companyId, crewtavo_payment_id: paymentId } },
       { idempotencyKey: `crewtavo-refund-${paymentId}-${back.amount + back.tip + back.before}-${amountCents}` },
     );
@@ -2570,7 +2571,7 @@ export async function refundStripePayment(env: Env, admin: Db, companyId: string
   // Booked as Stripe's webhook books it (the same processor_ref), so never twice.
   let recorded = false;
   try {
-    if (refund.charge) recorded = (await refunded(admin, { companyId }, await stripeApi<StripeCharge>(ctx.key, "GET", `/v1/charges/${refund.charge}`))) === companyId;
+    if (refund.charge) recorded = (await refunded(admin, { companyId }, await stripeApi<StripeCharge>(ctx.env, ctx.key, "GET", `/v1/charges/${refund.charge}`))) === companyId;
   } catch (problem) {
     console.error("Couldn't book a refund now; Stripe's webhook will", paymentId, problem);
   }
@@ -2618,7 +2619,7 @@ const CARD_LOOKUPS = 200;
 async function importCards(ctx: Ctx, state: ImportState) {
   const { admin, companyId } = ctx;
   const customers: StripeCustomer[] = [];
-  for await (const customer of stripeList<StripeCustomer>(ctx.key, "/v1/customers", { expand: ["data.invoice_settings.default_payment_method", "data.default_source"] })) customers.push(customer);
+  for await (const customer of stripeList<StripeCustomer>(ctx.env, ctx.key, "/v1/customers", { expand: ["data.invoice_settings.default_payment_method", "data.default_source"] })) customers.push(customer);
   if (!customers.length) return;
   const [links, clients, defaults, agreements] = await Promise.all([
     admin.from("sync_links").select("local_id, external_id").eq("company_id", companyId).eq("provider", "stripe").eq("entity", "client"),
@@ -2662,7 +2663,7 @@ async function importCards(ctx: Ctx, state: ImportState) {
     let card = defaultCard(customer);
     if (!card && clientId && lookups < CARD_LOOKUPS) {
       lookups++;
-      card = (await stripeApi<{ data: StripePaymentMethod[] }>(ctx.key, "GET", "/v1/payment_methods", { customer: customer.id, type: "card", limit: 1 })).data[0] ?? null;
+      card = (await stripeApi<{ data: StripePaymentMethod[] }>(ctx.env, ctx.key, "GET", "/v1/payment_methods", { customer: customer.id, type: "card", limit: 1 })).data[0] ?? null;
     }
     if (!card) continue;
     if (!clientId) {

@@ -13,7 +13,7 @@ import type { Db } from "../lib/supabase";
  * QuickBooks item mapping lives in integrations.settings:
  *   { "environment": "production" | "sandbox", "item_map": { "<service uuid>": "<QBO Item Id>" }, "default_item_id": "1" }
  */
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { providerTimeout, zohoApiDomain, type Provider } from "./registry";
 import { accessToken, IntegrationError } from "./tokens";
 
@@ -122,7 +122,7 @@ async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknow
   if (!realm) throw new IntegrationError(NO_REALM);
   const { token, secret } = await accessToken(ctx.env, ctx.admin, ctx.companyId, "quickbooks");
   const env = qboEnvironment(ctx.env, ctx.integration.settings, secret.extra);
-  const url = `${QBO_BASE[env]}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}`;
+  const url = `${serviceUrl(ctx.env, "quickbooks", QBO_BASE[env])}/v3/company/${realm}/${path}${path.includes("?") ? "&" : "?"}minorversion=${QBO_MINOR_VERSION}`;
   const response = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Type": "application/json" },
@@ -142,7 +142,7 @@ async function zoho(ctx: Ctx, method: "GET" | "POST" | "PUT", path: string, body
   const org = ctx.integration.external_account_id;
   if (!org) throw new IntegrationError(NO_ORGANIZATION);
   // Checked here too: tokens saved before only Zoho's servers were accepted may name another.
-  const apiDomain = zohoApiDomain(secret.extra?.api_domain);
+  const apiDomain = zohoApiDomain(ctx.env, secret.extra?.api_domain);
   const response = await fetch(`${apiDomain}/books/v3/${path}${path.includes("?") ? "&" : "?"}organization_id=${org}`, {
     method,
     headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
@@ -423,7 +423,7 @@ export async function describeAccount(env: Env, provider: Provider, token: strin
   if (provider === "quickbooks") {
     const realm = query.realmId;
     if (!realm) throw new IntegrationError("QuickBooks didn't return a company ID.");
-    const base = QBO_BASE[qboEnvironment(env, {}, extra)];
+    const base = serviceUrl(env, "quickbooks", QBO_BASE[qboEnvironment(env, {}, extra)]);
     const response = await fetch(`${base}/v3/company/${realm}/companyinfo/${realm}?minorversion=${QBO_MINOR_VERSION}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
       signal: providerTimeout(),
@@ -432,7 +432,7 @@ export async function describeAccount(env: Env, provider: Provider, token: strin
     return { external_account_id: realm, account_label: json.CompanyInfo?.CompanyName ?? `QuickBooks ${realm}` };
   }
   if (provider === "zoho_books") {
-    const apiDomain = zohoApiDomain(extra?.api_domain);
+    const apiDomain = zohoApiDomain(env, extra?.api_domain);
     const response = await fetch(`${apiDomain}/books/v3/organizations`, { headers: { Authorization: `Zoho-oauthtoken ${token}` }, signal: providerTimeout() });
     const json = (await response.json().catch(() => ({}))) as Record<string, any>;
     const org = json.organizations?.find((o: any) => o.is_default_org) ?? json.organizations?.[0];

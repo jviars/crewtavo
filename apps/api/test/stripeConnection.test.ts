@@ -543,7 +543,7 @@ async function answer(url: URL, method: string, path: string, key: string, body:
     Object.assign(invoice, { status: "paid", amount_paid: invoice.amount_due, charge, status_transitions: { ...invoice.status_transitions, paid_at: 1_760_000_500 } });
     return json(invoice);
   }
-  if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/void_invoice$/))) {
+  if ((m = path.match(/^\/v1\/invoices\/([^/]+)\/void$/))) {
     const invoice = s.invoices.get(m[1]!);
     if (!invoice) return noInvoice(m[1]!);
     if (invoice.status !== "open") return json({ error: { message: `You can only void open invoices. This one is ${invoice.status}.` } }, 400);
@@ -705,7 +705,7 @@ describe("switching to another Stripe account", () => {
 
     stripe.calls.length = 0;
     await connect(live);
-    expect(stripe.calls).toContain(`sk_test_A POST /v1/invoices/${made!.stripe_id}/void_invoice`);
+    expect(stripe.calls).toContain(`sk_test_A POST /v1/invoices/${made!.stripe_id}/void`);
     expect(stripeInvoice(made!.stripe_id)!.status).toBe("void");
     expect(rowsFor(INV)[0]).toMatchObject({ status: "void", detached_at: expect.any(String) });
 

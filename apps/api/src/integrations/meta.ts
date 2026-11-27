@@ -13,13 +13,13 @@
  * Meta's "unknown error", which Meta sometimes gives for a post it made) throws MaySent, never a plain
  * failure: it's checked, not sent again (services/social.ts).
  */
-import type { Env } from "../env";
+import { serviceUrl, type Env } from "../env";
 import { SentButUnrecorded } from "./accounting";
 import { DIALOG, GRAPH_VERSION, META_ADS_SCOPES, META_SCOPES } from "./metaConfig";
 import { IntegrationError } from "./registry";
 
 export { DIALOG, GRAPH_VERSION, META_ADS_SCOPES, META_SCOPES };
-const graphBase = (env: Env) => (env.META_GRAPH_URL ?? "https://graph.facebook.com").replace(/\/$/, "");
+const graphBase = (env: Env) => (env.META_GRAPH_URL ?? serviceUrl(env, "meta", "https://graph.facebook.com")).replace(/\/$/, "");
 
 /** The Page task a person needs to post as the Page. */
 export const CREATE_CONTENT = "CREATE_CONTENT";
@@ -148,12 +148,12 @@ export interface MetaKeys {
  * otherwise the permissions themselves. `ads` adds the two a Page in a business portfolio needs for
  * Instagram, and `again` asks again for permissions declined before.
  */
-export function metaAuthorizeUrl(keys: MetaKeys, state: string, redirect: string, options: { ads?: boolean; again?: boolean } = {}): string {
+export function metaAuthorizeUrl(env: Pick<Env, "LOOKALYKE_URL">, keys: MetaKeys, state: string, redirect: string, options: { ads?: boolean; again?: boolean } = {}): string {
   const params = new URLSearchParams({ client_id: keys.client_id, redirect_uri: redirect, state, response_type: "code" });
   if (keys.config_id && !options.ads) params.set("config_id", keys.config_id);
   else params.set("scope", [...META_SCOPES, ...(options.ads ? META_ADS_SCOPES : [])].join(","));
   if (options.again || options.ads) params.set("auth_type", "rerequest");
-  return `${DIALOG}/${GRAPH_VERSION}/dialog/oauth?${params}`;
+  return `${serviceUrl(env, "meta", DIALOG)}/${GRAPH_VERSION}/dialog/oauth?${params}`;
 }
 
 /** Meta turned the App ID or secret down (the secret pasted wrong, most likely). */

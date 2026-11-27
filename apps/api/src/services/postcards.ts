@@ -385,7 +385,7 @@ export async function mailProof(env: Env, db: Db, companyId: string, id: string,
   const base = (env.APP_URL ?? "").replace(/\/$/, "");
   try {
     const address = lobAddress(company.name, to);
-    const made = await createPostcard(lob.key, {
+    const made = await createPostcard(env, lob.key, {
       to: address,
       from: address,
       size,
@@ -523,7 +523,7 @@ export async function processPostcards(env: Env, options: { campaignId?: string 
         }
         next = index + 1;
         try {
-          const made = await createPostcard(lob.key, {
+          const made = await createPostcard(env, lob.key, {
             to: lobAddress(r.name, to),
             from: lobAddress(company.name, from),
             size: campaign.size as PostcardSize,
@@ -592,7 +592,7 @@ export async function checkMailedCards(env: Env) {
     try {
       const lob = await companyLob(env, admin, campaign.company_id);
       if (!lob || lob.mode !== campaign.mode) continue;
-      const { cards } = await listCards(lob.key, { campaign: campaign.id, failed: true });
+      const { cards } = await listCards(env, lob.key, { campaign: campaign.id, failed: true });
       counts.checked++;
       let marked = 0;
       for (const card of cards.filter((c) => c.status === "failed")) {
@@ -640,7 +640,7 @@ export async function settleStoppedCards(env: Env) {
   for (const row of stuck ?? []) campaigns.set(row.campaign_id, [...(campaigns.get(row.campaign_id) ?? []), row]);
   for (const [campaignId, rows] of campaigns) {
     const lob = await companyLob(env, admin, rows[0]!.company_id).catch(() => null);
-    const listing = lob && lob.mode === rows[0]!.mode ? await listCards(lob.key, { campaign: campaignId }).catch(() => null) : null;
+    const listing = lob && lob.mode === rows[0]!.mode ? await listCards(env, lob.key, { campaign: campaignId }).catch(() => null) : null;
     const cards = new Map((listing?.cards ?? []).filter((c) => c.metadata.crewtavo_campaign === campaignId && c.metadata.crewtavo_recipient).map((c) => [c.metadata.crewtavo_recipient!, c]));
     for (const row of rows) {
       const card = cards.get(String(row.id));

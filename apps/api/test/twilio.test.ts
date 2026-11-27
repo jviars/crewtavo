@@ -164,40 +164,40 @@ describe("checking a Twilio account before it's kept", () => {
 
   it("reads the account and finds the number in it, with the token it was given", async () => {
     const t = twilio();
-    expect(await checkTwilio(good, t.fetcher)).toEqual({ name: "Alder Lawn", from_number: "+15405550100", phone_sid: "PN123abc", sms_url: "https://demo.twilio.com/welcome/sms/reply/", trial: false });
+    expect(await checkTwilio({}, good, t.fetcher)).toEqual({ name: "Alder Lawn", from_number: "+15405550100", phone_sid: "PN123abc", sms_url: "https://demo.twilio.com/welcome/sms/reply/", trial: false });
     expect(t.requests.map((r) => [r.method, r.url.pathname + r.url.search, r.auth])).toEqual([
       ["GET", `/2010-04-01/Accounts/${SID_A}.json`, `${SID_A}:token-a-secret`],
       ["GET", `/2010-04-01/Accounts/${SID_A}/IncomingPhoneNumbers.json?PhoneNumber=%2B15405550100`, `${SID_A}:token-a-secret`],
     ]);
-    expect((await checkTwilio(good, twilio({ account: () => Response.json({ friendly_name: "Trial", status: "active", type: "Trial" }) }).fetcher)).trial).toBe(true);
+    expect((await checkTwilio({}, good, twilio({ account: () => Response.json({ friendly_name: "Trial", status: "active", type: "Trial" }) }).fetcher)).trial).toBe(true);
   });
 
   it("says what to fix without asking Twilio when the SID or number isn't one", async () => {
     const t = twilio();
-    expect(await problem(checkTwilio({ ...good, account_sid: "SK123" }, t.fetcher))).toMatch(/^That doesn't look like an Account SID/);
-    expect(await problem(checkTwilio({ ...good, from_number: "555-0100" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
-    expect(await problem(checkTwilio({ ...good, from_number: "555-0100", country: "CA" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
-    expect(await problem(checkTwilio({ ...good, from_number: "900123", country: "GB" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like 07700 900123.");
+    expect(await problem(checkTwilio({}, { ...good, account_sid: "SK123" }, t.fetcher))).toMatch(/^That doesn't look like an Account SID/);
+    expect(await problem(checkTwilio({}, { ...good, from_number: "555-0100" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
+    expect(await problem(checkTwilio({}, { ...good, from_number: "555-0100", country: "CA" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like (540) 555-0100.");
+    expect(await problem(checkTwilio({}, { ...good, from_number: "900123", country: "GB" }, t.fetcher))).toBe("Enter your Twilio number in full, with its area code, like 07700 900123.");
     expect(t.requests).toEqual([]);
   });
 
   it("finds a number typed as the company's country writes it", async () => {
     const t = twilio();
-    expect((await checkTwilio({ ...good, from_number: "07700 900100", country: "GB" }, t.fetcher)).from_number).toBe("+447700900100");
+    expect((await checkTwilio({}, { ...good, from_number: "07700 900100", country: "GB" }, t.fetcher)).from_number).toBe("+447700900100");
     expect(t.requests[1]!.url.searchParams.get("PhoneNumber")).toBe("+447700900100");
     // A US company's is read as it always was.
-    expect(await problem(checkTwilio({ ...good, from_number: "07700 900100", country: "US" }, t.fetcher))).toMatch(/^Enter your Twilio number in full/);
+    expect(await problem(checkTwilio({}, { ...good, from_number: "07700 900100", country: "US" }, t.fetcher))).toMatch(/^Enter your Twilio number in full/);
   });
 
   it("says so when Twilio turns the token down, the number isn't the account's, or it can't text", async () => {
-    expect(await problem(checkTwilio(good, twilio({ account: refused }).fetcher))).toMatch(/^Twilio didn't accept that Account SID and Auth Token/);
-    expect(await problem(checkTwilio(good, twilio({ numbers: () => Response.json({ incoming_phone_numbers: [] }) }).fetcher))).toBe(
+    expect(await problem(checkTwilio({}, good, twilio({ account: refused }).fetcher))).toMatch(/^Twilio didn't accept that Account SID and Auth Token/);
+    expect(await problem(checkTwilio({}, good, twilio({ numbers: () => Response.json({ incoming_phone_numbers: [] }) }).fetcher))).toBe(
       "(540) 555-0100 isn't a number in this Twilio account. Copy it from Phone Numbers → Active numbers in Twilio.",
     );
-    expect(await problem(checkTwilio(good, twilio({ numbers: () => Response.json({ incoming_phone_numbers: [{ sid: "PN1", capabilities: { sms: false } }] }) }).fetcher))).toMatch(/^That Twilio number can't send texts/);
-    expect(await problem(checkTwilio(good, twilio({ account: () => Response.json({ status: "suspended" }) }).fetcher))).toMatch(/^This Twilio account is suspended/);
-    expect(await problem(checkTwilio(good, twilio({ account: () => new Response("", { status: 503 }) }).fetcher))).toBe("Twilio couldn't check these right now (error 503). Try again in a minute.");
-    expect(await problem(checkTwilio(good, (async () => Promise.reject(new Error("offline"))) as typeof fetch))).toBe("Couldn't reach Twilio to check these. Try again in a minute.");
+    expect(await problem(checkTwilio({}, good, twilio({ numbers: () => Response.json({ incoming_phone_numbers: [{ sid: "PN1", capabilities: { sms: false } }] }) }).fetcher))).toMatch(/^That Twilio number can't send texts/);
+    expect(await problem(checkTwilio({}, good, twilio({ account: () => Response.json({ status: "suspended" }) }).fetcher))).toMatch(/^This Twilio account is suspended/);
+    expect(await problem(checkTwilio({}, good, twilio({ account: () => new Response("", { status: 503 }) }).fetcher))).toBe("Twilio couldn't check these right now (error 503). Try again in a minute.");
+    expect(await problem(checkTwilio({}, good, (async () => Promise.reject(new Error("offline"))) as typeof fetch))).toBe("Couldn't reach Twilio to check these. Try again in a minute.");
   });
 });
 
@@ -277,8 +277,8 @@ describe("connecting it on the Apps page", () => {
   });
 
   it("says plainly when Twilio won't change the number", async () => {
-    await expect(setSmsWebhook({ sid: SID_A, token: "t" }, "PN1", HOOK, twilio({ number: refused }).fetcher)).rejects.toThrow("Twilio didn't accept the Auth Token anymore. Connect your Twilio account again, then try this.");
-    await expect(setSmsWebhook({ sid: SID_A, token: "t" }, "PN1", HOOK, twilio({ number: () => new Response("", { status: 400 }) }).fetcher)).rejects.toThrow(/^Twilio couldn't change the number's settings \(error 400\)/);
+    await expect(setSmsWebhook({}, { sid: SID_A, token: "t" }, "PN1", HOOK, twilio({ number: refused }).fetcher)).rejects.toThrow("Twilio didn't accept the Auth Token anymore. Connect your Twilio account again, then try this.");
+    await expect(setSmsWebhook({}, { sid: SID_A, token: "t" }, "PN1", HOOK, twilio({ number: () => new Response("", { status: 400 }) }).fetcher)).rejects.toThrow(/^Twilio couldn't change the number's settings \(error 400\)/);
   });
 });
 

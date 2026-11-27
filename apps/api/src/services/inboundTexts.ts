@@ -85,10 +85,6 @@ export async function receiveText(admin: Db, text: InboundText, companies: reado
 
   for (const client of clients) {
     touched.add(client.company_id);
-    await admin.from("messages").insert({
-      company_id: client.company_id, client_id: client.id, channel: "sms", direction: "in", status: "received",
-      body, external_id: text.sid, sent_by: null, from_phone: text.from,
-    });
     // Texts off from now, or back on: only a change is news (a YES that's an ordinary reply isn't).
     let changed = false;
     if (keyword === "stop") {
@@ -101,6 +97,12 @@ export async function receiveText(admin: Db, text: InboundText, companies: reado
       changed = Boolean(data?.length);
       await clearStop(admin, client.company_id, text.from);
     }
+    // Filed after the STOP or START is done: a delivery that fails partway leaves no text, so its retry does it all again.
+    const { error: fileError } = await admin.from("messages").insert({
+      company_id: client.company_id, client_id: client.id, channel: "sms", direction: "in", status: "received",
+      body, external_id: text.sid, sent_by: null, from_phone: text.from,
+    });
+    if (fileError) throw new Error(`Couldn't file a text from a client: ${fileError.message}`);
     const notice = changed && phrase
       ? { title: `${client.display_name} asked to stop texts`, body: `They texted ${theirWords}, so Crewtavo won't text them. If that isn't what they meant, you can turn texts back on from their page, only if they ask.` }
       : changed && keyword === "stop"
