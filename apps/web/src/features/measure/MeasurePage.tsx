@@ -45,6 +45,7 @@ import { ShareDrawing, type DrawingRow } from "./drawings";
 import { AUTO_NAME, choiceName, ELEVATION_CREDIT, imageryCredit, imageryInfo, imageryUsable, isImageryId, mapKeys, openingImagery, OVERLAYS, probeImagery, resolveAuto, setMyDefault, SLOPE_CLASSES, stateId, type ImageryChoice, type ImageryId, type OverlayId } from "./imagery";
 import { imageryMenu, ImageryPicker, type ImageryPickerProps } from "./ImageryPicker";
 import { helpSeen, markHelpSeen, MeasureHelp } from "./MeasureHelp";
+import { drawnAs, itemAfterTool } from "./nextShape";
 import { defaultNames, formatShapeValue, isDefaultName, MeasureMap, type MeasureMapHandle, type Shape, type Tool } from "./MeasureMap";
 import { useTooLarge } from "../plans/UploadLimit";
 import { isRoofingCompany } from "../roofing/data";
@@ -718,8 +719,8 @@ export function MeasurePage() {
     setTool(next);
     mapRef.current?.setTool(next);
     if (next !== "select") setSelected(null);
-    // A plain tool draws plain shapes; cutting out an island keeps the item picked.
-    if (next !== "cutout") setActiveItem(null);
+    // A plain tool draws plain shapes; cutting out an island keeps the item picked, but not a bed (nextShape.ts).
+    setActiveItem((item) => itemAfterTool(item, next));
     setActiveEdge(null);
   };
   const removeSelected = () => {
@@ -769,16 +770,18 @@ export function MeasurePage() {
     mapRef.current?.setTool("linestring");
     setSelected(null);
   };
-  /** Shapes just finished while an item or a roof edge was picked become that item or edge. */
+  /**
+   * Shapes just drawn while an item or a roof edge was picked become that item or edge. Not the ones
+   * put on the map for the person (Find's outlines and holes, OpenStreetMap's buildings): a house cut
+   * out while Bed is picked is no bed.
+   */
   const onShapes = (next: Shape[], inProgress: Shape | null) => {
     const fresh = next.filter((s) => !knownIds.current.has(s.id));
     fresh.forEach((s) => knownIds.current.add(s.id));
-    if (activeItem) {
-      const mine = fresh.filter((s) => itemFits(activeItem.id, s.kind));
-      if (mine.length) setItems((list) => ({ ...list, ...Object.fromEntries(mine.map((s) => [s.id, activeItem.id])) }));
-    }
+    const tagged = drawnAs(fresh, activeItem);
+    if (Object.keys(tagged).length) setItems((list) => ({ ...list, ...tagged }));
     if (activeEdge) {
-      const lines = fresh.filter((s) => s.kind === "Length");
+      const lines = fresh.filter((s) => s.kind === "Length" && !s.byCode);
       if (lines.length) setEdges((list) => ({ ...list, ...Object.fromEntries(lines.map((s) => [s.id, activeEdge])) }));
     }
     setShapes(next);

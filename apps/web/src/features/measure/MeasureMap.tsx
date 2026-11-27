@@ -42,6 +42,8 @@ export interface Shape {
   color: string;
   /** Square feet (a cutout's whole size), feet along the map, or 1 for a count. */
   value: number;
+  /** Put on the map for the person (Find, building outlines, a reopened drawing, an area made a cutout), not drawn by hand. */
+  byCode?: true;
 }
 
 /** A picture of the imagery in view (MeasureMapHandle.viewImage). */
@@ -346,6 +348,8 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
   const toolRef = useRef<Tool>("polygon");
   const colors = useRef(new Map<string, string>());
   const shapesRef = useRef<Shape[]>([]);
+  // The shapes this handle's add, addPoints, load and convert put on the map (Shape.byCode).
+  const byCode = useRef(new Set<string>());
   const streetLayers = useRef<string[]>([]);
   const nameLayers = useRef<string[]>([]);
   const imageryToken = useRef(0);
@@ -716,7 +720,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (!f.geometry || MODE_GEOMETRY[String(f.properties.mode)] !== f.geometry.type) continue;
       const geometry = f.geometry as Feature["geometry"];
       const kind = kindOf(String(f.properties.mode), f.geometry.type);
-      const shape: Shape = { id: String(f.id), kind, geometry, color: kind === "Cutout" ? CUT_COLOR : colorOf(String(f.id)), value: shapeValue(geometry) };
+      const shape: Shape = { id: String(f.id), kind, geometry, color: kind === "Cutout" ? CUT_COLOR : colorOf(String(f.id)), value: shapeValue(geometry), ...(byCode.current.has(String(f.id)) ? { byCode: true as const } : {}) };
       if (f.properties.currentlyDrawing) drawing = shape;
       else shapes.push(shape);
     }
@@ -942,6 +946,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       // Terra Draw keeps which mode drew a shape to itself, so it's drawn again in the other one.
       if (draw.getMode() === "select") draw.deselectFeature(id);
       const next = String(draw.getFeatureId());
+      byCode.current.add(next);
       draw.removeFeatures([id]);
       const [result] = draw.addFeatures([{ type: "Feature", id: next, geometry: feature.geometry, properties: { mode } } as GeoJSONStoreFeatures]);
       if (result?.valid === false) {
@@ -959,6 +964,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       // Terra Draw refuses points finer than the 9 decimals it keeps (map tiles give about 15).
       const round = (n: number) => Math.round(n * 1e9) / 1e9;
       const rows = polygons.map((p) => ({ type: "Feature", id: String(draw.getFeatureId()), geometry: { type: "Polygon", coordinates: p.map((ring) => ring.map(([x, y]) => [round(x), round(y)])) }, properties: { mode } }) as GeoJSONStoreFeatures);
+      rows.forEach((r) => byCode.current.add(String(r.id)));
       const results = draw.addFeatures(rows);
       report();
       return rows.filter((_, i) => results[i]?.valid !== false).map((r) => String(r.id));
@@ -968,6 +974,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       if (!draw) return [];
       const round = (n: number) => Math.round(n * 1e9) / 1e9;
       const rows = points.map(([x, y]) => ({ type: "Feature", id: String(draw.getFeatureId()), geometry: { type: "Point", coordinates: [round(x), round(y)] }, properties: { mode: "point" } }) as GeoJSONStoreFeatures);
+      rows.forEach((r) => byCode.current.add(String(r.id)));
       const results = draw.addFeatures(rows);
       report();
       return rows.filter((_, i) => results[i]?.valid !== false).map((r) => String(r.id));
@@ -1022,6 +1029,7 @@ export const MeasureMap = forwardRef<MeasureMapHandle, MeasureMapProps>(function
       const rows = features.flatMap((f) => {
         if (!f.geometry || !["Polygon", "LineString", "Point"].includes(f.geometry.type)) return [];
         const id = String(draw.getFeatureId());
+        byCode.current.add(id);
         ids.push(id);
         const mode = f.geometry.type === "Polygon" ? (f.properties?.cutout === true ? "cutout" : "polygon") : f.geometry.type === "LineString" ? "linestring" : "point";
         return [{ type: "Feature", id, geometry: f.geometry, properties: { mode } } as GeoJSONStoreFeatures];

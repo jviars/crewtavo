@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { lawnItem } from "@crewtavo/core/lawn";
+import { pavingItem } from "@crewtavo/core/paving";
+import { readFileSync } from "node:fs";
 import { boxAround, buildingAt, buildingsOn } from "../src/features/measure/buildings";
 import { lasHeader } from "../src/features/measure/lidar";
+import { drawnAs, itemAfterTool } from "../src/features/measure/nextShape";
 import { photoAngle, pitchFromAngle, startingHandles, tiltOf } from "../src/features/measure/pitchMath";
 import { groupRows } from "../src/features/measure/TakeoffList";
 
@@ -110,5 +114,35 @@ describe("the takeoff list", () => {
       ["Lines", "30 ft"],
       ["Counts", "1"],
     ]);
+  });
+});
+
+describe("the next shape's item", () => {
+  const bed = lawnItem("bed")!;
+  const asphalt = pavingItem("asphalt")!;
+  const read = (file: string) => readFileSync(new URL(`../src/features/measure/${file}`, import.meta.url), "utf8");
+
+  it("is a bed only while Bed is picked: pressing Cut out goes back to a plain cutout", () => {
+    expect(itemAfterTool(bed, "cutout")).toBeNull();
+    // Cutting an island out of the asphalt keeps asphalt picked, as it always did.
+    expect(itemAfterTool(asphalt, "cutout")).toBe(asphalt);
+    expect(itemAfterTool(asphalt, "polygon")).toBeNull();
+    expect(itemAfterTool(bed, "select")).toBeNull();
+    const page = read("MeasurePage.tsx");
+    expect(page).toContain("setActiveItem((item) => itemAfterTool(item, next));");
+  });
+
+  it("goes on the shapes a person draws, never on ones put on the map for them", () => {
+    // A bed drawn by hand; a house cut out by Find or from OpenStreetMap's buildings while Bed is picked.
+    expect(drawnAs([{ id: "drawn", kind: "Cutout" }, { id: "house", kind: "Cutout", byCode: true }], bed)).toEqual({ drawn: "bed" });
+    // An item only goes on the kind of shape it can be.
+    expect(drawnAs([{ id: "island", kind: "Cutout" }, { id: "lot", kind: "Area" }, { id: "found", kind: "Area", byCode: true }], asphalt)).toEqual({ lot: "asphalt" });
+    expect(drawnAs([{ id: "drawn", kind: "Cutout" }], null)).toEqual({});
+    // The map says which shapes it was handed: Find's and the buildings' (add), counts found (addPoints),
+    // a reopened drawing (load) and an area made a cutout (convert).
+    const map = read("MeasureMap.tsx");
+    expect(map.match(/byCode\.current\.add\(/g)).toHaveLength(4);
+    expect(map).toContain("...(byCode.current.has(String(f.id)) ? { byCode: true as const } : {})");
+    expect(read("MeasurePage.tsx")).toContain("const tagged = drawnAs(fresh, activeItem);");
   });
 });
