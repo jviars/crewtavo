@@ -28,8 +28,8 @@ import { MessageBody } from "../clients/MessageBody";
 import { messageFrom, messagePeople } from "../clients/messagePeople";
 import { ConnectEmailHint } from "../settings/ConnectEmailHint";
 import { ConversationRow } from "./ConversationRow";
-import { conversationsFrom } from "./conversations";
-import { answersMessages, isWaiting, useDoneMarks, useMarkDone } from "./done";
+import { conversationsFrom, isWaiting, rowWaits, waitingByClient } from "./conversations";
+import { answersMessages, useDoneMarks, useMarkDone } from "./done";
 import { UnknownRows, UnknownThread, useUnknownNumbers } from "./UnknownNumbers";
 import { numbersFor } from "./unknownTexts";
 
@@ -103,6 +103,7 @@ export function MessagesPage() {
     () => conversationsFrom(messages.data?.rows ?? [], messages.data?.waiting, f.channels).filter((c) => !term || c.client!.display_name.toLowerCase().includes(term.toLowerCase()) || c.body.toLowerCase().includes(term.toLowerCase())),
     [messages.data, f, term],
   );
+  const waitingLatest = useMemo(() => waitingByClient(messages.data?.waiting), [messages.data]);
   const open = (clientId: string | null) => setParams(clientId ? { client: clientId } : {}, { replace: true });
   // Texts and calls from unknown numbers are from outside: none under Email, and only theirs under Texts or Calls.
   const unknownNumbers = numbersFor(strangers.data ?? [], filter, term);
@@ -131,7 +132,7 @@ export function MessagesPage() {
                 {conversations.length > 0 && (
                   <InboxGroup label={unknownNumbers.length ? "Clients" : undefined} count={unknownNumbers.length ? conversations.length : undefined}>
                     {conversations.map((c) => {
-                      const waiting = isWaiting(c, marks?.get(c.client!.id));
+                      const waiting = rowWaits(c, waitingLatest, marks?.get(c.client!.id));
                       return (
                       <ConversationRow
                         key={c.client!.id}

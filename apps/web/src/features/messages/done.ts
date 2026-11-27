@@ -27,10 +27,6 @@ export function useDoneMarks() {
   });
 }
 
-/** The latest message is the client's, and came after the conversation was last marked done. */
-export const isWaiting = (latest: { direction: string; created_at: string }, doneAt: string | undefined) =>
-  latest.direction === "in" && (!doneAt || Date.parse(doneAt) < Date.parse(latest.created_at));
-
 /** How many conversations wait on the office, for the dot on the Messages button. */
 export function useWaitingCount() {
   const session = useSession();
