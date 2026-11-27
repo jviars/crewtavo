@@ -23,6 +23,7 @@ import {
   type Position,
   type Section,
 } from "@crewtavo/core";
+import { businessCountry } from "@crewtavo/core/countries";
 import { z } from "zod";
 import { applyMeasurement, measurementVariables, saveMeasurement, type MeasurementValues } from "../services/measurements";
 import { companyArg, requireRole, rows, tool, type ToolContext } from "./tool";
@@ -90,7 +91,7 @@ export const measurementTools = {
 
   save_measurement: tool({
     description:
-      "Draw and save a measurement on the measuring map from outlines you already have, as [longitude, latitude] points, for any trade: areas (a lawn, a lot, a roof section), cutouts (what's inside an area but not part of it: the house, a pool; or a lawn's bed), lines (edging, curb, striping, a roof's eaves and ridges) and counts (trees, stalls, drains; the property's map point will do when you only know how many). Each shape can say what it is for a takeoff (`item`), so its formula values add up (a lawn's beds, trees and obstacles; a paving lot's asphalt and stalls). Crewtavo works out the sizes the way Measure does. A lawn (plain areas, no paving items or roof pitch) also gets each area's slope from free USGS elevation (US only); where there's none, `slope` (flat, hilly or steep) stands in. It's saved on the property (and the quote or request, when given), marked as drawn by an assistant. It's only as right as the outlines you give: say so, and give the person the link to check and fix it in Measure. Then fill_quote_from_measurement prices a quote from it.",
+      "Draw and save a measurement on the measuring map from outlines you already have, as [longitude, latitude] points, for any trade: areas (a lawn, a lot, a roof section), cutouts (what's inside an area but not part of it: the house, a pool; or a lawn's bed), lines (edging, curb, striping, a roof's eaves and ridges) and counts (trees, stalls, drains; the property's map point will do when you only know how many). Each shape can say what it is for a takeoff (`item`), so its formula values add up (a lawn's beds, trees and obstacles; a paving lot's asphalt and stalls). Crewtavo works out the sizes the way Measure does. A lawn (plain areas, no paving items or roof pitch) also gets each area's slope from free USGS elevation (in the United States only, by the property's country or else the business's); where there's none, `slope` (flat, hilly or steep) stands in. It's saved on the property (and the quote or request, when given), marked as drawn by an assistant. It's only as right as the outlines you give: say so, and give the person the link to check and fix it in Measure. Then fill_quote_from_measurement prices a quote from it.",
     area: "clients",
     input: z.object({
       title: z.string().trim().min(1).max(200).default("Measurement"),
@@ -135,7 +136,10 @@ export const measurementTools = {
       // A lawn: plain areas, no paving and no roof. Each area's slope, less what's cut out of it: null
       // outside the US, undefined when USGS didn't answer; a slope given stands in for either.
       const lawn = !a.roof_pitch && !a.lines.some((l) => l.edge) && ![...a.areas, ...a.cutouts, ...a.lines, ...a.counts].some((s) => pavingItem(s.item));
-      const read = await Promise.all(areas.map((g, n) => (lawn && !a.areas[n].item ? readSlope(g, cuts).catch(() => undefined) : Promise.resolve(null))));
+      // USGS is only asked in the United States: the property's country when it has one, else the business's.
+      const property = lawn && a.property_id ? (await ctx.db.from("properties").select("country").eq("id", a.property_id).eq("company_id", ctx.companyId).maybeSingle()).data : null;
+      const country = property?.country ?? businessCountry({ country: ctx.country, timezone: ctx.timezone });
+      const read = await Promise.all(areas.map((g, n) => (lawn && !a.areas[n].item ? readSlope(g, cuts, { country }).catch(() => undefined) : Promise.resolve(null))));
       const slopes = read.map((r, n): GroundSlope | null | undefined => r ?? (a.areas[n].slope ? pickedSlope(a.areas[n].slope as "flat" | "hilly" | "steep") : r));
       const depth = a.depth_in ? { depth_in: a.depth_in } : {};
       const feature = (geometry: Geometry, properties: Record<string, unknown>): Feature => ({ type: "Feature", geometry, properties: { ...depth, ...properties } });

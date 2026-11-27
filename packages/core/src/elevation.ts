@@ -9,8 +9,34 @@
 import { cutOut, polygonAreaM2, type Geometry, type GroundSlope, type Position } from "./geo";
 
 export const DEP_SERVICE = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer";
-/** 3DEP covers the US and its territories; nothing is asked for outside this box. */
+/** 3DEP's pictures (the slope and contour overlays) are only asked for inside this box. */
 export const US_BOX: [number, number, number, number] = [-179.5, 17.5, -64.5, 71.5];
+/**
+ * Where a lawn's slope is read: the lower 48 states, Alaska, Hawaii, and Puerto Rico with the US
+ * Virgin Islands, each [west, south, east, north]. USGS answers beyond the border too, with coarse
+ * numbers that look real (2.3% for a yard in Toronto, a flat 0 in Monterrey), so it's only trusted
+ * inside the United States. Boxes can't follow a border: southern Canada, northern Mexico and the
+ * Bahamas are inside these, and the place's country settles those (inUs).
+ */
+export const US_BOXES: ReadonlyArray<readonly [number, number, number, number]> = [
+  [-125, 24.3, -66.8, 49.5],
+  [-179.5, 51, -129.5, 71.5],
+  [-161, 18.5, -154.5, 22.5],
+  [-68, 17.5, -64.5, 18.7],
+];
+/** The country codes an address in those boxes' United States can carry. */
+const US_CODES = new Set(["US", "PR", "VI"]);
+
+/**
+ * Whether points are in the United States, as far as can be told: not when their `country` (the
+ * property's, else the business's) is known and is another one; otherwise by US_BOXES. With no
+ * country, or a US business working just over the border, a place a box can't tell apart still counts.
+ */
+export function inUs(points: readonly Position[], country?: string | null): boolean {
+  const code = typeof country === "string" ? country.trim().toUpperCase() : "";
+  if (code && !US_CODES.has(code)) return false;
+  return points.every((p) => US_BOXES.some(([west, south, east, north]) => Number(p[0]) >= west && Number(p[0]) <= east && Number(p[1]) >= south && Number(p[1]) <= north));
+}
 /** Steeper than this grade (3:1) is what a lawn's slope counts as steep (steep_pct). */
 export const STEEP_GRADE = 33.3;
 
@@ -42,12 +68,14 @@ export function slopeFrom(stats: SlopeStats): GroundSlope | null {
   return { mean_pct: Math.round(average.mean * 10) / 10, steep_pct: Math.round((steep / total) * 1000) / 10 };
 }
 
-/** The slope under an area, less the cutouts over it; null where USGS has no elevation (outside the US). */
-export async function readSlope(area: Geometry, cutouts: Geometry[], signal?: { aborted: boolean }): Promise<GroundSlope | null> {
+/**
+ * The slope under an area, less the cutouts over it; null outside the United States (inUs, with the
+ * `country` the place is in when one is known), where the lawn's slope is picked by hand or asked of
+ * Google, and null where USGS has no elevation.
+ */
+export async function readSlope(area: Geometry, cutouts: Geometry[], { country, signal }: { country?: string | null; signal?: { aborted: boolean } } = {}): Promise<GroundSlope | null> {
   const rings = cutOut(area, cutouts).flat();
-  const [west, south, east, north] = US_BOX;
-  const inUs = rings.flat().every((p) => Number(p[0]) >= west && Number(p[0]) <= east && Number(p[1]) >= south && Number(p[1]) <= north);
-  if (!rings.length || !inUs) return null;
+  if (!rings.length || !inUs(rings.flat(), country)) return null;
   // Sent as a form: a big lawn's outline is too long for a link, and a form needs no CORS preflight.
   const fields = { geometry: JSON.stringify({ rings, spatialReference: { wkid: 4326 } }), geometryType: "esriGeometryPolygon", renderingRule: SLOPE_RULE, f: "json" };
   const body = Object.entries(fields).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");

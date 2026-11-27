@@ -38,6 +38,32 @@ describe("Lawn slope from USGS", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("is only asked inside the United States: nothing for a place the address or the business says is abroad", async () => {
+    const fetch = vi.fn(async () => Response.json({ statistics: [{ mean: 2.3, count: 4 }], histograms: [{ min: 1, max: 5, counts: [2, 2] }] }));
+    vi.stubGlobal("fetch", fetch);
+    // USGS answers for Toronto with coarse numbers that look real: a Canadian address or business gets no reading, to pick one or ask Google.
+    const toronto = yard(-79.3832, 43.6532);
+    expect(await readSlope(toronto, [], { country: "CA" })).toBeNull();
+    expect(await readSlope(yard(-100.31, 25.67), [], { country: "MX" })).toBeNull(); // Monterrey
+    // Even on the US side of the line, when the place is said to be abroad.
+    expect(await readSlope(yard(-79.87, 37.05), [], { country: "ca" })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    // Abroad by where it is, whatever country is given or not: Edmonton, Mexico City, Havana, London.
+    for (const [lng, lat] of [[-113.49, 53.54], [-99.13, 19.43], [-82.38, 23.13], [-0.13, 51.5]]) {
+      expect(await readSlope(yard(lng, lat), [])).toBeNull();
+      expect(await readSlope(yard(lng, lat), [], { country: "US" })).toBeNull();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    // The United States, as before: the states, Puerto Rico and the US Virgin Islands, with the US or no country given.
+    const us = [[-79.87, 37.05], [-81.8, 24.555], [-124.7, 48.37], [-67.0, 44.81], [-95.15, 49.36], [-149.9, 61.2], [-130.03, 55.91], [-157.86, 21.3], [-66.1, 18.4], [-64.75, 17.72]];
+    for (const [lng, lat] of us) expect(await readSlope(yard(lng, lat), [], { country: lng > -64.9 ? "VI" : lng > -67 && lat < 19 ? "PR" : "US" })).toEqual({ mean_pct: 2.3, steep_pct: 0 });
+    expect(await readSlope(yard(-79.87, 37.05), [])).not.toBeNull();
+    expect(await readSlope(yard(-79.87, 37.05), [], { country: null })).not.toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(us.length + 2);
+    // A box can't tell Windsor from Detroit, so with no country (or the US) given, just over the line is still asked.
+    expect(await readSlope(toronto, [])).not.toBeNull();
+  });
+
   it("tries again when USGS times out, and says so after three tries", async () => {
     vi.useFakeTimers();
     try {

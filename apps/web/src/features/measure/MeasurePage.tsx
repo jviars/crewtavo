@@ -242,6 +242,8 @@ export function MeasurePage() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [abroad, setAbroad] = useState<{ place: string } | null>(null);
+  // The country of the address the map last went to from the search (null when it isn't known), for the lawn's slope.
+  const [placeCountry, setPlaceCountry] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const [history, setHistory] = useState({ undo: false, redo: false });
   const [capturing, setCapturing] = useState(false);
@@ -269,7 +271,7 @@ export function MeasurePage() {
         invoice: linkIds.invoice ?? m?.invoice_id ?? null,
       };
       const [property, quote, request, invoice, companyRow] = await Promise.all([
-        ids.property ? db.from("properties").select("id, line1, city, region, postal_code, lat, lng, client:clients(id, display_name)").eq("id", ids.property).maybeSingle() : null,
+        ids.property ? db.from("properties").select("id, line1, city, region, postal_code, country, lat, lng, client:clients(id, display_name)").eq("id", ids.property).maybeSingle() : null,
         ids.quote ? db.from("quotes").select("id, number, title, client_id").eq("id", ids.quote).maybeSingle() : null,
         ids.request ? db.from("requests").select("id, number, title, client_id").eq("id", ids.request).maybeSingle() : null,
         ids.invoice ? db.from("invoices").select("id, number, subject, client_id").eq("id", ids.invoice).maybeSingle() : null,
@@ -409,6 +411,9 @@ export function MeasurePage() {
   // Outside the US, with slope from Google turned on (Settings > Maps): Google's heights, asked only
   // while the map shows Google satellite, as Google's terms want.
   const googleSlopeKey = imagery === "google" ? googleElevationKey(company.settings) : null;
+  // USGS is only asked in the United States (it answers past the border, with coarse numbers that look
+  // real): by the country of the address last searched or picked, else the property's, else the business's.
+  const slopeCountry = placeCountry ?? ctx?.property?.country ?? companyCountry();
   useEffect(() => {
     if (!lawn) return;
     // A lawn opened with the drawing, or picked by hand, keeps its slope through a change; one USGS
@@ -431,13 +436,13 @@ export function MeasurePage() {
         };
         const google = googleSlopeKey;
         const asked = google ? { google: true } : {};
-        readSlope(area, cutouts)
+        readSlope(area, cutouts, { country: slopeCountry })
           .then((reading) => (reading === null && google ? readGoogleSlope(google, area, cutouts) : reading))
           .then((reading) => done({ key, reading, ...asked }), () => done({ key, failed: true, ...asked }));
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [slopes, slopeKeys, shapes, googleSlopeKey]);
+  }, [slopes, slopeKeys, shapes, googleSlopeKey, slopeCountry]);
   const groundSlope = drawingSlope(summary);
   const bedSqft = lawn ? Number(lawnQuantities(summary.sections).bed_sqft) : 0;
   const bedYards = (bedSqft * depthIn) / 12 / 27;
@@ -634,6 +639,7 @@ export function MeasurePage() {
    */
   const goTo = (to: { lat: number; lng: number; zoom: number; country: string | null; place: string }, keepImagery = false) => {
     mapRef.current?.jumpTo(to.lng, to.lat, to.zoom);
+    setPlaceCountry(to.country);
     if (keepImagery) return;
     if (to.country && to.country !== "US") {
       // Auto finds the best there is by itself; a US-only source someone picked gets explained.

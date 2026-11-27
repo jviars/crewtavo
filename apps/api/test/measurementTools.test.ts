@@ -87,6 +87,35 @@ describe("the assistant's drawings", () => {
     expect(down.sent.some((s) => s.method === "POST")).toBe(true);
   });
 
+  it("reads a lawn's slope from USGS only in the United States: the property's country, else the business's", async () => {
+    const save = measurementTools.save_measurement;
+    // USGS answers for Toronto too, with coarse numbers that look real.
+    const toronto = box(-79.3832, 43.6532, 0.0004, 0.0003);
+    // A Canadian business: no reading, so the slope given stands, or the note asks for one.
+    const canada = world([]);
+    const picked = await save.run({ ...canada.ctx, country: "CA", timezone: "America/Toronto" } as ToolContext, save.input.parse({ areas: [{ outline: toronto, slope: "flat" }] }));
+    expect(canada.asked).toEqual([]);
+    expect(picked).toMatchObject({ values: { slope_pct: 2 } });
+    const none = await save.run({ ...world([]).ctx, country: "CA", timezone: "America/Toronto" } as ToolContext, save.input.parse({ areas: [{ outline: toronto }] }));
+    expect(none).toMatchObject({ slope_note: expect.stringContaining("outside the US") });
+    // A business whose country was never asked is taken from its time zone.
+    const zone = world([]);
+    await save.run({ ...zone.ctx, country: null, timezone: "America/Toronto" } as ToolContext, save.input.parse({ areas: [{ outline: toronto }] }));
+    expect(zone.asked).toEqual([]);
+    // Its property across the border, in the US, is read; a US business's property in Canada isn't.
+    const south = world([{ country: "US" }]);
+    await save.run({ ...south.ctx, country: "CA", timezone: "America/Toronto" } as ToolContext, save.input.parse({ property_id: HOUSE, areas: [{ outline: YARD }] }));
+    expect(south.sent[0]!.path).toContain(`/properties?select=country&id=eq.${HOUSE}`);
+    expect(south.asked).toHaveLength(1);
+    const north = world([{ country: "CA" }]);
+    await save.run({ ...north.ctx, country: "US" } as ToolContext, save.input.parse({ property_id: HOUSE, areas: [{ outline: toronto }] }));
+    expect(north.asked).toEqual([]);
+    // A US business is asked as it always was.
+    const us = world([]);
+    await save.run({ ...us.ctx, country: "US" } as ToolContext, save.input.parse({ areas: [{ outline: YARD }] }));
+    expect(us.asked).toHaveLength(1);
+  });
+
   it("keeps every point to the 9 decimals the measuring map takes, so the drawing opens whole in Measure", async () => {
     // Outlines the way a geocoder or arithmetic gives them: 13 to 15 decimals. Terra Draw's own count of them.
     const decimals = (n: number) => {

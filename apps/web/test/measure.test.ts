@@ -175,3 +175,14 @@ describe("reopening a saved drawing", () => {
     expect(page).toContain("if (ids.length < saved.filter(drawable).length) toast.error(");
   });
 });
+
+describe("a lawn's slope in Measure", () => {
+  it("is asked of USGS with the country the place is in, so a Canadian lawn has none and can be picked or asked of Google", () => {
+    const page = readFileSync(new URL("../src/features/measure/MeasurePage.tsx", import.meta.url), "utf8");
+    // The address last searched or picked, else the property's, else the business's (core readSlope and inUs decide).
+    expect(page).toContain("const slopeCountry = placeCountry ?? ctx?.property?.country ?? companyCountry();");
+    expect(page).toContain("readSlope(area, cutouts, { country: slopeCountry })");
+    expect(page).toContain("setPlaceCountry(to.country);");
+    expect(page).toContain('select("id, line1, city, region, postal_code, country, lat, lng, client:clients(id, display_name)")');
+  });
+});
