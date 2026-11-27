@@ -156,6 +156,36 @@ describe("the assistant's drawings", () => {
     expect((roof as { values: Record<string, number> }).values.eave_ft).toBeGreaterThan(30);
   });
 
+  it("prices a line that reads a depth at its item's own depth, as Fill quantities does on the quote", async () => {
+    // A 2,700 sq ft drive drawn at 2 inches (the asphalt's), with a stone base whose price list item says 6.
+    const STONE = "44444444-4444-4444-8444-444444444444";
+    const ASPHALT = "55555555-5555-4555-8555-555555555555";
+    const drawing = { total_area_sqft: 2700, total_area_sqyd: 300, total_length_ft: 0, roof_pitch: null, waste_pct: 0, sections: [{ feature_id: "a", kind: "Area", label: "Area 1", value: 2700, unit: "sq ft", depth_in: 2, manual_override: false }] };
+    const lines = [
+      { id: STONE, name: "Stone base", formula: "area_sqft * depth_in / 12 / 27", service: { formula_target: "quantity", default_depth_in: 6 } },
+      { id: ASPHALT, name: "Asphalt", formula: "area_sqyd * depth_in * 110 / 2000", service: { formula_target: "quantity", default_depth_in: null } },
+    ];
+    const { ctx } = world([]);
+    const writes: Array<{ path: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if ((init?.method ?? "GET") !== "GET") {
+        writes.push({ path: decodeURIComponent(`${url.pathname}${url.search}`), body: JSON.parse(String(init?.body)) });
+        return new Response(null, { status: 204 });
+      }
+      return Response.json(url.pathname.endsWith("/measurements") ? [drawing] : lines);
+    });
+    const fill = measurementTools.fill_quote_from_measurement;
+    const result = (await fill.run({ ...ctx, permissions: ["sales"] } as ToolContext, fill.input.parse({ quote_id: HOUSE, measurement_id: DRAWING }))) as { lines: unknown[]; values: Record<string, number> };
+    // 6 inches of stone (50 cu yd), not the 2 typed for the asphalt (16.7); the asphalt at the drawing's 2 (33 tons).
+    expect(result.lines).toEqual([
+      { id: STONE, name: "Stone base", field: "quantity", value: 50, depth_in: 6 },
+      { id: ASPHALT, name: "Asphalt", field: "quantity", value: 33, depth_in: 2 },
+    ]);
+    expect(writes.find((w) => w.path.includes(STONE))?.body).toEqual({ quantity: 50 });
+    expect(result.values).toMatchObject({ area_sqft: 2700, depth_in: 2 });
+  });
+
   it("says which items a shape can be when it's given one it can't", async () => {
     const save = measurementTools.save_measurement;
     await expect(save.run(world([]).ctx, save.input.parse({ areas: [{ outline: YARD, item: "tree" }] }))).rejects.toThrow(/Area 1: "tree" isn't an item it can be. An area can be asphalt/);

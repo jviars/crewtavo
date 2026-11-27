@@ -184,7 +184,7 @@ export const measurementTools = {
 
   fill_quote_from_measurement: tool({
     description:
-      "Price a quote's lines from a saved drawing with the price list's formulas, as Fill quantities from this does on the quote: each line from a price list item with a formula gets its quantity or price (mowing from the lawn's size and steep_pct, trim-around from trees and obstacles, sealcoat from sealcoat_sqft, shingles from squares, and so on). A line whose formula needs a value the drawing doesn't have says so and keeps what it had. Add the lines first (update_quote with service_id); the drawing becomes the quote's.",
+      "Price a quote's lines from a saved drawing with the price list's formulas, as Fill quantities from this does on the quote: each line from a price list item with a formula gets its quantity or price (mowing from the lawn's size and steep_pct, trim-around from trees and obstacles, sealcoat from sealcoat_sqft, shingles from squares, and so on). A line whose formula reads a depth is priced at its price list item's own depth when it has one (stone base, mulch), else the drawing's, and says which (depth_in). A line whose formula needs a value the drawing doesn't have says so and keeps what it had. Add the lines first (update_quote with service_id); the drawing becomes the quote's.",
     area: "quotes",
     input: z.object({
       quote_id: z.uuid(),
@@ -194,7 +194,9 @@ export const measurementTools = {
     }),
     run: async (ctx, a) => {
       requireRole(ctx, SALES, "sales");
-      const { variables, lines } = await applyMeasurement(ctx.db, ctx.companyId, a.quote_id, a.measurement_id, undefined, a.line_ids);
+      // As the quote page and Paving ask (item_depths): a line whose item has its own depth is priced at
+      // it (6 inches of stone base), not at the depth the drawing was given for something else.
+      const { variables, lines } = await applyMeasurement(ctx.db, ctx.companyId, a.quote_id, a.measurement_id, undefined, a.line_ids, { itemDepths: true });
       // The values the drawing has, without the many that are zero or missing for it.
       return { lines, values: Object.fromEntries(Object.entries(variables).filter(([, v]) => v !== null && v !== 0)) };
     },
