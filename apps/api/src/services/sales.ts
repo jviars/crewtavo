@@ -279,7 +279,8 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     });
   }
   // A separate email, not a Bcc: the client's own link says yes and pays as them, so the sender's
-  // copy carries the office's. It isn't put on the timeline, and one that doesn't go never undoes the send.
+  // copy carries the office's, marked as theirs: looking at it isn't the client opening it (lib/links `cc`).
+  // It isn't put on the timeline, and one that doesn't go never undoes the send.
   let copy: Delivered["copy"];
   if (channel === "email" && s.copyTo !== undefined && delivery.went.length) {
     const to = s.copyTo;
@@ -287,7 +288,7 @@ export async function deliver(s: SalesScope, kind: "quote" | "invoice", record: 
     else if (delivery.went.some((person) => emailMatchKey(person.to) === emailMatchKey(to))) copy = { to, sent: true };
     else {
       const went = delivery.went.map((person) => person.to).join(", ");
-      const result = await email(to, `Your copy of what was sent to ${went}.\n\n${message(links.office)}`).catch((error: unknown) => ({ sent: false, reason: error instanceof Error ? error.message : undefined }));
+      const result = await email(to, `Your copy of what was sent to ${went}.\n\n${message(links.copy)}`).catch((error: unknown) => ({ sent: false, reason: error instanceof Error ? error.message : undefined }));
       copy = result.sent ? { to, sent: true } : { to, sent: false, reason: result.reason || "The copy couldn't be sent." };
     }
   }

@@ -181,7 +181,7 @@ const S = { roof: "s-roof", tear: "s-tear", edge: "s-edge", deck: "s-deck", chim
 // The client's own link as an email or text to them carries it (own: 1), unless it's a preview, the
 // office's copy (via), or `old`: a link minted before the client's own were marked.
 // `nm`: an office copy made by someone who doesn't see the money; `exp`: the link it's minted from runs out then.
-type HubLink = { t: "quote" | "invoice" | "client"; id: string; pv?: 1; via?: "office"; old?: true; nm?: 1; exp?: number };
+type HubLink = { t: "quote" | "invoice" | "client"; id: string; pv?: 1; via?: "office"; old?: true; nm?: 1; cc?: 1; exp?: number };
 const tokenFor = async ({ old, ...link }: HubLink) =>
   (await clientLink(env, "https://ops.example.com", { c: ROOFER, ...(old || link.pv || link.via ? {} : { own: 1 as const }), ...link })).split("/hub/")[1]!;
 const hub = async (link: HubLink, path = "", body?: unknown) =>
@@ -519,6 +519,40 @@ describe("a client opening a quote or invoice", () => {
     expect(opens()).toEqual([]);
     expect((await hub({ t: "quote", id: QUOTE })).status).toBe(200);
     await vi.waitFor(() => expect(opens()).toEqual([{ p_company: ROOFER, p_kind: "quote", p_id: QUOTE }]));
+  });
+
+  it("isn't the sender opening their own copy, or anything reached from it", async () => {
+    const page = await hub({ t: "quote", id: QUOTE, via: "office", cc: 1 });
+    expect(page.status).toBe(200);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(opens()).toEqual([]);
+    // Their copy's way to the client's account, and the quotes and invoices there, stay the sender's.
+    const home = (await page.json()).home as string;
+    expect(await readClientLink(env, home.split("/hub/")[1]!)).toMatchObject({ t: "client", via: "office", cc: 1 });
+    const account = await (await app.request(`/api/hub/${home.split("/hub/")[1]}`, {}, env)).json();
+    expect(await readClientLink(env, account.quotes[0].link.split("/hub/")[1]!)).toMatchObject({ t: "quote", id: QUOTE, via: "office", cc: 1 });
+  });
+
+  it("isn't someone on the team looking at the client's link where they're signed in to Crewtavo", async () => {
+    // The link a send hands back, or Copy Client Hub link: the office's copy, as a contact's is.
+    const token = await tokenFor({ t: "quote", id: QUOTE, via: "office" });
+    const from = (member: string) => app.request(`/api/hub/${token}`, { headers: { "X-Team-Member": member } }, env);
+    expect((await from(SALES)).status).toBe(200);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(opens()).toEqual([]);
+    // Someone who isn't on this business's team (or no longer is), and anything that isn't a person's id: an open like any other.
+    expect((await from("00000000-0000-4000-8000-00000000beef")).status).toBe(200);
+    await vi.waitFor(() => expect(opens()).toHaveLength(1));
+    state.tables.memberships![0]!.active = false;
+    await from(SALES);
+    await vi.waitFor(() => expect(opens()).toHaveLength(2));
+    await from("someone");
+    await vi.waitFor(() => expect(opens()).toHaveLength(3));
+  });
+
+  it("is recorded through the office's copy a contact was sent, or the office passed on", async () => {
+    expect((await hub({ t: "quote", id: QUOTE, via: "office" })).status).toBe(200);
+    await vi.waitFor(() => expect(opens()).toContainEqual({ p_company: ROOFER, p_kind: "quote", p_id: QUOTE }));
   });
 
   it("never fails the page", async () => {

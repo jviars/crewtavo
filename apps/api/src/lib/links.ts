@@ -37,6 +37,11 @@ export interface ClientLink {
   // referral credit and the autopay they're on (routes/public.ts clientHome), and every link minted
   // from it keeps the mark. The client's own link never has it.
   nm?: 1;
+  // 1: the sender's own copy of a quote or invoice they sent (Send me a copy; clientLinks' `copy`):
+  // an office copy that's never passed on to the client, so opening it, or a quote or invoice
+  // reached from it, isn't the client opening it (routes/public.ts opened). Every link minted from
+  // it keeps the mark.
+  cc?: 1;
 }
 
 const PATHS: Record<LinkKind, string> = {
@@ -80,19 +85,21 @@ export const KEPT_LINK = "[Client Hub link]";
  * or text that goes out to their own email or phone (sentToClient); `office`, the office's copy (via
  * "office"), for what a send hands back to the person who sent it to copy, and for a send to any other
  * address. So no one on the team holds a link that can say yes to autopay or tip on the client's
- * saved card for them. `kept`, for the copy kept on the client's timeline, is no link at all
- * (KEPT_LINK).
+ * saved card for them. `copy` is the office's copy for the sender's own email of what they sent
+ * (cc: 1): the one link nobody passes on, so opening it never counts as the client opening it.
+ * `kept`, for the copy kept on the client's timeline, is no link at all (KEPT_LINK).
  *
- * `nm` (lib/links above) only ever marks the office's copy: the client's own link shows them their
+ * `nm` (lib/links above) only ever marks the office's copies: the client's own link shows them their
  * money.
  */
-export async function clientLinks(env: Env, baseUrl: string, link: Omit<ClientLink, "exp" | "via" | "own">, days?: number): Promise<{ own: string; office: string; kept: string }> {
+export async function clientLinks(env: Env, baseUrl: string, link: Omit<ClientLink, "exp" | "via" | "own" | "cc">, days?: number): Promise<{ own: string; office: string; copy: string; kept: string }> {
   const { nm, ...rest } = link;
-  const [own, office] = await Promise.all([
+  const [own, office, copy] = await Promise.all([
     clientLink(env, baseUrl, { ...rest, own: 1 }, days),
     clientLink(env, baseUrl, { ...rest, via: "office", ...(nm && { nm }) }, days),
+    clientLink(env, baseUrl, { ...rest, via: "office", cc: 1, ...(nm && { nm }) }, days),
   ]);
-  return { own, office, kept: KEPT_LINK };
+  return { own, office, copy, kept: KEPT_LINK };
 }
 
 /** An email's address for comparing: trimmed, in lower case. */

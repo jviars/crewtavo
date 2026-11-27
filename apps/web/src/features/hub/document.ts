@@ -35,6 +35,33 @@ import type { DocumentCompany, DocumentData } from "../documents/types";
 /** A Client Hub link's token as the server made it (lib/linkToken.ts). */
 export const hubToken = linkToken;
 
+/** This browser's storage, or null where the page isn't let near it (private mode, blocked cookies). */
+function browserStorage(): Storage | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who is signed in to Crewtavo in this browser (their user id, where Supabase keeps the sign-in), or
+ * null in a client's. The Hub sends it with what it asks for (X-Team-Member), so someone in the
+ * office opening a client's link to look at it isn't taken for the client: "Opened 2h ago" and the
+ * rules that follow an open are about the client (the server's opened, routes/public.ts).
+ */
+export function teamMemberHere(storage: Pick<Storage, "getItem"> | null = browserStorage()): string | null {
+  try {
+    if (!storage) return null;
+    const key = Object.keys(storage).find((k) => /^sb-.+-auth-token$/.test(k));
+    const kept = key ? (JSON.parse(storage.getItem(key) ?? "null") as { access_token?: string; user?: { id?: unknown }; currentSession?: { user?: { id?: unknown } } } | null) : null;
+    const id = (kept?.access_token ? kept : kept?.currentSession)?.user?.id;
+    return typeof id === "string" && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface HubLine {
   id?: string;
   /** The option it's on; null for a line on every option (and on a quote without options). */

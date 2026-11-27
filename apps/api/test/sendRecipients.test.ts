@@ -31,7 +31,7 @@ const server = vi.hoisted(() => ({ tables: {} as Record<string, unknown> }));
 vi.mock("../src/lib/supabase", async (original) => ({ ...(await original<typeof import("../src/lib/supabase")>()), adminClient: () => stubDb(server.tables) }));
 vi.mock("../src/lib/links", async (original) => ({
   ...(await original<typeof import("../src/lib/links")>()),
-  clientLinks: async (_env: Env, baseUrl: string, link: { id: string }) => ({ own: `${baseUrl}/own/${link.id}`, office: `${baseUrl}/office/${link.id}`, kept: "[Client Hub link]" }),
+  clientLinks: async (_env: Env, baseUrl: string, link: { id: string }) => ({ own: `${baseUrl}/own/${link.id}`, office: `${baseUrl}/office/${link.id}`, copy: `${baseUrl}/copy/${link.id}`, kept: "[Client Hub link]" }),
 }));
 
 const CO = "00000000-0000-4000-8000-0000000000a1";
@@ -195,15 +195,19 @@ describe("sending to the people named", () => {
 describe("Send me a copy", () => {
   const withCopy = (copyTo: string) => ({ ...scope(), copyTo });
 
-  it("sends the sender their own email with the office's link, and keeps it off the timeline", async () => {
-    const result = await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com"], copy: true }));
-    expect(result).toMatchObject({ sent: true, sent_to: ["pat@example.com"], copy: { to: "me@ridge.example", sent: true } });
+  it("sends the sender their own email with their own copy of the link, and keeps it off the timeline", async () => {
+    const result = await deliver(withCopy("me@ridge.example"), "invoice", invoice, sendSchema.parse({ recipients: ["pat@example.com", "mo@example.com"], copy: true }));
+    expect(result).toMatchObject({ sent: true, sent_to: ["pat@example.com", "mo@example.com"], copy: { to: "me@ridge.example", sent: true } });
     const mine = emails.find((m) => m.to === "me@ridge.example")!;
-    expect(mine.text).toContain("Your copy of what was sent to pat@example.com.");
-    expect(mine.text).toContain("/office/inv-1");
-    expect(mine.text).not.toContain("/own/");
+    expect(mine.text).toContain("Your copy of what was sent to pat@example.com, mo@example.com.");
+    // Their own copy: opening it isn't the client opening the invoice (lib/links `cc`).
+    expect(mine.text).toContain("/copy/inv-1");
+    expect(mine.text).not.toMatch(/\/own\/|\/office\//);
+    // A contact's link, and the one handed back to pass on, are the office's copy: opening those counts.
+    expect(emails.find((m) => m.to === "mo@example.com")!.text).toContain("/office/inv-1");
+    expect(result.link).toBe("https://ops.example.com/office/inv-1");
     expect(logged).toHaveLength(1);
-    expect(logged[0]!.recipients).toEqual([{ to: "pat@example.com", name: "Pat Lee" }]);
+    expect(logged[0]!.recipients).toEqual([{ to: "pat@example.com", name: "Pat Lee" }, { to: "mo@example.com", name: "mo@example.com" }]);
   });
 
   it("says so when the copy didn't go, and the client's send still stands", async () => {

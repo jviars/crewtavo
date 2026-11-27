@@ -428,6 +428,18 @@ describe("client links by kind", () => {
     expect(await readClientLink(env, links.own.split("/hub/")[1]!)).not.toHaveProperty("nm");
   });
 
+  it("marks the sender's own copy (cc) on an office copy, without the money when theirs leaves it out", async () => {
+    const links = await clientLinks(env, "https://ops.example.com", { c: "co", t: "quote", id: "quote-1", nm: 1 });
+    const copy = await readClientLink(env, links.copy.split("/hub/")[1]!);
+    expect(copy).toMatchObject({ t: "quote", id: "quote-1", via: "office", cc: 1, nm: 1 });
+    expect(copy).not.toHaveProperty("own");
+    // Only that one: a contact's link and the one a send hands back are passed on, and count as opened.
+    expect(await readClientLink(env, links.office.split("/hub/")[1]!)).not.toHaveProperty("cc");
+    expect(await readClientLink(env, links.own.split("/hub/")[1]!)).not.toHaveProperty("cc");
+    const withMoney = await clientLinks(env, "https://ops.example.com", { c: "co", t: "invoice", id: "invoice-1" });
+    expect(await readClientLink(env, withMoney.copy.split("/hub/")[1]!)).not.toHaveProperty("nm");
+  });
+
   it("keeps no working link in the copy kept on the timeline, which crews and connected assistants read", async () => {
     const links = await clientLinks(env, "https://ops.example.com", { c: "co", t: "quote", id: "quote-1" });
     expect(links.kept).toBe(KEPT_LINK);

@@ -25,6 +25,7 @@ import {
   rangeWords,
   reviewChange,
   signedThanks,
+  teamMemberHere,
   unpickedGroup,
   waitingInvoices,
   type HubOption,
@@ -467,5 +468,25 @@ describe("autopay on the Client Hub's invoices", () => {
     ];
     expect(waitingInvoices(invoices).map((i) => i.id)).toEqual(["owed", "late", "failed", "confirm"]);
     expect(invoices.filter(needsNewCard).map((i) => i.id)).toEqual(["failed", "confirm"]);
+  });
+});
+
+describe("who is signed in to Crewtavo where a Client Hub link is opened", () => {
+  const ME = "7b0b6f0e-5d0c-4c58-9a51-3a4e8f3c2d10";
+  const stored = (items: Record<string, string>) => ({ ...items, getItem: (key: string) => items[key] ?? null });
+
+  it("is the person Supabase keeps signed in in this browser, so their look isn't taken for the client's", () => {
+    expect(teamMemberHere(stored({ theme: "dark", "sb-abcd-auth-token": JSON.stringify({ access_token: "a.b.c", user: { id: ME } }) }))).toBe(ME);
+    // As older versions kept it.
+    expect(teamMemberHere(stored({ "sb-abcd-auth-token": JSON.stringify({ currentSession: { access_token: "a.b.c", user: { id: ME } } }) }))).toBe(ME);
+  });
+
+  it("is nobody in a client's browser, or when what's kept can't be read", () => {
+    expect(teamMemberHere(stored({ theme: "dark" }))).toBeNull();
+    expect(teamMemberHere(stored({ "sb-abcd-auth-token": "not json" }))).toBeNull();
+    expect(teamMemberHere(stored({ "sb-abcd-auth-token": JSON.stringify({ access_token: "a.b.c", user: { id: "<script>" } }) }))).toBeNull();
+    expect(teamMemberHere(stored({ "sb-abcd-auth-token": "null" }))).toBeNull();
+    // Storage the browser won't let the page read (private mode, blocked cookies).
+    expect(teamMemberHere(null)).toBeNull();
   });
 });

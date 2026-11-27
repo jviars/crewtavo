@@ -88,6 +88,7 @@ import {
   reviewChange,
   roofTiles,
   signedThanks,
+  teamMemberHere,
   TIP_MINIMUM,
   TIP_PERCENTS,
   trustBadges,
@@ -116,10 +117,10 @@ type View = QuoteView | InvoiceView | ClientView;
 async function hubFetch<T>(path: string, body?: unknown, method?: "DELETE"): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(
-      `/api/hub/${path}`,
-      method ? { method } : body === undefined ? undefined : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
-    );
+    // Someone signed in to Crewtavo here is the office looking, which the server doesn't count as the client opening it.
+    const member = teamMemberHere();
+    const headers = { ...(member ? { "X-Team-Member": member } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) };
+    res = await fetch(`/api/hub/${path}`, method ? { method, headers } : body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
   } catch {
     throw new ApiError("Couldn't connect. Check your internet connection and try again.", 0);
   }

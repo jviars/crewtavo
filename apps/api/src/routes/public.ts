@@ -138,14 +138,16 @@ async function refuseReplaced(c: Parameters<typeof appUrl>[0], l: ClientLink) {
  * unmarked link can't become the client's own by opening an invoice from the client's home. They
  * keep when it was made too (at; 0 for a link from before links carried one), so a link minted from
  * an old link ends with it when the office resets the client's links; whether it leaves the money
- * out (nm); and when it runs out (exp): a link minted from another never outlives it, so opening
- * one can't hand out fresh links that keep it going for good.
+ * out (nm); whether it's the sender's own copy of a send (cc), which never counts as the client
+ * opening anything; and when it runs out (exp): a link minted from another never outlives it, so
+ * opening one can't hand out fresh links that keep it going for good.
  */
 const viaOf = (l: Pick<ClientLink, "via">): "client" | "office" => (l.via === "office" ? "office" : "client");
-const keepVia = (l: Pick<ClientLink, "via" | "own" | "at" | "nm" | "exp">) => ({
+const keepVia = (l: Pick<ClientLink, "via" | "own" | "at" | "nm" | "cc" | "exp">) => ({
   ...(l.via === "office" ? { via: "office" as const } : l.own === 1 ? { own: 1 as const } : {}),
   at: l.at ?? 0,
   ...(l.nm === 1 ? { nm: 1 as const } : {}),
+  ...(l.cc === 1 ? { cc: 1 as const } : {}),
   exp: l.exp,
 });
 
@@ -438,15 +440,36 @@ async function hubFields(admin: ReturnType<typeof adminClient>, companyId: strin
 }
 
 /**
- * A quote or invoice opened through a client's link, never the office's preview: when, for the
- * office's lists and pages, and on the first open a line in its history that automations can follow
- * (20261125100200_hub_opens.sql). In the background, so it never slows or fails the page.
+ * Who is signed in to Crewtavo in the browser a Hub page was opened in, as the page says it (their
+ * user id; apps/web features/hub/document.ts teamMemberHere). Nothing is trusted to it: it only ever
+ * keeps an open from being counted as the client's.
+ */
+const TEAM_MEMBER_HEADER = "x-team-member";
+
+/** Whether the person a Hub page names as signed in is on this business's team now. */
+async function onTheTeam(admin: ReturnType<typeof adminClient>, companyId: string, userId: string | undefined): Promise<boolean> {
+  if (!userId || !uuid.safeParse(userId).success) return false;
+  const { data, error } = await admin.from("memberships").select("user_id").eq("company_id", companyId).eq("user_id", userId).eq("active", true).limit(1);
+  if (error) throw dbError(error);
+  return Boolean(data?.length);
+}
+
+/**
+ * A quote or invoice opened through a client's link: when, for the office's lists and pages, and on
+ * the first open a line in its history that automations can follow (20261125100200_hub_opens.sql).
+ * Never the office's own look at it: not its preview (pv), not the sender's own copy of a send (cc),
+ * and not a link opened where someone on the business's team is signed in (the "Client link" a send
+ * hands back, or Copy Client Hub link, pasted into their own browser). The same links count once
+ * they're passed on and opened anywhere else: a contact's link is the office's copy too. In the
+ * background, so it never slows or fails the page.
  */
 function opened(c: Context<AppEnv>, l: ClientLink) {
-  if (l.pv || (l.t !== "quote" && l.t !== "invoice")) return;
+  if (l.pv || l.cc || (l.t !== "quote" && l.t !== "invoice")) return;
+  const member = c.req.header(TEAM_MEMBER_HEADER);
   runInBackground(
     c,
     (async () => {
+      if (await onTheTeam(adminClient(c.env), l.c, member)) return;
       const { data: first, error } = await adminClient(c.env).rpc("hub_opened", { p_company: l.c, p_kind: l.t, p_id: l.id });
       if (error) throw dbError(error);
       if (first) kickAutomations(c, l.c);
@@ -1384,7 +1407,7 @@ publicRoutes.post("/webhooks/stripe/:company", async (c) => {
 // ---------------------------------------------------------------------------------------------
 
 /** The client's Hub home. Minted from an office copy of a link (`from`), it stays one; from the client's own (own), so does it. It runs out with `from`. */
-const homeLink = (c: Parameters<typeof appUrl>[0], companyId: string, clientId: string, from: Pick<ClientLink, "via" | "own" | "at" | "nm" | "exp">) =>
+const homeLink = (c: Parameters<typeof appUrl>[0], companyId: string, clientId: string, from: Pick<ClientLink, "via" | "own" | "at" | "nm" | "cc" | "exp">) =>
   clientLink(c.env, appUrl(c), { c: companyId, t: "client", id: clientId, ...keepVia(from) });
 const firstNames = (rows: Array<{ user_id: string }>, names: Map<string, string>) => rows.map((r) => names.get(r.user_id)).filter(Boolean) as string[];
 
