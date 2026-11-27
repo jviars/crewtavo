@@ -47,6 +47,35 @@ const polygon = (outline: Position[]): Geometry => {
   const [first, last] = [ring[0], ring[ring.length - 1]];
   return { type: "Polygon", coordinates: [first[0] === last[0] && first[1] === last[1] ? ring : [...ring, first]] };
 };
+/**
+ * How long save_measurement waits on USGS for a drawing's slopes, all its lawns together. USGS
+ * usually answers in a second or two, but can hold a request for a minute before giving up, three
+ * tries a lawn; the assistant and the person are waiting on the save.
+ */
+const SLOPE_WAIT_MS = 20_000;
+
+/**
+ * Each lawn's slope (null for an area that isn't asked about), read at once and for `ms` at most:
+ * one that failed or hasn't answered by then is undefined, as when USGS is down, and the drawing
+ * saves without it. Requests still out are called off.
+ */
+async function slopesWithin(ms: number, reads: Array<((signal: AbortSignal) => Promise<GroundSlope | null>) | null>): Promise<Array<GroundSlope | null | undefined>> {
+  if (!reads.some(Boolean)) return reads.map(() => null);
+  const stop = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((done) => {
+    timer = setTimeout(() => {
+      stop.abort();
+      done(undefined);
+    }, ms);
+  });
+  try {
+    return await Promise.all(reads.map((read) => (read ? Promise.race([read(stop.signal).catch(() => undefined), late]) : null)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The values quote formulas read from a drawing, without the many that are zero or missing for it. */
 const valuesOf = (m: MeasurementValues) => Object.fromEntries(Object.entries(measurementVariables(m)).filter(([, v]) => v !== null && v !== 0));
 
@@ -139,7 +168,7 @@ export const measurementTools = {
       // USGS is only asked in the United States: the property's country when it has one, else the business's.
       const property = lawn && a.property_id ? (await ctx.db.from("properties").select("country").eq("id", a.property_id).eq("company_id", ctx.companyId).maybeSingle()).data : null;
       const country = property?.country ?? businessCountry({ country: ctx.country, timezone: ctx.timezone });
-      const read = await Promise.all(areas.map((g, n) => (lawn && !a.areas[n].item ? readSlope(g, cuts, { country }).catch(() => undefined) : Promise.resolve(null))));
+      const read = await slopesWithin(SLOPE_WAIT_MS, areas.map((g, n) => (lawn && !a.areas[n].item ? (signal) => readSlope(g, cuts, { country, signal }) : null)));
       const slopes = read.map((r, n): GroundSlope | null | undefined => r ?? (a.areas[n].slope ? pickedSlope(a.areas[n].slope as "flat" | "hilly" | "steep") : r));
       const depth = a.depth_in ? { depth_in: a.depth_in } : {};
       const feature = (geometry: Geometry, properties: Record<string, unknown>): Feature => ({ type: "Feature", geometry, properties: { ...depth, ...properties } });

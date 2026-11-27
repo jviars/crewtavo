@@ -12,14 +12,20 @@ const HOUSE = "11111111-1111-4111-8111-111111111111";
 const DRAWING = "33333333-3333-4333-8333-333333333333";
 const USGS_STATS = { statistics: [{ mean: 12, count: 100 }], histograms: [{ min: 0, max: 40, counts: [70, 0, 0, 30] }] };
 
-/** The Data API answering `rows`, and USGS answering `usgs` (or failing), keeping what was sent to each. */
+/** USGS taking the request and never answering. */
+const NEVER = Symbol("never");
+
+/** The Data API answering `rows`, and USGS answering `usgs` (or failing, or never answering), keeping what was sent to each. */
 function world(rows: unknown, usgs: unknown = USGS_STATS) {
   const sent: Array<{ method: string; path: string; body: unknown }> = [];
   const asked: string[] = [];
+  const signals: Array<AbortSignal | null | undefined> = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     if (url.hostname === "elevation.nationalmap.gov") {
       asked.push(String(init?.body));
+      signals.push(init?.signal);
+      if (usgs === NEVER) return new Promise<Response>(() => {});
       if (usgs instanceof Error) throw usgs;
       return Response.json(usgs);
     }
@@ -28,7 +34,7 @@ function world(rows: unknown, usgs: unknown = USGS_STATS) {
     return Response.json(method === "POST" ? { id: DRAWING } : rows, { status: method === "POST" ? 201 : 200 });
   });
   const ctx = { db: createClient("http://127.0.0.1:8080", "sb_publishable_test"), companyId: "company-1", role: "owner", permissions: [], origin: "https://crew.example", timezone: "America/New_York" } as unknown as ToolContext;
-  return { sent, asked, ctx };
+  return { sent, asked, signals, ctx };
 }
 
 // A 40 m by 30 m yard in Virginia, a house in the middle of it, and a bed in one corner.
@@ -85,6 +91,27 @@ describe("the assistant's drawings", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(await saving).toMatchObject({ slope_note: expect.stringContaining("didn't answer for area 1") });
     expect(down.sent.some((s) => s.method === "POST")).toBe(true);
+  });
+
+  it("waits on USGS for 20 seconds at most, then saves the drawing without a slope", async () => {
+    vi.useFakeTimers();
+    const hung = world([], NEVER);
+    const save = measurementTools.save_measurement;
+    let result: unknown;
+    void save.run(hung.ctx, save.input.parse({ areas: [{ outline: YARD }, { outline: box(-79.88, 37.05, 0.0004, 0.0003) }] })).then((r) => (result = r));
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(result).toBeUndefined();
+    expect(hung.sent.some((s) => s.method === "POST")).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    // Saved, as when USGS fails: no slope on either lawn, and a note that Measure reads it on opening.
+    expect(result).toMatchObject({ id: DRAWING, slope_note: expect.stringContaining("didn't answer for area 1, 2") });
+    const row = hung.sent.find((s) => s.method === "POST")!.body as { sections: Array<{ slope?: unknown }> };
+    expect(row.sections.map((s) => s.slope)).toEqual([undefined, undefined]);
+    // The requests still out are called off, and no more are made.
+    expect(hung.signals).toHaveLength(2);
+    expect(hung.signals.every((s) => s?.aborted)).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(hung.asked).toHaveLength(2);
   });
 
   it("reads a lawn's slope from USGS only in the United States: the property's country, else the business's", async () => {
