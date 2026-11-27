@@ -460,11 +460,14 @@ async function onTheTeam(admin: ReturnType<typeof adminClient>, companyId: strin
  * Never the office's own look at it: not its preview (pv), not the sender's own copy of a send (cc),
  * and not a link opened where someone on the business's team is signed in (the "Client link" a send
  * hands back, or Copy Client Hub link, pasted into their own browser). The same links count once
- * they're passed on and opened anywhere else: a contact's link is the office's copy too. In the
+ * they're passed on and opened anywhere else: a contact's link is the office's copy too. Nor a
+ * crawler or a scanner that loads the page and says what it is (the Hub page asks from the browser
+ * it's in, so the request carries that browser's User-Agent; lib/links linkPreview). In the
  * background, so it never slows or fails the page.
  */
 function opened(c: Context<AppEnv>, l: ClientLink) {
   if (l.pv || l.cc || (l.t !== "quote" && l.t !== "invoice")) return;
+  if (linkPreview(c.req.header("User-Agent"))) return;
   const member = c.req.header(TEAM_MEMBER_HEADER);
   runInBackground(
     c,

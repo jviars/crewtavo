@@ -555,6 +555,18 @@ describe("a client opening a quote or invoice", () => {
     await vi.waitFor(() => expect(opens()).toContainEqual({ p_company: ROOFER, p_kind: "quote", p_id: QUOTE }));
   });
 
+  it("isn't a crawler or a browser nobody is looking at loading the page", async () => {
+    const token = await tokenFor({ t: "quote", id: QUOTE });
+    const as = (agent: string) => app.request(`/api/hub/${token}`, { headers: { "User-Agent": agent } }, env);
+    // The page still loads for them: only the open isn't counted.
+    expect((await as("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")).status).toBe(200);
+    expect((await as("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.0.0 Safari/537.36")).status).toBe(200);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(opens()).toEqual([]);
+    await as("Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1");
+    await vi.waitFor(() => expect(opens()).toHaveLength(1));
+  });
+
   it("never fails the page", async () => {
     state.rpcs.hub_opened = () => ({ data: null, error: { message: "boom" } });
     vi.spyOn(console, "error").mockImplementation(() => undefined);

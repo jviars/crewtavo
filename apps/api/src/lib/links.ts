@@ -144,8 +144,10 @@ export const reviewLink = (baseUrl: string, token: string) => `${baseUrl.replace
 /**
  * A request from a link preview or crawler, not a person opening the link: a text's or chat app's
  * preview (iMessage sends "facebookexternalhit/1.1 Facebot Twitterbot/1.0"), Slack, WhatsApp and
- * the like. A tracked link still answers it, but doesn't count it as an open.
+ * the like, and a browser run with no window ("HeadlessChrome"), as a scanner that loads the whole
+ * page is when it says so. A tracked link still answers it, but doesn't count it as an open. One
+ * that calls itself an ordinary browser can't be told from a person by what it sends.
  */
 export function linkPreview(userAgent: string | null | undefined): boolean {
-  return /facebookexternalhit|facebot|twitterbot|slackbot|whatsapp|telegrambot|discordbot|linkedinbot|skypeuripreview|bot\b|crawler|spider|preview/i.test(userAgent ?? "");
+  return /facebookexternalhit|facebot|twitterbot|slackbot|whatsapp|telegrambot|discordbot|linkedinbot|skypeuripreview|bot\b|crawler|spider|preview|headless/i.test(userAgent ?? "");
 }
