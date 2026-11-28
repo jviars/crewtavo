@@ -22,16 +22,16 @@ begin
 end $$;
 grant execute on all functions in schema tdm to authenticated, service_role;
 
--- Jess owns Mike Lawn; Ava is an admin, Dana office, Marcus leads a crew, Tyler and Sam are field
--- crew, Ben is field crew about to leave, Lee is a sub, Ruth is office. Xavier owns another business.
+-- Jo owns Mike Lawn; Ava is an admin, Dana office, Mateo leads a crew, Toby and Sid are field
+-- crew, Bo is field crew about to leave, Lee is a sub, Ruth is office. Xavier owns another business.
 insert into auth.users (id, email, raw_user_meta_data) values
-  ('dc010000-0000-0000-0000-000000000001', 'jess@mike.test', '{"full_name": "Jess Park"}'),
+  ('dc010000-0000-0000-0000-000000000001', 'jo@mike.test', '{"full_name": "Jo Quinn"}'),
   ('dc010000-0000-0000-0000-000000000002', 'ava@mike.test', '{"full_name": "Ava Stone"}'),
   ('dc010000-0000-0000-0000-000000000003', 'dana@mike.test', '{"full_name": "Dana Hale"}'),
-  ('dc010000-0000-0000-0000-000000000004', 'marcus@mike.test', '{"full_name": "Marcus Reyes"}'),
-  ('dc010000-0000-0000-0000-000000000005', 'tyler@mike.test', '{"full_name": "Tyler Brooks"}'),
-  ('dc010000-0000-0000-0000-000000000006', 'sam@mike.test', '{"full_name": "Sam Ortiz"}'),
-  ('dc010000-0000-0000-0000-000000000007', 'ben@mike.test', '{"full_name": "Ben Carter"}'),
+  ('dc010000-0000-0000-0000-000000000004', 'mateo@mike.test', '{"full_name": "Mateo Cruz"}'),
+  ('dc010000-0000-0000-0000-000000000005', 'toby@mike.test', '{"full_name": "Toby Lane"}'),
+  ('dc010000-0000-0000-0000-000000000006', 'sid@mike.test', '{"full_name": "Sid Moss"}'),
+  ('dc010000-0000-0000-0000-000000000007', 'bo@mike.test', '{"full_name": "Bo Hart"}'),
   ('dc010000-0000-0000-0000-000000000008', 'lee@mike.test', '{"full_name": "Lee Sub"}'),
   ('dc010000-0000-0000-0000-000000000009', 'xavier@nov.test', '{"full_name": "Xavier Lima"}'),
   ('dc010000-0000-0000-0000-00000000000a', 'ruth@mike.test', '{"full_name": "Ruth Kim"}');
@@ -74,7 +74,7 @@ select tdm.check(public.chat_start_direct(:'co', array['dc010000-0000-0000-0000-
 select tdm.check((select kind = 'direct' from public.chat_channels where id = :'dm1'), 'it''s a direct conversation');
 select tdm.check((select array_agg(user_id order by user_id) from public.chat_direct_members where channel_id = :'dm1') = array['dc010000-0000-0000-0000-000000000003', 'dc010000-0000-0000-0000-000000000004']::uuid[],
   'with its two people');
-select tdm.check((select people = array['dc010000-0000-0000-0000-000000000004']::uuid[] from public.chat_overview(:'co') where id = :'dm1'), 'Dana''s list shows Marcus as who it''s with');
+select tdm.check((select people = array['dc010000-0000-0000-0000-000000000004']::uuid[] from public.chat_overview(:'co') where id = :'dm1'), 'Dana''s list shows Mateo as who it''s with');
 select tdm.check((select count(*) from public.chat_direct_people(:'co')) = 7 and not exists (select 1 from public.chat_direct_people(:'co') where user_id in ('dc010000-0000-0000-0000-000000000008', 'dc010000-0000-0000-0000-000000000003')),
   'the people Dana can message are the team, not the sub or herself');
 select tdm.expect_error(format('select public.chat_start_direct(%L, %L)', :'co', '{dc010000-0000-0000-0000-000000000008}'), 'a sub can''t be messaged');
@@ -90,15 +90,15 @@ commit;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
-select tdm.check(public.chat_start_direct(:'co', array['dc010000-0000-0000-0000-000000000003']::uuid[]) = :'dm1', 'Marcus messaging Dana gets the same conversation');
-select tdm.check((select unread = 1 and mentions = 1 from public.chat_overview(:'co') where id = :'dm1'), 'Dana''s message is new for Marcus, and counts as a mention');
-select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm1') = 1, 'Marcus reads it');
+select tdm.check(public.chat_start_direct(:'co', array['dc010000-0000-0000-0000-000000000003']::uuid[]) = :'dm1', 'Mateo messaging Dana gets the same conversation');
+select tdm.check((select unread = 1 and mentions = 1 from public.chat_overview(:'co') where id = :'dm1'), 'Dana''s message is new for Mateo, and counts as a mention');
+select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm1') = 1, 'Mateo reads it');
 select tdm.check((select count(*) from public.chat_members(:'dm1')) = 2, 'its member list is the two of them');
 commit;
 
-select tdm.check((select count(*) from public.notifications where user_id = 'dc010000-0000-0000-0000-000000000004' and kind = 'chat' and title = 'Dana Hale messaged you'
-  and body = 'Can you take the Elm St job Friday?' and link = '/chat/' || :'dm1' || '?message=' || :'dm1_msg') = 1, 'Marcus is told "Dana Hale messaged you"');
-select tdm.check((select count(*) from public.notifications where kind = 'chat' and title like 'Dana Hale%' and user_id <> 'dc010000-0000-0000-0000-000000000004') = 0, 'and nobody else is');
+select tdm.check((select count(*) from public.notifications where company_id = :'co' and user_id = 'dc010000-0000-0000-0000-000000000004' and kind = 'chat' and title = 'Dana Hale messaged you'
+  and body = 'Can you take the Elm St job Friday?' and link = '/chat/' || :'dm1' || '?message=' || :'dm1_msg') = 1, 'Mateo is told "Dana Hale messaged you"');
+select tdm.check((select count(*) from public.notifications where company_id = :'co' and kind = 'chat' and title like 'Dana Hale%' and user_id <> 'dc010000-0000-0000-0000-000000000004') = 0, 'and nobody else is');
 
 -- ===== Nobody else reads it: not the owner, not an admin =====================================
 begin;
@@ -162,22 +162,22 @@ update public.chat_messages set body = 'Truck 2 is low on oil <@&office>' where 
 select tdm.check((select mention_roles = '{}' from public.chat_messages where id = :'dm2_msg'), 'not after an edit either');
 commit;
 
-select tdm.check((select count(*) from public.notifications where kind = 'chat' and title = 'Tyler Brooks messaged you and 2 others') = 3
-  and (select count(*) from public.notifications where kind = 'chat' and title like 'Tyler Brooks%') = 3, 'a group message tells the other three, and nobody else (not the office it named)');
+select tdm.check((select count(*) from public.notifications where company_id = :'co' and kind = 'chat' and title = 'Toby Lane messaged you and 2 others') = 3
+  and (select count(*) from public.notifications where company_id = :'co' and kind = 'chat' and title like 'Toby Lane%') = 3, 'a group message tells the other three, and nobody else (not the office it named)');
 
 -- ===== Closing and leaving ==================================================================
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
 select public.chat_close_direct(:'dm1');
-select tdm.check((select closed from public.chat_overview(:'co') where id = :'dm1'), 'Marcus closes his conversation with Dana');
+select tdm.check((select closed from public.chat_overview(:'co') where id = :'dm1'), 'Mateo closes his conversation with Dana');
 select tdm.expect_error(format('select public.chat_leave_direct(%L)', :'dm1'), 'a conversation of two can''t be left, only closed');
 commit;
 
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
-insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'dm1', 'dc010000-0000-0000-0000-000000000003', 'Never mind, Tyler has it.');
+insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'dm1', 'dc010000-0000-0000-0000-000000000003', 'Never mind, Toby has it.');
 commit;
 
 begin;
@@ -190,9 +190,9 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000006", "role": "authenticated"}', true);
 select public.chat_leave_direct(:'dm2');
-select tdm.check(not exists (select 1 from public.chat_overview(:'co') where id = :'dm2'), 'Sam leaves the group: it''s gone from his list');
+select tdm.check(not exists (select 1 from public.chat_overview(:'co') where id = :'dm2'), 'Sid leaves the group: it''s gone from his list');
 select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm2') = 0, 'and he can''t read it any more');
-select tdm.check((select count(*) from public.notifications where user_id = 'dc010000-0000-0000-0000-000000000006' and kind = 'chat' and read_at is null) = 0, 'its notifications are put away');
+select tdm.check((select count(*) from public.notifications where company_id = :'co' and user_id = 'dc010000-0000-0000-0000-000000000006' and kind = 'chat' and read_at is null) = 0, 'its notifications are put away');
 commit;
 
 begin;
@@ -200,7 +200,7 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
 select tdm.check((select people = array['dc010000-0000-0000-0000-000000000003', 'dc010000-0000-0000-0000-000000000004']::uuid[] from public.chat_overview(:'co') where id = :'dm2'), 'the others carry on without him');
 select tdm.check(public.chat_start_direct(:'co', array['dc010000-0000-0000-0000-000000000003', 'dc010000-0000-0000-0000-000000000004', 'dc010000-0000-0000-0000-000000000006']::uuid[]) <> :'dm2',
-  'messaging all four again starts a new conversation: Sam isn''t pulled back into the old one');
+  'messaging all four again starts a new conversation: Sid isn''t pulled back into the old one');
 commit;
 
 -- ===== Someone who leaves the company ========================================================
@@ -216,7 +216,7 @@ update public.memberships set active = false where company_id = :'co' and user_i
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000007", "role": "authenticated"}', true);
-select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm_ben') = 0, 'Ben has left: he can''t read the conversation');
+select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm_ben') = 0, 'Bo has left: he can''t read the conversation');
 select tdm.expect_error(format('insert into public.chat_messages (company_id, channel_id, author_id, body) values (%L, %L, %L, %L)', :'co', :'dm_ben', 'dc010000-0000-0000-0000-000000000007', 'One more thing'),
   'or post in it');
 select tdm.expect_error(format('select public.chat_start_direct(%L, %L)', :'co', '{dc010000-0000-0000-0000-00000000000a}'), 'or start one');
@@ -227,11 +227,11 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-00000000000a", "role": "authenticated"}', true);
 select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm_ben') = 1, 'Ruth keeps the history');
 select tdm.check((select not can_post from public.chat_overview(:'co') where id = :'dm_ben'), 'with nobody left to read it, she can''t post in it');
-select tdm.expect_error(format('select public.chat_start_direct(%L, %L)', :'co', '{dc010000-0000-0000-0000-000000000007}'), 'and can''t message Ben any more');
+select tdm.expect_error(format('select public.chat_start_direct(%L, %L)', :'co', '{dc010000-0000-0000-0000-000000000007}'), 'and can''t message Bo any more');
 commit;
 
 set role service_role;
-select tdm.check((select array_agg(u) from public.chat_audience(:'dm_ben') as u) = array['dc010000-0000-0000-0000-00000000000a']::uuid[], 'Ben gets no live updates from it');
+select tdm.check((select array_agg(u) from public.chat_audience(:'dm_ben') as u) = array['dc010000-0000-0000-0000-00000000000a']::uuid[], 'Bo gets no live updates from it');
 reset role;
 
 -- ===== Subs never see chat ===================================================================
@@ -293,7 +293,7 @@ commit;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
-select tdm.check((select count(*) from public.chat_messages where channel_id in (:'dm1', :'dm2')) = 0, 'Marcus can''t read his either');
+select tdm.check((select count(*) from public.chat_messages where channel_id in (:'dm1', :'dm2')) = 0, 'Mateo can''t read his either');
 commit;
 
 set role service_role;

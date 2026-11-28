@@ -19,8 +19,11 @@
  * Each person hears in their own language (profiles.locale): the notifications themselves are
  * stored in English and read by their shape (packages/core/src/i18n/es/notices.ts), and the email's
  * and text's own words are translated here.
+ *
+ * Team chat's quiet hours and pause (public.chat_quiet_hours, each person's): a chat notification
+ * made while they're on stays on the bell. It isn't pushed, emailed or texted, then or later.
  */
-import { byEmail, byText, DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
+import { byEmail, byText, chatQuietAt, DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type ChatQuiet, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
 import { translator } from "@crewtavo/core/i18n";
 import { installSpanish } from "@crewtavo/core/i18n/es";
 import { translateNotice } from "@crewtavo/core/i18n/patterns";
@@ -44,6 +47,7 @@ interface Row {
   link: string | null;
   read_at: string | null;
   delivery_token: string | null;
+  created_at?: string;
 }
 
 installSpanish();
@@ -77,17 +81,22 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
 
   const userIds = [...new Set(rows.map((r) => r.user_id))];
   const companyIds = [...new Set(rows.map((r) => r.company_id))];
-  const [prefs, profiles, companies, devices, subContacts] = await Promise.all([
+  const chatUsers = [...new Set(rows.filter((r) => notificationTopic(r.kind) === "chat").map((r) => r.user_id))];
+  const [prefs, profiles, companies, devices, subContacts, quietHours] = await Promise.all([
     admin.from("notification_prefs").select("company_id, user_id, email, sms, push").in("user_id", userIds),
     admin.from("profiles").select("user_id, email, phone, full_name, locale").in("user_id", userIds),
-    admin.from("companies").select("id, name, email").in("id", companyIds),
+    admin.from("companies").select("id, name, email, timezone").in("id", companyIds),
     admin.from("push_subscriptions").select("id, user_id, endpoint, p256dh, auth").in("user_id", userIds),
     // A sub's sign-in made by Crewtavo: the phone and email the office keeps for them, as they are now.
     admin.rpc("sub_notice_contacts", { p_users: userIds }),
+    // Team chat's quiet hours, for those with chat notifications in the batch.
+    chatUsers.length
+      ? admin.from("chat_quiet_hours").select("company_id, user_id, quiet_on, starts, ends, days, time_zone, paused_until").in("user_id", chatUsers)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   // Without who they are and how they want to hear, nothing can be sent right. The batch is left as
   // it is, and is claimed again when its five minutes run out.
-  const unread = [prefs, profiles, companies, devices].find((r) => r.error)?.error;
+  const unread = [prefs, profiles, companies, devices, quietHours].find((r) => r.error)?.error;
   if (unread) throw new Error(`Couldn't read who to notify: ${unread.message}`);
   if (subContacts.error) reportError(new Error(subContacts.error.message), { task: "notify", step: "sub_notice_contacts" });
   const prefsFor = (companyId: string, userId: string): Record<NotificationChannel, string[]> =>
@@ -153,9 +162,12 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
       // In their language: the notices as they read in the app, and the email's and text's own words.
       const t = translator(person.locale);
       const shown = (i: Row) => translateNotice(t.locale, i);
+      // Team chat during their quiet hours or pause: the bell only.
+      const quiet = (quietHours.data ?? []).find((q) => q.company_id === companyId && q.user_id === userId) as ChatQuiet | undefined;
+      const hushed = (i: Row) => notificationTopic(i.kind) === "chat" && chatQuietAt(new Date(i.created_at ?? Date.now()), quiet, company.timezone);
       // What they chose to get by this channel, less what has gone (or been turned down for good) by it.
       const pick = (channel: NotificationChannel) =>
-        lowFirst(items.filter((i) => !state.get(i.id)?.[channel] && chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic) && (channel !== "email" || byEmail(i.kind)) && (channel !== "sms" || byText(i.kind))));
+        lowFirst(items.filter((i) => !state.get(i.id)?.[channel] && !hushed(i) && chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic) && (channel !== "email" || byEmail(i.kind)) && (channel !== "sms" || byText(i.kind))));
 
       const forEmail = pick("email");
       // Never to a sub's stand-in address.

@@ -35,6 +35,8 @@ export interface ChatChannel {
   people?: string[] | null;
   /** A direct conversation closed until a new message comes. */
   closed?: boolean;
+  /** How I hear about it (Notify.tsx): every message, mentions and replies, or nothing. */
+  notify?: "all" | "mentions" | "nothing";
 }
 
 export interface ChatRole {
@@ -159,7 +161,8 @@ export function useChatBadge(): { mentions: number; unread: boolean } {
   const state = useChatState();
   const channels = state.data?.channels ?? [];
   const threads = state.data?.threads ?? { unread: 0, mentions: 0 };
-  return { mentions: channels.reduce((n, c) => n + c.mentions, 0) + threads.mentions, unread: channels.some((c) => c.unread > 0) || threads.unread > 0 };
+  // A channel set to nothing doesn't light it up for plain unread; its mentions still count.
+  return { mentions: channels.reduce((n, c) => n + c.mentions, 0) + threads.mentions, unread: channels.some((c) => c.unread > 0 && c.notify !== "nothing") || threads.unread > 0 };
 }
 
 /** A channel's messages, newest page first; older pages load as people scroll up. */

@@ -392,6 +392,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"chat_channel_prefs": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"notify": string,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"notify": string,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"notify"?: string,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_channel_prefs_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"chat_channels": {
                   Row: {
                     "archived_at": string | null,"category": string,"company_id": string,"created_at": string,"created_by": string | null,"crew_id": string | null,"direct_key": string | null,"id": string,"kind": string,"name": string,"position": number,"topic": string | null,"updated_at": string
@@ -474,6 +494,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "chat_messages"
       referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_quiet_hours": {
+                  Row: {
+                    "company_id": string,"days": (number)[],"ends": string,"paused_until": string | null,"quiet_on": boolean,"starts": string,"time_zone": string | null,"updated_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"days"?: (number)[],"ends"?: string,"paused_until"?: string | null,"quiet_on"?: boolean,"starts"?: string,"time_zone"?: string | null,"updated_at"?: string,"user_id": string
+                  }
+                  Update: {
+                    "company_id"?: string,"days"?: (number)[],"ends"?: string,"paused_until"?: string | null,"quiet_on"?: boolean,"starts"?: string,"time_zone"?: string | null,"updated_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_quiet_hours_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
     }
                   ]
                 },"chat_reactions": {
@@ -4533,7 +4573,7 @@ isOneToOne: false
                            },
 "chat_overview":
 { Args: { "p_company": string }; Returns: {
-              "archived": boolean,"can_manage": boolean,"can_post": boolean,"category": string,"closed": boolean,"created_at": string,"crew_id": string,"id": string,"kind": string,"last_message_at": string,"mentions": number,"name": string,"people": (string)[],"position": number,"topic": string,"unread": number
+              "archived": boolean,"can_manage": boolean,"can_post": boolean,"category": string,"closed": boolean,"created_at": string,"crew_id": string,"id": string,"kind": string,"last_message_at": string,"mentions": number,"name": string,"notify": string,"people": (string)[],"position": number,"topic": string,"unread": number
             }[]
                            },
 "chat_save_roles":
@@ -4544,6 +4584,9 @@ isOneToOne: false
                            },
 "chat_set_enabled":
 { Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
+                           },
+"chat_set_notify":
+{ Args: { "p_channel": string,"p_notify": string }; Returns: string
                            },
 "chat_start_direct":
 { Args: { "p_company": string,"p_people": (string)[] }; Returns: string

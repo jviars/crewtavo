@@ -1,4 +1,5 @@
 import { msg } from "./i18n";
+import { addDays, isTimeZoneName, localDate, localTime, zonedTimeToUtc } from "./time";
 
 /**
  * Kinds of notification a person can also get by email, text or a push to their phone (the bell in
@@ -22,7 +23,7 @@ export const NOTIFICATION_TOPICS = [
   // Subs only: their job offers and their pay (on by default, texts too: an offer waits for their answer).
   { key: "jobs", label: msg("My jobs"), hint: msg("Job offers, and what you're owed and paid") },
   { key: "alerts", label: msg("Other alerts"), hint: msg("Leads handed to you, and your company's automations, like a quote being approved") },
-  { key: "chat", label: msg("Team chat"), hint: msg("When someone @mentions you or your role, or replies to you") },
+  { key: "chat", label: msg("Team chat"), hint: msg("Direct messages, @mentions of you or your role, replies to you and threads you follow. Each channel's bell can change it") },
   // Owners and admins: Railway's warnings (services/hosting.ts) and storage nearing its limit
   // (services/storageUsage.ts), and owners: the nightly database backup failing (services/backups.ts).
   // Off Railway, Settings → Profile calls it "Storage and backups".
@@ -90,3 +91,49 @@ export const byEmail = (kind: string) => kind !== "review" && kind !== "social_s
 
 /** Whether a kind goes by text: all but the warning that texts aren't going out. */
 export const byText = (kind: string) => kind !== SENDING_WARNINGS.sms;
+
+/**
+ * Team chat's quiet hours and pause for one person (public.chat_quiet_hours): during either, chat
+ * notifications stay on the bell, with no push, email or text (services/delivery.ts). Times are
+ * "21:00" (Postgres sends "21:00:00"), days 0 (Sunday) to 6, and the zone is the person's, or the
+ * business's when they didn't pick one.
+ */
+export interface ChatQuiet {
+  quiet_on: boolean;
+  starts: string;
+  ends: string;
+  days: readonly number[];
+  time_zone: string | null;
+  paused_until: string | null;
+}
+
+/** The zone quiet hours are read in: the person's, else the business's, else UTC. */
+export const quietZone = (quiet: Pick<ChatQuiet, "time_zone"> | null | undefined, companyZone: string | null | undefined) =>
+  [quiet?.time_zone, companyZone].find((z): z is string => Boolean(z) && isTimeZoneName(z!)) ?? "UTC";
+
+/**
+ * Whether Team chat is quiet for someone at `at`: paused until later, or in their quiet hours. Each
+ * chosen day's quiet time starts at `starts` and runs to `ends`, past midnight when that's earlier (a
+ * Friday's 21:00 to 07:00 ends on Saturday morning). The same start and end is the whole day.
+ */
+export function chatQuietAt(at: Date, quiet: ChatQuiet | null | undefined, companyZone: string | null | undefined): boolean {
+  if (!quiet) return false;
+  if (quiet.paused_until && Date.parse(quiet.paused_until) > at.getTime()) return true;
+  if (!quiet.quiet_on || !quiet.days.length) return false;
+  const zone = quietZone(quiet, companyZone);
+  const time = localTime(at, zone);
+  const day = new Date(`${localDate(at, zone)}T12:00:00Z`).getUTCDay();
+  const starts = quiet.starts.slice(0, 5);
+  const ends = quiet.ends.slice(0, 5);
+  const on = (d: number) => quiet.days.includes(d);
+  if (starts === ends) return on(day);
+  if (starts < ends) return on(day) && time >= starts && time < ends;
+  return (on(day) && time >= starts) || (on((day + 6) % 7) && time < ends);
+}
+
+/** "Pause until tomorrow morning": 8:00 the next morning where they are (this morning's, in the small hours). */
+export function nextMorning(now: Date, zone: string): Date {
+  const today = localDate(now, zone);
+  return zonedTimeToUtc(localTime(now, zone) < "04:00" ? today : addDays(today, 1), "08:00", zone);
+}
+

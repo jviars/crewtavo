@@ -423,3 +423,44 @@ describe("someone who uses Crewtavo in Spanish (profiles.locale)", () => {
     expect(sent.texts()[0]!.Body).toBe("November Lawn: You're on Smith mowing: Thu Nov 12, 7:00 AM https://ops.example.com/field/visits/v1");
   });
 });
+
+describe("Team chat's quiet hours", () => {
+  // Cal hears about chat and his schedule by every channel. November Lawn is in Chicago (UTC-6 in November).
+  const chatWorld = (notifications: Row[], quiet: Row | null) => {
+    const w = world(notifications);
+    w.tables.notification_prefs = [{ company_id: CO, user_id: CAL, email: ["schedule", "chat"], sms: ["schedule", "chat"], push: ["schedule", "chat"] }];
+    w.tables.companies = [{ id: CO, name: "November Lawn", email: "office@november.test", timezone: "America/Chicago" }];
+    w.tables.chat_quiet_hours = quiet ? [{ company_id: CO, user_id: CAL, ...quiet }] : [];
+    return w;
+  };
+  const chat = (at: string) => notice({ kind: "chat", title: "Dana Hale messaged you", body: "Call me", link: "/chat/c1?message=m1", created_at: at });
+  const weeknights = { quiet_on: true, starts: "21:00:00", ends: "07:00:00", days: [1, 2, 3, 4, 5], time_zone: null, paused_until: null };
+
+  it("keep a chat notification made in them on the bell: no push, email or text, then or later", async () => {
+    // Friday 10:30 PM in Chicago.
+    const w = chatWorld([chat("2026-11-28T04:30:00Z")], weeknights);
+    const sent = serve(w);
+    expect(await deliverNotifications(env)).toEqual({ claimed: 1, email: 0, sms: 0, push: 0, failed: 0 });
+    expect(w.tables.notifications![0]).toMatchObject({ delivered_at: "now", delivery_failed_at: null });
+    expect([sent.emails().length, sent.texts().length, sendPush.mock.calls.length]).toEqual([0, 0, 0]);
+  });
+
+  it("let one made outside them go as usual, and other topics go whatever the hour", async () => {
+    // Friday 3:00 PM in Chicago, and a schedule change in the quiet of the night.
+    const w = chatWorld([chat("2026-11-27T21:00:00Z"), notice({ created_at: "2026-11-28T04:30:00Z" })], weeknights);
+    const sent = serve(w);
+    expect(await deliverNotifications(env)).toMatchObject({ claimed: 2, email: 1, sms: 1 });
+    expect(sent.emails()[0]!.subject).toBe("2 updates from November Lawn");
+    expect(sendPush).toHaveBeenCalledTimes(2);
+  });
+
+  it("hold while notifications are paused, and in the person's own zone", async () => {
+    const paused = chatWorld([chat("2026-11-27T21:00:00Z")], { ...weeknights, quiet_on: false, paused_until: "2026-11-27T22:00:00Z" });
+    serve(paused);
+    expect(await deliverNotifications(env)).toMatchObject({ claimed: 1, email: 0, sms: 0, push: 0 });
+    // 8:30 PM in Chicago is 9:30 PM in New York, where Cal said he is.
+    const eastern = chatWorld([chat("2026-11-28T02:30:00Z")], { ...weeknights, time_zone: "America/New_York" });
+    serve(eastern);
+    expect(await deliverNotifications(env)).toMatchObject({ claimed: 1, email: 0, sms: 0, push: 0 });
+  });
+});

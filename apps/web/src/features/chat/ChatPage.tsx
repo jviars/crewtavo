@@ -25,6 +25,8 @@ import d from "./direct.module.css";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { ThreadPanel, threadPath, ThreadsLink, ThreadsView } from "./Threads";
+import { ChannelNotifyMenu, PauseMenu } from "./Notify";
+import n from "./notify.module.css";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
@@ -200,6 +202,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
         {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
+        {state && <PauseMenu />}
         {state?.direct_messages && <NewMessageButton />}
         {state?.me?.admin && (
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
@@ -221,13 +224,14 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
                 <Icon name="chevronDown" size={12} bold />
               </button>
               {g.channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => {
-                const unread = c.unread > 0 && c.id !== current;
+                const muted = c.notify === "nothing";
+                const unread = c.unread > 0 && c.id !== current && !muted;
                 const readOnly = !c.can_post && !c.archived && c.kind !== "announcement";
                 return (
                   <NavLink
                     key={c.id}
                     to={`/chat/${c.id}`}
-                    className={s.channel}
+                    className={muted ? `${s.channel} ${n.muted}` : s.channel}
                     data-unread={unread || undefined}
                     aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}`}
                   >
@@ -240,6 +244,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
                     <span className={s.channelEnd}>
                       {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
                       {readOnly && <span className="hide-mobile"><Icon name="eye" size={13} label={t("Read only")} /></span>}
+                      {muted && <span className={n.mutedIcon}><Icon name="bellOff" size={13} label={t("Notifications off")} /></span>}
                       {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
                       {unread && <span className={s.dot} aria-hidden="true" />}
                     </span>
@@ -428,6 +433,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
           <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={membersOpen ? t("Hide the member list") : membersCount ? t("Members ({count})", { count: membersCount }) : t("Members")} aria-pressed={membersOpen} title={t("Members")} onClick={onToggleMembers}>
             <Icon name="users" size={15} />
           </button>
+          <ChannelNotifyMenu channel={channel} />
           {isDirect && <DirectMenu channel={channel} />}
         </div>
       </header>

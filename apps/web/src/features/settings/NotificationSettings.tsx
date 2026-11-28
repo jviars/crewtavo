@@ -23,6 +23,7 @@ import { homeScreenSignInNote, subSignsInOnHomeScreen } from "../auth/textCode";
 import { toast } from "@/lib/toast";
 import { InstallAppButton } from "../field/InstallAppCard";
 import { chatOn } from "../chat/data";
+import { ChatQuietSettings } from "../chat/Notify";
 import { managesSubs } from "../subs/subsData";
 import { msg, t, T } from "@/lib/i18n";
 
@@ -195,6 +196,7 @@ export function NotificationSettings({ phone }: { phone: string | null }) {
         <FormError error={save.error} />
       </div>
     </Section>
+    {chatOn(session) && <ChatQuietSettings />}
     </>
   );
 }

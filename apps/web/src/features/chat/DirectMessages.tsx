@@ -22,6 +22,7 @@ import { directPeople } from "./direct";
 import { Avatar, listTime } from "./ui";
 import s from "./chat.module.css";
 import d from "./direct.module.css";
+import n from "./notify.module.css";
 import { t } from "@/lib/i18n";
 
 const phone = () => window.matchMedia("(max-width: 900px)").matches;
@@ -181,13 +182,14 @@ export function DirectSection({ channels, state, current, open, onToggle }: { ch
       {channels.length === 0 && open && <p className={d.empty}>{t("Message someone with the pencil above.")}</p>}
       {channels.filter((c) => open || c.id === current || c.mentions > 0).map((c) => {
         const people = directPeople(c, state.people);
-        const unread = c.unread > 0 && c.id !== current;
+        const muted = c.notify === "nothing";
+        const unread = c.unread > 0 && c.id !== current && !muted;
         const sub = people.length === 1 ? people[0].role_label : t.plural(people.length + 1, { one: "{count} person", other: "{count} people" });
         return (
           <div key={c.id} className={d.row}>
             <NavLink
               to={`/chat/${c.id}`}
-              className={s.channel}
+              className={muted ? `${s.channel} ${n.muted}` : s.channel}
               data-unread={unread || undefined}
               aria-label={`${c.name}${c.mentions && c.id !== current ? `, ${t.plural(c.mentions, { one: "{count} new message", other: "{count} new messages" })}` : ""}`}
             >
@@ -198,6 +200,7 @@ export function DirectSection({ channels, state, current, open, onToggle }: { ch
               </span>
               <span className={s.channelEnd}>
                 {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
+                {muted && <span className={n.mutedIcon}><Icon name="bellOff" size={13} label={t("Notifications off")} /></span>}
                 {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
                 {unread && <span className={s.dot} aria-hidden="true" />}
               </span>

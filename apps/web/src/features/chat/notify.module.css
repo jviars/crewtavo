@@ -1,0 +1,37 @@
+/*
+ * How you hear about Team chat (Notify.tsx): the bells in the list's and a conversation's heads, a
+ * muted channel in the list, and quiet hours in Settings → Profile.
+ */
+
+/* The list head's bell, beside New message and Chat settings (the same size as theirs). */
+.headBtn { display: grid; flex: none; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-3); cursor: pointer; }
+.headBtn:hover { background: var(--fill-2); color: var(--ink); }
+.headPaused { color: var(--warning, var(--text-2)); }
+.bell { flex: none; }
+
+/* A channel set to nothing: dimmed, with a crossed-out bell; its mention count stays bright. */
+.muted > span:not(:last-child) { opacity: 0.55; }
+.mutedIcon { display: inline-flex; color: var(--quiet); }
+
+/* Quiet hours. */
+.pauseRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.pauseRow > .grow { display: grid; gap: 2px; min-width: 200px; }
+.label { color: var(--ink); font-size: var(--fs-13); font-weight: 600; }
+.quiet { display: grid; gap: 12px; padding: 12px; border-radius: 10px; background: var(--fill); }
+.times { display: flex; flex-wrap: wrap; gap: 12px; }
+.time { display: grid; gap: 4px; color: var(--text-2); font-size: var(--fs-12); font-weight: 600; }
+.time input { width: 140px; }
+.days { display: flex; flex-wrap: wrap; gap: 6px; }
+.day {
+  min-width: 44px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--page);
+  color: var(--text-2); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer;
+}
+.day[aria-pressed="true"] { border-color: transparent; background: var(--solid); color: var(--on-solid); }
+.link { padding: 0; border: 0; background: none; color: var(--info); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+@media (max-width: 900px) {
+  .headBtn { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .headBtn:hover { background: var(--fill-3); }
+  .day { height: 40px; }
+  .time input { width: 150px; }
+}
