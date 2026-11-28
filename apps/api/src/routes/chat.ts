@@ -191,7 +191,7 @@ export function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent,
   toChannel(adminClient(c.env), c.var.companyId, channelId, event, options).catch((error) => reportError(error, { feature: "chat-live" }));
 }
 
-/** A thread's root with its new count of replies, to everyone looking at its channel. */
+/** A thread's root with its new count of replies, to everyone looking at its channel (after the answer, like publish). */
 async function publishRoot(c: Context<AppEnv>, rootId: string) {
   const { data, error } = await c.var.db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", rootId).maybeSingle();
   if (error || !data) return;
@@ -349,7 +349,7 @@ chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c
   if (error) throw chatDbError(error);
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, id, { type: "message", channel_id: id, message });
-  if (message.thread_root) await publishRoot(c, message.thread_root);
+  if (message.thread_root) publishRoot(c, message.thread_root).catch((error) => reportError(error, { feature: "chat-live" }));
   return c.json({ message }, 201);
 });
 
@@ -377,7 +377,7 @@ chat.delete("/chat/messages/:id", requireUser, requireCompany(), async (c) => {
   if (!data) throw new HttpError(403, "You can only delete your own messages.");
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, message.channel_id, { type: "message_updated", channel_id: message.channel_id, message });
-  if (message.thread_root) await publishRoot(c, message.thread_root);
+  if (message.thread_root) publishRoot(c, message.thread_root).catch((error) => reportError(error, { feature: "chat-live" }));
   return c.json({ message });
 });
 

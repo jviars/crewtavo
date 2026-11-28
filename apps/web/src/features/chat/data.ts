@@ -321,7 +321,7 @@ export function setFollowing(queryClient: QueryClient, company: string, root: st
   queryClient.setQueryData<ThreadPages>(chatKeys.thread(company, root), (data) => (data ? { ...data, pages: data.pages.map((p) => ({ ...p, following })) } : data));
 }
 
-/** Read the thread up to now: here at once, then on the server. */
+/** Read the thread up to now on the server, then its counts here. */
 export async function markThreadRead(queryClient: QueryClient, company: string, root: string) {
   await api.post(`/chat/messages/${root}/thread/read`).catch(() => undefined);
   queryClient.invalidateQueries({ queryKey: chatKeys.state(company) });

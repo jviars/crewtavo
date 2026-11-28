@@ -37,7 +37,8 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
   const [params] = useSearchParams();
   const thread = useThread(rootId);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
-  const [focusKey, setFocusKey] = useState(`open:${rootId}`);
+  // Ready to type on a computer; a phone waits for a tap, rather than covering the thread with its keyboard.
+  const [focusKey, setFocusKey] = useState(() => (window.matchMedia("(pointer: coarse)").matches ? "" : `open:${rootId}`));
   const [flash, setFlash] = useState<string | null>(params.get("message"));
 
   const pages = thread.data?.pages ?? [];
