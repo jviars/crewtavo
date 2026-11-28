@@ -61,6 +61,17 @@ async function eventually(fn, timeoutMs = 45_000) {
     await sleep(1500);
   }
 }
+/**
+ * Waits for what an automation does. Automations run on the minute too, and a nudge to run them that
+ * comes a moment after another is held back (lib/background.ts kickAutomations), leaving the work to
+ * the next minute: often longer than eventually waits. So each look runs them first, as the minute would.
+ */
+function afterAutomations(fn) {
+  return eventually(async () => {
+    if (vars.CRON_SECRET) await fetch(`${API}/api/cron/automations`, { method: "POST", headers: { Authorization: `Bearer ${vars.CRON_SECRET}` } }).catch(() => {});
+    return fn();
+  });
+}
 function must({ data, error }, what) {
   if (error) throw new Error(`${what}: ${error.message}`);
   return data;
@@ -227,7 +238,7 @@ step("4. The quote goes to the customer, who approves it online");
     const again = await publicApi("POST", `/hub/${mail.token}/approve`, { name: "Pat Customer" });
     check(again.status === 409, "an approved quote can't be approved twice", again.status);
   }
-  const notified = await eventually(async () => {
+  const notified = await afterAutomations(async () => {
     const rows = must(await owner.db.from("notifications").select("title").eq("user_id", owner.userId).ilike("title", `%#${quote.number}%approved%`), "notifications");
     return rows.length > 0;
   });
@@ -409,7 +420,7 @@ step("11. The customer pays: a check for part, the rest online");
     const online = payments.find((p) => p.method === "ach");
     check(Boolean(online) && Number(online.tip_amount) === 50 && Number(online.amount) === Number(partial.balance_due), "the bank payment is recorded with the $50 tip kept separate", online);
   }
-  const notified = await eventually(async () => {
+  const notified = await afterAutomations(async () => {
     const rows = must(await owner.db.from("notifications").select("title").eq("user_id", owner.userId).ilike("title", `%#${invoice.number}%paid%`), "notifications");
     return rows.length > 0;
   });
