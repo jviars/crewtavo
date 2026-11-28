@@ -89,6 +89,8 @@
 .choice > span { display: grid; gap: 2px; min-width: 0; }
 .choice strong { font-size: var(--fs-14); font-weight: 600; }
 .choice small { color: var(--text-3); font-size: var(--fs-12); }
+.subsNote { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--fill-2); color: var(--ink); font-size: var(--fs-13); }
+.subsNote svg { flex: none; margin-top: 1px; color: var(--text-3); }
 
 /* ---------- Status ---------- */
 .status { display: inline-flex; align-items: center; gap: 3px; min-width: 0; max-width: 100%; margin-left: 6px; color: var(--text-3); font-size: var(--fs-11); font-weight: 500; vertical-align: baseline; }

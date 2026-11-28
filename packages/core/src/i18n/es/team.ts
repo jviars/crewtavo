@@ -954,4 +954,5 @@ export default {
   "Delete this scheduled message?": "¿Eliminar este mensaje programado?",
   "It won't be sent.": "No se enviará.",
   "Edit the scheduled message": "Editar el mensaje programado",
+  "Subcontractors on this job will see it too: they read its instructions for the crew and its files.": "Los subcontratistas de este trabajo también lo verán: leen sus instrucciones para la cuadrilla y sus archivos.",
 } satisfies Catalog;

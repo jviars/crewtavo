@@ -688,14 +688,14 @@ isOneToOne: false
                   ]
                 },"chat_scheduled_messages": {
                   Row: {
-                    "attachments": NonNullable<Json>,"author_id": string,"body": string,"channel_id": string,"company_id": string,"created_at": string,"id": string,"job_id": string | null,"reply_to": string | null,"send_at": string,"updated_at": string
+                    "attachments": NonNullable<Json>,"author_id": string,"body": string,"channel_id": string,"company_id": string,"created_at": string,"id": string,"job_id": string | null,"reply_to": string | null,"retry_at": string | null,"send_at": string,"tries": number,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "attachments"?: NonNullable<Json>,"author_id": string,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"send_at": string,"updated_at"?: string
+                    "attachments"?: NonNullable<Json>,"author_id": string,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"retry_at"?: string | null,"send_at": string,"tries"?: number,"updated_at"?: string
                   }
                   Update: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"send_at"?: string,"updated_at"?: string
+                    "attachments"?: NonNullable<Json>,"author_id"?: string,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"retry_at"?: string | null,"send_at"?: string,"tries"?: number,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -4758,6 +4758,9 @@ isOneToOne: false
 { Args: { "p_limit"?: number }; Returns: {
               "company_id": string,"reminder_id": string,"told": boolean,"user_id": string
             }[]
+                           },
+"chat_send_scheduled_now":
+{ Args: { "p_id": string }; Returns: string
                            },
 "chat_set_direct_messages":
 { Args: { "p_company": string,"p_on": boolean }; Returns: boolean

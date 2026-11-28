@@ -44,6 +44,9 @@ describe("voice notes", () => {
     expect(isAudio({ path: "a/chat/b/c.webm" })).toBe(true);
     expect(isAudio({ type: "image/jpeg", path: "a/chat/b/c.jpg" })).toBe(false);
     expect(isAudio({ type: "application/pdf", path: "a/chat/b/c.pdf" })).toBe(false);
+    // The type is the sender's word: a document called audio is still a document (and isn't sent to be written out).
+    expect(isAudio({ type: "audio/webm", path: "a/chat/b/c.pdf" })).toBe(false);
+    expect(isAudio({ type: "audio/mp4" })).toBe(true);
   });
 
   it("writes times as a clock and plays at 1×, 1.5× and 2× in turn", () => {

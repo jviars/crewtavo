@@ -5,6 +5,7 @@
  *   GET  /chat/settings/voice-words     whether voice notes are written out with the OpenAI key (owners, admins)
  *   PUT  /chat/settings/voice-words     turn it on (once OpenAI accepts the key) or off
  *   POST /chat/messages/:id/to-job      a message onto a job: its words as a note, or a copy of its photos and files
+ *   GET  /chat/to-job/:jobId            how many subcontractors are on the job's visits (they'd see what's added)
  *   GET  /chat/statuses                 everyone's status now (theirs by hand, else their running clock's)
  *   PUT  /chat/status                   set my own status; DELETE clears it. Everyone connected hears of it.
  *   GET  /chat/scheduled                my messages waiting to be sent later (?channel= for one conversation)
@@ -29,7 +30,7 @@ import { reserveStorage, snapshotsFrom } from "../lib/storageLimits";
 import { adminClient } from "../lib/supabase";
 import { removeStored } from "../services/planFiles";
 import { afterMessage, voiceWordsOn } from "../services/chatVoice";
-import { attachment, chatDbError, loadPeople, MESSAGE_COLUMNS, messageBody, messageById, publish, requireOn, shapeMessages, type MessageRow } from "./chat";
+import { attachment, chatDbError, loadPeople, MESSAGE_COLUMNS, messageBody, publish, requireOn, shapeMessages, type MessageRow } from "./chat";
 
 type Ctx = Context<AppEnv>;
 
@@ -85,7 +86,7 @@ function whenWritten(iso: string, timeZone: string | null) {
  * crew. That's where the office reads the job's notes on its page and every crew sees them on each
  * of the job's visits. A voice note adds its words.
  */
-async function addAsNote(c: Ctx, job: { id: string; instructions: string | null }, message: Awaited<ReturnType<typeof messageById>>) {
+async function addAsNote(c: Ctx, job: { id: string; instructions: string | null }, message: MessageRow) {
   const { db, companyId } = c.var;
   const [shaped] = await shapeMessages(db, companyId, [message]);
   const mentioned = await loadPeople(db, companyId, message.mention_users);
@@ -112,7 +113,7 @@ async function addAsNote(c: Ctx, job: { id: string; instructions: string | null 
  * from the browser would be, and recorded as the person, so the database's rules about who adds what
  * where apply.
  */
-async function addFiles(c: Ctx, job: { id: string }, message: Awaited<ReturnType<typeof messageById>>) {
+async function addFiles(c: Ctx, job: { id: string }, message: MessageRow) {
   const { db, companyId, userId } = c.var;
   const files = Array.isArray(message.attachments) ? (message.attachments as Array<{ path: string; name?: string; type?: string; size?: number }>) : [];
   if (!files.length) throw new HttpError(400, "This message has no photos or files.");
@@ -160,12 +161,33 @@ async function addFiles(c: Ctx, job: { id: string }, message: Awaited<ReturnType
   return { added, skipped };
 }
 
+/**
+ * Whether subcontractors are on the job's visits: they read its instructions and the files the crew
+ * sees, so what's added from chat reaches them too, and the dialog says so first.
+ */
+async function subsOnJob(c: Ctx, jobId: string): Promise<number> {
+  const { db, companyId } = c.var;
+  const visits = must(await db.from("visits").select("id").eq("company_id", companyId).eq("job_id", jobId).limit(1000));
+  if (!visits.length) return 0;
+  const on = must(await db.from("visit_assignees").select("user_id").eq("company_id", companyId).in("visit_id", visits.map((v) => v.id)));
+  const people = [...new Set(on.map((a) => a.user_id))];
+  if (!people.length) return 0;
+  return must(await db.from("memberships").select("user_id").eq("company_id", companyId).eq("role", "subcontractor").in("user_id", people)).length;
+}
+
+chatField.get("/chat/to-job/:jobId", requireUser, requireCompany(EDITS_JOBS), async (c) => {
+  const jobId = uuid.parse(c.req.param("jobId"));
+  await requireOn(c);
+  return c.json({ subs: await subsOnJob(c, jobId) });
+});
+
 chatField.post("/chat/messages/:id/to-job", requireUser, requireCompany(EDITS_JOBS), async (c) => {
   const id = uuid.parse(c.req.param("id"));
   const body = await readJson(c, z.object({ job_id: uuid, as: z.enum(["note", "files"]) }));
   const { db, companyId } = c.var;
   await requireOn(c);
-  const message = await messageById(db, id);
+  // This company's message, as the person sees it.
+  const message = must(await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("company_id", companyId).eq("id", id).maybeSingle(), "That message isn't here anymore.") as MessageRow;
   if (message.deleted_at) throw new HttpError(404, "That message isn't here anymore.");
   const job = must(await db.from("jobs").select("id, number, title, instructions").eq("company_id", companyId).eq("id", body.job_id).maybeSingle(), "That job isn't here anymore.");
   const done = body.as === "note" ? await addAsNote(c, job, message) : await addFiles(c, job, message);
@@ -287,23 +309,25 @@ chatField.delete("/chat/scheduled/:id", requireUser, requireCompany(), async (c)
 });
 
 /** Send now: as a message sent this moment, by its own id (sent twice, it's there once). */
+/**
+ * Send now: the database takes the scheduled message as it sends it (public.chat_send_scheduled_now),
+ * so the minute's run can't send it too. Published here only when this call sent it.
+ */
 chatField.post("/chat/scheduled/:id/send", requireUser, requireCompany(), async (c) => {
   const id = uuid.parse(c.req.param("id"));
   const { db, companyId, userId } = c.var;
   await requireOn(c);
-  const later = must(await db.from("chat_scheduled_messages").select(SCHEDULED_COLUMNS).eq("id", id).maybeSingle(), "That message was sent or taken back already.");
-  const { data, error } = await db
-    .from("chat_messages")
-    .insert({ id: later.id, company_id: companyId, channel_id: later.channel_id, author_id: userId, body: later.body, attachments: later.attachments as never, job_id: later.job_id, reply_to: later.reply_to })
-    .select(MESSAGE_COLUMNS)
-    .single();
-  if (error && error.code !== "23505") throw chatDbError(error);
-  const row = data ?? (await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", later.id).maybeSingle()).data;
-  await db.from("chat_scheduled_messages").delete().eq("id", id);
-  toUser(companyId, userId, { type: "scheduled", channel_id: later.channel_id });
-  if (!row) throw new HttpError(409, "That message can't be sent now.");
-  const [message] = await shapeMessages(db, companyId, [row as MessageRow]);
-  if (data) {
+  const { data: sent, error } = await db.rpc("chat_send_scheduled_now", { p_id: id });
+  if (error) {
+    if (error.code === "P0002") throw new HttpError(404, "That message was sent or taken back already.");
+    if (error.code === "55P03") throw new HttpError(409, "It's being sent right now.");
+    throw chatDbError(error);
+  }
+  const row = (await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("company_id", companyId).eq("id", id).eq("author_id", userId).maybeSingle()).data as MessageRow | null;
+  if (!row) throw new HttpError(404, "That message was sent or taken back already.");
+  toUser(companyId, userId, { type: "scheduled", channel_id: row.channel_id });
+  const [message] = await shapeMessages(db, companyId, [row]);
+  if (sent) {
     publish(c, message.channel_id, { type: "message", channel_id: message.channel_id, message });
     afterMessage(c, message);
   }
@@ -328,7 +352,7 @@ chatField.put("/chat/messages/:id/reminder", requireUser, requireCompany(), asyn
   const body = await readJson(c, z.object({ remind_at: sendAt }));
   const { db, companyId, userId } = c.var;
   await requireOn(c);
-  const message = await messageById(db, id);
+  const message = must(await db.from("chat_messages").select("id, channel_id").eq("company_id", companyId).eq("id", id).maybeSingle(), "That message isn't here anymore.");
   const { data, error } = await db
     .from("chat_reminders")
     .upsert({ company_id: companyId, channel_id: message.channel_id, message_id: id, user_id: userId, remind_at: body.remind_at }, { onConflict: "user_id,message_id" })

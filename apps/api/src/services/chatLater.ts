@@ -26,7 +26,8 @@ export async function sendDueChat(env: Env) {
     }
     sent++;
     try {
-      const { data } = await admin.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", row.message_id).maybeSingle();
+      // Only the message this run sent, where it was scheduled to go, as its author.
+      const { data } = await admin.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", row.message_id).eq("company_id", row.company_id).eq("channel_id", row.channel_id).eq("author_id", row.author_id).maybeSingle();
       if (!data) continue;
       const [message] = await shapeMessages(admin, row.company_id, [data as MessageRow]);
       await toChannel(admin, row.company_id, row.channel_id, { type: "message", channel_id: row.channel_id, message });
