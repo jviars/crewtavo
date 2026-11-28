@@ -1,8 +1,9 @@
 /**
  * Apps → ChatGPT with the company's own OpenAI key (routes/apps.ts and routes/chatgpt.ts): the key
  * is checked with OpenAI before it's saved, the model is one OpenAI lists for it, and a company
- * with a Claude key too chooses which one Crewtavo's AI uses. OpenAI is a stubbed fetch and the
- * database is kept in memory: nothing reaches OpenAI.
+ * with a Claude key too chooses which one Crewtavo's AI uses. Apps → Claude checks its key with
+ * Anthropic the same way. OpenAI and Anthropic are a stubbed fetch and the database is kept in
+ * memory: nothing reaches either.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
@@ -66,6 +67,51 @@ const saved = async () => {
   const secret = world.db.tables.integration_secrets!.find((r) => r.provider === "chatgpt");
   return secret ? decryptJson<{ api_key: string }>(env, secret.ciphertext) : null;
 };
+
+/** Anthropic's answer to reading the model's details, which is how a Claude key is checked; the requests it got come back. */
+function anthropic(status: number | "down", errorType = "authentication_error") {
+  const calls: Array<{ url: string; key: string }> = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const asked = input instanceof Request ? input : new Request(input, init);
+    calls.push({ url: asked.url, key: asked.headers.get("x-api-key") ?? "" });
+    if (status === "down") throw new TypeError("fetch failed");
+    return status === 200 ? Response.json({ id: "claude-opus-5-5", type: "model" }) : Response.json({ type: "error", error: { type: errorType, message: "no" } }, { status });
+  });
+  return calls;
+}
+const CLAUDE_KEY = "sk-ant-api03-walnut-paving-key";
+const claudeRow = () => world.db.tables.integrations!.find((r) => r.provider === "anthropic");
+
+describe("saving the company's Claude key", () => {
+  it("checks it with Anthropic first, for free, and only then shows it as installed", async () => {
+    const calls = anthropic(200);
+    expect(await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY }))).toEqual([200, { provider: "anthropic", status: "connected" }]);
+    // Reading the model's details is all that's asked: nothing that costs.
+    expect(calls).toEqual([{ url: "https://api.anthropic.com/v1/models/claude-opus-5-5", key: CLAUDE_KEY }]);
+    expect(claudeRow()).toMatchObject({ status: "connected", account_label: "Key ending -key" });
+    expect(JSON.stringify(world.db.tables)).not.toContain(CLAUDE_KEY);
+  });
+
+  it("isn't saved when Anthropic turns it down, and says what to fix", async () => {
+    anthropic(401);
+    expect(await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY }))).toEqual([400, { error: "Anthropic turned the Claude key down. Check that it was copied correctly on the Apps page, or make a new one in the Claude Console." }]);
+    anthropic(403, "permission_error");
+    expect((await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY })))[1].error).toMatch(/The Claude key can't use claude-opus-5-5/);
+    expect(claudeRow()).toBeUndefined();
+    expect(world.db.tables.integration_secrets).toEqual([]);
+  });
+
+  it("isn't saved unchecked when Anthropic can't be reached or is busy: it says to try again", async () => {
+    anthropic("down");
+    expect(await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY }))).toEqual([400, { error: "Crewtavo couldn't reach Anthropic to check the Claude key. Try again in a minute." }]);
+    anthropic(529, "overloaded_error");
+    expect(await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY }))).toEqual([400, { error: "Crewtavo couldn't reach Anthropic to check the Claude key. Try again in a minute." }]);
+    anthropic(429, "rate_limit_error");
+    expect(await answer(request("PUT", "/apps/anthropic/key", { api_key: CLAUDE_KEY }))).toEqual([400, { error: "Anthropic is busy right now. Try again in a minute." }]);
+    expect(claudeRow()).toBeUndefined();
+    expect(world.db.tables.integration_secrets).toEqual([]);
+  }, 30_000);
+});
 
 describe("saving the company's OpenAI key", () => {
   it("checks it with OpenAI first, for free, and keeps it sealed with a model picked from the ones OpenAI lists", async () => {

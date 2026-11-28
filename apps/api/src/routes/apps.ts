@@ -20,7 +20,7 @@ import { checkTwilio, companyTwilio, forgetTwilio, serverTwilio, setSmsWebhook, 
 import { deleteQuoWebhook, forgetQuo, type QuoSettings } from "../lib/quo";
 import { quoState } from "./quo";
 import { adminClient, type Db } from "../lib/supabase";
-import { aiChoice, askerOf, complete, countAiAsk, teamPlans, type OpenAiSettings } from "../services/ai";
+import { aiChoice, askerOf, checkAnthropicKey, complete, countAiAsk, teamPlans, type OpenAiSettings } from "../services/ai";
 import { analyticsSettings } from "../services/analytics";
 import { AbcProblem, chooseAbcAccount, connectAbc, settingsOf as abcSettingsOf } from "../integrations/abcSupply";
 import { describeAccount, retryAccounting } from "../integrations/accounting";
@@ -822,6 +822,13 @@ apps.put("/apps/:provider/key", requireUser, requireCompany(ADMINS, "apps"), asy
   // Open-Meteo's paid service: asked one small question with the key, for the same reason.
   if (provider === "open_meteo") {
     const problem = await checkOpenMeteoKey(body.api_key);
+    if (problem) throw new HttpError(400, problem);
+  }
+  // Claude: checked by reading the model's details with the key (free), so a key pasted wrong says
+  // so now instead of showing as installed and failing the first ask. When Anthropic can't be
+  // reached or is busy the key isn't saved unchecked: it says to try again, as the checks above do.
+  if (provider === "anthropic") {
+    const problem = await checkAnthropicKey(c.env, body.api_key);
     if (problem) throw new HttpError(400, problem);
   }
   // OpenAI: checked by listing the models the key can use (free). The list is kept for the admin to

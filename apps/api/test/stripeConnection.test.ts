@@ -619,6 +619,8 @@ async function fakeServices(input: string | URL, init: RequestInit = {}): Promis
     others.emails.push(JSON.parse(String(init.body)));
     return Response.json({ id: `email_${others.emails.length}` });
   }
+  // Apps → Claude checks its key by reading the model's details.
+  if (url.startsWith("https://api.anthropic.com/v1/models/")) return Response.json({ id: "claude-opus-5-5", type: "model" });
   return fakeStripe(input, init);
 }
 
