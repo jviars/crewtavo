@@ -8,7 +8,7 @@
  * person's password: the address is where every reset, invite and client link points.
  */
 import { ADDRESS_PREFIX, addressUrl, normalizeDomain, prefixedAddress, type AddressChange, type AddressCheck, type AddressOverview, type DnsProvider, type DnsRecordCheck } from "@crewtavo/core/address";
-import { cloudflareTokenUrl, fillStep, GENERIC_DNS_PROVIDER, providerById } from "@crewtavo/core/dns";
+import { cloudflareTokenUrl, fillStep, GENERIC_DNS_PROVIDER, providerById, providerNote } from "@crewtavo/core/dns";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -885,6 +885,8 @@ export function RailwayTokenForm({ tokensUrl, onLogin, intro }: { tokensUrl: str
 function RecordsCard({ overview, change, bare = false }: { overview: AddressOverview; change: AddressChange; bare?: boolean }) {
   const [added, setAdded] = useState<number | null>(null);
   const provider = providerById(change.provider);
+  // Worded for where this Crewtavo runs: Railway isn't named on a business's own server.
+  const note = providerNote(provider, overview.platform);
   const known = knownProvider(change.provider);
   const { records } = change;
   const them = records.length === 1 ? "it" : "them";
@@ -906,10 +908,10 @@ function RecordsCard({ overview, change, bare = false }: { overview: AddressOver
           {provider.hostNote && <span className="set-note">{provider.hostNote}</span>}
         </div>
       )}
-      {provider.note && (
+      {note && (
         <div className="callout">
           <Icon name="info" size={16} />
-          <span className="grow">{provider.note}</span>
+          <span className="grow">{note}</span>
         </div>
       )}
       {list(true)}

@@ -105,7 +105,7 @@ export interface DnsProvider {
   /** How the provider's Name/Host box works, e.g. "GoDaddy adds your domain itself: type just app". */
   hostNote: string | null;
   rootCname: boolean;
-  /** Anything worth knowing, e.g. Cloudflare's proxy. */
+  /** Anything worth knowing, e.g. Cloudflare's proxy. Shown through providerNote (dns.ts), which words it for where Crewtavo runs. */
   note?: string;
 }
 

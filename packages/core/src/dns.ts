@@ -3,7 +3,7 @@
  * provider is recognized from the domain's nameservers, and its steps are filled in with each
  * record to add. The shared types (DnsProvider) and address helpers live in address.ts.
  */
-import type { DnsProvider } from "./address";
+import type { AddressPlatform, DnsProvider } from "./address";
 
 /** The usual Name box: the provider puts the domain on the end itself. */
 const addsDomain = (provider: string, box: string, root = "type @") =>
@@ -23,7 +23,8 @@ export const DNS_PROVIDERS: DnsProvider[] = [
     ],
     hostNote: "Cloudflare takes either the part before your domain (crm) or the whole address (crm.example.com). For the domain itself, type @.",
     rootCname: true,
-    note: "Keep the record DNS only (grey cloud), not Proxied (orange cloud). Railway sets up the HTTPS certificate itself, and the orange cloud needs extra SSL settings to work with it.",
+    // {host_gets} is whoever gets the certificate: Railway, or the business's own server (providerNote).
+    note: "Keep the record DNS only (grey cloud), not Proxied (orange cloud). {host_gets} the HTTPS certificate itself, and the orange cloud needs extra SSL settings to work with it.",
   },
   {
     id: "godaddy",
@@ -277,6 +278,14 @@ export function providerById(id: string | null | undefined): DnsProvider {
 export function cloudflareTokenUrl(): string {
   const permissions = JSON.stringify([{ key: "dns", type: "edit" }, { key: "zone", type: "read" }]);
   return `https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=${encodeURIComponent(permissions)}&accountId=*&zoneId=all&name=Crewtavo`;
+}
+
+/**
+ * A provider's note for where this Crewtavo runs: Railway is only named on Railway. Anywhere else
+ * the business's own server gets the certificate (Caddy, in the steps the screen gives).
+ */
+export function providerNote(provider: DnsProvider, platform: AddressPlatform): string | null {
+  return provider.note?.replace("{host_gets}", platform === "railway" ? "Railway sets up" : "Your server sets up") ?? null;
 }
 
 /** A provider step with the record put in. `unknown` stands in for a value only the owner can see (Railway's, or their server's address). */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addressProblem, hostLabel, normalizeDomain, prefixedAddress, suggestAddress } from "../src/address";
-import { DNS_PROVIDERS, GENERIC_DNS_PROVIDER, cloudflareTokenUrl, fillStep, providerById, providerForNameservers } from "../src/dns";
+import { DNS_PROVIDERS, GENERIC_DNS_PROVIDER, cloudflareTokenUrl, fillStep, providerById, providerForNameservers, providerNote } from "../src/dns";
 
 describe("DNS providers", () => {
   it.each(DNS_PROVIDERS)("$label is consistent", (p) => {
@@ -18,6 +18,27 @@ describe("DNS providers", () => {
     const ids = DNS_PROVIDERS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).not.toContain(GENERIC_DNS_PROVIDER.id);
+  });
+});
+
+describe("a provider's note", () => {
+  const cloudflare = DNS_PROVIDERS.find((p) => p.id === "cloudflare")!;
+
+  it("names Railway only on Railway: a self-hosted server gets its own certificate", () => {
+    expect(providerNote(cloudflare, "railway")).toBe("Keep the record DNS only (grey cloud), not Proxied (orange cloud). Railway sets up the HTTPS certificate itself, and the orange cloud needs extra SSL settings to work with it.");
+    for (const platform of ["compose", "server"] as const) {
+      expect(providerNote(cloudflare, platform)).toBe("Keep the record DNS only (grey cloud), not Proxied (orange cloud). Your server sets up the HTTPS certificate itself, and the orange cloud needs extra SSL settings to work with it.");
+    }
+  });
+
+  it.each(DNS_PROVIDERS)("$label's note says nothing about Railway off Railway, and has no blank left in it", (p) => {
+    for (const platform of ["railway", "compose", "server"] as const) expect(providerNote(p, platform) ?? "").not.toMatch(/[{}]/);
+    expect(providerNote(p, "compose") ?? "").not.toMatch(/railway/i);
+    expect(providerNote(p, "server") ?? "").not.toMatch(/railway/i);
+  });
+
+  it("is nothing for a provider with nothing to add", () => {
+    expect(providerNote(GENERIC_DNS_PROVIDER, "compose")).toBeNull();
   });
 });
 
