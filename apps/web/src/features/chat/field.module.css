@@ -77,6 +77,19 @@
 .waitingPhotos img { width: 72px; height: 52px; border-radius: 6px; object-fit: cover; }
 .waitingCount { display: inline-flex; align-items: center; gap: 2px; color: var(--text-3); font-size: var(--fs-11); font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ---------- Add to a job: two choices, as rows ---------- */
+.choices { display: grid; gap: 8px; }
+.choice {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; min-height: 64px; padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--page); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.choice:hover:not(:disabled) { border-color: var(--border-strong); background: var(--fill); }
+.choice:disabled { opacity: 0.5; cursor: default; }
+.choice > svg { flex: none; margin-top: 1px; color: var(--text-3); }
+.choice > span { display: grid; gap: 2px; min-width: 0; }
+.choice strong { font-size: var(--fs-14); font-weight: 600; }
+.choice small { color: var(--text-3); font-size: var(--fs-12); }
+
 /* ---------- Phones ---------- */
 @media (max-width: 900px) {
   .player { padding: 6px 12px 6px 6px; }

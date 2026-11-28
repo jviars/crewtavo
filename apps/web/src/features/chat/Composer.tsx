@@ -5,18 +5,17 @@
  * Enter sends on a computer; on a phone the send button does. A half-written message waits for you
  * when you come back to the channel.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
-import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
-import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
-import { api, supabase } from "@/lib/api";
+import { api } from "@/lib/api";
 import { uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { JobPicker, type JobPick } from "./JobPicker";
 import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, roleColor } from "./ui";
 import { usePhone, useVoiceRecorder } from "./voice";
@@ -460,50 +459,4 @@ function useTypingNames(channelId: string, me: string) {
     return () => clearInterval(timer);
   }, [names.length]);
   return names;
-}
-
-interface JobPick {
-  id: string;
-  number: number | null;
-  title: string;
-}
-
-/** Pick a job to link: recent ones first, or search by title or number. */
-function JobPicker({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (job: JobPick) => void }) {
-  const { company } = useSession();
-  const [q, setQ] = useState("");
-  const jobs = useQuery({
-    queryKey: ["chat-job-search", company.id, q.trim()],
-    enabled: open,
-    queryFn: async () => {
-      let query = supabase().from("jobs").select("id, number, title, status, client:clients(display_name)").eq("company_id", company.id).neq("status", "archived").order("updated_at", { ascending: false }).limit(12);
-      const term = q.trim();
-      if (/^#?\d+$/.test(term)) query = query.eq("number", Number(term.replace("#", "")));
-      else if (term) query = query.ilike("title", `%${term.replace(/[%_]/g, "")}%`);
-      const { data, error } = await query;
-      if (error) throw new Error(error.message);
-      return data as unknown as Array<JobPick & { status: string; client: { display_name: string } | null }>;
-    },
-  });
-  return (
-    <Dialog open={open} onClose={onClose} title={t("Link a job")} size="sm">
-      <div className={`dialog-body stack-sm ${s.jobPicker}`}>
-        <SearchField value={q} onChange={setQ} placeholder={t("Search jobs by title or number")} label={t("Search jobs")} shortcut={false} autoFocus />
-        {jobs.isPending && <span className="muted small">{t("Loading jobs…")}</span>}
-        {jobs.data?.length === 0 && <span className="muted small">{t("No jobs match.")}</span>}
-        {Boolean(jobs.data?.length) && (
-          <ul className={s.jobList}>
-            {jobs.data?.map((j) => (
-              <li key={j.id}>
-                <button type="button" className={s.jobRow} onClick={() => onPick(j)}>
-                  <strong>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>
-                  {j.client?.display_name && <span>{j.client.display_name}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Dialog>
-  );
 }

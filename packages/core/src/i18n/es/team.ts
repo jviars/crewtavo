@@ -701,4 +701,18 @@ export default {
   "Voice note": "Nota de voz",
   "Send now": "Enviar ahora",
   "Sending failed.": "No se pudo enviar.",
+  // Team chat: from a message to a job
+  "Added to {job} as a note": "Se agregó a {job} como nota",
+  "{count} files copied to {job}": { one: "{count} archivo copiado a {job}", other: "{count} archivos copiados a {job}" },
+  "Not copied: {files}": "No se copiaron: {files}",
+  "Add to a job": "Agregar a un trabajo",
+  "Add to {job}": "Agregar a {job}",
+  "Add as a note": "Agregar como nota",
+  "Its words, who wrote it and when, under the job's instructions for the crew.": "Sus palabras, quién lo escribió y cuándo, debajo de las instrucciones del trabajo para la cuadrilla.",
+  "This message has no words to add.": "Este mensaje no tiene palabras para agregar.",
+  "Add its photos and files to the job": "Agregar sus fotos y archivos al trabajo",
+  "A copy goes on the job. The message keeps its own.": "Una copia va al trabajo. El mensaje se queda con los suyos.",
+  "This message has no photos or files.": "Este mensaje no tiene fotos ni archivos.",
+  "Pick another job": "Elegir otro trabajo",
+  "Linked to this message": "Vinculado a este mensaje",
 } satisfies Catalog;
