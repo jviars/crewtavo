@@ -80,6 +80,12 @@ describe("Google's address suggestions on the measuring map", () => {
     expect(search).toContain('googleNow.current ? onPickPlace({ ...place, ...at, from: "google" }) : onSubmit?.(label)');
   });
 
+  it("close when the focus moves on to another box, not only on a click elsewhere", () => {
+    const search = read("../src/features/measure/AddressSearch.tsx");
+    expect(search).toContain("if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close();");
+    expect(search).toContain('document.addEventListener("pointerdown", away);');
+  });
+
   it("stay on in a form that only takes the words of an address", () => {
     const dialog = read("../src/features/schedule/VisitDialog.tsx");
     const box = dialog.slice(dialog.indexOf("<AddressSearch"), dialog.indexOf("/>", dialog.indexOf("<AddressSearch")));

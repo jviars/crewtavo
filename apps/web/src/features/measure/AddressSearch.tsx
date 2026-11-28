@@ -219,7 +219,16 @@ export function AddressSearch({
   const enter = onSubmit ? " Press Enter to look up the full address." : "";
   let lastGroup = "";
   const field = (
-    <div className="input-group address-search" ref={box}>
+    <div
+      className="input-group address-search"
+      ref={box}
+      // Moving on to another box (Tab, or the next field) closes the list too, so it doesn't sit over
+      // the rest of the form; a click elsewhere is the pointerdown above. Not when nothing else takes
+      // the focus: Safari doesn't focus a suggestion as it's clicked, and that pick has to land.
+      onBlur={(e) => {
+        if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close();
+      }}
+    >
       <span className="addon">{busy || locating || (fetching && showList) ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <Icon name="search" size={14} />}</span>
       <input
         name="address"
