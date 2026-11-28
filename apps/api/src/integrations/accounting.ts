@@ -155,8 +155,9 @@ const qboQuery = async (ctx: Ctx, entity: string, select: string): Promise<Array
 /**
  * QuickBooks refused an invoice for something on it that isn't there (2500, Invalid Reference Id)
  * or was made inactive (610). If that's `current`, the item lines go under, another is found: an
- * active service item, "Services" before any other, or a new one called Services under an income
- * account (the one for services before the one for products) when the company has none. It's saved
+ * active service item, "Services" before any other, or a new one called Services (Crewtavo services
+ * when an inactive item still holds that name) under an income account (the one for services before
+ * the one for products) when the company has none. It's saved
  * as settings.default_item_id for every invoice after. Null when `current` is there to use, so the
  * refusal was about something else.
  */
@@ -169,7 +170,12 @@ async function replaceDefaultItem(ctx: Ctx, current: string): Promise<string | n
     const accounts = await qboQuery(ctx, "Account", "select Id, Name, AccountSubType from Account where AccountType = 'Income' and Active = true");
     const account = accounts.find((a) => a.AccountSubType === "ServiceFeeIncome") ?? accounts.find((a) => a.AccountSubType === "SalesOfProductIncome") ?? accounts[0];
     if (!account) throw new IntegrationError("QuickBooks has no item to put invoice lines under, and no income account to add one to. Add a service item in QuickBooks, then press Try again.");
-    item = (await qbo(ctx, "POST", "item", { Name: "Services", Type: "Service", IncomeAccountRef: { value: account.Id } })).Item;
+    const add = async (Name: string) => (await qbo(ctx, "POST", "item", { Name, Type: "Service", IncomeAccountRef: { value: account.Id } })).Item;
+    // An inactive item keeps its name, and QuickBooks won't make another with it (6240, Duplicate Name Exists): ours then says whose it is.
+    item = await add("Services").catch((error) => {
+      if (error instanceof QuickBooksFault && error.code === "6240") return add("Crewtavo services");
+      throw error;
+    });
   }
   const id = String(item!.Id);
   const settings = { ...ctx.integration.settings, default_item_id: id };

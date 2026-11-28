@@ -1077,7 +1077,7 @@ describe("accounting sync", () => {
        * QuickBooks with these active items and income accounts: it refuses an invoice with a line
        * under an item it doesn't have (active), adds the item it's sent, and keeps every request.
        */
-      function company(items: Array<{ Id: string; Name: string; Type: string }>, accounts: Array<{ Id: string; Name: string; AccountSubType: string }> = [], fault = refusal.missing) {
+      function company(items: Array<{ Id: string; Name: string; Type: string }>, accounts: Array<{ Id: string; Name: string; AccountSubType: string }> = [], fault = refusal.missing, takenNames: string[] = []) {
         const calls: Array<{ method: string; what: string; body: any }> = [];
         vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
           const url = new URL(input);
@@ -1093,6 +1093,8 @@ describe("accounting sync", () => {
           }
           if (method === "GET") return Response.json({ Invoice: { Id: "qbo-inv-1", SyncToken: "3" } });
           if (url.pathname.endsWith("/item")) {
+            // An inactive item keeps its name: QuickBooks won't make another with it (6240).
+            if (takenNames.includes(body.Name)) return Response.json({ Fault: { Error: [{ Message: "Duplicate Name Exists Error", Detail: "The name supplied already exists. : Id=1", code: "6240" }], type: "ValidationFault" } }, { status: 400 });
             items.push({ Id: "31", Name: body.Name, Type: body.Type });
             return Response.json({ Item: { Id: "31", Name: body.Name } });
           }
@@ -1127,6 +1129,15 @@ describe("accounting sync", () => {
         const calls = company([], [{ Id: "80", Name: "Sales of Product Income", AccountSubType: "SalesOfProductIncome" }, { Id: "79", Name: "Services", AccountSubType: "ServiceFeeIncome" }]);
         await runAccountingJob(env, db, invoiceJob);
         expect(calls.find((c) => c.method === "POST" && c.what === "item")!.body).toEqual({ Name: "Services", Type: "Service", IncomeAccountRef: { value: "79" } });
+        expect(invoices(calls)).toEqual(["1", "31"]);
+        expect(remembered(queries)).toEqual([{ settings: { default_item_id: "31" } }]);
+      });
+
+      it("is added under another name when an inactive item still holds Services", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1" });
+        const calls = company([], [{ Id: "79", Name: "Services", AccountSubType: "ServiceFeeIncome" }], refusal.inactive, ["Services"]);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(calls.filter((c) => c.method === "POST" && c.what === "item").map((c) => c.body.Name)).toEqual(["Services", "Crewtavo services"]);
         expect(invoices(calls)).toEqual(["1", "31"]);
         expect(remembered(queries)).toEqual([{ settings: { default_item_id: "31" } }]);
       });
