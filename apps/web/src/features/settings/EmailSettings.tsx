@@ -189,7 +189,7 @@ export function EmailSettings() {
           <Icon name="info" size={16} />
           <div className="grow">
             {fallback === "dev"
-              ? `Test mode: until ${canChange ? "you connect" : "an owner connects"} a mailbox, emails go to the local Mailpit inbox (http://localhost:56324).`
+              ? `Test mode: until ${canChange ? "you connect" : "an owner connects"} a mailbox, emails go to the local Mailpit inbox.`
               : `Until ${canChange ? "you connect" : "an owner connects"} a mailbox, emails go out from the address whoever installed Crewtavo set up.`}
           </div>
         </div>

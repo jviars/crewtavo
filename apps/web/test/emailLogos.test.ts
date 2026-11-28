@@ -54,3 +54,14 @@ describe("email provider logos", () => {
     expect(html).toContain('aria-hidden="true"');
   });
 });
+
+describe("the development inbox", () => {
+  it("is named without an address, since the web app isn't told where MAILPIT_URL points", () => {
+    const settings = new URL("../src/features/settings/", import.meta.url);
+    for (const file of ["EmailSettings.tsx", "TeamSettings.tsx"]) {
+      const page = readFileSync(new URL(file, settings), "utf8");
+      expect(page, file).toContain("the local Mailpit inbox.");
+      expect(page, file).not.toMatch(/localhost:\d+/);
+    }
+  });
+});
