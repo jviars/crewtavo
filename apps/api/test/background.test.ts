@@ -696,12 +696,12 @@ describe("accounting sync", () => {
       linked: Record<string, string>,
       others: Array<{ entity: string; local_id: string; external_id: string }> = [],
       sent: Record<string, unknown> = invoice,
-      more: { paid?: Record<string, unknown>; company?: Record<string, unknown> } = {},
+      more: { paid?: Record<string, unknown>; company?: Record<string, unknown>; settings?: Record<string, unknown> } = {},
     ) {
       const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
       const links = new Map(Object.entries(linked));
-      const { db } = fakeDb((q) => {
-        if (q.table === "integrations") return verb(q) === "select" ? { data: { provider, external_account_id: "books-1", settings: {} } } : {};
+      const { db, queries } = fakeDb((q) => {
+        if (q.table === "integrations") return verb(q) === "select" ? { data: { provider, external_account_id: "books-1", settings: more.settings ?? {} } } : {};
         if (q.table === "integration_secrets") return { data: { ciphertext } };
         if (q.table === "companies") return { data: more.company ?? null };
         if (q.table === "invoices") return { data: sent };
@@ -715,7 +715,7 @@ describe("accounting sync", () => {
         }
         return { data: null };
       });
-      return { db, links };
+      return { db, links, queries };
     }
 
     /**
@@ -1039,6 +1039,125 @@ describe("accounting sync", () => {
       ]);
       expect(calls[2]!.body).toMatchObject({ adjustment: 21.2, adjustment_description: "Tax (5.3%)" });
       expect(calls[4]!.body).toMatchObject({ amount: 421.2, invoices: [{ invoice_id: "zoho-inv-1", amount_applied: 421.2 }] });
+    });
+
+    // Every line QuickBooks takes needs an item. Lines go under the one saved for the company
+    // (settings.default_item_id), and until one is saved under QuickBooks' first, "1". A company
+    // whose item 1 is gone or inactive had every invoice refused.
+    describe("the QuickBooks item lines go under", () => {
+      const refusal = {
+        missing: { Message: "Invalid Reference Id", Detail: "Invalid Reference Id : Item element id 1 is not found", code: "2500" },
+        inactive: { Message: "Object Not Found", Detail: "Object Not Found : Something you're trying to use has been made inactive. Check the fields with accounts, customers, items, vendors or employees.", code: "610" },
+      };
+      /**
+       * QuickBooks with these active items and income accounts: it refuses an invoice with a line
+       * under an item it doesn't have (active), adds the item it's sent, and keeps every request.
+       */
+      function company(items: Array<{ Id: string; Name: string; Type: string }>, accounts: Array<{ Id: string; Name: string; AccountSubType: string }> = [], fault = refusal.missing) {
+        const calls: Array<{ method: string; what: string; body: any }> = [];
+        vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+          const url = new URL(input);
+          const method = init?.method ?? "GET";
+          const body = init?.body ? JSON.parse(String(init.body)) : null;
+          const query = url.searchParams.get("query");
+          calls.push({ method, what: query ?? url.pathname.split("/").at(-1)!, body });
+          if (query) {
+            const value = (field: string) => new RegExp(`${field} = '([^']*)'`).exec(query)?.[1];
+            if (query.includes("from Item")) return Response.json({ QueryResponse: { Item: items.filter((i) => (value("Id") ?? i.Id) === i.Id && (value("Type") ?? i.Type) === i.Type) } });
+            if (query.includes("from Account")) return Response.json({ QueryResponse: { Account: accounts } });
+            return Response.json({ QueryResponse: {} });
+          }
+          if (method === "GET") return Response.json({ Invoice: { Id: "qbo-inv-1", SyncToken: "3" } });
+          if (url.pathname.endsWith("/item")) {
+            items.push({ Id: "31", Name: body.Name, Type: body.Type });
+            return Response.json({ Item: { Id: "31", Name: body.Name } });
+          }
+          const unknown = body.Line.some((l: any) => l.SalesItemLineDetail && !items.some((i) => i.Id === l.SalesItemLineDetail.ItemRef.value));
+          return unknown ? Response.json({ Fault: { Error: [fault], type: "ValidationFault" } }, { status: 400 }) : Response.json({ Invoice: { Id: "qbo-inv-1", SyncToken: "0" } });
+        });
+        return calls;
+      }
+      const invoices = (calls: ReturnType<typeof company>) => calls.filter((c) => c.method === "POST" && c.what === "invoice").map((c) => c.body.Line[0].SalesItemLineDetail.ItemRef.value);
+      const remembered = (queries: Query[]) => queries.filter((q) => q.table === "integrations" && verb(q) === "update").map((q) => call(q, "update")![1]).filter((u) => u.settings);
+
+      it.each(["missing", "inactive"] as const)("is found when item 1 is %s, remembered, and the invoice sent under it", async (why) => {
+        const { db, links, queries } = await ours("quickbooks", { client: "cust-1" }, [], invoice, { settings: { environment: "sandbox" } });
+        const calls = company([{ Id: "7", Name: "Hours", Type: "Service" }, { Id: "12", Name: "Services", Type: "Service" }, { Id: "15", Name: "Gravel", Type: "Inventory" }], [], refusal[why]);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(invoices(calls)).toEqual(["1", "12"]);
+        expect(remembered(queries)).toEqual([{ settings: { environment: "sandbox", default_item_id: "12" } }]);
+        expect(links.get("invoice")).toBe("qbo-inv-1");
+        expect(calls.some((c) => c.method === "POST" && c.what === "item")).toBe(false);
+      });
+
+      it("is the first service item when none is called Services", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1" });
+        const calls = company([{ Id: "15", Name: "Gravel", Type: "Inventory" }, { Id: "7", Name: "Hours", Type: "Service" }]);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(invoices(calls)).toEqual(["1", "7"]);
+        expect(remembered(queries)).toEqual([{ settings: { default_item_id: "7" } }]);
+      });
+
+      it("is added as Services, under the services income account, when the company has no service item", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1" });
+        const calls = company([], [{ Id: "80", Name: "Sales of Product Income", AccountSubType: "SalesOfProductIncome" }, { Id: "79", Name: "Services", AccountSubType: "ServiceFeeIncome" }]);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(calls.find((c) => c.method === "POST" && c.what === "item")!.body).toEqual({ Name: "Services", Type: "Service", IncomeAccountRef: { value: "79" } });
+        expect(invoices(calls)).toEqual(["1", "31"]);
+        expect(remembered(queries)).toEqual([{ settings: { default_item_id: "31" } }]);
+      });
+
+      it("says what to do when there's no income account to add it under", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1" });
+        const calls = company([]);
+        await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("QuickBooks has no item to put invoice lines under, and no income account to add one to. Add a service item in QuickBooks, then press Try again.");
+        expect(invoices(calls)).toEqual(["1"]);
+        expect(remembered(queries)).toEqual([]);
+      });
+
+      it("is the one remembered from then on", async () => {
+        const { db } = await ours("quickbooks", { client: "cust-1" }, [], invoice, { settings: { default_item_id: "12" } });
+        const calls = company([{ Id: "12", Name: "Services", Type: "Service" }]);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(invoices(calls)).toEqual(["12"]);
+      });
+
+      it("is found again when the remembered one is made inactive, and for an invoice being updated", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" }, [], invoice, { settings: { default_item_id: "12" } });
+        const calls = company([{ Id: "7", Name: "Hours", Type: "Service" }], [], refusal.inactive);
+        await runAccountingJob(env, db, invoiceJob);
+        expect(invoices(calls)).toEqual(["12", "7"]);
+        expect(calls.filter((c) => c.method === "POST").map((c) => [c.body.Id, c.body.SyncToken, c.body.sparse])).toEqual([["qbo-inv-1", "3", true], ["qbo-inv-1", "3", true]]);
+        expect(remembered(queries)).toEqual([{ settings: { default_item_id: "7" } }]);
+      });
+
+      // The same fault for something else on the invoice (a customer made inactive): item 1 is there, so it stays.
+      it("is left alone when QuickBooks has it and refuses the invoice for something else", async () => {
+        const { db, queries } = await ours("quickbooks", { client: "cust-1" });
+        const calls: string[] = [];
+        vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+          const query = new URL(input).searchParams.get("query");
+          calls.push(`${init?.method ?? "GET"} ${query ?? "invoice"}`);
+          if (query) return Response.json({ QueryResponse: query.includes("from Item") ? { Item: [{ Id: "1", Name: "Landscaping", Type: "Service" }] } : {} });
+          return Response.json({ Fault: { Error: [refusal.inactive] } }, { status: 400 });
+        });
+        await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("made inactive");
+        expect(calls.filter((c) => c.startsWith("POST"))).toHaveLength(1);
+        expect(calls.filter((c) => c.includes("from Item"))).toEqual(["GET select Id from Item where Id = '1'"]);
+        expect(remembered(queries)).toEqual([]);
+      });
+
+      it("isn't looked for when QuickBooks refuses for any other reason", async () => {
+        const { db } = await ours("quickbooks", { client: "cust-1" });
+        const calls: string[] = [];
+        vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+          const query = new URL(input).searchParams.get("query");
+          calls.push(`${init?.method ?? "GET"} ${query ?? "invoice"}`);
+          return query ? Response.json({ QueryResponse: {} }) : Response.json({ Fault: { Error: [{ Message: "The transaction date is in a closed period", code: "6200" }] } }, { status: 400 });
+        });
+        await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("closed period");
+        expect(calls.filter((c) => c.includes("from Item"))).toEqual([]);
+      });
     });
 
     // Voided here (its payments, if it had any, refunded or removed first): the books' copy is voided

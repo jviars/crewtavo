@@ -13,6 +13,9 @@ import type { Db } from "../lib/supabase";
  *
  * QuickBooks item mapping lives in integrations.settings:
  *   { "environment": "production" | "sandbox", "item_map": { "<service uuid>": "<QBO Item Id>" }, "default_item_id": "1" }
+ * default_item_id is the item lines go under when their service isn't mapped. Until one is saved
+ * it's QuickBooks' first item, "1"; when QuickBooks says that item (or the saved one) isn't there to
+ * use, one is found or added and saved (replaceDefaultItem).
  */
 import { serviceUrl, type Env } from "../env";
 import { providerTimeout, zohoApiDomain, type Provider } from "./registry";
@@ -133,9 +136,47 @@ async function qbo(ctx: Ctx, method: "GET" | "POST", path: string, body?: unknow
   const json = (await response.json().catch(() => ({}))) as Record<string, any>;
   if (!response.ok) {
     const detail = json.Fault?.Error?.[0];
-    throw new IntegrationError(`QuickBooks ${path}: ${response.status} ${detail?.Message ?? ""} ${detail?.Detail ?? ""}`.trim());
+    throw new QuickBooksFault(`QuickBooks ${path}: ${response.status} ${detail?.Message ?? ""} ${detail?.Detail ?? ""}`.trim(), detail?.code === undefined ? null : String(detail.code));
   }
   return json;
+}
+
+/** QuickBooks turned a request down, with the code of its first fault ("2500", "610", ...) when it gave one. */
+class QuickBooksFault extends IntegrationError {
+  override name = "QuickBooksFault";
+  constructor(message: string, readonly code: string | null) {
+    super(message);
+  }
+}
+
+const qboQuery = async (ctx: Ctx, entity: string, select: string): Promise<Array<Record<string, any>>> =>
+  (await qbo(ctx, "GET", `query?query=${encodeURIComponent(select)}`)).QueryResponse?.[entity] ?? [];
+
+/**
+ * QuickBooks refused an invoice for something on it that isn't there (2500, Invalid Reference Id)
+ * or was made inactive (610). If that's `current`, the item lines go under, another is found: an
+ * active service item, "Services" before any other, or a new one called Services under an income
+ * account (the one for services before the one for products) when the company has none. It's saved
+ * as settings.default_item_id for every invoice after. Null when `current` is there to use, so the
+ * refusal was about something else.
+ */
+async function replaceDefaultItem(ctx: Ctx, current: string): Promise<string | null> {
+  // A query answers with active records only.
+  if ((await qboQuery(ctx, "Item", `select Id from Item where Id = '${current.replace(/'/g, "\\'")}'`)).length) return null;
+  const services = await qboQuery(ctx, "Item", "select Id, Name from Item where Type = 'Service' and Active = true");
+  let item = services.find((i) => i.Name === "Services") ?? services[0];
+  if (!item) {
+    const accounts = await qboQuery(ctx, "Account", "select Id, Name, AccountSubType from Account where AccountType = 'Income' and Active = true");
+    const account = accounts.find((a) => a.AccountSubType === "ServiceFeeIncome") ?? accounts.find((a) => a.AccountSubType === "SalesOfProductIncome") ?? accounts[0];
+    if (!account) throw new IntegrationError("QuickBooks has no item to put invoice lines under, and no income account to add one to. Add a service item in QuickBooks, then press Try again.");
+    item = (await qbo(ctx, "POST", "item", { Name: "Services", Type: "Service", IncomeAccountRef: { value: account.Id } })).Item;
+  }
+  const id = String(item!.Id);
+  const settings = { ...ctx.integration.settings, default_item_id: id };
+  const { error } = await ctx.admin.from("integrations").update({ settings }).match({ company_id: ctx.companyId, provider: "quickbooks" });
+  if (error) throw new IntegrationError(error.message);
+  ctx.integration.settings = settings;
+  return id;
 }
 
 async function zoho(ctx: Ctx, method: "GET" | "POST" | "PUT", path: string, body?: unknown) {
@@ -226,8 +267,9 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
 
   if (ctx.provider === "quickbooks") {
     const itemMap = (ctx.integration.settings.item_map ?? {}) as Record<string, string>;
+    const mapped = (line: any): string | undefined => (line.service_id && itemMap[line.service_id]) || undefined;
     const defaultItem = String(ctx.integration.settings.default_item_id ?? "1");
-    const body = {
+    const body = (fallback: string) => ({
       CustomerRef: { value: customerId },
       DocNumber: String(invoice.number),
       TxnDate: invoice.issued_on,
@@ -238,7 +280,7 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
           Amount: lineTotal(line.quantity, line.unit_price), // rounded as the invoice's own totals are
           Description: line.description || line.name,
           SalesItemLineDetail: {
-            ItemRef: { value: (line.service_id && itemMap[line.service_id]) || defaultItem },
+            ItemRef: { value: mapped(line) ?? fallback },
             Qty: Number(line.quantity),
             UnitPrice: Number(line.unit_price),
             TaxCodeRef: { value: line.taxable ? "TAX" : "NON" },
@@ -250,12 +292,24 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
       ApplyTaxAfterDiscount: true,
       // On an update, a tax gone to nothing is sent too, or QuickBooks keeps the one it had.
       ...(Number(invoice.tax_amount) > 0 || existing ? { TxnTaxDetail: { TotalTax: Number(invoice.tax_amount) } } : {}),
+    });
+    // Sent with the item lines go under; if QuickBooks says something on it isn't there to use and
+    // that's the item, once more with the one found instead.
+    const send = async (more: Record<string, unknown> = {}) => {
+      try {
+        return (await qbo(ctx, "POST", "invoice", { ...body(defaultItem), ...more })).Invoice;
+      } catch (error) {
+        const refused = error instanceof QuickBooksFault && (error.code === "2500" || error.code === "610") && lines.some((line: any) => !mapped(line));
+        const found = refused ? await replaceDefaultItem(ctx, defaultItem) : null;
+        if (!found) throw error;
+        return (await qbo(ctx, "POST", "invoice", { ...body(found), ...more })).Invoice;
+      }
     };
     if (existing) {
       // A sparse update replaces the lines; it needs the invoice's SyncToken, which any change in the
       // books moves on (a payment applied, an edit there), so it's read first. Sent again, it's the same change.
       const current = (await qbo(ctx, "GET", `invoice/${encodeURIComponent(existing)}`)).Invoice;
-      await qbo(ctx, "POST", "invoice", { ...body, Id: existing, SyncToken: current?.SyncToken, sparse: true });
+      await send({ Id: existing, SyncToken: current?.SyncToken, sparse: true });
       return existing;
     }
     // Sent already: QuickBooks has an invoice with our number for this customer, dated as ours and
@@ -267,7 +321,7 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
         i.TxnDate === invoice.issued_on &&
         (i.Line ?? []).filter((l: any) => l.DetailType === "SalesItemLineDetail").reduce((sum: number, l: any) => sum + toCents(l.Amount), 0) === charged,
     );
-    const created = sent ?? (await qbo(ctx, "POST", "invoice", body)).Invoice;
+    const created = sent ?? (await send());
     await remember(ctx, "invoice", invoiceId, created.Id, created.SyncToken);
     return created.Id;
   }
