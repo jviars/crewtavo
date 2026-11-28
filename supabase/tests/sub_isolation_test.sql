@@ -621,7 +621,10 @@ select t1070.check(array(
   'change_client_tags(uuid[], text, text)',
   'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chargeable_invoices(uuid, uuid)',
   'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
-  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)',
+  'chat_save_roles(uuid, jsonb, jsonb)',
+  -- Searching team chat: a sub has no chat (private.chat_rights), so finds nothing.
+  'chat_search(uuid, text, uuid, uuid, text[], timestamp with time zone, timestamp with time zone, text, integer, integer)',
+  'chat_set_enabled(uuid, boolean)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each
