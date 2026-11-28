@@ -420,14 +420,14 @@ isOneToOne: false
                   ]
                 },"chat_messages": {
                   Row: {
-                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null
+                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null,"search": unknown,"search_text": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"search"?: never,"search_text"?: never
                   }
                   Update: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"search"?: never,"search_text"?: never
                   }
                   Relationships: [
                     {
@@ -4473,6 +4473,11 @@ isOneToOne: false
 "chat_save_roles":
 { Args: { "p_company": string,"p_rules": Json,"p_settings": Json }; Returns: undefined
                            },
+"chat_search":
+{ Args: { "p_after"?: string,"p_author"?: string,"p_before"?: string,"p_channel"?: string,"p_company": string,"p_has"?: (string)[],"p_limit"?: number,"p_offset"?: number,"p_order"?: string,"p_query"?: string }; Returns: {
+              "channel_id": string,"id": string,"rank": number
+            }[]
+                           },
 "chat_set_enabled":
 { Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
                            },
@@ -4926,7 +4931,7 @@ isOneToOne: false
                            },
 "global_search":
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
-              "client_id": string,"id": string,"kind": string,"number": number,"status": string,"subtitle": string,"title": string
+              "client_id": string,"id": string,"kind": string,"number": number,"parent_id": string,"status": string,"subtitle": string,"title": string
             }[]
                            },
 "guide_feedback":

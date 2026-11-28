@@ -1,7 +1,7 @@
 /**
  * ⌘K / Ctrl+K: search every client (by name, contacts, email, phone or tag), address, request, quote, job,
  * invoice, measurement, guide, campaign, automation, price list service, file, piece of equipment (the
- * company's or at a client's property), subcontractor, applicant, chat channel, promo code and app, jump to
+ * company's or at a client's property), subcontractor, applicant, chat channel or message, promo code and app, jump to
  * any screen or section of Settings, or start something new. "/" also opens it when you're not typing in a field.
  *
  * Outside a field, G then a screen's key goes there and N then a Create item's key starts it (nav.ts
@@ -46,9 +46,9 @@ interface Item {
 const KIND_ICON: Record<string, IconName> = {
   client: "clients", property: "pin", request: "requests", quote: "quote", job: "job", invoice: "invoice", equipment: "truck",
   measurement: "area", kb: "book", campaign: "marketing", rule: "bolt", service: "list", sub: "users", file: "file",
-  applicant: "user", channel: "hash", asset: "wrench", promo: "tag",
+  applicant: "user", channel: "hash", asset: "wrench", promo: "tag", chat: "chat",
 };
-const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string }) => string> = {
+const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; title: string; parent_id: string | null }) => string> = {
   client: (r) => `/clients/${r.id}`,
   property: (r) => `/clients/${r.client_id}`,
   request: (r) => `/requests/${r.id}`,
@@ -66,6 +66,8 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
   file: (r) => `/drive?file=${r.id}`,
   applicant: (r) => `/applicants/${r.id}`,
   channel: (r) => `/chat/${r.id}`,
+  // A team chat message, in its channel.
+  chat: (r) => `/chat/${r.parent_id}?message=${r.id}`,
   // Shown on the client's page, under its property.
   asset: (r) => `/clients/${r.client_id}`,
   promo: () => "/marketing?tab=promos",
@@ -74,7 +76,7 @@ const KIND_PATH: Record<string, (r: { id: string; client_id: string | null; titl
 const KIND_GROUP: Record<string, string> = {
   client: msg("Clients"), property: msg("Properties"), request: msg("Requests"), quote: msg("Quotes"), job: msg("Jobs"), invoice: msg("Invoices"), equipment: msg("Equipment"),
   measurement: msg("Measurements"), kb: msg("Guides"), campaign: msg("Campaigns"), rule: msg("Automations"), service: msg("Price list"), sub: msg("Subcontractors"), file: msg("Files"),
-  applicant: msg("Applicants"), channel: msg("Team chat"), asset: msg("Property equipment"), promo: msg("Promo codes"),
+  applicant: msg("Applicants"), channel: msg("Team chat"), asset: msg("Property equipment"), promo: msg("Promo codes"), chat: msg("Chat messages"),
 };
 /** A two-key shortcut as it reads: "G then S". */
 const keys = (first: string, second: string) => t("{first} then {second}", { first, second });
@@ -85,7 +87,7 @@ const OWN_KEYS = /^\/(measure|paving|roofing)(\/|$)/;
 const SEQUENCE_MS = 1500;
 
 /** Kinds that live in an app or area someone may not have: shown only to whoever sees that screen. */
-const KIND_SCREEN: Record<string, string> = { applicant: "/applicants", channel: "/chat", promo: "/marketing?tab=promos", campaign: "/marketing" };
+const KIND_SCREEN: Record<string, string> = { applicant: "/applicants", channel: "/chat", chat: "/chat", promo: "/marketing?tab=promos", campaign: "/marketing" };
 
 export function CommandPalette() {
   const session = useSession();
@@ -198,10 +200,10 @@ export function CommandPalette() {
           : Promise.resolve({ data: [], error: null }),
       ]);
       const records = unwrap(found);
-      const equipment: Array<Omit<(typeof records)[number], "number" | "client_id"> & { number: number | null; client_id: string | null }> = unwrap(gear).map((g) => ({
-        kind: "equipment", id: g.id, title: g.name, subtitle: [kindLabel(g.kind), g.make, g.model].filter(Boolean).join(" "), status: "", number: null, client_id: null,
+      const equipment: Array<Omit<(typeof records)[number], "number" | "client_id" | "parent_id"> & { number: number | null; client_id: string | null; parent_id: string | null }> = unwrap(gear).map((g) => ({
+        kind: "equipment", id: g.id, title: g.name, subtitle: [kindLabel(g.kind), g.make, g.model].filter(Boolean).join(" "), status: "", number: null, client_id: null, parent_id: null,
       }));
-      const subcontractors: typeof equipment = unwrap(subs).map((s) => ({ kind: "sub", id: s.id, title: s.name, subtitle: s.trade ?? "", status: "", number: null, client_id: null }));
+      const subcontractors: typeof equipment = unwrap(subs).map((s) => ({ kind: "sub", id: s.id, title: s.name, subtitle: s.trade ?? "", status: "", number: null, client_id: null, parent_id: null }));
       // Files open in Drive, which is the office's: crews find theirs on their visits.
       const opensFiles = hasRole(session, "admin", "office", "estimator");
       const opens = (kind: string) => !KIND_SCREEN[kind] || SCREENS.some((n) => n.to === KIND_SCREEN[kind] && navVisible(session, n));

@@ -20,8 +20,10 @@ import { Composer, type MentionOption } from "./Composer";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
+import { ChatSearchField, SEARCH_FIELD_ID, SearchPanel } from "./SearchPanel";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
+import panels from "./panels.module.css";
 import { t } from "@/lib/i18n";
 
 const LAST_CHANNEL = "crewtavo.chat.channel";
@@ -87,6 +89,8 @@ export function ChatPage() {
   const { channelId } = useParams();
   const [params] = useSearchParams();
   const around = params.get("message");
+  // A panel in the conversation's place (a screen of its own on a phone): Search.
+  const view = params.get("view") === "search" ? params.get("view") : null;
   const navigate = useNavigate();
   const state = useChatState();
   const [membersOpen, setMembersOpen] = useState(() => wide() && window.matchMedia("(min-width: 1181px)").matches && stored(MEMBERS_OPEN, true));
@@ -99,11 +103,11 @@ export function ChatPage() {
 
   // On a computer, /chat opens the channel you had open last (or the first one).
   useEffect(() => {
-    if (channelId || !channels.length || !wide()) return;
+    if (channelId || view || !channels.length || !wide()) return;
     const last = stored<string | null>(LAST_CHANNEL, null);
     const target = channels.find((c) => c.id === last && !c.archived) ?? channels.find((c) => !c.archived) ?? channels[0];
     navigate(`/chat/${target.id}`, { replace: true });
-  }, [channelId, channels, navigate]);
+  }, [channelId, view, channels, navigate]);
   useEffect(() => {
     if (channel) store(LAST_CHANNEL, channel.id);
   }, [channel]);
@@ -119,9 +123,11 @@ export function ChatPage() {
   };
 
   return (
-    <div ref={layout} className={s.layout} data-view={channelId ? "channel" : "list"} data-members={(membersOpen && channel) || undefined}>
+    <div ref={layout} className={s.layout} data-view={channelId || view ? "channel" : "list"} data-members={(membersOpen && channel && !view) || undefined}>
       <ChannelList state={state.data} current={channelId} />
-      {channel ? (
+      {view === "search" ? (
+        <SearchPanel state={state.data} />
+      ) : channel ? (
         <Conversation key={channel.id} channel={channel} state={state.data!} around={around} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
       ) : (
         <section className={s.conversation} aria-label={t("Channel")}>
@@ -185,10 +191,12 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
+        <Link to="/chat?view=search" className={`${s.settings} mobile-only`} aria-label={t("Search chat")} title={t("Search chat")}><Icon name="search" size={16} /></Link>
         {state?.me?.admin && (
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
       </div>
+      <ChatSearchField state={state} className={`${panels.sideSearch} hide-mobile`} />
       <nav className={s.sideList} aria-label={t("Channels")}>
         {!state && (
           <Loading label={t("Loading channels")} className="stack-sm">
@@ -387,6 +395,18 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost btn-icon"
+            aria-label={t("Search {channel}", { channel: channelLabel(channel) })}
+            title={t("Search this channel")}
+            onClick={() => {
+              navigate(`/chat/${channel.id}?view=search&in=${channel.id}`);
+              requestAnimationFrame(() => document.getElementById(SEARCH_FIELD_ID)?.focus());
+            }}
+          >
+            <Icon name="search" size={15} />
+          </button>
           <button type="button" className="btn btn-sm btn-ghost" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}>
             <Icon name="pushpin" size={15} /><span className={s.toolText}>{t("Pinned")}</span>
           </button>
