@@ -196,3 +196,21 @@ export function centers(grids: Uint8Array[], size: number, cells = GRID): Array<
   }
   return out;
 }
+
+const list = (words: string[]) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);
+
+/**
+ * What a Find everything in view run says when it's done. `found` is what went on the map ("1 lawn",
+ * "3 trees"); `unread` is what fal.ai didn't answer for, each with the server's reason. One thing
+ * unread doesn't hide the rest: the toast says what was found, what wasn't looked for and why.
+ */
+export function findSummary(found: string[], unread: Array<{ what: string; error: string }>, place: string): { kind: "success" | "info" | "warning"; title: string; description?: string } {
+  if (!unread.length) {
+    if (!found.length) return { kind: "info", title: `Nothing found here. Zoom so the ${place} fills the map, or outline it with Find in the dock.` };
+    return { kind: "success", title: `Found ${list(found)}. Check them against the imagery and drag any corners that are off.` };
+  }
+  const missing = list(unread.map((u) => u.what));
+  const why = unread[0]!.error;
+  if (!found.length) return { kind: "warning", title: `fal.ai didn't answer for ${missing}, and nothing else was found here.`, description: why };
+  return { kind: "warning", title: `Found ${list(found)}. fal.ai didn't answer for ${missing}.`, description: `${why} What was found is on the map, so tick only what's missing to look again.` };
+}

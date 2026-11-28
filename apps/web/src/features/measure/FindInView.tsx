@@ -19,7 +19,7 @@ import { Icon } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { buildingsIn, lotAt } from "./buildings";
-import { anyOf, centers, GRID, maskGrid, outlines } from "./detect";
+import { anyOf, centers, findSummary, GRID, maskGrid, outlines } from "./detect";
 import type { ImageryId } from "./imagery";
 import type { MeasureMapHandle } from "./MeasureMap";
 import { areasAndCutouts, LAWN_TAP, lawnShape } from "./TapOutline";
@@ -27,6 +27,10 @@ import { areasAndCutouts, LAWN_TAP, lawnShape } from "./TapOutline";
 /** What the server asks SAM 3 for (DETECT_TARGETS in integrations/fal.ts). */
 type Ask = "asphalt" | "concrete" | "stalls" | "lawn" | "trees" | "trampolines" | "playsets";
 interface Result { target: Ask; masks: string[]; scores: number[] }
+/** Something fal.ai didn't answer for, with the server's reason (`failed` in routes/paving.ts). */
+interface Unread { target: Ask; error: string }
+/** Each thing asked for, as the toast names one fal didn't answer for. */
+const ASKED: Record<Ask, string> = { asphalt: "asphalt", concrete: "concrete", stalls: "stalls", lawn: "the lawn", trees: "trees", trampolines: "trampolines", playsets: "play sets" };
 /** A choice in the dialog: what it asks for, and how what comes back lands on the map. */
 interface Target { id: string; label: string; detail: string; ask: Ask[]; item: string; as: "area" | "points"; word: [string, string] }
 
@@ -37,7 +41,7 @@ const PAVING_TARGETS: Target[] = [
 ];
 const LAWN_TARGETS: Target[] = [
   { id: "lawn", label: "Lawn", detail: "The grass, with the buildings cut out and the shade under trees kept in", ask: ["lawn"], item: LAWN_TAP, as: "area", word: ["lawn", "lawns"] },
-  { id: "trees", label: "Trees", detail: "Marks each tree on the lawn to trim around", ask: ["trees"], item: "tree", as: "points", word: ["tree", "trees"] },
+  { id: "trees", label: "Trees", detail: "Marks each tree on the lawn to trim around, up to 32 a run", ask: ["trees"], item: "tree", as: "points", word: ["tree", "trees"] },
   { id: "play", label: "Trampolines and play sets", detail: "Marked as obstacles to trim around", ask: ["trampolines", "playsets"], item: "obstacle", as: "points", word: ["obstacle", "obstacles"] },
 ];
 /** The picture sent to fal: the middle square of the map, this many pixels across. */
@@ -103,7 +107,8 @@ export function FindInView({
       const [w, n] = view.at(0, 0);
       const [e, s] = view.at(SIZE, SIZE);
       const buildings = wantsLawn ? buildingsIn([w, s, e, n]).catch(() => []) : Promise.resolve([]);
-      const { results } = await api.post<{ results: Result[] }>("/paving/detect", { image, targets: targets.flatMap((t) => t.ask) });
+      // The server keeps what answered when fal turns one target down: `failed` says which and why.
+      const { results, failed = [] } = await api.post<{ results: Result[]; failed?: Unread[] }>("/paving/detect", { image, targets: targets.flatMap((t) => t.ask) });
       // How many feet a picture pixel is, for leaving out specks and car-sized holes.
       const ftPerPx = (lineLengthM([view.at(0, SIZE / 2), view.at(SIZE, SIZE / 2)]) * 3.280_84) / SIZE;
       const cellSqft = ((ftPerPx * SIZE) / GRID) ** 2;
@@ -153,13 +158,14 @@ export function FindInView({
         // Islands and buildings in the asphalt come out of it.
         if (target.id === "asphalt") handle.add(cutouts.map(toMap).filter((ring) => sqft(ring) >= MIN_HOLE_SQFT).map((ring) => [ring]), "Cutout");
       }
-      return found;
+      return { found, failed };
     },
-    onSuccess: (found) => {
+    onSuccess: ({ found, failed }) => {
       setOpen(false);
-      if (!found.length) return void toast.info(`Nothing found here. Zoom so the ${place} fills the map, or outline it with Find in the dock.`);
       const words = found.map(({ target, count }) => `${count} ${target.word[count === 1 ? 0 : 1]}`);
-      toast.success(`Found ${list(words)}. Check them against the imagery and drag any corners that are off.`);
+      const { kind, title, description } = findSummary(words, failed.map((f) => ({ what: ASKED[f.target] ?? f.target, error: f.error })), place);
+      // One that names what wasn't looked for stays up long enough to read.
+      toast[kind](title, description ? { description, duration: 12_000 } : {});
     },
   });
 
@@ -238,5 +244,3 @@ function dedupe(points: Array<[number, number]>, feet: number): Array<[number, n
 
 /** What this many requests cost at fal's half a cent each, in words. */
 const cents = (requests: number) => (requests % 2 ? `${(requests / 2).toFixed(1)}¢` : `${requests / 2}¢`);
-
-const list = (words: string[]) => (words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`);

@@ -32,8 +32,8 @@ paving.post("/paving/detect", requireUser, requireCompany([...SALES, "crew_lead"
   if (!(await allow(c.env, `paving-detect:${c.var.companyId}`, 30, 10 * 60))) throw new HttpError(429, "That's a lot of searches in a few minutes. Wait a little and try again.");
   const secret = await loadSecret(c.env, adminClient(c.env), c.var.companyId, "fal").catch(() => null);
   if (!secret?.api_key) throw new HttpError(400, "Find everything in view needs fal.ai. An owner or admin can install it on the Apps page.");
-  const results = await detect(c.env, secret.api_key, body.image, [...new Set(body.targets)]);
-  return c.json({ results });
+  // `failed` lists any target fal didn't answer for, with why, beside what the others found.
+  return c.json(await detect(c.env, secret.api_key, body.image, [...new Set(body.targets)]));
 });
 
 /** Paving on its Apps page: Install and Uninstall (public.trade_app_set_enabled). */

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { polygonAreaM2, type Section } from "@crewtavo/core/geo";
 import { optionTotals, quoteTotals } from "@crewtavo/core/money";
 import { describe, expect, it } from "vitest";
-import { centers, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from "../src/features/measure/detect";
+import { centers, findSummary, gridPolygons, outlines, pieceAt, ringArea, simplifyRing } from "../src/features/measure/detect";
 import { lotAt } from "../src/features/measure/buildings";
 import { contours, guessPolygons, opened } from "../src/features/measure/maskOutline";
 import { pickMask, pixelValues, SAM_SIZE } from "../src/features/measure/samLocal";
@@ -60,6 +60,34 @@ describe("Find paving's outlines", () => {
 
   it("puts a count at the middle of each stall it found", () => {
     expect(centers([grid(10, [0, 0, 2, 4]), grid(10, [6, 6, 10, 10]), grid(10)], 100, 10)).toEqual([[10, 20], [80, 80]]);
+  });
+});
+
+describe("what Find everything in view says when it's done", () => {
+  it("says what was found, or that nothing was, as before", () => {
+    expect(findSummary(["1 lawn", "3 trees"], [], "yard")).toEqual({ kind: "success", title: "Found 1 lawn and 3 trees. Check them against the imagery and drag any corners that are off." });
+    expect(findSummary([], [], "lot")).toEqual({ kind: "info", title: "Nothing found here. Zoom so the lot fills the map, or outline it with Find in the dock." });
+  });
+
+  it("keeps what was found when fal didn't answer for one thing, and says which and why", () => {
+    const busy = "fal.ai is busy right now. Try again in a minute.";
+    expect(findSummary(["1 lawn", "3 obstacles"], [{ what: "trees", error: busy }], "yard")).toEqual({
+      kind: "warning",
+      title: "Found 1 lawn and 3 obstacles. fal.ai didn't answer for trees.",
+      description: `${busy} What was found is on the map, so tick only what's missing to look again.`,
+    });
+    // Nothing else turned up: it still names what wasn't looked for, instead of "Nothing found here".
+    expect(findSummary([], [{ what: "trees", error: busy }, { what: "play sets", error: busy }], "yard")).toEqual({
+      kind: "warning",
+      title: "fal.ai didn't answer for trees and play sets, and nothing else was found here.",
+      description: busy,
+    });
+  });
+
+  it("reads the server's list of what fal didn't answer for", () => {
+    const panel = readFileSync(new URL("../src/features/measure/FindInView.tsx", import.meta.url), "utf8");
+    expect(panel).toContain("const { results, failed = [] } = await api.post<{ results: Result[]; failed?: Unread[] }>(\"/paving/detect\"");
+    expect(panel).toContain("findSummary(");
   });
 });
 

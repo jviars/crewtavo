@@ -1,7 +1,7 @@
 import { getPreset, LAWN_ADD_ONS } from "@crewtavo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { checkFalKey, DETECT_TARGETS, detect, falProblem } from "../src/integrations/fal";
+import { checkFalKey, DETECT_TARGETS, detect, falProblem, SAM3_MAX_MASKS, type DetectTarget } from "../src/integrations/fal";
 import { encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
@@ -102,7 +102,8 @@ describe("fal.ai", () => {
 
   it("asks SAM 3 for each target and keeps the masks it sends inline", async () => {
     fal.mockImplementation(async () => Response.json({ masks: [{ url: MASK }, { url: "https://example.com/not-fal.png" }], scores: [0.9, 0.8] }));
-    const results = await detect({}, "abc:def", IMAGE, ["asphalt", "stalls"], fal as never);
+    const { results, failed } = await detect({}, "abc:def", IMAGE, ["asphalt", "stalls"], fal as never);
+    expect(failed).toEqual([]);
     expect(results).toEqual([
       { target: "asphalt", masks: [MASK], scores: [0.9] },
       { target: "stalls", masks: [MASK], scores: [0.9] },
@@ -134,6 +135,54 @@ describe("fal.ai", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { results: Array<{ target: string }> }).results.map((r) => r.target)).toEqual(["lawn", "trees", "trampolines", "playsets"]);
     expect(fal.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).prompt)).toEqual(["grass lawn", "tree", "trampoline", "playground equipment"]);
+  });
+
+  it("never asks SAM 3 for more masks than fal allows", async () => {
+    // fal's schema for fal-ai/sam-3/image: max_masks is 1 to 32, and a larger number is refused with a 422.
+    expect(SAM3_MAX_MASKS).toBe(32);
+    for (const [target, { masks }] of Object.entries(DETECT_TARGETS)) expect(masks, target).toBeLessThanOrEqual(SAM3_MAX_MASKS);
+    fal.mockImplementation(async () => Response.json({ masks: [], scores: [] }));
+    await detect({}, "abc:def", IMAGE, Object.keys(DETECT_TARGETS) as DetectTarget[], fal as never);
+    for (const [, init] of fal.mock.calls) {
+      const sent = JSON.parse(String(init?.body)).max_masks;
+      expect(sent).toBeGreaterThanOrEqual(1);
+      expect(sent).toBeLessThanOrEqual(32);
+    }
+  });
+
+  it("keeps what fal found when one target is refused, and says which one wasn't read", async () => {
+    await paver({ falKey: "uniform:own-key" });
+    const refusal = { detail: [{ loc: ["body", "max_masks"], msg: "Input should be less than or equal to 32", type: "less_than_equal", ctx: { le: 32 } }] };
+    fal.mockImplementation(async (_url, init) =>
+      JSON.parse(String(init?.body)).prompt === "tree" ? Response.json(refusal, { status: 422 }) : Response.json({ masks: [{ url: MASK }], scores: [0.7] }),
+    );
+    const res = await send("/paving/detect", { image: IMAGE, targets: ["lawn", "trees", "trampolines", "playsets"] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { results: Array<{ target: string }>; failed: Array<{ target: string; error: string }> };
+    expect(body.results.map((r) => r.target)).toEqual(["lawn", "trampolines", "playsets"]);
+    expect(body.failed).toEqual([{ target: "trees", error: expect.stringMatching(/max_masks: Input should be less than or equal to 32/) }]);
+    // Zooming can't fix a setting fal refused, so it isn't worded as a problem with the picture.
+    expect(body.failed[0]!.error).not.toMatch(/map picture|Zoom in a little/);
+  });
+
+  it("fails the whole Find only when nothing answered, with fal's reason", async () => {
+    await paver({ falKey: "uniform:own-key" });
+    fal.mockImplementation(async () => new Response("{}", { status: 401 }));
+    const res = await send("/paving/detect", { image: IMAGE, targets: ["lawn", "trees"] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/didn't accept the key/);
+  });
+
+  it("words a 422 by what fal refused: the picture, or something else Crewtavo sent", () => {
+    const about = (loc: string, type: string, msg: string) => JSON.stringify({ detail: [{ loc: ["body", loc], msg, type }] });
+    expect(falProblem(422, about("image_url", "image_load_error", "Failed to load the image"))).toMatch(/couldn't read the map picture/);
+    expect(falProblem(422, about("image_url", "image_too_large", "Image too large"))).toMatch(/couldn't read the map picture/);
+    expect(falProblem(422, about("max_masks", "less_than_equal", "Input should be less than or equal to 32"))).toBe(
+      "fal.ai refused part of what Crewtavo asked for (max_masks: Input should be less than or equal to 32). Zooming in won't change that.",
+    );
+    // An answer with no reason to read keeps the old advice.
+    expect(falProblem(422, "")).toMatch(/couldn't read the map picture/);
+    expect(falProblem(400, "Bad Request")).toMatch(/couldn't read the map picture/);
   });
 
   it("refuses a picture that isn't one", async () => {

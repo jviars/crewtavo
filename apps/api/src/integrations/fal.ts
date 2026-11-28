@@ -12,13 +12,16 @@ type Where = Pick<Env, "LOOKALYKE_URL">;
 const runUrl = (env: Where) => `${serviceUrl(env, "fal", "https://fal.run")}/${SAM3_ENDPOINT}`;
 const pricingUrl = (env: Where) => `${serviceUrl(env, "fal", "https://api.fal.ai")}/v1/models/pricing?endpoint_id=${encodeURIComponent(SAM3_ENDPOINT)}`;
 
-/** What Find everything in view looks for, and the words SAM 3 is given for each. */
+/** The most masks SAM 3 gives in one answer: fal's schema has `max_masks` from 1 to 32 and refuses more with a 422. */
+export const SAM3_MAX_MASKS = 32;
+
+/** What Find everything in view looks for, the words SAM 3 is given for each, and how many masks to ask for (SAM3_MAX_MASKS at most). */
 export const DETECT_TARGETS = {
   asphalt: { prompt: "asphalt pavement", masks: 12 },
   concrete: { prompt: "concrete sidewalk", masks: 16 },
   stalls: { prompt: "parking space", masks: 32 },
   lawn: { prompt: "grass lawn", masks: 8 },
-  trees: { prompt: "tree", masks: 40 },
+  trees: { prompt: "tree", masks: 32 },
   trampolines: { prompt: "trampoline", masks: 6 },
   playsets: { prompt: "playground equipment", masks: 6 },
 } as const;
@@ -30,6 +33,11 @@ export interface DetectResult {
   masks: string[];
   scores: number[];
 }
+/** A target fal didn't answer for, and why, in a sentence to show. */
+export interface DetectFailure {
+  target: DetectTarget;
+  error: string;
+}
 
 type FetchLike = typeof fetch;
 
@@ -39,8 +47,36 @@ export function falProblem(status: number, body: string): string {
   if (status === 402 || /balance|credit|billing|payment/i.test(body)) return "Your fal.ai account is out of credit. Add some at fal.ai under Billing, then try again.";
   if (status === 403) return "fal.ai refused the key. Check that it's an API key with access to models, then paste it again.";
   if (status === 429) return "fal.ai is busy right now. Try again in a minute.";
-  if (status === 422 || status === 400) return "fal.ai couldn't read the map picture. Zoom in a little and try again.";
+  if (status === 422 || status === 400) {
+    // A 422 names what it refused. Only the picture is something zooming can change.
+    const refused = refusedInput(body);
+    if (refused) return `fal.ai refused part of what Crewtavo asked for (${refused}). Zooming in won't change that.`;
+    return "fal.ai couldn't read the map picture. Zoom in a little and try again.";
+  }
   return "fal.ai had a problem looking at the aerial. Try again in a minute.";
+}
+
+/**
+ * What a 422 from fal refused, as "field: its sentence", when that isn't the picture: fal answers
+ * { detail: [{ loc: ["body", "max_masks"], msg, type }] }. Null for the picture (loc image_url, or
+ * a type like image_load_error or file_download_error) and for an answer with nothing to read.
+ */
+function refusedInput(body: string): string | null {
+  let detail: unknown;
+  try {
+    detail = (JSON.parse(body) as { detail?: unknown } | null)?.detail;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(detail)) return null;
+  for (const entry of detail as Array<{ loc?: unknown; msg?: unknown; type?: unknown }>) {
+    const loc = Array.isArray(entry?.loc) ? entry.loc.map(String) : [];
+    if (loc.includes("image_url") || /^(image|file)_/.test(String(entry?.type ?? ""))) continue;
+    const field = loc.filter((part) => part !== "body").join(".");
+    const msg = typeof entry?.msg === "string" ? entry.msg.slice(0, 200) : "";
+    if (field || msg) return [field, msg].filter(Boolean).join(": ");
+  }
+  return null;
 }
 
 /** Checks a key with fal.ai's price list, which costs nothing. Returns a sentence to show, or null when it works. */
@@ -52,10 +88,14 @@ export async function checkFalKey(env: Where, key: string, fetcher: FetchLike = 
   return `fal.ai couldn't check the key right now (error ${res.status}). Try again in a minute.`;
 }
 
-/** Finds each target on the picture (a data:image/jpeg URI). The targets run side by side. */
-export async function detect(env: Where, key: string, image: string, targets: DetectTarget[], fetcher: FetchLike = fetch): Promise<DetectResult[]> {
-  return Promise.all(
-    targets.map(async (target) => {
+/**
+ * Finds each target on the picture (a data:image/jpeg URI). The targets run side by side, and fal
+ * charges for each one that answers, so one it refuses doesn't throw the others away: what answered
+ * comes back in `results` and the rest in `failed`, each with its reason. It throws only when none answered.
+ */
+export async function detect(env: Where, key: string, image: string, targets: DetectTarget[], fetcher: FetchLike = fetch): Promise<{ results: DetectResult[]; failed: DetectFailure[] }> {
+  const settled = await Promise.allSettled(
+    targets.map(async (target): Promise<DetectResult> => {
       const { prompt, masks } = DETECT_TARGETS[target];
       const res = await fetcher(runUrl(env), {
         method: "POST",
@@ -67,7 +107,7 @@ export async function detect(env: Where, key: string, image: string, targets: De
           sync_mode: true,
           output_format: "png",
           return_multiple_masks: true,
-          max_masks: masks,
+          max_masks: Math.min(masks, SAM3_MAX_MASKS),
           include_scores: true,
         }),
         signal: AbortSignal.timeout(90_000),
@@ -81,6 +121,16 @@ export async function detect(env: Where, key: string, image: string, targets: De
       return { target, masks: kept.map((k) => k.url), scores: kept.map((k) => k.score ?? 1) };
     }),
   );
+  const results: DetectResult[] = [];
+  const failed: DetectFailure[] = [];
+  let first: unknown;
+  settled.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") return void results.push(outcome.value);
+    first ??= outcome.reason;
+    failed.push({ target: targets[i]!, error: outcome.reason instanceof HttpError ? outcome.reason.message : "fal.ai had a problem looking at the aerial. Try again in a minute." });
+  });
+  if (!results.length && failed.length) throw first;
+  return { results, failed };
 }
 
 /** A mask as a data URI. fal sends them inline when asked; one it hosted instead is read from fal's own servers. */
