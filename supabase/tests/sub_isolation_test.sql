@@ -620,8 +620,14 @@ select t1070.check(array(
   -- Tagging many clients at once: runs as the caller, and no rule lets a sub change a client.
   'change_client_tags(uuid[], text, text)',
   'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chargeable_invoices(uuid, uuid)',
-  'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
-  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_set_enabled(uuid, boolean)',
+  -- Team chat's direct messages, threads, notification choices and "seen by" (20261129101000 to 101300): a
+  -- sub has no rights in any channel (private.chat_rights) and can't be in a conversation, so each
+  -- refuses them or answers nothing; the direct-messages switch is for owners and admins.
+  'chat_close_direct(uuid)',
+  'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_direct_people(uuid)', 'chat_follow(uuid, boolean)', 'chat_leave_direct(uuid)',
+  'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)', 'chat_read_marks(uuid)',
+  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
+  'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_thread_counts(uuid)', 'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each
@@ -806,6 +812,12 @@ select t1070.expect_error(format('select public.chat_mark_read(%L)', :'general')
 select t1070.expect_error(format('select public.chat_set_enabled(%L, false)', :'co'), 'chat_set_enabled refuses');
 select t1070.expect_error(format('select public.chat_create_channel(%L, %L, %L)', :'co', 'subs', 'everyone'), 'chat_create_channel refuses');
 select t1070.expect_error(format('select public.chat_save_roles(%L, %L, %L)', :'co', '[]', '[]'), 'chat_save_roles refuses');
+select t1070.check(not exists (select 1 from public.chat_direct_people(:'co')) and not exists (select 1 from public.chat_threads(:'co'))
+  and (select unread = 0 and mentions = 0 from public.chat_thread_counts(:'co')) and not exists (select 1 from public.chat_read_marks(:'general')),
+  'nobody to message directly, no threads and no read marks');
+select t1070.expect_error(format('select public.chat_start_direct(%L, %L)', :'co', '{d1070000-0000-0000-0000-000000000001}'), 'chat_start_direct refuses');
+select t1070.expect_error(format('select public.chat_set_direct_messages(%L, false)', :'co'), 'chat_set_direct_messages refuses');
+select t1070.expect_error(format('select public.chat_set_notify(%L, %L)', :'general', 'all'), 'chat_set_notify refuses');
 select t1070.expect_error(format('select public.web_stats(%L, current_date - 7, current_date)', :'co'), 'web_stats refuses');
 select t1070.expect_error(format('select public.web_analytics_save(%L, %L)', :'co', '{"enabled": true}'), 'web_analytics_save refuses');
 select t1070.expect_error(format('select public.set_sub_reminders(%L, false)', :'co'), 'set_sub_reminders refuses');
