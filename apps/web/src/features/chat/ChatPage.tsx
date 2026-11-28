@@ -21,6 +21,7 @@ import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useL
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { useWaitingByChannel, WaitingCount, WaitingMessages } from "./Outbox";
+import { useStatuses } from "./Status";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { t } from "@/lib/i18n";
@@ -318,16 +319,17 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
     return r ? { label: r.label, color: r.color } : null;
   };
   const trusted = channel.can_manage || state.me?.admin || hasRole(session, "admin", "office");
+  const statuses = useStatuses();
   const options: MentionOption[] = useMemo(() => {
     const people = (members.data ?? [])
       .filter((m) => m.id !== me)
-      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label }));
+      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label, status: statuses.get(m.id) }));
     const roles = state.roles
       .filter((r) => r.key !== "owner" && (r.mentionable || trusted))
       .map((r) => ({ kind: "role" as const, label: r.label, token: roleToken(r.key), color: r.color, hint: t("Role") }));
     const everyone = channel.can_manage ? [{ kind: "everyone" as const, label: t("everyone"), token: EVERYONE_TOKEN, hint: t("Everyone in this channel") }] : [];
     return [...people, ...roles, ...everyone];
-  }, [members.data, state.roles, me, trusted, channel.can_manage]);
+  }, [members.data, state.roles, me, trusted, channel.can_manage, statuses]);
 
   const ctx: MessageContext = {
     me,

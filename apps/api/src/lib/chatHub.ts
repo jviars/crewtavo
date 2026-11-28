@@ -18,7 +18,12 @@ export type ChatEvent =
   | { type: "read"; channel_id: string }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
-  | { type: "chat"; enabled: boolean };
+  | { type: "chat"; enabled: boolean }
+  // Someone's status changed (routes/chatField.ts); status null: cleared.
+  | { type: "status"; user_id: string; status: unknown }
+  // My scheduled messages or reminders changed (sent, failed, edited elsewhere): read them again.
+  | { type: "scheduled"; channel_id: string | null }
+  | { type: "reminders" };
 
 interface Listener {
   userId: string;

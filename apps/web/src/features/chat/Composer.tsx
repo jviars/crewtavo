@@ -16,6 +16,7 @@ import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { JobPicker, type JobPick } from "./JobPicker";
+import { StatusChip, type ChatStatus } from "./Status";
 import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, roleColor } from "./ui";
 import { usePhone, useVoiceRecorder } from "./voice";
@@ -29,6 +30,8 @@ export interface MentionOption extends Mentionable {
   avatar?: string | null;
   photo?: string | null;
   hint?: string;
+  /** A person's status, beside their name (Status.tsx). */
+  status?: ChatStatus;
 }
 
 interface Upload {
@@ -360,6 +363,7 @@ export function Composer({
               >
                 {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={22} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={16} />}
                 <span style={{ fontWeight: 600, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? t("@everyone") : o.label}</span>
+                <StatusChip status={o.status} />
                 {o.hint && <small>{o.hint}</small>}
               </button>
             ))}

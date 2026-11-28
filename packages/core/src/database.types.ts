@@ -548,6 +548,26 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"chat_statuses": {
+                  Row: {
+                    "company_id": string,"kind": string,"until": string | null,"updated_at": string,"user_id": string,"words": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"kind": string,"until"?: string | null,"updated_at"?: string,"user_id": string,"words"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"kind"?: string,"until"?: string | null,"updated_at"?: string,"user_id"?: string,"words"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_statuses_company_id_user_id_fkey"
+      columns: ["company_id","user_id"]
+isOneToOne: true
+      referencedRelation: "memberships"
+      referencedColumns: ["company_id","user_id"]
+    }
+                  ]
                 },"chat_transcripts": {
                   Row: {
                     "channel_id": string,"company_id": string,"created_at": string,"message_id": string,"path": string,"words": string
@@ -4501,6 +4521,11 @@ isOneToOne: false
                            },
 "chat_set_enabled":
 { Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
+                           },
+"chat_statuses":
+{ Args: { "p_company": string }; Returns: {
+              "by_clock": boolean,"kind": string,"until": string,"user_id": string,"words": string
+            }[]
                            },
 "chatgpt_host_id":
 { Args: Record<PropertyKey, never>; Returns: string

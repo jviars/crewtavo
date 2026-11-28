@@ -715,4 +715,17 @@ export default {
   "This message has no photos or files.": "Este mensaje no tiene fotos ni archivos.",
   "Pick another job": "Elegir otro trabajo",
   "Linked to this message": "Vinculado a este mensaje",
+  // Team chat: status
+  "{status}, from the clock": "{status}, según el reloj",
+  "Set a status": "Poner un estado",
+  "Your team sees it beside your name in Team chat.": "Tu equipo lo ve junto a tu nombre en el chat del equipo.",
+  "In my own words": "Con mis palabras",
+  "Your status": "Tu estado",
+  "{count} of {max} characters": "{count} de {max} caracteres",
+  "At the supply yard": "En el patio del proveedor",
+  "Clear it": "Quitarlo",
+  "Clear status": "Quitar el estado",
+  "until {time}": "hasta {time}",
+  "from the clock": "según el reloj",
+  "Change your status": "Cambiar tu estado",
 } satisfies Catalog;

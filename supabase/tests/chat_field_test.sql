@@ -111,3 +111,64 @@ select tcf.expect_error(format('insert into public.chat_messages (id, company_id
 commit;
 select tcf.check((select count(*) from public.chat_messages where body like 'Done at Elm St%') = 1, 'so it''s there once');
 select tcf.check((select count(*) from public.notifications where link like '%5e5e5e5e-0000-4000-8000-000000000001') = 1, 'and Lee hears about it once');
+
+-- ===== Status ===================================================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+insert into public.chat_statuses (company_id, user_id, kind) values (:'co', 'f1e1d000-0000-0000-0000-000000000001', 'office');
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_statuses (company_id, user_id, kind, until) values (:'co', 'f1e1d000-0000-0000-0000-000000000004', 'off', now() + interval '8 hours');
+select tcf.check((select kind = 'off' from public.chat_statuses where user_id = 'f1e1d000-0000-0000-0000-000000000004'), 'Nia sets her own status');
+select tcf.expect_error(format('insert into public.chat_statuses (company_id, user_id, kind) values (%L, %L, %L)', :'co', 'f1e1d000-0000-0000-0000-000000000003', 'busy'), 'but not Lee''s');
+update public.chat_statuses set kind = 'busy' where user_id = 'f1e1d000-0000-0000-0000-000000000001';
+delete from public.chat_statuses where user_id = 'f1e1d000-0000-0000-0000-000000000001';
+select tcf.check((select kind = 'office' from public.chat_statuses where user_id = 'f1e1d000-0000-0000-0000-000000000001'), 'nor changes or clears anyone else''s');
+select tcf.expect_error(format('insert into public.chat_statuses (company_id, user_id, kind) values (%L, %L, %L) on conflict (company_id, user_id) do update set kind = excluded.kind', :'co', 'f1e1d000-0000-0000-0000-000000000004', 'custom'), 'her own words need words');
+select tcf.expect_error(format('update public.chat_statuses set kind = %L, words = %L where user_id = %L', 'custom', repeat('x', 61), 'f1e1d000-0000-0000-0000-000000000004'), 'up to 60 characters of them');
+select tcf.expect_error(format('update public.chat_statuses set until = now() - interval %L where user_id = %L', '1 hour', 'f1e1d000-0000-0000-0000-000000000004'), 'and a status clears in the future');
+commit;
+
+-- Lee's clock runs on a drive; Nia's on a visit, though she set Off today by hand.
+insert into public.time_entries (company_id, user_id, category, started_at) values
+  (:'co', 'f1e1d000-0000-0000-0000-000000000003', 'drive', now() - interval '20 minutes'),
+  (:'co', 'f1e1d000-0000-0000-0000-000000000004', 'visit', now() - interval '1 hour');
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_statuses where company_id = :'co') = 2, 'Sid reads the team''s statuses');
+select tcf.check((select kind = 'driving' and by_clock from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000003'), 'Lee on the clock for a drive is Driving');
+select tcf.check((select kind = 'off' and not by_clock from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000004'), 'a status set by hand comes before the clock''s');
+select tcf.check((select count(*) from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000005') = 0, 'nobody else has one');
+select tcf.check((select count(*) from public.time_entries where user_id = 'f1e1d000-0000-0000-0000-000000000003') = 0, 'and Sid still can''t read Lee''s time');
+commit;
+
+update public.time_entries set ended_at = now() where user_id = 'f1e1d000-0000-0000-0000-000000000003';
+insert into public.time_entries (company_id, user_id, category, started_at) values (:'co', 'f1e1d000-0000-0000-0000-000000000003', 'break', now() - interval '1 minute');
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+select tcf.check((select kind = 'break' from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000003'), 'Lee''s break is On a break');
+update public.chat_statuses set until = now() + interval '1 second' where user_id = 'f1e1d000-0000-0000-0000-000000000004';
+commit;
+select pg_sleep(1.2);
+update public.time_entries set ended_at = now() where user_id = 'f1e1d000-0000-0000-0000-000000000003';
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+select tcf.check((select kind = 'on_job' and by_clock from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000004'), 'once Nia''s own status clears, her visit''s clock says On a job');
+select tcf.check((select count(*) from public.chat_statuses(:'co') where user_id = 'f1e1d000-0000-0000-0000-000000000003') = 0, 'and Lee, clocked out, has none');
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000009", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_statuses) = 0 and (select count(*) from public.chat_statuses(:'co')) = 0, 'another business sees no one''s status');
+select tcf.expect_error(format('insert into public.chat_statuses (company_id, user_id, kind) values (%L, %L, %L)', :'co', 'f1e1d000-0000-0000-0000-000000000009', 'busy'), 'or sets one there');
+commit;

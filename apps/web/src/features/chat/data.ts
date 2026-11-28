@@ -326,7 +326,10 @@ type LiveEvent =
   | { type: "read"; channel_id: string }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
-  | { type: "chat"; enabled: boolean };
+  | { type: "chat"; enabled: boolean }
+  | { type: "status"; user_id: string; status: { user_id: string } | null }
+  | { type: "scheduled"; channel_id: string | null }
+  | { type: "reminders" };
 
 /**
  * One streaming connection per tab while chat is on (GET /api/chat/live). It reconnects by itself,
@@ -387,6 +390,19 @@ export function useChatLive() {
         case "chat":
           void refresh();
           queryClient.invalidateQueries({ queryKey: chatKeys.all(company) });
+          return;
+        // Status, sending later and reminders (Status.tsx, Schedule.tsx, Reminders.tsx).
+        case "status":
+          if (event.status) {
+            const status = event.status;
+            queryClient.setQueryData<Array<{ user_id: string }>>(["chat", company, "statuses"], (list) => (list ? [...list.filter((x) => x.user_id !== event.user_id), status] : list));
+          } else queryClient.invalidateQueries({ queryKey: ["chat", company, "statuses"] });
+          return;
+        case "scheduled":
+          queryClient.invalidateQueries({ queryKey: ["chat", company, "scheduled"] });
+          return;
+        case "reminders":
+          queryClient.invalidateQueries({ queryKey: ["chat", company, "reminders"] });
           return;
       }
     };

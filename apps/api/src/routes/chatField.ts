@@ -5,9 +5,11 @@
  *   GET  /chat/settings/voice-words     whether voice notes are written out with the OpenAI key (owners, admins)
  *   PUT  /chat/settings/voice-words     turn it on (once OpenAI accepts the key) or off
  *   POST /chat/messages/:id/to-job      a message onto a job: its words as a note, or a copy of its photos and files
+ *   GET  /chat/statuses                 everyone's status now (theirs by hand, else their running clock's)
+ *   PUT  /chat/status                   set my own status; DELETE clears it. Everyone connected hears of it.
  */
 import { ADMINS, levelLabel, SALES, toEditable } from "@crewtavo/core";
-import { isAudio } from "@crewtavo/core/chatField";
+import { CUSTOM_STATUS, isAudio, STATUS_KINDS, STATUS_TEXT_MAX } from "@crewtavo/core/chatField";
 import { fileTitle } from "@crewtavo/core/drive";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
@@ -15,6 +17,7 @@ import type { AppEnv } from "../env";
 import { checkOpenAiKey } from "../integrations/openai";
 import { loadSecret } from "../integrations/tokens";
 import { requireCompany, requireUser } from "../lib/auth";
+import { toCompany } from "../lib/chatHub";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reserveStorage, snapshotsFrom } from "../lib/storageLimits";
 import { adminClient } from "../lib/supabase";
@@ -161,4 +164,54 @@ chatField.post("/chat/messages/:id/to-job", requireUser, requireCompany(EDITS_JO
   const job = must(await db.from("jobs").select("id, number, title, instructions").eq("company_id", companyId).eq("id", body.job_id).maybeSingle(), "That job isn't here anymore.");
   const done = body.as === "note" ? await addAsNote(c, job, message) : await addFiles(c, job, message);
   return c.json({ job: { id: job.id, number: job.number, title: job.title }, ...done });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Status
+// ---------------------------------------------------------------------------------------------
+
+export interface ChatStatusOut {
+  user_id: string;
+  kind: string;
+  words: string | null;
+  until: string | null;
+  by_clock: boolean;
+}
+
+chatField.get("/chat/statuses", requireUser, requireCompany(), async (c) => {
+  const { db, companyId } = c.var;
+  await requireOn(c);
+  const rows = must(await db.rpc("chat_statuses", { p_company: companyId })) as ChatStatusOut[];
+  return c.json({ statuses: rows });
+});
+
+chatField.put("/chat/status", requireUser, requireCompany(), async (c) => {
+  const body = await readJson(
+    c,
+    z
+      .object({
+        kind: z.enum([CUSTOM_STATUS, ...STATUS_KINDS.map((k) => k.key)] as [string, ...string[]]),
+        words: z.string().trim().max(STATUS_TEXT_MAX, `Keep it under ${STATUS_TEXT_MAX} characters.`).nullable().default(null),
+        until: z.iso.datetime({ offset: true }).nullable().default(null),
+      })
+      .refine((b) => b.kind !== CUSTOM_STATUS || Boolean(b.words), { message: "Write your status first.", path: ["words"] }),
+  );
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const row = { company_id: companyId, user_id: userId, kind: body.kind, words: body.kind === CUSTOM_STATUS ? body.words : null, until: body.until };
+  const { data, error } = await db.from("chat_statuses").upsert(row, { onConflict: "company_id,user_id" }).select("user_id, kind, words, until").single();
+  if (error) throw error.code === "22023" ? new HttpError(400, "Pick when it clears: a time in the next year.") : dbError(error);
+  const status: ChatStatusOut = { ...data, by_clock: false };
+  toCompany(companyId, { type: "status", user_id: userId, status });
+  return c.json({ status });
+});
+
+chatField.delete("/chat/status", requireUser, requireCompany(), async (c) => {
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const { error } = await db.from("chat_statuses").delete().eq("company_id", companyId).eq("user_id", userId);
+  if (error) throw dbError(error);
+  // What the clock says comes back, if it's running: read again by whoever's looking.
+  toCompany(companyId, { type: "status", user_id: userId, status: null });
+  return c.json({ ok: true });
 });
