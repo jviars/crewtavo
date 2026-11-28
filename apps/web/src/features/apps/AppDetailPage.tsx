@@ -188,8 +188,9 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
       // Google's own calendars go with its sign-in; the ones added by address are removed here.
       if (hasAccount(app)) {
         const res = await api.post<{ revoked?: boolean }>(`/apps/${app.id}/disconnect`, options);
+        if (app.id === "meta" && res?.revoked === false) toast.info("Meta didn't confirm that it removed Crewtavo's access, so your app may still be listed on Facebook. To remove it there, open Settings & privacy, then Settings, then Business Integrations, pick the app and click Remove.");
         // The other Google app signs in the same way, and Google would sign it out too.
-        if (res?.revoked === false) toast.info(`Your Google sign-in stays, since ${app.id === "google_business" ? "Google Calendar" : "Google Business Profile"} uses it too. Remove Crewtavo in your Google account's security settings to end both.`);
+        else if (res?.revoked === false) toast.info(`Your Google sign-in stays, since ${app.id === "google_business" ? "Google Calendar" : "Google Business Profile"} uses it too. Remove Crewtavo in your Google account's security settings to end both.`);
       }
       if (app.id === "chatgpt") {
         if (app.team_plans || plan.data?.team_plans) await api.put("/ai/team-plans", { on: false });

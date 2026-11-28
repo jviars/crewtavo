@@ -256,10 +256,13 @@ export async function metaKeptSettings(admin: Db, companyId: string): Promise<Pi
   return live ? { live_confirmed_at: live } : {};
 }
 
-/** Signing out at Meta (with the app's own token, so it works after the user's sign-in ran out). */
-export async function signOutMeta(env: Env, secret: StoredSecret | null): Promise<void> {
+/**
+ * Signing out at Meta (with the app's own token, so it works after the user's sign-in ran out).
+ * False when Meta didn't confirm it: the app may still be listed in the person's Facebook settings.
+ */
+export async function signOutMeta(env: Env, secret: StoredSecret | null): Promise<boolean> {
   const keys = appKeysOf(secret?.extra);
-  await revokeMeta(env, keys.client_id ? (keys as unknown as MetaKeys) : null, (secret?.extra as MetaExtra | undefined)?.user_id);
+  return revokeMeta(env, keys.client_id ? (keys as unknown as MetaKeys) : null, (secret?.extra as MetaExtra | undefined)?.user_id);
 }
 
 /** Facebook & Instagram on its app page (GET /apps). */

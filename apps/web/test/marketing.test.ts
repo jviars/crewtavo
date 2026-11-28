@@ -1184,6 +1184,9 @@ describe("Facebook & Instagram in Apps", () => {
     expect(page).toContain("Signed in, but that Facebook account doesn't manage a Page.");
     expect(page).toContain("{!installed && (setup || keysSaved) && !unavailable && (");
     expect(page).toContain("Crewtavo's access to them is removed at Meta.");
+    // Meta didn't confirm the sign-out: the uninstall still finishes, and says where to remove the access.
+    expect(page).toContain('if (app.id === "meta" && res?.revoked === false)');
+    expect(page).toContain("Meta didn't confirm that it removed Crewtavo's access, so your app may still be listed on Facebook. To remove it there, open Settings & privacy, then Settings, then Business Integrations, pick the app and click Remove.");
     expect(source("../src/features/apps/MetaPanel.tsx")).toContain(`if {m.missing.length === 1 ? "it isn't" : "they aren't"} there`);
     const keys = source("../src/features/apps/AppKeysCard.tsx");
     const steps = keys.slice(keys.indexOf("export function MetaSteps"));

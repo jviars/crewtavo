@@ -413,9 +413,11 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
     await admin.from("outbox").update({ done_at: new Date().toISOString() }).match({ company_id: c.var.companyId, topic: "calendar.visit" }).is("done_at", null);
   }
   const secret = await loadSecret(c.env, admin, c.var.companyId, provider).catch(() => null);
+  // Meta didn't confirm the sign-out: the uninstall goes on, and says the access may still be listed at Facebook.
+  let metaSignedOut = true;
   // Stripe's open invoices are voided with the old key, which can finish after the response.
   if (secret && provider === "stripe") runInBackground(c, (await disconnectStripe(c.env, admin, c.var.companyId, secret)).settled);
-  else if (secret && provider === "meta") await signOutMeta(c.env, secret);
+  else if (secret && provider === "meta") metaSignedOut = await signOutMeta(c.env, secret);
   else if (secret?.api_key && provider === "quo") {
     // Quo stops sending here: the webhook Crewtavo made goes, if Quo still has it.
     const { data } = await admin.from("integrations").select("settings").match({ company_id: c.var.companyId, provider }).maybeSingle();
@@ -445,7 +447,7 @@ apps.post("/apps/:provider/disconnect", requireUser, requireCompany(ADMINS, "app
   if (provider === "twilio") forgetTwilio(c.var.companyId);
   // Texts go from Twilio again, if it's connected, from the next one on.
   if (provider === "quo") forgetQuo(c.var.companyId);
-  return c.json({ provider, status: "disconnected", ...(provider === "google_business" ? { removed } : {}), ...(shared ? { revoked: false } : {}) });
+  return c.json({ provider, status: "disconnected", ...(provider === "google_business" ? { removed } : {}), ...(shared || !metaSignedOut ? { revoked: false } : {}) });
 });
 
 /**

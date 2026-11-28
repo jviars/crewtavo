@@ -591,10 +591,23 @@ describe("signing in with the business's own Meta app", () => {
     expect(res.needs_business_permissions).toBe(true);
   });
 
+  it("still uninstalls when Meta doesn't confirm the sign-out, and says so, so the office can remove the access at Facebook", async () => {
+    for (const refusal of [graphError(190, undefined, "Invalid OAuth access token - Cannot parse access token"), graphError(2, undefined, "Service temporarily unavailable", 500)]) {
+      const f = fake({ override: (call) => (call.path === `${G}/u1/permissions` && call.method === "DELETE" ? refusal.clone() : undefined) });
+      const w = serve({ tables: { companies: [companyRow()], integrations: [metaRow()], integration_secrets: [await metaSecret()] }, outside: graph(f) });
+      const res = await request("/apps/meta/disconnect", { method: "POST" });
+      expect([res.status, await res.json()]).toEqual([200, { provider: "meta", status: "disconnected", revoked: false }]);
+      expect(w.tables.integrations![0]).toMatchObject({ status: "disconnected" });
+      expect((await loadSecret(env, adminClient(env), CO, "meta"))?.extra).toEqual(keys);
+    }
+  });
+
   it("signs out at Meta with the app's own token on disconnect, keeping the app's keys", async () => {
     const f = fake();
     const w = serve({ tables: { companies: [companyRow()], integrations: [metaRow()], integration_secrets: [await metaSecret({}, "expired-user-token")] }, outside: graph(f) });
-    await request("/apps/meta/disconnect", { method: "POST" });
+    const res = await request("/apps/meta/disconnect", { method: "POST" });
+    // Meta confirmed it, so there's nothing left for the office to do there.
+    expect(await res.json()).toEqual({ provider: "meta", status: "disconnected" });
     const revoke = graphCalls(w, "/u1/permissions", "DELETE");
     expect(revoke).toHaveLength(1);
     expect(revoke[0]!.auth).toBe(`Bearer ${keys.client_id}|${keys.client_secret}`);
