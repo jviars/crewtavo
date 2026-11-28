@@ -16,12 +16,12 @@ import { Icon } from "@/components/ui/Icon";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { signedUrls } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { Composer, type MentionOption } from "./Composer";
 import { chatKeys, markThreadRead, setFollowing, setViewingThread, useJobCards, useThread, type ChatChannel, type ChatMessage, type ChatState } from "./data";
 import { chatPlainText } from "@crewtavo/core/chat";
 import { MessageItem, type MessageContext } from "./MessageItem";
+import { useSignedLinks } from "./signedLinks";
 import { channelLabel, isNewDay, listTime, startsGroup, dayLabel } from "./ui";
 import { WaitingMessages } from "./Outbox";
 import s from "./chat.module.css";
@@ -104,7 +104,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, insert, onClose }: 
   }, [flash, all]);
 
   const paths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.map((a) => a.path)))].sort(), [all]);
-  const photos = useQuery({ queryKey: ["chat-photos", company, paths], enabled: paths.length > 0, staleTime: 50 * 60_000, queryFn: () => signedUrls(paths, 3600) });
+  const photos = useSignedLinks(paths);
   const jobs = useJobCards(all.map((m) => m.job_id).filter((id): id is string => Boolean(id)));
 
   const follow = useMutation({
@@ -117,7 +117,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, insert, onClose }: 
 
   const threadCtx: MessageContext = {
     ...ctx,
-    photos: { ...ctx.photos, ...(photos.data ?? {}) },
+    photos: { ...ctx.photos, ...photos },
     jobs: jobs.data ?? ctx.jobs,
     onThread: null,
     seen: null,

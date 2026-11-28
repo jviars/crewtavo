@@ -601,6 +601,14 @@ export default {
   "Add an emoji": "Agregar un emoji",
   "Add a reaction": "Agregar una reacción",
   "Reactions": "Reacciones",
+  "Who reacted": "Quién reaccionó",
+
+  // Team chat's settings: voice notes written out (features/chat/VoiceWordsSetting.tsx)
+  "Voice notes": "Notas de voz",
+  "Write out voice notes with OpenAI": "Escribir las notas de voz con OpenAI",
+  "Each voice note sent in Team chat is written out by OpenAI, and its words show under it for everyone in the channel. It uses your OpenAI key from <link>Apps → ChatGPT</link>, which is checked before this turns on, and is paid for on that key.": "OpenAI escribe cada nota de voz que se manda en el Chat del equipo, y sus palabras aparecen debajo para todos en el canal. Usa tu clave de OpenAI de <link>Aplicaciones → ChatGPT</link>, que se revisa antes de que esto se encienda, y se paga con esa clave.",
+  "Add an OpenAI key there first.": "Primero agrega ahí una clave de OpenAI.",
+  "Off, a voice note shows the words the phone heard as it was recorded, where the phone could.": "Apagado, una nota de voz muestra las palabras que el teléfono oyó al grabarla, donde el teléfono pudo.",
   "Find an emoji": "Busca un emoji",
   "Quick reactions": "Reacciones rápidas",
   "Emoji groups": "Grupos de emoji",

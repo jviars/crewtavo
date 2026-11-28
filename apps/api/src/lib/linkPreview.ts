@@ -135,25 +135,93 @@ function text(value: string | undefined, max: number): string | null {
 }
 const safeChar = (code: number) => (code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : "");
 
-/** A tag's attributes, lower-case names to raw values. */
-function attributes(tag: string): Record<string, string> {
+/** How much of a page is looked at for its tags: a page's <head> is near its start, and a page can't make reading it slow. */
+export const PARSE_CHARS = 64 * 1024;
+
+const isSpace = (ch: string | undefined) => ch === " " || ch === "\n" || ch === "\t" || ch === "\r" || ch === "\f";
+const isNameEnd = (ch: string | undefined) => ch === undefined || isSpace(ch) || ch === "/" || ch === ">";
+
+/**
+ * A tag's attributes from the text inside its < and >, lower-case names to raw values (the first of
+ * each name). One pass over it, never going back: no pattern of attributes or quotes makes it slow.
+ */
+function attributes(inside: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const m of tag.matchAll(/([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g)) {
-    out[m[1]!.toLowerCase()] ??= m[2] ?? m[3] ?? m[4] ?? "";
+  let i = 0;
+  const n = inside.length;
+  while (i < n) {
+    while (i < n && (isSpace(inside[i]) || inside[i] === "/")) i += 1;
+    const start = i;
+    while (i < n && !isSpace(inside[i]) && inside[i] !== "=" && inside[i] !== "/") i += 1;
+    const name = inside.slice(start, i).toLowerCase();
+    if (!name) {
+      i += 1;
+      continue;
+    }
+    while (i < n && isSpace(inside[i])) i += 1;
+    let value = "";
+    if (inside[i] === "=") {
+      i += 1;
+      while (i < n && isSpace(inside[i])) i += 1;
+      const quote = inside[i];
+      if (quote === '"' || quote === "'") {
+        const end = inside.indexOf(quote, i + 1);
+        value = inside.slice(i + 1, end === -1 ? n : end);
+        i = end === -1 ? n : end + 1;
+      } else {
+        const begin = i;
+        while (i < n && !isSpace(inside[i])) i += 1;
+        value = inside.slice(begin, i);
+      }
+    }
+    if (!(name in out)) out[name] = value;
   }
   return out;
 }
 
+/**
+ * The tags of a page's head that say what it is: each <meta>'s attributes and the <title>'s words.
+ * It reads forward with indexOf from one "<" to the next and stops at the end of the head (or the
+ * start of the body), so it takes time in step with the page, whatever the page holds.
+ */
+export function headTags(html: string): { metas: Array<Record<string, string>>; title: string | undefined } {
+  const page = html.slice(0, PARSE_CHARS);
+  const lower = page.toLowerCase();
+  const metas: Array<Record<string, string>> = [];
+  let title: string | undefined;
+  for (let at = lower.indexOf("<"); at !== -1; at = lower.indexOf("<", at + 1)) {
+    if (lower.startsWith("</head", at) || (lower.startsWith("<body", at) && isNameEnd(lower[at + 5]))) break;
+    if (lower.startsWith("<!--", at)) {
+      const end = lower.indexOf("-->", at + 4);
+      if (end === -1) break;
+      at = end + 2;
+      continue;
+    }
+    if (lower.startsWith("<meta", at) && isNameEnd(lower[at + 5])) {
+      const end = lower.indexOf(">", at + 5);
+      if (end === -1) break;
+      metas.push(attributes(page.slice(at + 5, end)));
+      at = end;
+    } else if (title === undefined && lower.startsWith("<title", at) && isNameEnd(lower[at + 6])) {
+      const open = lower.indexOf(">", at + 6);
+      const close = open === -1 ? -1 : lower.indexOf("</title", open + 1);
+      if (close === -1) break;
+      title = page.slice(open + 1, close);
+      at = close;
+    }
+  }
+  return { metas, title };
+}
+
 /** What a page's <head> says about it. */
 export function readHead(html: string, pageUrl: URL): Omit<LinkPreview, "url" | "image"> & { image: string | null } {
-  const head = html.slice(0, Math.max(html.search(/<\/head\s*>/i), 0) || html.length);
+  const tags = headTags(html);
   const meta = new Map<string, string>();
-  for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
-    const a = attributes(tag);
+  for (const a of tags.metas) {
     const key = (a.property ?? a.name ?? a.itemprop ?? "").toLowerCase();
     if (key && a.content !== undefined && !meta.has(key)) meta.set(key, a.content);
   }
-  const title = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(head)?.[1];
+  const title = tags.title;
   const imageHref = meta.get("og:image:secure_url") ?? meta.get("og:image") ?? meta.get("og:image:url") ?? meta.get("twitter:image") ?? meta.get("twitter:image:src");
   let image: string | null = null;
   if (imageHref) {
@@ -171,9 +239,12 @@ export function readHead(html: string, pageUrl: URL): Omit<LinkPreview, "url" | 
   };
 }
 
-/** A page's text in its own character set (from its header, else its first <meta charset>), else UTF-8. */
+const charsetOf = (value: string | undefined) => (value ? /charset\s*=\s*["']?([\w-]{1,40})/i.exec(value)?.[1] : undefined);
+
+/** A page's text in its own character set (from its header, else a <meta> near its start), else UTF-8. */
 function decodeHtml(bytes: Buffer, contentType: string): string {
-  const declared = /charset\s*=\s*["']?([\w-]+)/i.exec(contentType)?.[1] ?? /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i.exec(bytes.subarray(0, 2048).toString("latin1"))?.[1];
+  const metas = headTags(bytes.subarray(0, 2048).toString("latin1")).metas;
+  const declared = charsetOf(contentType) ?? metas.find((a) => a.charset)?.charset ?? charsetOf(metas.find((a) => a["http-equiv"]?.toLowerCase() === "content-type")?.content);
   try {
     return new TextDecoder(declared ?? "utf-8").decode(bytes);
   } catch {
@@ -182,8 +253,40 @@ function decodeHtml(bytes: Buffer, contentType: string): string {
 }
 
 let shrinking: Promise<unknown> = Promise.resolve();
-/** Bigger than any picture a page shows: one this size is something else, and isn't decoded. */
-const MAX_MEGAPIXELS = 24;
+/**
+ * Bigger than any picture a page shows for its link (they're about 1200 by 630): one this size is
+ * something else, and isn't decoded, as decoding one takes long and needs a lot of memory. Read from
+ * the picture's own header first.
+ */
+export const MAX_PICTURE_SIDE = 4000;
+const MAX_MEGAPIXELS = 8;
+
+/** A JPEG's width and height, from its frame header (the first SOF marker); null when it has none. */
+export function jpegSize(bytes: Uint8Array): [number, number] | null {
+  let i = 2;
+  while (i + 9 < bytes.length) {
+    if (bytes[i] !== 0xff) return null;
+    const marker = bytes[i + 1]!;
+    // Fill bytes, and markers that stand alone.
+    if (marker === 0xff) {
+      i += 1;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      i += 2;
+      continue;
+    }
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return [(bytes[i + 7]! << 8) | bytes[i + 8]!, (bytes[i + 5]! << 8) | bytes[i + 6]!];
+    }
+    i += 2 + ((bytes[i + 2]! << 8) | bytes[i + 3]!);
+  }
+  return null;
+}
+
+/** Whether a picture's header says it's small enough to decode. */
+const decodable = (size: [number, number] | null) =>
+  Boolean(size && size[0] > 0 && size[1] > 0 && size[0] <= MAX_PICTURE_SIDE && size[1] <= MAX_PICTURE_SIDE && size[0] * size[1] <= MAX_MEGAPIXELS * 1_000_000);
 
 /** A JPEG or PNG, as a small JPEG data: address; null for anything else, or one that doesn't decode. One at a time, with the server free between them. */
 export function previewPicture(bytes: Uint8Array, max = PREVIEW_LIMITS.imagePx): Promise<string | null> {
@@ -192,11 +295,11 @@ export function previewPicture(bytes: Uint8Array, max = PREVIEW_LIMITS.imagePx):
     .then(() => {
       let pixels: Rgba;
       if (isJpeg(bytes)) {
-        const photo = decode(bytes, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: MAX_MEGAPIXELS, maxMemoryUsageInMB: 160 });
+        if (!decodable(jpegSize(bytes))) return null;
+        const photo = decode(bytes, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: MAX_MEGAPIXELS, maxMemoryUsageInMB: 64 });
         pixels = { data: photo.data, width: photo.width, height: photo.height };
       } else if (isPng(bytes)) {
-        const [width, height] = pngSize(bytes);
-        if (!width || !height || width * height > MAX_MEGAPIXELS * 1_000_000) return null;
+        if (!decodable(pngSize(bytes))) return null;
         const png = PNG.sync.read(Buffer.from(bytes));
         // On white: a see-through picture would come out black as a JPEG.
         const data = new Uint8Array(png.data);

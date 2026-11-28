@@ -9,7 +9,7 @@
  * only messages they can read. Tapping one opens it in its channel (?message=).
  */
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type RefObject } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -126,6 +126,32 @@ export function ChatSearchField({ state, className, autoFocus, id }: { state: Ch
   );
 }
 
+/**
+ * On a phone the filters are one row that swipes sideways: it fades out at an edge where there are
+ * more filters past it (data-more), so a filter cut off by the screen's edge says there's more.
+ */
+function useScrollEdges(ref: RefObject<HTMLElement>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const mark = () => {
+      const left = el.scrollLeft > 1;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      const more = left && right ? "both" : left ? "left" : right ? "right" : "";
+      if (more) el.dataset.more = more;
+      else delete el.dataset.more;
+    };
+    mark();
+    el.addEventListener("scroll", mark, { passive: true });
+    const observer = new ResizeObserver(mark);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", mark);
+      observer.disconnect();
+    };
+  }, [ref]);
+}
+
 /** Wait until typing pauses before searching. */
 function useSettled<T>(value: T, ms = 250): T {
   const [settled, setSettled] = useState(value);
@@ -154,6 +180,8 @@ export function SearchPanel({ state }: { state: ChatState | undefined }) {
   const names = useNames(state, people.data);
   const [picking, setPicking] = useState(false);
   const listTop = useRef<HTMLDivElement>(null);
+  const chips = useRef<HTMLDivElement>(null);
+  useScrollEdges(chips);
 
   const key = JSON.stringify({ ...settled, q: settled.q.trim() });
   const results = useInfiniteQuery({
@@ -235,7 +263,7 @@ export function SearchPanel({ state }: { state: ChatState | undefined }) {
       <PanelHead title={channel ? t("Search {channel}", { channel: channelLabel(channel) }) : t("Search team chat")} icon="search" onClose={exit} />
       <div className={p.body}>
         <ChatSearchField state={state} className={`${p.field} mobile-only`} autoFocus={window.matchMedia("(max-width: 900px)").matches} />
-        <div className={p.tools} role="group" aria-label={t("Filters")}>
+        <div ref={chips} className={p.tools} role="group" aria-label={t("Filters")}>
           <Menu
             items={channelItems}
             label={channel ? t("In {channel}", { channel: channelLabel(channel) }) : t("In any channel")}

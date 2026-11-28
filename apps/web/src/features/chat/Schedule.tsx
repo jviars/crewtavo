@@ -176,7 +176,7 @@ export function SendLaterSheet({ open, onClose, onPick }: { open: boolean; onClo
 
 /** Names for <@id> and <@&role> in a waiting message, from what the composer can mention. */
 const namer = (options: readonly Mentionable[]) => (p: Exclude<MessagePart, { kind: "text" }>) =>
-  p.kind === "everyone" ? "everyone" : options.find((o) => o.token === (p.kind === "user" ? `<@${p.id}>` : `<@&${p.key}>`))?.label ?? (p.kind === "user" ? "someone" : "role");
+  p.kind === "everyone" ? t("everyone") : options.find((o) => o.token === (p.kind === "user" ? `<@${p.id}>` : `<@&${p.key}>`))?.label ?? (p.kind === "user" ? t("someone") : t("role"));
 
 /** Above the box: "2 scheduled messages", opening the list of them. */
 export function ScheduledBar({ channelId, options }: { channelId: string; options: readonly Mentionable[] }) {

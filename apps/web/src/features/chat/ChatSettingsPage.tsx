@@ -27,6 +27,7 @@ import { DirectMessagesSwitch } from "./DirectSwitch";
 import s from "./chat.module.css";
 import { Select } from "@/components/ui/Select";
 import { VoiceWordsSetting } from "./VoiceWordsSetting";
+import { t } from "@/lib/i18n";
 
 interface SettingsChannel {
   id: string;
@@ -387,7 +388,7 @@ function ChannelsTab({ data, adding, onAdding: setAdding }: { data: SettingsData
   return (
     <div className="stack">
       <p className={s.channelsNote}>Who can see each channel is on the Roles tab.</p>
-      <Section title="Direct messages">
+      <Section title={t("Direct messages")}>
         <DirectMessagesSwitch />
       </Section>
       {categories.map((cat) => {

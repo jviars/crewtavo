@@ -5,7 +5,7 @@
  * follow. On a phone the channel list and a channel are separate screens. Live updates come from
  * useChatLive (mounted by the app shell).
  */
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, NavLink, useMatch, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EVERYONE_TOKEN, roleToken, userToken } from "@crewtavo/core/chat";
@@ -18,13 +18,14 @@ import { useDocumentTitle } from "@/components/ui/PageHeader";
 import { Loading, Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
-import { signedUrls } from "@/lib/files";
 import { Composer, type MentionOption } from "./Composer";
 import { DirectFaces, DirectMenu, DirectSection, NewMessageButton, useStartDirect } from "./DirectMessages";
 import { directList, directPeople } from "./direct";
 import d from "./direct.module.css";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
+import { useSignedLinks } from "./signedLinks";
+import { attachmentLabel } from "./ChatFiles";
 import { ThreadPanel, threadPath, ThreadsLink, ThreadsView } from "./Threads";
 import { ChannelNotifyMenu, PauseMenu } from "./Notify";
 import { useSeenLines } from "./Seen";
@@ -363,12 +364,8 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
 
   // Photos to show and voice notes to play (documents open in the file viewer, which signs its own).
   const photoPaths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.filter((a) => chatFileKind(a) === "photo" || chatFileKind(a) === "audio").map((a) => a.path)))].sort(), [all]);
-  const photos = useQuery({
-    queryKey: ["chat-photos", company, photoPaths],
-    enabled: photoPaths.length > 0,
-    staleTime: 50 * 60_000,
-    queryFn: () => signedUrls(photoPaths, 3600),
-  });
+  // Each keeps its link while it works (signedLinks.ts): a playing voice note doesn't start again when a photo comes.
+  const photos = useSignedLinks(photoPaths);
   const jobs = useJobCards(all.map((m) => m.job_id).filter((id): id is string => Boolean(id)));
 
   const memberById = useMemo(() => new Map((members.data ?? []).map((m) => [m.id, m])), [members.data]);
@@ -402,11 +399,11 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
     myRoleKey: state.me?.role_key ?? session.role,
     canManage: channel.can_manage,
     canPost: channel.can_post,
-    personName: (id) => memberById.get(id)?.name ?? authors.get(id)?.name ?? "someone",
+    personName: (id) => memberById.get(id)?.name ?? authors.get(id)?.name ?? t("someone"),
     role: roleOf,
     mentionables: options,
     jobs: jobs.data,
-    photos: photos.data ?? {},
+    photos,
     onReply: (m) => {
       setReplyTo(m);
       setFocusKey(`reply:${m.id}`);
@@ -535,7 +532,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
               </div>
             );
           })}
-          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone")} />}
+          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? t("role") : t("everyone"))} />}
           {around && (
             <Button className={s.jumpLatest} size="sm" variant="dark" icon="arrowRight" onClick={() => navigate(`/chat/${channel.id}`, { replace: true })}>{t("Jump to the latest")}</Button>
           )}
@@ -589,7 +586,7 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
               <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
-              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? (chatFileKind(m.attachments[0]!) === "photo" ? t("Photo") : m.attachments[0]!.name || t("File")) : t("Job")}</div>
+              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? attachmentLabel(m.attachments[0]!) : t("Job")}</div>
             </button>
           ))}
         </div>

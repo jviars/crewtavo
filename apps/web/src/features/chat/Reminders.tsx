@@ -104,7 +104,7 @@ function RemindersDialog({ open, onClose, reminders, channels }: { open: boolean
         <ul className={f.laterList}>
           {reminders.map((r) => {
             const channel = channels.find((c) => c.id === r.channel_id);
-            const words = chatPlainText(r.message.body, (p) => (p.kind === "everyone" ? "everyone" : p.kind === "user" ? "someone" : "role")) || t("Photos or files");
+            const words = chatPlainText(r.message.body, (p) => (p.kind === "everyone" ? t("everyone") : p.kind === "user" ? t("someone") : t("role"))) || t("Photos or files");
             return (
               <li key={r.id} className={f.laterRow}>
                 <span className={f.laterWhen}><Icon name="alarm" size={12} />{laterLabel(r.remind_at, company.timezone)}</span>

@@ -1,7 +1,8 @@
 /**
  * A message's reactions under it: each kind as a pill with its count, yours in green. Tap one to add
- * or take back yours; hover it (or, on a phone, press and hold it) to see who. The quick reactions
- * show their own icon or words, an emoji itself. A last button adds another from the emoji picker.
+ * or take back yours; hover it (or, on a phone, press and hold it) to see who. With the keyboard,
+ * "Who reacted" comes after the pills, showing once it has the focus. The quick reactions show their
+ * own icon or words, an emoji itself. A last button adds another from the emoji picker.
  */
 import { useRef, useState, type PointerEvent } from "react";
 import { CHAT_REACTIONS } from "@crewtavo/core/chat";
@@ -65,7 +66,7 @@ export function ReactionPills({
           <button
             key={g.kind}
             type="button"
-            className={s.reaction}
+            className={`${s.reaction} ${x.pill}`}
             aria-pressed={on}
             aria-label={`${label}, ${g.users.length}`}
             title={`${label}: ${names(g)}`}
@@ -103,21 +104,25 @@ export function ReactionPills({
         align="start"
         onPick={(kind) => onToggle(kind, !mine.includes(kind))}
       />
-      <Dialog open={who} onClose={() => setWho(false)} title={t("Reactions")} size="sm">
-        <ul className={`dialog-body ${x.who}`}>
-          {reactions.map((g) => (
-            <li key={g.kind}>
-              <span className={x.whoKind} aria-hidden="true">
-                {QUICK_ICONS[g.kind] ? <Icon name={QUICK_ICONS[g.kind]!} size={16} /> : g.kind}
-              </span>
-              <span>
-                <strong>{reactionLabel(g.kind)}</strong>
-                <span>{names(g)}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </Dialog>
+      <button type="button" className={x.whoButton} onClick={() => setWho(true)}>{t("Who reacted")}</button>
+      {/* A tap in the sheet isn't a tap on the message under it. */}
+      <span style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}>
+        <Dialog open={who} onClose={() => setWho(false)} title={t("Reactions")} size="sm">
+          <ul className={`dialog-body ${x.who}`}>
+            {reactions.map((g) => (
+              <li key={g.kind}>
+                <span className={x.whoKind} aria-hidden="true">
+                  {QUICK_ICONS[g.kind] ? <Icon name={QUICK_ICONS[g.kind]!} size={16} /> : g.kind}
+                </span>
+                <span>
+                  <strong>{reactionLabel(g.kind)}</strong>
+                  <span>{names(g)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Dialog>
+      </span>
     </div>
   );
 }

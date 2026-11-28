@@ -440,14 +440,14 @@ isOneToOne: false
                   ]
                 },"chat_direct_members": {
                   Row: {
-                    "channel_id": string,"closed_at": string | null,"company_id": string,"joined_at": string,"left_at": string | null,"user_id": string
+                    "channel_id": string,"closed_at": string | null,"company_id": string,"joined_at": string,"left_at": string | null,"left_company": boolean,"user_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "channel_id": string,"closed_at"?: string | null,"company_id": string,"joined_at"?: string,"left_at"?: string | null,"user_id": string
+                    "channel_id": string,"closed_at"?: string | null,"company_id": string,"joined_at"?: string,"left_at"?: string | null,"left_company"?: boolean,"user_id": string
                   }
                   Update: {
-                    "channel_id"?: string,"closed_at"?: string | null,"company_id"?: string,"joined_at"?: string,"left_at"?: string | null,"user_id"?: string
+                    "channel_id"?: string,"closed_at"?: string | null,"company_id"?: string,"joined_at"?: string,"left_at"?: string | null,"left_company"?: boolean,"user_id"?: string
                   }
                   Relationships: [
                     {

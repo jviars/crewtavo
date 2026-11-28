@@ -179,17 +179,20 @@ select csr.check((select title from public.global_search(:'co', 'maple') where k
 select csr.check((select count(*) from public.global_search(:'co', 'east') where kind = 'channel') = 1, 'channels are still found');
 commit;
 
--- A direct conversation (once there are any) isn't a channel to jump to.
+-- ===== Direct conversations ======================================================================
+-- Ana and Omar talk about the gate code a lot, in their own conversation: newer than the office's
+-- message, and more of them than Ctrl+K shows.
 begin;
-do $$
-declare c text;
-begin
-  for c in select conname from pg_constraint where conrelid = 'public.chat_channels'::regclass and contype = 'c' and pg_get_constraintdef(oid) like '%kind%' loop
-    execute format('alter table public.chat_channels drop constraint %I', c);
-  end loop;
-end $$;
-insert into public.chat_channels (company_id, kind, name, category) values (:'co', 'direct', 'east-and-ana', 'Direct') returning id as dm \gset
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub": "c5ea0000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
-select csr.check((select count(*) from public.global_search(:'co', 'east') where kind = 'channel' and id = :'dm') = 0, 'Ctrl+K leaves direct conversations out of its channels');
+select public.chat_start_direct(:'co', array['c5ea0000-0000-0000-0000-000000000002']::uuid[]) as dm \gset
+select count(csr.post(:'co', :'dm', 'About the gate code, number ' || n)) from generate_series(1, 12) n;
+select csr.check(cardinality(csr.found(:'co', 'gate code')) = 13, 'Team chat''s own search finds the conversation''s messages too');
+select csr.check((select count(*) from public.global_search(:'co', 'gate code', 5) where kind = 'chat' and id = :'m_office') = 1,
+  'Ctrl+K still finds the office''s message, though a conversation has a dozen newer ones');
+select csr.check((select count(*) from public.global_search(:'co', 'gate code', 5) s join public.chat_channels c on c.id = s.parent_id where s.kind = 'chat' and c.kind = 'direct') = 0,
+  'and shows none from the conversation');
+select csr.check((select count(*) from public.global_search(:'co', 'dm', 5) where kind = 'channel' and id = :'dm') = 0
+  and (select count(*) from public.global_search(:'co', replace(:'dm', '-', ''), 5) where kind = 'channel') = 0, 'nor the conversation as a channel to jump to');
+select csr.check((select count(*) from public.chat_search(:'co', null, p_has := '{channel}')) = 0, 'and looking only in channels is no search on its own');
 rollback;
