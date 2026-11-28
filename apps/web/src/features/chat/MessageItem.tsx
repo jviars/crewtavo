@@ -162,7 +162,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   });
 
   const nameFor = (p: { kind: "user"; id: string } | { kind: "role"; key: string } | { kind: "everyone" }) =>
-    p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone";
+    p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? t("role") : t("everyone");
   const startEdit = () => setEditing(toEditable(message.body, nameFor));
   const saveEdit = () => {
     if (editing === null) return;

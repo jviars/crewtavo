@@ -108,7 +108,7 @@ export function MessageRow({
               <span key={f.path}>
                 <Icon name={f.kind === "photo" ? "image" : f.kind === "audio" ? "voicemail" : DOCUMENT_ICONS[chatDocumentType(f)]} size={12} />
                 <span>
-                  <Marked text={f.name || (f.kind === "photo" ? t("Photo") : f.kind === "audio" ? t("Voice note") : t("File"))} query={query} />
+                  <Marked text={f.kind === "audio" ? t("Voice note") : f.name || (f.kind === "photo" ? t("Photo") : t("File"))} query={query} />
                   {f.words && query.trim() && markMatches(f.words, query).some((m) => m.hit) && <>: “<Marked text={searchSnippet(f.words, query, 120)} query={query} />”</>}
                 </span>
               </span>

@@ -27,6 +27,15 @@ const TYPES: Record<string, string> = {
   txt: "text/plain",
 };
 
+/**
+ * A file in a line of words (a pinned message, a search result): a photo or a voice note by what it
+ * is (a voice note's stored name is English, "Voice note.webm"), a document by its name.
+ */
+export const attachmentLabel = (file: ChatAttachment) => {
+  const kind = chatFileKind(file);
+  return kind === "photo" ? t("Photo") : kind === "audio" ? t("Voice note") : file.name?.trim() || t("File");
+};
+
 /** The stored file's name: what it was called, or the name it's stored under. */
 const nameOf = (file: ChatAttachment) => file.name?.trim() || file.path.split("/").pop() || t("File");
 
@@ -59,7 +68,7 @@ export function FileCard({ file }: { file: ChatAttachment }) {
         <span className={f.icon} data-kind={audio ? "audio" : kind} aria-hidden="true"><Icon name={audio ? "voicemail" : DOCUMENT_ICONS[kind]} size={20} /></span>
         <span className={f.text}>
           <span className={f.name}>{name}</span>
-          <span className={f.meta}>{[audio ? t("Voice note") : CHAT_DOCUMENT_LABELS[kind], size].filter(Boolean).join(" · ")}</span>
+          <span className={f.meta}>{[audio ? t("Voice note") : t(CHAT_DOCUMENT_LABELS[kind]), size].filter(Boolean).join(" · ")}</span>
         </span>
       </button>
       {/* The viewer is drawn over the page, but its taps would still reach the message under it. */}

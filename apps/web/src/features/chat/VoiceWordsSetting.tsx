@@ -10,6 +10,7 @@ import { FormError } from "@/components/ui/Field";
 import { Section } from "@/components/ui/Section";
 import { SwitchRow } from "@/features/settings/SettingsKit";
 import { api } from "@/lib/api";
+import { t, T } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 
 export function VoiceWordsSetting() {
@@ -24,15 +25,17 @@ export function VoiceWordsSetting() {
   });
   if (!state.data) return null;
   return (
-    <Section level={3} title="Voice notes">
+    <Section level={3} title={t("Voice notes")}>
       <div className="set-rows">
         <SwitchRow
-          label="Write out voice notes with OpenAI"
+          label={t("Write out voice notes with OpenAI")}
           hint={
             <>
-              Each voice note sent in Team chat is written out by OpenAI, and its words show under it for everyone in the channel. It uses your OpenAI key from{" "}
-              <Link to="/apps/chatgpt">Apps → ChatGPT</Link>, which is checked before this turns on, and is paid for on that key.
-              {!state.data.openai && " Add an OpenAI key there first."} Off, a voice note shows the words the phone heard as it was recorded, where the phone could.
+              <T
+                text="Each voice note sent in Team chat is written out by OpenAI, and its words show under it for everyone in the channel. It uses your OpenAI key from <link>Apps → ChatGPT</link>, which is checked before this turns on, and is paid for on that key."
+                link={(words) => <Link to="/apps/chatgpt">{words}</Link>}
+              />
+              {!state.data.openai && <> {t("Add an OpenAI key there first.")}</>} {t("Off, a voice note shows the words the phone heard as it was recorded, where the phone could.")}
             </>
           }
           checked={save.isPending ? Boolean(save.variables) : state.data.on}

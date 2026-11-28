@@ -25,6 +25,7 @@ import d from "./direct.module.css";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { useSignedLinks } from "./signedLinks";
+import { attachmentLabel } from "./ChatFiles";
 import { ThreadPanel, threadPath, ThreadsLink, ThreadsView } from "./Threads";
 import { ChannelNotifyMenu, PauseMenu } from "./Notify";
 import { useSeenLines } from "./Seen";
@@ -395,7 +396,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
     myRoleKey: state.me?.role_key ?? session.role,
     canManage: channel.can_manage,
     canPost: channel.can_post,
-    personName: (id) => memberById.get(id)?.name ?? authors.get(id)?.name ?? "someone",
+    personName: (id) => memberById.get(id)?.name ?? authors.get(id)?.name ?? t("someone"),
     role: roleOf,
     mentionables: options,
     jobs: jobs.data,
@@ -528,7 +529,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
               </div>
             );
           })}
-          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone")} />}
+          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? t("role") : t("everyone"))} />}
           {around && (
             <Button className={s.jumpLatest} size="sm" variant="dark" icon="arrowRight" onClick={() => navigate(`/chat/${channel.id}`, { replace: true })}>{t("Jump to the latest")}</Button>
           )}
@@ -577,7 +578,7 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
               <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
-              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? (chatFileKind(m.attachments[0]!) === "photo" ? t("Photo") : m.attachments[0]!.name || t("File")) : t("Job")}</div>
+              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? attachmentLabel(m.attachments[0]!) : t("Job")}</div>
             </button>
           ))}
         </div>

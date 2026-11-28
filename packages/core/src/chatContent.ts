@@ -5,6 +5,7 @@
  * records they name, its own address, and how a search's words are found in it again to mark them.
  */
 import { chatBlocks, type ChatBlock, type ChatInline } from "./chat";
+import { msg } from "./i18n";
 
 /** The parts of URL (browsers' and Node's) used here: core is built without either's types. */
 type WebUrl = { origin: string; pathname: string };
@@ -61,8 +62,8 @@ const DOCUMENT_TYPES: Record<string, ChatDocumentType> = {
 export const chatDocumentType = (file: { path?: string | null; name?: string | null }): ChatDocumentType =>
   DOCUMENT_TYPES[ending(file.path) || ending(file.name)] ?? "text";
 
-/** "PDF", "Word", "Excel", "PowerPoint", "Text", "CSV": the names people know these files by (the same in every language). */
-export const CHAT_DOCUMENT_LABELS: Record<ChatDocumentType, string> = { pdf: "PDF", word: "Word", sheet: "Excel", slides: "PowerPoint", text: "Text", csv: "CSV" };
+/** "PDF", "Word", "Excel", "PowerPoint", "Text", "CSV": the names people know these files by (the same in every language, but "Text"). Shown through t(). */
+export const CHAT_DOCUMENT_LABELS: Record<ChatDocumentType, string> = { pdf: "PDF", word: "Word", sheet: "Excel", slides: "PowerPoint", text: msg("Text"), csv: "CSV" };
 
 /** A size as a file card shows it: "820 KB", "1.2 MB". */
 export function fileSize(bytes: number | null | undefined): string | null {
