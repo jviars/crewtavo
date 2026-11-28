@@ -20,6 +20,7 @@ import { Composer, type MentionOption } from "./Composer";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
+import { useWaitingByChannel, WaitingCount, WaitingMessages } from "./Outbox";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { t } from "@/lib/i18n";
@@ -163,6 +164,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
   const session = useSession();
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
+  const waiting = useWaitingByChannel(session.userId, session.company.id);
   const groups = useMemo(() => {
     const map = new Map<string, { name: string; order: number; channels: ChatChannel[] }>();
     for (const c of channels) {
@@ -212,7 +214,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
                     to={`/chat/${c.id}`}
                     className={s.channel}
                     data-unread={unread || undefined}
-                    aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}`}
+                    aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}${waiting.get(c.id) ? `, ${t.plural(waiting.get(c.id)!, { one: "{count} message waiting for signal", other: "{count} messages waiting for signal" })}` : ""}`}
                   >
                     <span className={s.hash} aria-hidden="true"><ChannelIcon channel={c} size={14} /></span>
                     <span className={s.channelText}>
@@ -222,6 +224,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
                     </span>
                     <span className={s.channelEnd}>
                       {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
+                      <WaitingCount count={waiting.get(c.id) ?? 0} />
                       {readOnly && <span className="hide-mobile"><Icon name="eye" size={13} label={t("Read only")} /></span>}
                       {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
                       {unread && <span className={s.dot} aria-hidden="true" />}
@@ -432,6 +435,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
               </div>
             );
           })}
+          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone")} />}
           {around && (
             <Button className={s.jumpLatest} size="sm" variant="dark" icon="arrowRight" onClick={() => navigate(`/chat/${channel.id}`, { replace: true })}>{t("Jump to the latest")}</Button>
           )}

@@ -691,4 +691,14 @@ export default {
   "Tomorrow at 6:30 AM": "Mañana a las 6:30 a.m.",
   "Monday at 7:00 AM": "El lunes a las 7:00 a.m.",
   "Tomorrow at 9:00 AM": "Mañana a las 9:00 a.m.",
+  // Team chat: messages waiting for signal
+  "{count} messages waiting for signal": { one: "{count} mensaje esperando señal", other: "{count} mensajes esperando señal" },
+  "Goes when there's signal": "Se envía cuando haya señal",
+  "A message waiting for signal": "Un mensaje esperando señal",
+  "Waiting for signal": "Esperando señal",
+  "Sending…": "Enviando…",
+  "Didn't send: {reason}": "No se envió: {reason}",
+  "Voice note": "Nota de voz",
+  "Send now": "Enviar ahora",
+  "Sending failed.": "No se pudo enviar.",
 } satisfies Catalog;

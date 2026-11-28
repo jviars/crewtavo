@@ -9,6 +9,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { ChatColor } from "@crewtavo/core/chat";
 import { activeCompany, api, refreshSignIn, supabase } from "@/lib/api";
 import { useSession, type Session } from "@/lib/session";
+import { startChatOutbox } from "./outbox";
 
 // ---------------------------------------------------------------------------------------------
 // Shapes
@@ -339,6 +340,9 @@ export function useChatLive() {
   const company = session.company.id;
   const me = session.userId;
   const refresh = session.refresh;
+
+  // Messages kept on the phone for signal go out once there is (outbox.ts).
+  useEffect(() => (on ? startChatOutbox(queryClient, me) : undefined), [on, me, queryClient]);
 
   useEffect(() => {
     if (!on) return;

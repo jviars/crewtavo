@@ -13,10 +13,11 @@ import { Icon } from "@/components/ui/Icon";
 import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
-import { uploadFile, uploadOnce } from "@/lib/files";
+import { uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { addMessage, useTyping, type ChatAttachment, type ChatChannel, type ChatMessage } from "./data";
+import { useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, roleColor } from "./ui";
 import { usePhone, useVoiceRecorder } from "./voice";
 import { MicButton, VoiceRecorder, type VoicePreview } from "./VoiceRecorder";
@@ -35,8 +36,12 @@ interface Upload {
   id: string;
   name: string;
   preview: string;
-  status: "uploading" | "done" | "error";
+  /** waiting: no signal to store it; it goes with the message, which waits on the phone (outbox.ts). */
+  status: "uploading" | "done" | "error" | "waiting";
   path?: string;
+  body?: Blob;
+  type?: string;
+  size?: number;
 }
 
 interface Draft {
@@ -133,19 +138,18 @@ export function Composer({
 
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
+  // Sent now, or kept on the phone until there's signal (outbox.ts); what the server refuses is said here.
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: ChatAttachment[]; job_id: string | null; reply_to: string | null }) =>
-      api.post<{ message: ChatMessage }>(`/chat/channels/${channel.id}/messages`, payload),
-    onSuccess: ({ message }) => addMessage(queryClient, session.company.id, message),
+    mutationFn: (payload: { body: string; attachments: WaitingFile[]; job_id: string | null; reply_to: string | null }) =>
+      sendChatMessage(queryClient, { ...payload, userId: session.userId, companyId: session.company.id, channelId: channel.id }),
   });
-  // A voice note: recorded here (voice.ts), stored in the channel's folder, then sent on its own.
+  // A voice note: recorded here (voice.ts), then sent on its own, stored in the channel's folder as it goes.
   const voice = useVoiceRecorder();
   const phone = usePhone();
   const sendVoice = useMutation({
-    mutationFn: async (note: VoicePreview) => {
+    mutationFn: (note: VoicePreview) => {
       const path = `${session.company.id}/chat/${channel.id}/${crypto.randomUUID()}.${note.ext}`;
-      await uploadOnce(path, note.blob);
-      const file: ChatAttachment = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, ...(note.words && { words: note.words.slice(0, 5000) }) };
+      const file: WaitingFile = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, body: note.blob, ...(note.words && { words: note.words.slice(0, 5000) }) };
       return send.mutateAsync({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null });
     },
     onSuccess: () => {
@@ -155,13 +159,14 @@ export function Composer({
   });
 
   const ready = uploads.every((u) => u.status !== "uploading");
-  const photos = uploads.filter((u) => u.status === "done" && u.path);
+  const photos = uploads.filter((u) => (u.status === "done" || u.status === "waiting") && u.path);
   const canSend = ready && !send.isPending && (text.trim().length > 0 || photos.length > 0 || Boolean(job));
 
   const submit = () => {
     if (!canSend) return;
     const body = fromEditable(text.trim(), picked);
-    const payload = { body, attachments: photos.map((u) => ({ path: u.path!, name: u.name })), job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
+    const attachments: WaitingFile[] = photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }), ...(u.status === "waiting" && { body: u.body }) }));
+    const payload = { body, attachments, job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
     send.mutate(payload, {
       onSuccess: () => {
         setText("");
@@ -266,13 +271,23 @@ export function Composer({
     if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos.", { count: MAX_PHOTOS }));
     // Photos turned away for space are told about once, together, with why and who can make room.
     const refused = new RefusedForSpace();
-    const sent = chosen.map((file) => {
+    const sent = chosen.map(async (file) => {
       const id = crypto.randomUUID();
-      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading" }]);
-      return uploadFile(session.company.id, `chat/${channel.id}`, file).then(
-        (path) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done", path } : x))),
+      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading", size: file.size }]);
+      // To a path chosen first, so a photo with no signal now goes up once, with its message, later.
+      let ready: Awaited<ReturnType<typeof prepareChatFile>>;
+      try {
+        ready = await prepareChatFile(session.company.id, channel.id, file);
+      } catch (error) {
+        setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
+        toast.error((error as Error).message);
+        return;
+      }
+      setUploads((u) => u.map((x) => (x.id === id ? { ...x, path: ready.path, type: ready.type } : x)));
+      return uploadOnce(ready.path, ready.body).then(
+        () => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done" } : x))),
         (error: unknown) => {
-          setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
+          setUploads((u) => u.map((x) => (x.id === id ? (noSignal(error) ? { ...x, status: "waiting", body: ready.body } : { ...x, status: "error" }) : x)));
           refused.add(error, file.name, file.size);
         },
       );
@@ -363,7 +378,7 @@ export function Composer({
             {uploads.map((u) => (
               <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this photo") : u.name}>
                 <img src={u.preview} alt="" />
-                <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.name}</span>
+                <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.status === "waiting" ? t("Goes when there's signal") : u.name}</span>
                 <button type="button" className="icon-btn" aria-label={t("Remove {tag}", { tag: u.name })} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={14} /></button>
               </span>
             ))}

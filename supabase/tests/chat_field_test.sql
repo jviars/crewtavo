@@ -99,3 +99,15 @@ select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000
 update public.chat_messages set deleted_at = now() where id = :'voice_msg';
 commit;
 select tcf.check((select count(*) from public.chat_transcripts where message_id = :'voice_msg') = 0, 'deleting the message takes its words with it');
+
+-- ===== A message sent twice with the id the phone chose =======================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_messages (id, company_id, channel_id, author_id, body)
+values ('5e5e5e5e-0000-4000-8000-000000000001', :'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Done at Elm St <@f1e1d000-0000-0000-0000-000000000003>');
+select tcf.expect_error(format('insert into public.chat_messages (id, company_id, channel_id, author_id, body) values (%L, %L, %L, %L, %L)',
+  '5e5e5e5e-0000-4000-8000-000000000001', :'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Done at Elm St <@f1e1d000-0000-0000-0000-000000000003>'), 'the same message sent again is turned away by its id');
+commit;
+select tcf.check((select count(*) from public.chat_messages where body like 'Done at Elm St%') = 1, 'so it''s there once');
+select tcf.check((select count(*) from public.notifications where link like '%5e5e5e5e-0000-4000-8000-000000000001') = 1, 'and Lee hears about it once');

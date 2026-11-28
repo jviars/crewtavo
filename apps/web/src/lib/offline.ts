@@ -21,6 +21,7 @@ import type { Role } from "@crewtavo/core/roles";
 import { dehydrate, hydrate, onlineManager, type DehydratedState, type Mutation, type MutationFunction, type QueryClient } from "@tanstack/react-query";
 import { ApiError, isAuthError, isNetworkError, isRestarting, SESSION_EXPIRED } from "./errors";
 import { forgetPhonePhotos, photosWaiting, startPhotoQueue, subscribePhonePhotos } from "./offlinePhotos";
+import { forgetChatOutbox } from "@/features/chat/outbox";
 import { forgetRecents } from "./recent";
 import { t } from "./i18n";
 
@@ -473,6 +474,8 @@ export function forgetOfflineCache(userId: string) {
   // The records they last opened, for the command palette (lib/recent.ts): clients' names and addresses.
   forgetRecents(userId);
   forgetPhonePhotos(userId);
+  // Team chat messages waiting for signal (features/chat/outbox.ts).
+  forgetChatOutbox(userId);
   tellServiceWorker(userId, 0);
 }
 
