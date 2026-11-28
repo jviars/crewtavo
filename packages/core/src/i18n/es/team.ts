@@ -757,4 +757,13 @@ export default {
   "Use the business's time zone ({zone})": "Usar la zona horaria del negocio ({zone})",
   "Use this device's time zone ({zone})": "Usar la zona horaria de este dispositivo ({zone})",
   "Pick at least one day for quiet hours to start on.": "Elige al menos un día en que empiecen las horas de silencio.",
+
+  // Team chat: who has seen a message (features/chat/Seen.tsx, direct.ts)
+  "Seen by {seen} of {total}": "Visto por {seen} de {total}",
+  "Seen by": "Visto por",
+  "Seen · {count}": "Lo vieron · {count}",
+  "Nobody has seen it yet.": "Nadie lo ha visto todavía.",
+  "Not yet · {count}": "Todavía no · {count}",
+  "Seen by everyone": "Visto por todos",
+  "Seen by {names}": "Visto por {names}",
 } satisfies Catalog;

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/api", () => ({ activeCompany: () => null, api: {}, refreshSignIn: async () => "ok", supabase: () => ({}) }));
 vi.mock("@/lib/session", () => ({ useSession: () => ({}) }));
 
-const { directList, directName, directPeople, withDirectNames } = await import("../src/features/chat/direct");
+const { directList, directName, directPeople, seenText, withDirectNames } = await import("../src/features/chat/direct");
 type State = Parameters<typeof withDirectNames>[0];
 
 const person = (id: string, name: string) => ({ id, name, avatar_color: null, avatar_url: null, role_key: "field_crew", role_label: "Field crew", color: "default" as const });
@@ -53,5 +53,15 @@ describe("the Direct messages list", () => {
     );
     expect(list.map((c) => c.id)).toEqual(["new", "empty", "old"]);
     expect(directList([channel("closed", { closed: true })], "closed").map((c) => c.id)).toEqual(["closed"]);
+  });
+});
+
+describe("seen, in a direct conversation", () => {
+  it("says Seen with one other person, and who in a group", () => {
+    expect(seenText([], 1)).toBeNull();
+    expect(seenText([person("m", "Marcus Reyes")], 1)).toBe("Seen");
+    expect(seenText([person("m", "Marcus Reyes")], 3)).toBe("Seen by Marcus Reyes");
+    expect(seenText([person("m", "Marcus Reyes"), person("t", "Tyler Brooks")], 3)).toBe("Seen by Marcus and Tyler");
+    expect(seenText([person("m", "Marcus Reyes"), person("t", "Tyler Brooks"), person("s", "Sam Ortiz")], 3)).toBe("Seen by everyone");
   });
 });

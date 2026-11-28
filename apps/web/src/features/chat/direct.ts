@@ -42,3 +42,15 @@ export function directList(channels: ChatChannel[], current: string | undefined)
   const at = (c: ChatChannel) => c.last_message_at ?? c.created_at ?? "";
   return channels.filter((c) => c.kind === "direct" && (!c.closed || c.id === current)).sort((a, b) => at(b).localeCompare(at(a)));
 }
+
+/**
+ * Under my latest message in a conversation: "Seen" once the other person has read past it, or in a
+ * group "Seen by Marcus", "Seen by Marcus and Tyler", "Seen by everyone". Null while nobody has.
+ */
+export function seenText(readers: Array<Pick<ChatPerson, "name">>, others: number): string | null {
+  if (!readers.length) return null;
+  if (others <= 1) return t("Seen");
+  if (readers.length >= others) return t("Seen by everyone");
+  return t("Seen by {names}", { names: directName(readers) });
+}
+

@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { AppEnv, Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { forgetAudiences, onlineUsers, subscribe, toChannel, toCompany, toUser, type ChatEvent } from "../lib/chatHub";
+import { channelKind, noteSeen } from "../lib/chatSeen";
 import { IN_CHANNEL, threadSummaries } from "../lib/chatThreads";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reportError } from "../lib/monitoring";
@@ -418,6 +419,9 @@ chat.post("/chat/channels/:id/read", requireUser, requireCompany(), async (c) =>
   const { error } = await db.rpc("chat_mark_read", { p_channel: id });
   if (error) throw chatDbError(error);
   toUser(companyId, userId, { type: "read", channel_id: id });
+  // "Seen by" in announcements and direct conversations (lib/chatSeen.ts).
+  const kind = await channelKind(db, id);
+  if (kind) noteSeen(adminClient(c.env), companyId, { id, kind }, userId, new Date().toISOString(), (e) => reportError(e, { feature: "chat-live" }));
   return c.json({ ok: true });
 });
 

@@ -44,6 +44,8 @@ export interface MessageContext {
   onJumpTo: (id: string) => void;
   /** Open a message's thread (Threads.tsx); not given inside a thread, where threads don't nest. */
   onThread?: ((rootId: string) => void) | null;
+  /** What shows under a message about who has read it (Seen.tsx), if anything. */
+  seen?: ((message: ChatMessage) => ReactNode) | null;
 }
 
 type TextContext = Pick<MessageContext, "personName" | "role" | "onPerson">;
@@ -299,6 +301,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         )}
 
         {message.thread && ctx.onThread && <ThreadSummary thread={message.thread} onOpen={() => ctx.onThread?.(message.id)} />}
+        {ctx.seen?.(message)}
       </div>
 
       {editing === null && (

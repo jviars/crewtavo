@@ -26,6 +26,7 @@ import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useL
 import { MembersPanel, PersonDialog } from "./Members";
 import { ThreadPanel, threadPath, ThreadsLink, ThreadsView } from "./Threads";
 import { ChannelNotifyMenu, PauseMenu } from "./Notify";
+import { useSeenLines } from "./Seen";
 import n from "./notify.module.css";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
@@ -357,6 +358,8 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
   }, [members.data, state.roles, me, trusted, channel.can_manage, isDirect]);
   const startDirect = useStartDirect();
   const message = state.direct_messages ? (p: ChatMember) => startDirect.mutate([p.id]) : null;
+  // "Seen by" under announcements (for their authors and the channel's managers) and in direct conversations.
+  const seen = useSeenLines({ channel, messages: all, me, manager: channel.can_manage || hasRole(session, "admin", "office"), people: state.people });
 
   const ctx: MessageContext = {
     me,
@@ -380,6 +383,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
       } else navigate(`/chat/${channel.id}?message=${id}`);
     },
     onThread: (rootId) => navigate(threadPath(channel.id, rootId)),
+    seen: seen.line,
   };
 
   const person: ChatMember | null = personId
@@ -505,6 +509,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
         onMessage={message}
       />
       <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
+      {seen.dialog}
       <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
     </section>
     {thread ? (

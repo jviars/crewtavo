@@ -83,6 +83,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
     photos: { ...ctx.photos, ...(photos.data ?? {}) },
     jobs: jobs.data ?? ctx.jobs,
     onThread: null,
+    seen: null,
     onReply: (m) => {
       setReplyTo(m);
       setFocusKey(`reply:${m.id}`);

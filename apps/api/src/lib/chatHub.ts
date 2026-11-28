@@ -16,6 +16,8 @@ export type ChatEvent =
   | { type: "reactions"; channel_id: string; message_id: string; reactions: unknown }
   | { type: "typing"; channel_id: string; user_id: string; name: string }
   | { type: "read"; channel_id: string }
+  // Someone read further (lib/chatSeen.ts): in a direct conversation, who and up to when.
+  | { type: "seen"; channel_id: string; reads?: Array<{ user_id: string; at: string }> }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
   | { type: "chat"; enabled: boolean };

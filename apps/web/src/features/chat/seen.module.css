@@ -1,0 +1,20 @@
+/* "Seen by" (Seen.tsx): the line under an announcement, the mark under your latest direct message, and who has seen it. */
+.line {
+  display: inline-flex; align-items: center; gap: 5px; min-height: 24px; margin-top: 4px; padding: 0 6px 0 2px; border: 0; border-radius: 6px;
+  background: none; color: var(--quiet); font: inherit; font-size: var(--fs-12); font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.line:hover { background: var(--fill-2); color: var(--ink); }
+.mark { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 2px; color: var(--quiet); font-size: var(--fs-11); }
+.groupTitle { margin: 6px 0 0; color: var(--quiet); font-size: var(--fs-12); font-weight: 600; letter-spacing: normal; }
+.people { display: grid; margin: 0; padding: 0; list-style: none; }
+.person { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--row-divider); }
+.person[data-not-yet] { color: var(--text-3); }
+.name { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-14); text-overflow: ellipsis; white-space: nowrap; }
+.when { flex: none; color: var(--quiet); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) {
+  .line { min-height: 36px; font-size: var(--fs-13); }
+  .mark { font-size: var(--fs-12); }
+  .person { min-height: 52px; }
+  .name { font-size: var(--fs-15); }
+}

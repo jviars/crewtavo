@@ -139,6 +139,7 @@ export const chatKeys = {
   pins: (company: string, channel: string) => ["chat", company, "pins", channel] as const,
   thread: (company: string, root: string) => ["chat", company, "thread", root] as const,
   threads: (company: string) => ["chat", company, "threads"] as const,
+  seen: (company: string, channel: string) => ["chat", company, "seen", channel] as const,
   settings: (company: string) => ["chat", company, "settings"] as const,
 };
 
@@ -408,6 +409,7 @@ type LiveEvent =
   | { type: "reactions"; channel_id: string; message_id: string; reactions: ChatReactionGroup[] }
   | { type: "typing"; channel_id: string; user_id: string; name: string }
   | { type: "read"; channel_id: string }
+  | { type: "seen"; channel_id: string; reads?: Array<{ user_id: string; at: string }> }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
   | { type: "chat"; enabled: boolean };
@@ -472,6 +474,10 @@ export function useChatLive() {
           return;
         case "read":
           refreshState();
+          return;
+        case "seen":
+          // Someone read further: "Seen by" (Seen.tsx) asks again.
+          queryClient.invalidateQueries({ queryKey: chatKeys.seen(company, event.channel_id) });
           return;
         case "channels":
           queryClient.invalidateQueries({ queryKey: chatKeys.all(company) });
