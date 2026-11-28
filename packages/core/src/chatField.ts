@@ -53,9 +53,14 @@ export function recordedFile(made: string | undefined, asked: RecordingType): { 
   return { type: asked.type, ext: asked.ext };
 }
 
-/** Whether a message's file is a voice note (or any recording): played in the message, not opened. */
+/**
+ * Whether a message's file is a voice note (or any recording): played in the message, not opened.
+ * By the ending it's stored under, which the database holds to (private.chat_file_endings), not the
+ * type the sender gave it: a document called audio/webm is still a document. Only a file not stored
+ * yet goes by its type.
+ */
 export const isAudio = (file: { type?: string | null; path?: string | null }) =>
-  Boolean(file.type?.startsWith("audio/")) || /\.(webm|weba|m4a|aac|mp3|mpga|ogg|oga|opus|wav)$/i.test(file.path ?? "");
+  file.path ? /\.(webm|weba|m4a|mp4|aac|mp3|mpga|ogg|oga|opus|wav)$/i.test(file.path) : Boolean(file.type?.startsWith("audio/"));
 
 /** "0:42", "4:05". */
 export function clockText(seconds: number): string {

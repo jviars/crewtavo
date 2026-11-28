@@ -17,6 +17,8 @@ const server = vi.hoisted(() => ({
   loseAnswers: 0,
   /** Every send turned down, as when the person can't post in the channel any more. */
   refuse: false,
+  /** Sends held until let go: a slow network. */
+  hold: null as null | Promise<void>,
 }));
 const open = vi.hoisted(() => ({ errors: null as null | typeof import("../src/lib/errors") }));
 
@@ -26,6 +28,7 @@ vi.mock("../src/lib/api", () => ({
   api: {
     post: async (path: string, body: { id: string; body: string; attachments: unknown[] }) => {
       server.posts++;
+      if (server.hold) await server.hold;
       if (!onlineManager.isOnline()) throw new open.errors!.ApiError("No internet connection.", 0, "network");
       if (server.refuse) throw new open.errors!.ApiError("You can't post in this channel.", 403);
       const channel = path.split("/")[3]!;
@@ -63,6 +66,7 @@ async function openApp(signal: boolean) {
   open.errors = await import("../src/lib/errors");
   const outbox = await import("../src/features/chat/outbox");
   return {
+    outbox,
     ...outbox,
     start: (userId: string) => closeApp.push(outbox.startChatOutbox(userId, () => undefined)),
     send: (text: string, files: Array<{ path: string; body?: Blob }> = []) =>
@@ -75,7 +79,7 @@ async function settled() {
 
 beforeEach(() => {
   idb.current = new FakeIndexedDb();
-  Object.assign(server, { posts: 0, loseAnswers: 0, refuse: false });
+  Object.assign(server, { posts: 0, loseAnswers: 0, refuse: false, hold: null });
   server.messages.clear();
   server.files.clear();
   vi.stubGlobal("indexedDB", idb.current);
@@ -190,5 +194,53 @@ describe("messages waiting in a conversation", () => {
     await settled();
     expect([...server.messages.values()].map((m) => m.body)).toEqual(["First", "Second", "Third"]);
     expect(app.waitingNow()).toEqual([]);
+  });
+});
+
+describe("a message sent from the box", () => {
+  it("is held on the phone while its answer is slow, so it's neither lost nor sent twice, and one written after it goes after it", async () => {
+    const app = await openApp(true);
+    app.start("u1");
+    let letGo = () => undefined as void;
+    server.hold = new Promise<void>((resolve) => (letGo = resolve));
+    const first = app.send("Gate is locked");
+    await settled();
+    expect(app.waitingNow()).toMatchObject([{ body: "Gate is locked", direct: true, sending: true }]);
+    // Leaving the conversation and writing again: the second waits behind the first.
+    const second = app.send("Never mind, found the key");
+    await settled();
+    expect(app.waitingNow().map((m) => m.body)).toEqual(["Gate is locked", "Never mind, found the key"]);
+    server.hold = null;
+    letGo();
+    expect(await first).toMatchObject({ body: "Gate is locked" });
+    expect(await second).toBeNull();
+    await settled();
+    expect([...server.messages.values()].map((m) => m.body)).toEqual(["Gate is locked", "Never mind, found the key"]);
+    expect(app.waitingNow()).toEqual([]);
+    expect(kept()).toEqual([]);
+  });
+
+  it("whose answer never comes waits for signal like the rest", async () => {
+    const app = await openApp(true);
+    app.start("u1");
+    server.loseAnswers = 1;
+    expect(await app.send("Running late")).toBeNull();
+    expect(app.waitingNow()).toMatchObject([{ body: "Running late", sending: false, attempts: 1 }]);
+    expect(app.waitingNow()[0]!.direct).toBeFalsy();
+    expect(kept()).toHaveLength(1);
+  });
+});
+
+describe("thread replies waiting", () => {
+  it("wait in their thread, and in the channel only when they're sent there too", async () => {
+    const app = await openApp(false);
+    app.start("u1");
+    await app.outbox.sendChatMessage({ userId: "u1", companyId: "c1", channelId: "ch1", body: "In the thread", attachments: [], job_id: null, reply_to: null, thread_root: "root1", also_in_channel: false });
+    await app.outbox.sendChatMessage({ userId: "u1", companyId: "c1", channelId: "ch1", body: "In both", attachments: [], job_id: null, reply_to: null, thread_root: "root1", also_in_channel: true });
+    await app.send("In the channel");
+    const all = app.waitingNow();
+    expect(app.waitingIn(all, "u1", "c1", "ch1").map((m) => m.body)).toEqual(["In both", "In the channel"]);
+    expect(app.waitingIn(all, "u1", "c1", "ch1", "root1").map((m) => m.body)).toEqual(["In the thread", "In both"]);
+    expect(app.waitingIn(all, "u1", "c2", "ch1")).toEqual([]);
   });
 });

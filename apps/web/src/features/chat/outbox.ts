@@ -46,6 +46,12 @@ export interface WaitingMessage {
   /** When the timer tries it next (ms). */
   nextAt: number;
   sending: boolean;
+  /**
+   * Being sent the first time, straight from the box: held here so leaving the screen meanwhile
+   * neither loses it nor lets it go twice. The timer leaves it alone; screens show it only once
+   * the answer is slow in coming.
+   */
+  direct?: boolean;
   /** False when the phone wouldn't keep it: closing the app loses it. */
   kept: boolean;
   /** Why the server turned it down when it was tried again. It waits for Send now or Delete. */
@@ -53,7 +59,7 @@ export interface WaitingMessage {
 }
 
 /** As the phone's storage holds it: bytes rather than Blobs, which some iPhones can't read back. */
-interface Stored extends Omit<WaitingMessage, "attachments" | "sending" | "kept" | "problem"> {
+interface Stored extends Omit<WaitingMessage, "attachments" | "sending" | "kept" | "problem" | "direct"> {
   attachments: Array<Omit<WaitingFile, "body"> & { bytes?: ArrayBuffer; bytesType?: string }>;
   problem?: string;
 }
@@ -109,7 +115,7 @@ const subscribeWaiting = (listener: () => void) => {
 
 async function keep(message: WaitingMessage): Promise<boolean> {
   try {
-    const { sending: _sending, kept: _kept, attachments, ...rest } = message;
+    const { sending: _sending, kept: _kept, direct: _direct, attachments, ...rest } = message;
     const files = await Promise.all(
       attachments.map(async ({ body, ...file }) => (body ? { ...file, bytes: await body.arrayBuffer(), bytesType: body.type } : file)),
     );
@@ -178,10 +184,27 @@ export async function sendChatMessage(input: NewMessage): Promise<ChatMessage | 
   // Behind messages of theirs already waiting in this conversation, so it keeps its place after them.
   const behind = waiting.some((m) => m.userId === input.userId && m.channelId === input.channelId && !m.problem);
   if (onlineManager.isOnline() && !behind) {
+    // Held here while it goes, and kept on the phone as it does, in case the answer never comes.
+    set([...waiting, { ...message, sending: true, direct: true }]);
+    const keeping = keep(message);
     try {
-      return await deliver(message);
+      const sent = await deliver(message);
+      set(waiting.filter((m) => m.id !== message.id));
+      if (await keeping) await unkeep(message.id);
+      void flush(true);
+      return sent;
     } catch (error) {
-      if (!noSignal(error)) throw error;
+      if (noSignal(error) && held(message.id)) {
+        // No answer: it waits like any other, for the next try.
+        change(message.id, { sending: false, direct: false, attempts: 1, nextAt: Date.now() + retryDelay(0, Math.random()), kept: await keeping });
+        plan();
+        return null;
+      }
+      // Refused (the box says why), or signed out meanwhile: it isn't kept.
+      set(waiting.filter((m) => m.id !== message.id));
+      if (await keeping) await unkeep(message.id);
+      if (noSignal(error)) return null;
+      throw error;
     }
   }
   message.attempts = 1;
@@ -207,7 +230,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 function plan() {
   clearTimeout(timer);
   const to = sender;
-  const next = to ? waiting.filter((m) => m.userId === to.userId && !m.problem && !m.sending).sort((a, b) => a.nextAt - b.nextAt)[0] : undefined;
+  const next = to ? waiting.filter((m) => m.userId === to.userId && !m.problem && !m.sending && !m.direct).sort((a, b) => a.nextAt - b.nextAt)[0] : undefined;
   if (!next) return;
   timer = setTimeout(() => void flush(), Math.max(0, next.nextAt - Date.now()));
 }
@@ -227,7 +250,8 @@ async function flush(now = false) {
       // On the timer, once any is due: then they go oldest first, so the conversation keeps its order.
       if (!now && !mine.some((m) => m.nextAt <= Date.now())) return;
       const next = [...mine].sort((a, b) => a.createdAt - b.createdAt)[0];
-      if (!next) return;
+      // One going straight from the box is first: the rest wait for its answer, which tries them then.
+      if (!next || next.direct) return;
       change(next.id, { sending: true });
       let failure: unknown = null;
       let sent: ChatMessage | null = null;
@@ -273,7 +297,7 @@ function askToStay() {
 /** Send now: tried at once, even one the server turned down before. */
 export function sendWaitingNow(id: string) {
   const message = held(id);
-  if (!message || message.sending) return;
+  if (!message || message.sending || message.direct) return;
   change(id, { problem: undefined, nextAt: 0 });
   void flush(true);
 }
@@ -319,17 +343,22 @@ export function forgetChatOutbox(userId: string) {
 
 const all = () => waiting;
 
-/** This person's waiting messages in a conversation, oldest first. */
-export function useWaiting(userId: string, companyId: string, channelId: string): WaitingMessage[] {
-  const list = useSyncExternalStore(subscribeWaiting, all);
-  return list.filter((m) => m.userId === userId && m.companyId === companyId && m.channelId === channelId);
+/**
+ * This person's waiting messages in a conversation, oldest first: what goes to the channel itself
+ * (a thread's reply only when it's sent there too), or with `threadRoot`, that thread's replies.
+ */
+export function useWaiting(userId: string, companyId: string, channelId: string, threadRoot: string | null = null): WaitingMessage[] {
+  return waitingIn(useSyncExternalStore(subscribeWaiting, all), userId, companyId, channelId, threadRoot);
 }
+
+export const waitingIn = (list: readonly WaitingMessage[], userId: string, companyId: string, channelId: string, threadRoot: string | null = null) =>
+  list.filter((m) => m.userId === userId && m.companyId === companyId && m.channelId === channelId && (threadRoot ? m.thread_root === threadRoot : !m.thread_root || Boolean(m.also_in_channel)));
 
 /** How many of this person's messages wait in each conversation, for the channel list. */
 export function useWaitingCounts(userId: string, companyId: string): Map<string, number> {
   const list = useSyncExternalStore(subscribeWaiting, all);
   const counts = new Map<string, number>();
-  for (const m of list) if (m.userId === userId && m.companyId === companyId) counts.set(m.channelId, (counts.get(m.channelId) ?? 0) + 1);
+  for (const m of list) if (m.userId === userId && m.companyId === companyId && !m.direct) counts.set(m.channelId, (counts.get(m.channelId) ?? 0) + 1);
   return counts;
 }
 

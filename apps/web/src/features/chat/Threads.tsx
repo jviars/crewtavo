@@ -23,6 +23,7 @@ import { chatKeys, markThreadRead, setFollowing, setViewingThread, useJobCards, 
 import { chatPlainText } from "@crewtavo/core/chat";
 import { MessageItem, type MessageContext } from "./MessageItem";
 import { channelLabel, isNewDay, listTime, startsGroup, dayLabel } from "./ui";
+import { WaitingMessages } from "./Outbox";
 import s from "./chat.module.css";
 import th from "./threads.module.css";
 import { t } from "@/lib/i18n";
@@ -181,6 +182,9 @@ export function ThreadPanel({ channel, rootId, ctx, options, insert, onClose }: 
               </div>
             );
           })}
+          {/* Its replies waiting on this phone for signal (Outbox.tsx). */}
+          <WaitingMessages me={session.userId} companyId={company} channelId={channel.id} threadRoot={rootId}
+            name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone")} />
         </div>
       </div>
       {root && !root.deleted_at && (

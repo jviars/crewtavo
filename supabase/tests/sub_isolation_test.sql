@@ -631,12 +631,13 @@ select t1070.check(array(
   -- Team chat (20261019001600, and 20261129101000 to 104000): a sub has no rights in any channel
   -- (private.chat_rights) and can't be in a direct conversation, so each refuses them or answers nothing:
   -- channels and direct messages, threads, notification choices, "seen by", search and statuses (for the
-  -- team only: has_role leaves subs out). The switches are for owners and admins.
+  -- team only: has_role leaves subs out). The switches are for owners and admins. Send now sends only
+  -- the caller's own scheduled message, as them, so a sub has none to send.
   'chat_close_direct(uuid)', 'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_direct_people(uuid)',
   'chat_follow(uuid, boolean)', 'chat_leave_direct(uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
   'chat_read_marks(uuid)', 'chat_save_roles(uuid, jsonb, jsonb)',
   'chat_search(uuid, text, uuid, uuid, text[], timestamp with time zone, timestamp with time zone, text, integer, integer)',
-  'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
+  'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_send_scheduled_now(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
   'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_statuses(uuid)', 'chat_thread_counts(uuid)',
   'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.

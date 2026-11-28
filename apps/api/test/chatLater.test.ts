@@ -46,19 +46,26 @@ afterEach(() => resetHub());
 
 describe("the minute that sends Team chat messages later", () => {
   it("publishes what was sent to the channel, and tells each author's tabs their list changed", async () => {
-    db.messages = [{ id: "m1", channel_id: "general", author_id: "nia", body: "Truck leaves at 6", attachments: [], job_id: null, reply_to: null, mention_users: [], mention_roles: [], mention_all: false, pinned_at: null, pinned_by: null, edited_at: null, deleted_at: null, created_at: "2026-11-29T12:30:00Z" }];
+    db.messages = [
+      // Another company's message, and one in another channel: never published for these rows.
+      { id: "m9", company_id: "other", channel_id: "general", author_id: "nia", body: "Not this", attachments: [], deleted_at: null },
+      { id: "m1", company_id: "fern", channel_id: "general", author_id: "nia", body: "Truck leaves at 6", attachments: [], job_id: null, reply_to: null, mention_users: [], mention_roles: [], mention_all: false, pinned_at: null, pinned_by: null, edited_at: null, deleted_at: null, created_at: "2026-11-29T12:30:00Z" },
+    ];
     db.due = [
       { scheduled_id: "m1", company_id: "fern", channel_id: "general", author_id: "nia", message_id: "m1", problem: null },
       { scheduled_id: "m2", company_id: "fern", channel_id: "general", author_id: "sid", message_id: null, problem: "You can't post in #general any more." },
+      // Its id named another company's message: the database said so, and nothing goes out for it.
+      { scheduled_id: "m9", company_id: "fern", channel_id: "general", author_id: "nia", message_id: null, problem: "It couldn't be sent: another message has its id." },
     ];
     db.reminders = [{ reminder_id: "r1", company_id: "fern", user_id: "dana", told: true }];
     const got: Record<string, ChatEvent[]> = { dana: [], nia: [], sid: [] };
     for (const who of Object.keys(got)) subscribe("fern", who, (e) => got[who]!.push(e));
 
-    expect(await sendDueChat({} as Env)).toEqual({ sent: 1, dropped: 1, reminded: 1 });
+    expect(await sendDueChat({} as Env)).toEqual({ sent: 1, dropped: 2, reminded: 1 });
     expect(got.dana.filter((e) => e.type === "message")).toMatchObject([{ channel_id: "general", message: { id: "m1", body: "Truck leaves at 6" } }]);
+    expect(got.dana.filter((e) => e.type === "message")).toHaveLength(1);
     expect(got.sid.filter((e) => e.type === "message")).toEqual([]);
-    expect(got.nia.filter((e) => e.type === "scheduled")).toEqual([{ type: "scheduled", channel_id: "general" }]);
+    expect(got.nia.filter((e) => e.type === "scheduled")).toEqual([{ type: "scheduled", channel_id: "general" }, { type: "scheduled", channel_id: "general" }]);
     expect(got.sid.filter((e) => e.type === "scheduled")).toEqual([{ type: "scheduled", channel_id: "general" }]);
     expect(got.dana.filter((e) => e.type === "reminders")).toEqual([{ type: "reminders" }]);
     expect(got.nia.filter((e) => e.type === "reminders")).toEqual([]);

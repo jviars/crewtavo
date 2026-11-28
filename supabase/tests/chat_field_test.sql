@@ -304,3 +304,141 @@ select tcf.check((select count(*) from public.notifications where user_id = 'f1e
   'on her bell: whose message, where, its words and the way to it');
 select tcf.check((select not told from tcf_reminded where user_id = 'f1e1d000-0000-0000-0000-000000000005'), 'Sid, who can''t see #general any more, isn''t told of it');
 select tcf.check((select count(*) from public.chat_reminders) = 0 and (select count(*) from public.chat_send_due_reminders()) = 0, 'and each is done once');
+
+-- ===== A scheduled message's id is the database's ===============================================
+select id as office_ch from public.chat_channels where company_id = :'co' and name = 'office' \gset
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'office_ch', 'f1e1d000-0000-0000-0000-000000000002', 'Payroll numbers: private') returning id as office_msg \gset
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (id, company_id, channel_id, author_id, body, send_at)
+values (:'office_msg', :'co', :'general', 'f1e1d000-0000-0000-0000-000000000004', 'Hi all', now() + interval '1 second') returning id as picked \gset
+select tcf.check(:'picked' <> :'office_msg', 'a scheduled message can''t take an id someone picks, an office message''s here');
+commit;
+
+-- Even a row with another message's id (put there past the guard) isn't taken for that message.
+alter table public.chat_scheduled_messages disable trigger chat_scheduled_guard;
+insert into public.chat_scheduled_messages (id, company_id, channel_id, author_id, body, send_at)
+values (:'office_msg', :'co', :'general', 'f1e1d000-0000-0000-0000-000000000004', 'Copy of the office message', now() - interval '1 minute');
+alter table public.chat_scheduled_messages enable trigger chat_scheduled_guard;
+select pg_sleep(1.1);
+create temp table tcf_leak as select * from public.chat_send_due();
+select tcf.check((select message_id is null and problem = 'It couldn''t be sent: another message has its id.' from tcf_leak where scheduled_id = :'office_msg'),
+  'the scheduler doesn''t take another message for one of its own: it says it couldn''t be sent, and sends nothing');
+select tcf.check((select channel_id = :'office_ch' and body = 'Payroll numbers: private' from public.chat_messages where id = :'office_msg'), 'the office message stays where it was');
+select tcf.check((select message_id = :'picked' from tcf_leak where scheduled_id = :'picked')
+  and (select channel_id = :'general' and body = 'Hi all' from public.chat_messages where id = :'picked'), 'Nia''s own goes, by the id the database gave it');
+
+-- ===== Send now: taken, then sent once ==========================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Sending this one now', now() + interval '1 day') returning id as now_msg \gset
+select tcf.check(public.chat_send_scheduled_now(:'now_msg') = :'now_msg', 'Send now sends it, by its own id');
+select tcf.check((select count(*) from public.chat_scheduled_messages where id = :'now_msg') = 0 and (select count(*) from public.chat_messages where id = :'now_msg') = 1, 'once, and off the list');
+select tcf.check(public.chat_send_scheduled_now(:'now_msg') is null, 'again, it says it was sent already, and sends nothing');
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Not Lee''s to send', now() + interval '1 day') returning id as nia_only \gset
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+select tcf.expect_error(format('select public.chat_send_scheduled_now(%L)', :'nia_only'), 'nobody sends someone else''s scheduled message now');
+commit;
+select tcf.check((select count(*) from public.chat_send_due()) = 0, 'and the minute''s run has nothing of these to send again');
+
+-- ===== Kept for another try, not lost ===========================================================
+-- A lock or a deadlock while it's sent: it's tried again later, not dropped (made to happen here by a trigger).
+create function tcf.deadlock() returns trigger language plpgsql as $$
+begin
+  if new.body = 'Held up' then raise exception 'deadlock detected' using errcode = '40P01'; end if;
+  return new;
+end $$;
+create trigger tcf_deadlock before insert on public.chat_messages for each row execute function tcf.deadlock();
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Held up', now() + interval '1 second') returning id as held_msg \gset
+commit;
+select pg_sleep(1.1);
+select count(*) as nia_told from public.notifications where user_id = 'f1e1d000-0000-0000-0000-000000000004' and kind = 'chat_scheduled' \gset
+select tcf.check((select count(*) from public.chat_send_due()) = 0, 'a deadlock doesn''t send or drop it');
+select tcf.check((select tries = 1 and retry_at > now() from public.chat_scheduled_messages where id = :'held_msg'), 'it waits a few minutes to be tried again');
+select tcf.check((select count(*) from public.notifications where user_id = 'f1e1d000-0000-0000-0000-000000000004' and kind = 'chat_scheduled') = :'nia_told', 'and Nia isn''t told it failed');
+drop trigger tcf_deadlock on public.chat_messages;
+update public.chat_scheduled_messages set retry_at = now() - interval '1 second' where id = :'held_msg';
+select tcf.check((select message_id = :'held_msg' from public.chat_send_due()), 'on the next try it goes');
+
+-- ===== While Team chat is off, scheduled messages and reminders wait ===========================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'After the break', now() + interval '1 second') returning id as off_msg \gset
+insert into public.chat_reminders (message_id, user_id, remind_at) values (:'lee_msg', 'f1e1d000-0000-0000-0000-000000000004', now() + interval '1 second') returning id as off_reminder \gset
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+select public.chat_set_enabled(:'co', false);
+commit;
+select pg_sleep(1.1);
+select tcf.check((select count(*) from public.chat_send_due()) = 0 and (select count(*) from public.chat_send_due_reminders()) = 0, 'with Team chat off, nothing due goes');
+select tcf.check((select count(*) from public.chat_scheduled_messages where id = :'off_msg') = 1 and (select count(*) from public.chat_reminders where id = :'off_reminder') = 1,
+  'and nothing is thrown away: both wait');
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_statuses) = 0 and (select count(*) from public.chat_statuses(:'co')) = 0, 'nor does anyone''s status, or the clock''s, show');
+select tcf.expect_error(format('insert into public.chat_statuses (company_id, user_id, kind) values (%L, %L, %L)', :'co', 'f1e1d000-0000-0000-0000-000000000005', 'busy'), 'or get set');
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+select public.chat_set_enabled(:'co', true);
+commit;
+select tcf.check((select message_id = :'off_msg' from public.chat_send_due()) and (select told from public.chat_send_due_reminders() where reminder_id = :'off_reminder'),
+  'once it''s back on, the message goes and the reminder is told');
+
+-- ===== A job on a scheduled message, deleted ====================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+insert into public.clients (company_id, display_name) values (:'co', 'Ann Client') returning id as client \gset
+insert into public.jobs (company_id, client_id, title) values (:'co', :'client', 'Driveway sealcoat') returning id as job \gset
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, job_id, send_at)
+values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000001', :'job', now() + interval '1 day') returning id as job_later \gset
+delete from public.jobs where id = :'job';
+select tcf.check((select job_id is null from public.chat_scheduled_messages where id = :'job_later'), 'a job on a scheduled message can be deleted, and its link goes');
+commit;
+
+-- A business with all of it is deleted whole.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000009", "role": "authenticated"}', true);
+select public.chat_set_enabled(:'other', true);
+select id as other_general from public.chat_channels where company_id = :'other' and name = 'general' \gset
+insert into public.clients (company_id, display_name) values (:'other', 'Bo Client') returning id as other_client \gset
+insert into public.jobs (company_id, client_id, title) values (:'other', :'other_client', 'Snow route') returning id as other_job \gset
+insert into public.chat_messages (company_id, channel_id, author_id, body, attachments) values (:'other', :'other_general', 'f1e1d000-0000-0000-0000-000000000009', 'Plow at 4',
+  jsonb_build_array(jsonb_build_object('path', :'other' || '/chat/' || :'other_general' || '/3c3c3c3c-0000-4000-8000-000000000001.webm', 'type', 'audio/webm'))) returning id as other_msg \gset
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, job_id, send_at) values (:'other', :'other_general', 'f1e1d000-0000-0000-0000-000000000009', :'other_job', now() + interval '1 day');
+insert into public.chat_reminders (message_id, user_id, remind_at) values (:'other_msg', 'f1e1d000-0000-0000-0000-000000000009', now() + interval '1 day');
+insert into public.chat_statuses (company_id, user_id, kind) values (:'other', 'f1e1d000-0000-0000-0000-000000000009', 'office');
+commit;
+insert into public.chat_transcripts (message_id, path, words) values (:'other_msg', :'other' || '/chat/' || :'other_general' || '/3c3c3c3c-0000-4000-8000-000000000001.webm', 'Plow at four');
+delete from public.companies where id = :'other';
+select tcf.check(not exists (select 1 from public.chat_scheduled_messages where company_id = :'other') and not exists (select 1 from public.chat_reminders where company_id = :'other')
+  and not exists (select 1 from public.chat_statuses where company_id = :'other') and not exists (select 1 from public.chat_transcripts where company_id = :'other'),
+  'and a business with scheduled messages, reminders, statuses and words is deleted whole');

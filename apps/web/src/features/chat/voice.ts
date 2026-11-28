@@ -8,7 +8,7 @@
  * and a recording can't share the microphone.
  */
 import { recordedFile, recordingType, VOICE_MAX_SECONDS } from "@crewtavo/core/chatField";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
 export type Recording =
@@ -53,6 +53,11 @@ export function microphoneProblem(error: unknown): string {
   return t("The microphone couldn't start. Try again.");
 }
 
+/** Speech recognition's errors that another try won't mend: no signal for it, or not allowed. */
+const SPEECH_STOPS = new Set(["network", "not-allowed", "service-not-allowed", "audio-capture", "language-not-supported"]);
+/** It's started again after it ends by itself, a little later each time, this many times at most. */
+const SPEECH_RESTARTS = 20;
+
 /** Records one voice note at a time. `seconds` and `level` (0 to 1) change while recording. */
 export function useVoiceRecorder() {
   const [recording, setRecording] = useState<Recording>({ phase: "idle" });
@@ -65,20 +70,25 @@ export function useVoiceRecorder() {
     frame?: number;
     timer?: ReturnType<typeof setInterval>;
     listener?: Listener;
+    again?: ReturnType<typeof setTimeout>;
     heard: string[];
     hearing: string;
     started: number;
     keep: boolean;
-  }>({ heard: [], hearing: "", started: 0, keep: true });
+    /** Which start is the current one: a cancel, or leaving, moves it on, so a start still asking for the microphone stops there. */
+    run: number;
+  }>({ heard: [], hearing: "", started: 0, keep: true, run: 0 });
 
   const release = useCallback(() => {
     const p = parts.current;
     if (p.frame) cancelAnimationFrame(p.frame);
     clearInterval(p.timer);
+    clearTimeout(p.again);
     p.stream?.getTracks().forEach((track) => track.stop());
     void p.audio?.close().catch(() => undefined);
     if (p.listener) {
       p.listener.onend = null;
+      p.listener.onerror = null;
       try {
         p.listener.stop();
       } catch {
@@ -87,6 +97,7 @@ export function useVoiceRecorder() {
     }
     p.frame = undefined;
     p.timer = undefined;
+    p.again = undefined;
     p.stream = undefined;
     p.audio = undefined;
     p.listener = undefined;
@@ -98,12 +109,19 @@ export function useVoiceRecorder() {
       setRecording({ phase: "error", message: t("This browser can't record voice notes. Try Chrome, Safari or Firefox.") });
       return;
     }
+    const p = parts.current;
+    const run = ++p.run;
     setRecording({ phase: "starting" });
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch (error) {
-      setRecording({ phase: "error", message: microphoneProblem(error) });
+      if (p.run === run) setRecording({ phase: "error", message: microphoneProblem(error) });
+      return;
+    }
+    // Cancelled, or the screen left, while the phone asked for the microphone: let it go at once.
+    if (p.run !== run) {
+      stream.getTracks().forEach((track) => track.stop());
       return;
     }
     const kind = recordingType((type) => MediaRecorder.isTypeSupported(type));
@@ -115,7 +133,6 @@ export function useVoiceRecorder() {
       setRecording({ phase: "error", message: t("This browser can't record voice notes. Try Chrome, Safari or Firefox.") });
       return;
     }
-    const p = parts.current;
     const chunks: Blob[] = [];
     p.recorder = recorder;
     p.stream = stream;
@@ -128,7 +145,7 @@ export function useVoiceRecorder() {
       const took = Math.min(VOICE_MAX_SECONDS, (Date.now() - p.started) / 1000);
       const words = [...p.heard, p.hearing].join(" ").replace(/\s+/g, " ").trim();
       release();
-      if (!p.keep || !chunks.length) return setRecording({ phase: "idle" });
+      if (!p.keep || !chunks.length || p.run !== run) return setRecording({ phase: "idle" });
       const file = recordedFile(recorder.mimeType, kind);
       const blob = new Blob(chunks, { type: file.type });
       setRecording({ phase: "preview", blob, url: URL.createObjectURL(blob), type: file.type, ext: file.ext, seconds: Math.max(1, Math.round(took)), words });
@@ -162,11 +179,15 @@ export function useVoiceRecorder() {
       if (now >= VOICE_MAX_SECONDS && recorder.state === "recording") recorder.stop();
     }, 250);
 
-    // The words, while the browser can hear them. It stops by itself after a quiet spell: started again.
+    // The words, while the browser can hear them. It stops by itself after a quiet spell: started
+    // again, a little later each time, and not after an error another try won't mend (no signal for
+    // it, or not allowed), so it doesn't go round and round for the whole recording.
     const Speech = speechListener();
     if (Speech) {
       try {
         const listener = new Speech();
+        let restarts = 0;
+        let done = false;
         listener.lang = browserOrSpanish() ?? navigator.language ?? "en-US";
         listener.continuous = true;
         listener.interimResults = true;
@@ -179,14 +200,21 @@ export function useVoiceRecorder() {
           }
           p.hearing = hearing.trim();
         };
-        listener.onerror = () => undefined;
+        listener.onerror = (event) => {
+          if (SPEECH_STOPS.has(event.error ?? "")) done = true;
+        };
         listener.onend = () => {
-          if (p.recorder?.state !== "recording") return;
-          try {
-            listener.start();
-          } catch {
-            // It won't start again: the note goes without the rest of its words.
-          }
+          if (done || p.recorder !== recorder || recorder.state !== "recording" || restarts >= SPEECH_RESTARTS) return;
+          const wait = restarts === 0 ? 0 : Math.min(10_000, 500 * 2 ** (restarts - 1));
+          restarts += 1;
+          p.again = setTimeout(() => {
+            if (recorder.state !== "recording") return;
+            try {
+              listener.start();
+            } catch {
+              // It won't start again: the note goes without the rest of its words.
+            }
+          }, wait);
         };
         listener.start();
         p.listener = listener;
@@ -202,10 +230,11 @@ export function useVoiceRecorder() {
     if (recorder?.state === "recording") recorder.stop();
   }, []);
 
-  /** Thrown away, while recording or from the preview. */
+  /** Thrown away, while starting, recording or from the preview. */
   const discard = useCallback(() => {
     const p = parts.current;
     p.keep = false;
+    p.run += 1;
     if (p.recorder?.state === "recording") p.recorder.stop();
     else release();
     setRecording((current) => {
@@ -224,8 +253,10 @@ export function useVoiceRecorder() {
 
   useEffect(
     () => () => {
-      parts.current.keep = false;
-      if (parts.current.recorder?.state === "recording") parts.current.recorder.stop();
+      const p = parts.current;
+      p.keep = false;
+      p.run += 1;
+      if (p.recorder?.state === "recording") p.recorder.stop();
       release();
     },
     [release],
@@ -234,13 +265,37 @@ export function useVoiceRecorder() {
   return { recording, seconds, level, start, stop, discard, done };
 }
 
-const PHONE = "(max-width: 900px)";
-const phoneNow = () => typeof window !== "undefined" && window.matchMedia(PHONE).matches;
-const watchPhone = (change: () => void) => {
-  const query = window.matchMedia(PHONE);
+/**
+ * Stops a recording once its box is out of sight (on a phone, a thread opened over the channel
+ * hides the channel's box): one being made goes to its preview, and one still starting is called off.
+ */
+export function useStopWhenHidden(box: RefObject<HTMLElement>, recorder: ReturnType<typeof useVoiceRecorder>) {
+  const { phase } = recorder.recording;
+  const { stop, discard } = recorder;
+  useEffect(() => {
+    const el = box.current;
+    if (!el || (phase !== "recording" && phase !== "starting") || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (el.offsetWidth || el.offsetHeight) return;
+      if (phase === "recording") stop();
+      else discard();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [box, phase, stop, discard]);
+}
+
+const TOUCH = "(pointer: coarse)";
+const touchNow = () => typeof window !== "undefined" && window.matchMedia(TOUCH).matches;
+const watchTouch = (change: () => void) => {
+  const query = window.matchMedia(TOUCH);
   query.addEventListener("change", change);
   return () => query.removeEventListener("change", change);
 };
 
-/** Whether chat is laid out for a phone now (its phone rules in chat.module.css). */
-export const usePhone = () => useSyncExternalStore(watchPhone, phoneNow, () => false);
+/**
+ * Whether the screen is worked by touch (a phone, a tablet) rather than a mouse: the microphone in
+ * Send's place while the box is empty, and Send later by a long press. A narrow window on a computer
+ * keeps the computer's: the microphone beside the camera and the chevron beside Send.
+ */
+export const useTouch = () => useSyncExternalStore(watchTouch, touchNow, () => false);
