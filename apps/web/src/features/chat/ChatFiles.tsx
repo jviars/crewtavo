@@ -62,7 +62,8 @@ export function FileCard({ file }: { file: ChatAttachment }) {
           <span className={f.meta}>{[audio ? t("Voice note") : CHAT_DOCUMENT_LABELS[kind], size].filter(Boolean).join(" · ")}</span>
         </span>
       </button>
-      {open && <FileViewer file={viewerFile(file, company.id)} canEdit={false} onClose={() => setOpen(false)} />}
+      {/* The viewer is drawn over the page, but its taps would still reach the message under it. */}
+      {open && <span style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}><FileViewer file={viewerFile(file, company.id)} canEdit={false} onClose={() => setOpen(false)} /></span>}
     </>
   );
 }

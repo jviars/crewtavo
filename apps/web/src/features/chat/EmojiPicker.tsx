@@ -125,7 +125,8 @@ export function EmojiPicker({
       >
         {trigger}
       </button>
-      <div ref={panel} id={id} className={`menu ${x.picker}`} role="dialog" aria-label={label} popover="auto">
+      {/* A tap in the picker isn't a tap on the message it's opened from. */}
+      <div ref={panel} id={id} className={`menu ${x.picker}`} role="dialog" aria-label={label} popover="auto" onClick={(e) => e.stopPropagation()}>
         {open && <PickerBody label={label} quick={quick} mine={mine} onPick={pick} onClose={() => { panel.current?.hidePopover(); button.current?.focus(); }} sheet={() => panel.current} />}
       </div>
     </>

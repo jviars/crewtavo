@@ -601,6 +601,7 @@ export default {
   "Add an emoji": "Agregar un emoji",
   "Add a reaction": "Agregar una reacción",
   "Reactions": "Reacciones",
+  "Who reacted": "Quién reaccionó",
   "Find an emoji": "Busca un emoji",
   "Quick reactions": "Reacciones rápidas",
   "Emoji groups": "Grupos de emoji",

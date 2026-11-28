@@ -182,8 +182,10 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
     if (await confirm({ title: t("Delete this message?"), body: mine ? t("It's removed for everyone.") : t("It's removed for everyone, and its author isn't told."), confirmLabel: t("Delete"), danger: true })) remove.mutate();
   };
   // A tap on a phone shows the tools; a tap on a link, button or photo does what it says instead.
-  const tap = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).closest("a, button, textarea, input")) return;
+  const tap = (e: MouseEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement;
+    // Nor is a tap in what the message opened over itself (a file's viewer, who reacted, the emoji picker).
+    if (!e.currentTarget.contains(target) || target.closest("a, button, textarea, input, dialog, [popover], [role='dialog']")) return;
     if (window.matchMedia("(hover: none)").matches) setMenu((m) => !m);
   };
 
