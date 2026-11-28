@@ -23,6 +23,7 @@ import { useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
 import { FileCard, FileCards } from "./ChatFiles";
 import { EmojiPicker } from "./EmojiPicker";
+import { LinkCards } from "./LinkCards";
 import { ReactionPills, toggledReactions } from "./Reactions";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import s from "./chat.module.css";
@@ -273,6 +274,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             <span className={s.jobCard}>{t("A job you can't open")}</span>
           )
         )}
+        {editing === null && message.body && <LinkCards message={message} />}
 
         <ReactionPills reactions={message.reactions} me={ctx.me} personName={ctx.personName} onToggle={(kind, on) => react.mutate({ kind, on })} />
       </div>

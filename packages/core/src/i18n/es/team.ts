@@ -625,6 +625,15 @@ export default {
   "Couldn't upload this file": "No se pudo subir este archivo",
   "Open {name}": "Abrir {name}",
 
+  // Team chat: cards for links (features/chat/LinkCards.tsx)
+  "A quote you can't open": "Una cotización que no puedes abrir",
+  "An invoice you can't open": "Una factura que no puedes abrir",
+  "A client you can't open": "Un cliente que no puedes abrir",
+  "A request you can't open": "Una solicitud que no puedes abrir",
+  "Request #{number}": "Solicitud #{number}",
+  "{amount} due": "{amount} por pagar",
+  "Client Hub link": "Enlace del Portal del cliente",
+
   // Guides: the list, a guide, its quiz and suggestions (features/kb)
   "{count} to look at": "{count} por revisar",
   "Done with {name}'s suggestion": "Listo con la sugerencia de {name}",

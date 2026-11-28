@@ -418,6 +418,26 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"chat_link_previews": {
+                  Row: {
+                    "company_id": string,"description": string | null,"fetched_at": string,"final_url": string | null,"image": string | null,"ok": boolean,"site_name": string | null,"title": string | null,"url": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"description"?: string | null,"fetched_at"?: string,"final_url"?: string | null,"image"?: string | null,"ok": boolean,"site_name"?: string | null,"title"?: string | null,"url": string
+                  }
+                  Update: {
+                    "company_id"?: string,"description"?: string | null,"fetched_at"?: string,"final_url"?: string | null,"image"?: string | null,"ok"?: boolean,"site_name"?: string | null,"title"?: string | null,"url"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_link_previews_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"chat_messages": {
                   Row: {
                     "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null,"search": unknown,"search_text": string | null
