@@ -2593,6 +2593,13 @@ export async function refundStripePayment(env: Env, admin: Db, companyId: string
       throw new HttpError(409, KEY_CANT);
     }
     if (problem.status === 400) throw new HttpError(409, problem.message);
+    if (problem.status === 0 || problem.status === 429 || problem.status >= 500) {
+      // Stripe failed or never answered, after the tries stripeApi makes. Whether it made the refund
+      // isn't known (if it did, its webhook books it), so the office looks before asking again: until
+      // it's booked here, asking again is the same request, which Stripe makes once.
+      console.error("Stripe didn't answer a refund", paymentId, problem);
+      throw new HttpError(502, "Stripe isn't answering right now, so the refund may not have gone through. Look at this payment again in a few minutes, and try again if the refund isn't there.");
+    }
     throw problem;
   }
   // Booked as Stripe's webhook books it (the same processor_ref), so never twice.

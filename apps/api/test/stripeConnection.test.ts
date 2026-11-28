@@ -2939,6 +2939,26 @@ describe("refunds from Crewtavo", () => {
     await expect(refundStripePayment(env, db.db, OTHER_CO, payment.id, 1000)).rejects.toMatchObject({ status: 404 });
   });
 
+  // Stripe failing or not answering leaves it unknown whether the refund was made, so the office is
+  // told to look before trying again. A try straight after asks Stripe for the same refund.
+  it.each([
+    ["failing", { status: 500 }],
+    ["turning requests away", { status: 429, error: { message: "Too many requests" } }],
+    ["not answering", { lose: true }],
+  ] as const)("says so when Stripe is %s, and the next try refunds once", async (_, trouble) => {
+    const { key, payment } = await paidByCard();
+    stripe.trouble.push({ when: (m, p) => p === "/v1/refunds", times: 3, ...trouble });
+    await expect(refundStripePayment(env, db.db, CO, payment.id, 1000)).rejects.toMatchObject({
+      status: 502, message: "Stripe isn't answering right now, so the refund may not have gone through. Look at this payment again in a few minutes, and try again if the refund isn't there.",
+    });
+    expect(await refundStripePayment(env, db.db, CO, payment.id, 1000)).toEqual({ refunded_cents: 1000, recorded: true });
+    expect(side(key).refunds).toHaveLength(1);
+    // Every ask for it, the four tries included (not the look at what the key can do, when it was connected).
+    const asks = sentTo("POST", /^\/v1\/refunds$/).filter((r) => r.body.get("payment_intent") === payment.processor_ref);
+    expect(asks.map((r) => r.idempotency)).toEqual(Array(4).fill(`crewtavo-refund-${payment.id}-0-1000`));
+    expect(refunds()).toHaveLength(1);
+  });
+
   it("needs a key that can make refunds, and stops offering them when Stripe turns it down", async () => {
     const { payment } = await paidByCard();
     stripe.trouble.push({ when: (m, p) => p === "/v1/refunds", times: 1, status: 403, error: { type: "permission_error", message: "The provided key does not have the required permissions for this endpoint" } });
