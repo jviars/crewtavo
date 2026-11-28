@@ -323,6 +323,9 @@ apps.get("/apps/:provider/callback", async (c) => {
   const nonce = getCookie(c, STATE_COOKIE);
   deleteCookie(c, STATE_COOKIE, { path: "/api/apps" });
   if (!state || state.provider !== provider || !nonce || nonce !== state.nonce) return done("error", "The sign-in link expired. Try connecting again.");
+  // Cancelling on the provider's page comes back as access_denied: the code alone from Intuit, Zoho
+  // and Google, with "Permissions error" from Meta. Neither says what happened, so it's said here.
+  if (query.error === "access_denied") return done("error", `You cancelled the sign-in, so ${catalogEntry(provider)?.name ?? "it"} wasn't connected.`);
   if (query.error || !query.code) return done("error", query.error_description ?? query.error ?? "Sign-in was cancelled.");
 
   const admin = adminClient(c.env);

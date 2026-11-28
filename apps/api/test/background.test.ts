@@ -520,6 +520,30 @@ describe("accounting sync", () => {
       expect(queries.some((q) => q.table === "integration_secrets" && verb(q) === "upsert")).toBe(true);
     });
 
+    // Cancel on Intuit's, Zoho's or Google's page comes back as the code alone: ?error=access_denied.
+    it.each([
+      ["quickbooks", { error: "access_denied" }, "You cancelled the sign-in, so QuickBooks Online wasn't connected."],
+      ["zoho_books", { error: "access_denied" }, "You cancelled the sign-in, so Zoho Books wasn't connected."],
+      ["google_calendar", { error: "access_denied" }, "You cancelled the sign-in, so Google Calendar wasn't connected."],
+      ["google_business", { error: "access_denied" }, "You cancelled the sign-in, so Google Business Profile wasn't connected."],
+      // Meta sends words of its own with a cancel, which say nothing to the person who cancelled.
+      ["meta", { error: "access_denied", error_reason: "user_denied", error_description: "Permissions error" }, "You cancelled the sign-in, so Facebook & Instagram wasn't connected."],
+      // Anything else still says what the provider said.
+      ["quickbooks", { error: "invalid_scope", error_description: "The scope isn't one this app may ask for." }, "The scope isn't one this app may ask for."],
+    ] as const)("a cancelled %s sign-in says so in a sentence, and connects nothing", async (provider, answer, message) => {
+      const { rpcs, queries } = ours(null);
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const state = await signToken(env, { company: COMPANY, user: "user-1", provider, nonce: "nonce-1", exp: Math.floor(Date.now() / 1000) + 600 });
+      const res = await app.request(`/api/apps/${provider}/callback?${new URLSearchParams({ state, ...answer })}`, { headers: { Cookie: "crewtavo_oauth_nonce=nonce-1" } }, env);
+      const back = new URL(res.headers.get("location")!, "https://crew.example.com");
+      expect(back.pathname).toBe(`/apps/${provider}`);
+      expect(Object.fromEntries(back.searchParams)).toEqual({ status: "error", message });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(queries.filter((q) => verb(q) !== "select")).toEqual([]);
+      expect(again(rpcs)).toEqual([]);
+    });
+
     it("go again when the owner asks, and the note about them goes", async () => {
       const { rpcs, queries } = ours({ status: "connected", external_account_id: "realm-1" });
       const res = await app.request("/api/apps/quickbooks/retry", { method: "POST", headers }, env);
