@@ -7,7 +7,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CHAT_REACTIONS, chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { orderReactions } from "@crewtavo/core/chatEmoji";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -19,6 +20,8 @@ import { copyText } from "@/lib/clipboard";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
+import { EmojiPicker } from "./EmojiPicker";
+import { ReactionPills, toggledReactions } from "./Reactions";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
@@ -119,14 +122,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   const react = useMutation({
     meta: { inline: true },
     mutationFn: (v: { kind: string; on: boolean }) => api.post<{ reactions: ChatReactionGroup[] }>(`/chat/messages/${message.id}/reactions`, v),
-    onMutate: (v) => {
-      const next = CHAT_REACTIONS.map((r) => {
-        const users = message.reactions.find((g) => g.kind === r.key)?.users ?? [];
-        if (r.key !== v.kind) return { kind: r.key, users };
-        return { kind: r.key, users: v.on ? [...new Set([...users, ctx.me])] : users.filter((u) => u !== ctx.me) };
-      }).filter((g) => g.users.length);
-      setReactions(queryClient, company, message.channel_id, message.id, next);
-    },
+    onMutate: (v) => setReactions(queryClient, company, message.channel_id, message.id, orderReactions(toggledReactions(message.reactions, v.kind, ctx.me, v.on))),
     onSuccess: (res) => setReactions(queryClient, company, message.channel_id, message.id, res.reactions),
     onError: () => setReactions(queryClient, company, message.channel_id, message.id, message.reactions),
   });
@@ -176,11 +172,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
 
   const job = message.job_id ? ctx.jobs?.get(message.job_id) : undefined;
   const nameColor = author ? roleColor(author.color) : undefined;
-  // Each reaction a check box: yours are ticked, and the menu stays open to pick another.
-  const reactionMenu = CHAT_REACTIONS.map((r) => {
-    const on = message.reactions.find((g) => g.kind === r.key)?.users.includes(ctx.me) ?? false;
-    return { label: t(r.label), icon: REACTION_ICONS[r.key], checkbox: true, checked: on, onSelect: () => react.mutate({ kind: r.key, on: !on }) };
-  });
+  // Yours, shown as on in the picker: picking one again takes it back.
+  const myReactions = message.reactions.filter((g) => g.users.includes(ctx.me)).map((g) => g.kind);
 
   return (
     <div
@@ -272,26 +265,12 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )
         )}
 
-        {message.reactions.length > 0 && (
-          <div className={s.reactions}>
-            {message.reactions.map((g) => {
-              const info = CHAT_REACTIONS.find((r) => r.key === g.kind);
-              const on = g.users.includes(ctx.me);
-              const names = g.users.map((u) => (u === ctx.me ? t("You") : ctx.personName(u))).join(", ");
-              const label = info ? t(info.label) : g.kind;
-              return (
-                <button key={g.kind} type="button" className={s.reaction} aria-pressed={on} aria-label={`${label}, ${g.users.length}`} title={`${label}: ${names}`} onClick={() => react.mutate({ kind: g.kind, on: !on })}>
-                  {g.kind === "thumbs_up" || !info ? <><Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={13} />{g.users.length}</> : `${label} · ${g.users.length}`}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <ReactionPills reactions={message.reactions} me={ctx.me} personName={ctx.personName} onToggle={(kind, on) => react.mutate({ kind, on })} />
       </div>
 
       {editing === null && (
         <div className={s.tools}>
-          <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
+          <EmojiPicker label={t("React")} quick mine={myReactions} triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} onPick={(kind) => react.mutate({ kind, on: !myReactions.includes(kind) })} />
           {ctx.canPost && (
             <button type="button" className={`icon-btn ${s.icon}`} aria-label={t("Reply")} title={t("Reply")} onClick={() => ctx.onReply(message)}>
               <Icon name="reply" size={16} />

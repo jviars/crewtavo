@@ -8,7 +8,8 @@
  * them at once (lib/chatHub.ts).
  */
 import type { TablesUpdate } from "@crewtavo/core";
-import { ADMINS, channelSlug, CHAT_COLORS, CHAT_REACTIONS, chatRoleKey, isChatColor, isRole, ROLE_LABELS, STAFF, type ChatColor, type Role } from "@crewtavo/core";
+import { ADMINS, channelSlug, CHAT_COLORS, chatRoleKey, isChatColor, isRole, ROLE_LABELS, STAFF, type ChatColor, type Role } from "@crewtavo/core";
+import { isReactionKind, orderReactions, reactionKind } from "@crewtavo/core/chatEmoji";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
@@ -147,8 +148,11 @@ export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[
   });
 }
 
+/** Reactions by kind, who added each in the order they did: the quick ones first, then emoji as they came (core orderReactions). */
 function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatReactionOut[] {
-  return CHAT_REACTIONS.map((r) => ({ kind: r.key, users: rows.filter((x) => x.kind === r.key).map((x) => x.user_id) })).filter((r) => r.users.length);
+  const groups = new Map<string, string[]>();
+  for (const row of rows) groups.set(row.kind, [...(groups.get(row.kind) ?? []), row.user_id]);
+  return orderReactions([...groups].map(([kind, users]) => ({ kind, users })));
 }
 
 /** Whether the company has Team chat on: read with the server's key (the browser's role doesn't read the company's settings). */
@@ -351,7 +355,8 @@ chat.post("/chat/messages/:id/pin", requireUser, requireCompany(), async (c) => 
 
 chat.post("/chat/messages/:id/reactions", requireUser, requireCompany(), async (c) => {
   const id = uuid.parse(c.req.param("id"));
-  const body = await readJson(c, z.object({ kind: z.enum(CHAT_REACTIONS.map((r) => r.key) as [string, ...string[]]), on: z.boolean() }));
+  // A quick reaction's key, or an emoji from core's list (👍 is the thumbs up already).
+  const body = await readJson(c, z.object({ kind: z.string().max(40).transform(reactionKind).refine(isReactionKind, "Pick a reaction from the list."), on: z.boolean() }));
   const { db, userId } = c.var;
   await requireOn(c);
   const message = await messageById(db, id);

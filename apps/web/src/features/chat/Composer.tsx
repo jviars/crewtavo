@@ -17,6 +17,7 @@ import { uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { EmojiPicker } from "./EmojiPicker";
 import { Avatar, roleColor } from "./ui";
 import s from "./chat.module.css";
 import { t, T } from "@/lib/i18n";
@@ -242,6 +243,16 @@ export function Composer({
     setText(text.slice(0, start) + middle + text.slice(end));
   };
 
+  /** An emoji from the picker, where the cursor is (in place of what's selected). */
+  const insertEmoji = (emoji: string) => {
+    const el = input.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? start;
+    caret.current = [start + emoji.length, start + emoji.length];
+    setText(text.slice(0, start) + emoji + text.slice(end));
+    el?.focus();
+  };
+
   const addPhotos = (list: FileList | File[] | null) => {
     const all = [...(list ?? [])].filter(isPhoto);
     const chosen = all.slice(0, MAX_PHOTOS - uploads.length);
@@ -378,6 +389,8 @@ export function Composer({
             onBlur={() => setTimeout(() => setSuggest(null), 150)}
             maxLength={4000}
           />
+          {/* On a phone, the keyboard has its own emoji. */}
+          <EmojiPicker label={t("Add an emoji")} triggerClassName={`${s.composerBtn} hide-mobile`} trigger={<Icon name="react" size={17} />} onPick={insertEmoji} />
           <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
             <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>

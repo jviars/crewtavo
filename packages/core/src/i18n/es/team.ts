@@ -599,6 +599,25 @@ export default {
   "Voice note": "Nota de voz",
   "File": "Archivo",
 
+  // Team chat: reactions and emoji (features/chat/EmojiPicker.tsx, Reactions.tsx; core chatEmoji.ts)
+  "Add an emoji": "Agregar un emoji",
+  "Add a reaction": "Agregar una reacción",
+  "Reactions": "Reacciones",
+  "Find an emoji": "Busca un emoji",
+  "Quick reactions": "Reacciones rápidas",
+  "Emoji groups": "Grupos de emoji",
+  "Used lately": "Usados hace poco",
+  "Found": "Encontrados",
+  "No emoji for “{query}”": "Ningún emoji para “{query}”",
+  "Smileys": "Caritas",
+  "People and hands": "Personas y manos",
+  "Work and tools": "Trabajo y herramientas",
+  "Nature and weather": "Naturaleza y clima",
+  "Food": "Comida",
+  "Travel and vehicles": "Viajes y vehículos",
+  "Objects": "Objetos",
+  "Symbols": "Símbolos",
+
   // Guides: the list, a guide, its quiz and suggestions (features/kb)
   "{count} to look at": "{count} por revisar",
   "Done with {name}'s suggestion": "Listo con la sugerencia de {name}",

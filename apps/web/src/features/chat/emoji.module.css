@@ -1,0 +1,60 @@
+/*
+ * The emoji picker (EmojiPicker.tsx): the menu's popover (components.css .menu), wider, with a
+ * search field, the quick reactions, the groups as tabs and a grid of eight a row that scrolls. On a
+ * phone it's the menu's bottom sheet, with 44px emoji.
+ */
+.picker.picker { width: 344px; max-width: calc(100vw - 16px); padding: 0; overflow: hidden; }
+.picker:popover-open { display: flex; flex-direction: column; max-height: min(440px, 70vh); }
+.picker[data-sheet]:popover-open { width: 100%; max-width: none; max-height: min(78dvh, calc(100dvh - 40px)); }
+
+.search { display: flex; flex: none; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--divider); color: var(--quiet); }
+.search:focus-within { border-bottom-color: var(--green); }
+.search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--ink); font: inherit; font-size: var(--fs-13); }
+.search input::-webkit-search-cancel-button { cursor: pointer; }
+
+.quick { display: flex; flex: none; flex-wrap: wrap; gap: 6px; padding: 8px 10px 4px; }
+.quickItem {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--divider); border-radius: var(--radius-pill);
+  background: none; color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 500; cursor: pointer;
+}
+.quickItem:hover { border-color: var(--border); background: var(--fill-2); color: var(--ink); }
+.quickItem[aria-pressed="true"] { border-color: color-mix(in srgb, var(--green) 45%, transparent); background: color-mix(in srgb, var(--green) 10%, transparent); color: var(--ink); }
+
+.tabs { display: flex; flex: none; gap: 2px; padding: 6px 8px 2px; border-bottom: 1px solid var(--divider); overflow-x: auto; scrollbar-width: none; }
+.tab { display: grid; flex: none; place-items: center; width: 32px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--text-3); font-size: 17px; line-height: 1; cursor: pointer; }
+.tab:hover { background: var(--menu-hi); color: var(--ink); }
+
+.scroll { flex: 1; min-height: 120px; padding: 0 6px 8px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.heading { position: sticky; top: 0; z-index: 1; padding: 8px 4px 4px; background: var(--menu); color: var(--quiet); font-size: var(--fs-11); font-weight: 600; }
+.picker[data-sheet] .heading { background: var(--m-sheet); }
+.grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.emoji {
+  display: grid; place-items: center; aspect-ratio: 1; min-width: 0; padding: 0; border: 0; border-radius: 8px; background: none;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 22px; line-height: 1; cursor: pointer;
+}
+.emoji:hover, .emoji:focus-visible { background: var(--menu-hi); }
+.emoji:focus-visible { outline-offset: -2px; }
+.emoji[aria-pressed="true"] { background: color-mix(in srgb, var(--green) 14%, transparent); }
+.none { margin: 0; padding: 16px 8px; color: var(--text-3); font-size: var(--fs-13); }
+
+@media (max-width: 900px) {
+  .search { height: 48px; margin: 0 16px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--fill-2); }
+  .search input { font-size: var(--fs-16); }
+  .quick { gap: 8px; padding: 10px 16px 4px; }
+  .quickItem { height: 40px; padding: 0 14px; font-size: var(--fs-14); }
+  .tabs { gap: 4px; padding: 8px 12px 4px; }
+  .tab { width: 40px; height: 40px; font-size: 20px; }
+  .scroll { padding: 0 10px calc(10px + env(safe-area-inset-bottom)); }
+  .heading { padding: 10px 6px 4px; font-size: var(--fs-13); }
+  .emoji { min-height: 44px; font-size: 26px; }
+}
+
+/* Under a message (Reactions.tsx): an emoji in its pill, the button that adds one, and who reacted. */
+.pillEmoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 15px; line-height: 1; }
+.addReaction { color: var(--quiet); }
+.addReaction:hover { color: var(--ink); }
+.who { display: grid; gap: 0; margin: 0; padding-top: 0; list-style: none; }
+.who li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--row-divider); }
+.who li > span:last-child { display: grid; gap: 2px; min-width: 0; color: var(--text-2); font-size: var(--fs-13); }
+.who strong { color: var(--ink); font-weight: 600; }
+.whoKind { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--fill-2); color: var(--text-2); font-size: 18px; }
