@@ -25,7 +25,7 @@ import { StatusChip, type ChatStatus } from "./Status";
 import { laterLabel, scheduledKey, ScheduledBar, SendLaterMenu, SendLaterSheet, useLongPress } from "./Schedule";
 import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, channelLabel, roleColor } from "./ui";
-import { usePhone, useVoiceRecorder } from "./voice";
+import { useStopWhenHidden, useTouch, useVoiceRecorder } from "./voice";
 import { MicButton, VoiceRecorder, type VoicePreview } from "./VoiceRecorder";
 import s from "./chat.module.css";
 import th from "./threads.module.css";
@@ -60,6 +60,10 @@ interface Draft {
   text: string;
   picked: MentionOption[];
 }
+
+type OutgoingPayload = { body: string; attachments: WaitingFile[]; job_id: string | null; reply_to: string | null; thread_root: string | null; also_in_channel: boolean };
+/** What a refused send puts back in the box. */
+type Restore = { key: string; text: string; picked: MentionOption[]; uploads: Upload[]; job: JobPick | null };
 
 /** Drafts by channel, for as long as the tab is open. */
 const drafts = new Map<string, Draft>();
@@ -161,23 +165,61 @@ export function Composer({
 
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
-  // Sent now, or kept on the phone until there's signal (outbox.ts); what the server refuses is said here.
+  // The box as it is now, for a send that comes back refused after the screen moved on.
+  const now = useRef({ key: draftKey, text, mounted: true });
+  now.current.key = draftKey;
+  now.current.text = text;
+  useEffect(() => {
+    now.current.mounted = true;
+    return () => void (now.current.mounted = false);
+  }, []);
+
+  // Sent now, or kept on the phone until there's signal (outbox.ts). The box empties as the message
+  // is handed over, so leaving the conversation meanwhile can't bring it back to be sent twice; one
+  // the server refuses comes back to the box (or to its draft), with why. The callbacks are the
+  // mutation's own, so they run after leaving too.
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: WaitingFile[]; job_id: string | null; reply_to: string | null; thread_root: string | null; also_in_channel: boolean }) =>
+    mutationFn: ({ payload }: { payload: OutgoingPayload; restore: Restore }) =>
       sendChatMessage({ ...payload, userId: session.userId, companyId: session.company.id, channelId: channel.id }),
-    onSuccess: (message) => message && addMessage(queryClient, session.company.id, message),
+    onSuccess: (message, { restore }) => {
+      if (message) addMessage(queryClient, session.company.id, message);
+      restore.uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
+    },
+    onError: (_error, { restore }) => {
+      if (!drafts.has(restore.key)) drafts.set(restore.key, { text: restore.text, picked: restore.picked });
+      if (now.current.mounted && now.current.key === restore.key && !now.current.text.trim()) {
+        setText(restore.text);
+        setPicked(restore.picked);
+        setUploads(restore.uploads);
+        setJob(restore.job);
+      }
+    },
   });
   // A voice note: recorded here (voice.ts), then sent on its own, stored in the channel's folder as it goes.
   const voice = useVoiceRecorder();
-  const phone = usePhone();
+  const touch = useTouch();
+  const box = useRef<HTMLDivElement>(null);
+  const mic = useRef<HTMLButtonElement>(null);
+  useStopWhenHidden(box, voice);
+  // The recorder closed: focus back where the recording began (the box on a computer, the microphone on a phone).
+  const phase = voice.recording.phase;
+  const recordedBefore = useRef(false);
+  useEffect(() => {
+    if (phase !== "idle") recordedBefore.current = true;
+    else if (recordedBefore.current) {
+      recordedBefore.current = false;
+      (touch ? mic.current : input.current)?.focus();
+    }
+  }, [phase, touch]);
   const sendVoice = useMutation({
     mutationFn: (note: VoicePreview) => {
       const path = `${session.company.id}/chat/${channel.id}/${crypto.randomUUID()}.${note.ext}`;
       // The stored file's name, the same for everyone; a message shows it in their own words.
       const file: WaitingFile = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, body: note.blob, ...(note.words && { words: note.words.slice(0, 5000) }) }; // i18n-ignore: stored
-      return send.mutateAsync({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null, thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend });
+      return sendChatMessage({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null, thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend, userId: session.userId, companyId: session.company.id, channelId: channel.id });
     },
-    onSuccess: () => {
+    onSuccess: (message) => {
+      if (message) addMessage(queryClient, session.company.id, message);
       voice.done();
       onCancelReply();
     },
@@ -185,20 +227,22 @@ export function Composer({
 
   const ready = uploads.every((u) => u.status !== "uploading");
   const photos = uploads.filter((u) => (u.status === "done" || u.status === "waiting") && u.path);
-  const canSend = ready && !send.isPending && (text.trim().length > 0 || photos.length > 0 || Boolean(job));
+  const canSend = ready && (text.trim().length > 0 || photos.length > 0 || Boolean(job));
 
   const submit = () => {
     if (!canSend) return;
     const body = fromEditable(text.trim(), picked);
     const attachments: WaitingFile[] = photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }), ...(u.status === "waiting" && { body: u.body }) }));
     const payload = { body, attachments, job_id: job?.id ?? null, reply_to: replyTo?.id ?? null, thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend };
-    send.mutate(payload, { onSuccess: cleared });
+    const restore: Restore = { key: draftKey, text, picked, uploads, job };
+    cleared(false);
+    send.mutate({ payload, restore });
   };
-  /** Sent, waiting for signal, or scheduled: the box is empty again. */
-  const cleared = () => {
+  /** Sent, waiting for signal, or scheduled: the box is empty again. `revoke`: its photos' previews can go (not while a send may hand them back). */
+  const cleared = (revoke = true) => {
     setText("");
     setPicked([]);
-    uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
+    if (revoke) uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
     setUploads([]);
     setJob(null);
     onCancelReply();
@@ -220,7 +264,7 @@ export function Composer({
       });
     },
     onSuccess: (_r, at) => {
-      cleared();
+      cleared(true);
       toast.success(t("Scheduled for {when}", { when: laterLabel(at.toISOString(), session.company.timezone) }));
       void queryClient.invalidateQueries({ queryKey: scheduledKey(session.company.id) });
     },
@@ -406,7 +450,7 @@ export function Composer({
 
   const placeholder = thread ? t("Reply…") : t("Message {channel}", { channel: channelLabel(channel) });
   return (
-    <div className={s.foot}>
+    <div ref={box} className={s.foot}>
       {!thread && <ScheduledBar channelId={channel.id} options={options} />}
       <div
         className={s.composer}
@@ -479,7 +523,7 @@ export function Composer({
               { label: t("Choose a file"), icon: "paperclip", description: t("PDF, Word, Excel, PowerPoint, text or CSV, up to 15 MB"), onSelect: () => documents.current?.click(), disabled: uploads.length >= MAX_FILES },
             ]}
           />
-          {!phone && <MicButton onClick={() => void voice.start()} />}
+          {!touch && <MicButton buttonRef={mic} onClick={() => void voice.start()} />}
           <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addFiles(e.target.files)} />
           <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(e) => addFiles(e.target.files)} />
           <input ref={documents} type="file" accept={CHAT_DOCUMENT_ACCEPT} multiple hidden onChange={(e) => addFiles(e.target.files)} />
@@ -502,23 +546,23 @@ export function Composer({
           <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
             <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>
-          {phone && !text.trim() && !uploads.length && !job ? (
-            <MicButton round onClick={() => void voice.start()} />
+          {touch && !text.trim() && !uploads.length && !job ? (
+            <MicButton round buttonRef={mic} onClick={() => void voice.start()} />
           ) : (
           <>
           <button
             type="button"
             className={`btn btn-sm btn-primary ${s.sendBtn}`}
             aria-label={t("Send")}
-            aria-description={phone ? t("Hold to send later") : undefined}
+            aria-description={touch && !thread ? t("Hold to send later") : undefined}
             disabled={!canSend}
-            {...(phone && !thread ? press.handlers : {})}
+            {...(touch && !thread ? press.handlers : {})}
             onClick={() => (press.consume() ? undefined : submit())}
           >
             <span className={s.sendIcon} aria-hidden="true"><Icon name="arrowUp" size={19} /></span>
             <span className={s.sendText}>{t("Send")}</span>
           </button>
-          {!phone && !thread && <SendLaterMenu disabled={!canSend || later.isPending} onPick={(at) => later.mutate(at)} />}
+          {!touch && !thread && <SendLaterMenu disabled={!canSend || later.isPending} onPick={(at) => later.mutate(at)} />}
           </>
           )}
         </div>

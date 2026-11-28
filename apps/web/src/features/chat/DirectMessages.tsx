@@ -19,6 +19,7 @@ import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { chatKeys, markRead, type ChatChannel, type ChatPerson, type ChatState } from "./data";
 import { directPeople } from "./direct";
+import { useWaitingByChannel, WaitingCount } from "./Outbox";
 import { Avatar, listTime } from "./ui";
 import s from "./chat.module.css";
 import d from "./direct.module.css";
@@ -169,6 +170,8 @@ export function NewMessageDialog({ open, onClose }: { open: boolean; onClose: ()
 /** The list's "Direct messages" section: each conversation by its people, the latest first. */
 export function DirectSection({ channels, state, current, open, onToggle }: { channels: ChatChannel[]; state: ChatState; current: string | undefined; open: boolean; onToggle: () => void }) {
   const close = useCloseDirect();
+  const session = useSession();
+  const waiting = useWaitingByChannel(session.userId, session.company.id);
   // A phone's rows are taller, with a face the size of a channel's icon.
   const face = phone() ? 40 : 20;
   return (
@@ -191,7 +194,7 @@ export function DirectSection({ channels, state, current, open, onToggle }: { ch
               to={`/chat/${c.id}`}
               className={muted ? `${s.channel} ${n.muted}` : s.channel}
               data-unread={unread || undefined}
-              aria-label={`${c.name}${c.mentions && c.id !== current ? `, ${t.plural(c.mentions, { one: "{count} new message", other: "{count} new messages" })}` : ""}`}
+              aria-label={`${c.name}${c.mentions && c.id !== current ? `, ${t.plural(c.mentions, { one: "{count} new message", other: "{count} new messages" })}` : ""}${waiting.get(c.id) ? `, ${t.plural(waiting.get(c.id)!, { one: "{count} message waiting for signal", other: "{count} messages waiting for signal" })}` : ""}`}
             >
               <span className={`${s.hash} ${d.lead}`} aria-hidden="true"><DirectFaces people={people} size={face} /></span>
               <span className={s.channelText}>
@@ -200,6 +203,7 @@ export function DirectSection({ channels, state, current, open, onToggle }: { ch
               </span>
               <span className={s.channelEnd}>
                 {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
+                <WaitingCount count={waiting.get(c.id) ?? 0} />
                 {muted && <span className={n.mutedIcon}><Icon name="bellOff" size={13} label={t("Notifications off")} /></span>}
                 {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
                 {unread && <span className={s.dot} aria-hidden="true" />}
