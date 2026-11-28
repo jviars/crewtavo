@@ -242,9 +242,15 @@ export function abcSays(body: string): string | null {
   return words || null;
 }
 
-/** A level of ABC's product categories (product group, category, product type...). */
+/**
+ * A level of ABC's product categories (product group, category, product type...). ABC's docs give
+ * each a `label` and a `description` in words; `name` can be only the code (the product group's
+ * "1000") or the words with a code in front ("000013 - Steep Slope Roofing").
+ */
 interface RawLevel {
   name?: string | null;
+  code?: string | null;
+  label?: string | null;
   description?: string | null;
   category?: RawLevel | null;
   productType?: RawLevel | null;
@@ -282,8 +288,15 @@ const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"'
 /**
  * A category's name without ABC's code in front, and with its HTML entities read:
  * "000013  -  Steep Slope Roofing (&gt;2/12 Pitch)" is "Steep Slope Roofing (>2/12 Pitch)".
+ * ABC's docs write the same sign as "<gt/>".
  */
-const levelName = (value: unknown) => text(text(value)?.replace(/^\d+\s*-\s*/, "").replace(/&(amp|lt|gt|quot|#39|apos);/g, (_, e: string) => ENTITIES[e]!));
+const levelName = (value: unknown) => text(text(value)?.replace(/^\d+\s*-\s*/, "").replace(/&(amp|lt|gt|quot|#39|apos);|<(amp|lt|gt)\/>/g, (_, e: string, tag: string) => ENTITIES[e ?? tag]!));
+
+/** A level's name in words: its label, else its description, else its name unless that's only the code. */
+function levelWords(level: RawLevel | null | undefined): string | null {
+  const name = levelName(level?.name);
+  return levelName(level?.label) ?? levelName(level?.description) ?? (name && !/^\d+$/.test(name) && name !== text(level?.code) ? name : null);
+}
 
 const LEGAL_ENDING = /[\s,.]+(sales|llc|l\.l\.c|inc|incorporated|co|corp|corporation|company|ltd|lp|mfg)\.?$/i;
 
@@ -302,7 +315,7 @@ export function brandOf(value: unknown): string | null {
 function pathOf(raw: RawItem): string[] {
   const group = raw.hierarchy?.productGroup;
   const levels = [group, group?.category, group?.category?.productType, group?.category?.productType?.materialComposition];
-  return levels.map((level) => levelName(level?.name) ?? levelName(level?.description)).filter((name): name is string => Boolean(name));
+  return levels.map(levelWords).filter((name): name is string => Boolean(name));
 }
 
 /** A unit as the list of usual items gives it ("PC - PIECE"), as its code (PC) and words (Piece). */

@@ -425,6 +425,27 @@ describe("ABC Supply's catalog", () => {
     expect(sent("/search/items").at(-1).filters[0]).toEqual({ key: "productFamilyId", condition: "equals", values: ["FAM-HDZ"], joinCondition: "and" });
   });
 
+  it("reads a category's name in words where ABC's `name` is only its code", async () => {
+    // As ABC's Get Item and Search Items pages show a hierarchy: the product group's name is its code, and the words are in label and description.
+    const documented = {
+      productGroup: {
+        name: "1000", code: "1000", label: "Steep Slope Products", description: "Steep Slope Products",
+        category: {
+          name: "000013 - Steep Slope Roofing (<gt/>2:12 Pitch)", code: "13", label: "Steep Slope Roofing (<gt/>2:12 Pitch)", description: "Steep Slope Roofing (<gt/>2:12 Pitch)",
+          productType: { name: "000070 - Fiberglass Laminated Shingles", code: "70", label: "Fiberglass Laminated Shingles", description: "Fiberglass Laminated Shingles", materialComposition: { name: "000062 - Asphalt Composition Shingles and Hip & Ridge", code: "62", description: "Asphalt Composition Shingles and Hip & Ridge" } },
+        },
+      },
+    };
+    // A level with nothing but a code has no name to show; one with only a name in words keeps it.
+    const sparse = { productGroup: { name: "1000", code: "1000", category: { name: "Accessories", code: "44", productType: { name: "70", code: "000070" } } } };
+    abc.mockImplementation(async (url) => Response.json({ ...ITEM, hierarchy: String(url).includes("SPARSE") ? sparse : documented }));
+    const client = new AbcClient({}, "sandbox", "token-1", abc as never);
+    const item = await client.item("02GATZ3CH");
+    expect(item.path).toEqual(["Steep Slope Products", "Steep Slope Roofing (>2:12 Pitch)", "Fiberglass Laminated Shingles", "Asphalt Composition Shingles and Hip & Ridge"]);
+    expect(item.kind).toBe("Fiberglass Laminated Shingles");
+    expect((await client.item("SPARSE")).path).toEqual(["Accessories"]);
+  });
+
   it("shows what the account usually buys, then its prices, finding its bill-to account the first time", async () => {
     await roofer();
     abc.mockImplementation(async (url, init) => {
