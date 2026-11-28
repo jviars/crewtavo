@@ -636,7 +636,7 @@ function uninstallBody(app: AppRow, counts: { calendars: number; teamPlans?: boo
     return `Its calendars come off the schedule.${visits} Your own Google calendars aren't changed. ${again}`;
   }
   if (app.auth === "link") return `${counts.calendars === 1 ? "Its calendar comes" : `Its ${counts.calendars} calendars come`} off the schedule. The calendars themselves aren't changed. ${again}`;
-  if (app.id === "stripe") return `Crewtavo's webhook comes out of your Stripe account, and new invoices and payments stop showing up here. Nothing already recorded is deleted. ${again}`;
+  if (app.id === "stripe") return stripeUninstallWords();
   if (app.category === "Accounting") {
     const keys = app.app_keys ? ` Your ${app.id === "quickbooks" ? "Intuit" : "Zoho"} app's keys stay, so installing it again is one sign-in.` : "";
     return `Syncing stops right away. Nothing already synced is deleted.${keys} ${again}`;
@@ -892,6 +892,15 @@ export function KeyCard({ app, onSaved }: { app: AppRow; onSaved: () => void }) 
       {stripeSteps && note}
     </Section>
   );
+}
+
+/**
+ * What uninstalling Stripe does, all of it said before: Crewtavo stops hearing from the account, so
+ * the open invoices it made there are voided and the saved cards let go (leaveAccount in the API's
+ * integrations/stripe.ts), which ends autopay for those clients.
+ */
+export function stripeUninstallWords(): string {
+  return "Crewtavo's webhook comes out of your Stripe account, and new invoices and payments stop showing up here. The open invoices Crewtavo made in Stripe are voided there, so clients can't pay them online; what they owe here doesn't change. Every card and bank account clients saved is removed, which ends autopay for them until they set it up again. Nothing already recorded is deleted. You can install it again any time.";
 }
 
 /** What uninstalling Twilio does: its texts stop, unless Quo is connected and sends them already; either way its keys leave Crewtavo. */

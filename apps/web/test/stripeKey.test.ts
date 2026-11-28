@@ -9,7 +9,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { KeyCard } from "../src/features/apps/AppDetailPage";
+import { KeyCard, stripeUninstallWords } from "../src/features/apps/AppDetailPage";
 import { isFullSecretKey, STRIPE_NEW_KEY, type AppRow } from "../src/features/apps/catalog";
 import { StripePanel } from "../src/features/apps/StripePanel";
 
@@ -65,5 +65,17 @@ describe("the Stripe card", () => {
     expect(text(html)).toContain("then delete the full key in Stripe");
     expect(html).toContain(STRIPE_NEW_KEY.replace(/&/g, "&amp;"));
     expect(text(render(createElement(StripePanel, { app: app("stripe", { stripe: STRIPE }), onChanged: () => undefined })))).not.toContain("full Stripe secret key");
+  });
+});
+
+describe("uninstalling Stripe", () => {
+  // Said before, not only in the notice after: disconnecting voids the open Stripe invoices Crewtavo
+  // made and lets go of every saved card (leaveAccount in the API's integrations/stripe.ts).
+  it("says first that open Stripe invoices are voided and saved cards removed, ending autopay", () => {
+    const words = stripeUninstallWords();
+    expect(words).toContain("Crewtavo's webhook comes out of your Stripe account, and new invoices and payments stop showing up here.");
+    expect(words).toContain("The open invoices Crewtavo made in Stripe are voided there, so clients can't pay them online; what they owe here doesn't change.");
+    expect(words).toContain("Every card and bank account clients saved is removed, which ends autopay for them until they set it up again.");
+    expect(words).toContain("Nothing already recorded is deleted.");
   });
 });
