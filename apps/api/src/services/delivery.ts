@@ -21,7 +21,8 @@
  * and text's own words are translated here.
  *
  * Team chat's quiet hours and pause (public.chat_quiet_hours, each person's): a chat notification
- * made while they're on stays on the bell. It isn't pushed, emailed or texted, then or later.
+ * made while they're on stays on the bell. It isn't pushed, emailed or texted, then or later. A
+ * reminder someone set for themselves (chat_reminder) goes as usual.
  */
 import { byEmail, byText, chatQuietAt, DEFAULT_NOTIFICATION_PREFS, isPlaceholderEmail, notificationTopic, type ChatQuiet, type NotificationChannel, type NotificationTopic } from "@crewtavo/core";
 import { translator } from "@crewtavo/core/i18n";
@@ -162,9 +163,10 @@ export async function deliverNotifications(env: Env, options: { minAgeSeconds?: 
       // In their language: the notices as they read in the app, and the email's and text's own words.
       const t = translator(person.locale);
       const shown = (i: Row) => translateNotice(t.locale, i);
-      // Team chat during their quiet hours or pause: the bell only.
+      // Team chat during their quiet hours or pause: the bell only. A reminder they set themselves
+      // still comes: they asked for it at that time.
       const quiet = (quietHours.data ?? []).find((q) => q.company_id === companyId && q.user_id === userId) as ChatQuiet | undefined;
-      const hushed = (i: Row) => notificationTopic(i.kind) === "chat" && chatQuietAt(new Date(i.created_at ?? Date.now()), quiet, company.timezone);
+      const hushed = (i: Row) => notificationTopic(i.kind) === "chat" && i.kind !== "chat_reminder" && chatQuietAt(new Date(i.created_at ?? Date.now()), quiet, company.timezone);
       // What they chose to get by this channel, less what has gone (or been turned down for good) by it.
       const pick = (channel: NotificationChannel) =>
         lowFirst(items.filter((i) => !state.get(i.id)?.[channel] && !hushed(i) && chosen[channel].includes(notificationTopic(i.kind) as NotificationTopic) && (channel !== "email" || byEmail(i.kind)) && (channel !== "sms" || byText(i.kind))));

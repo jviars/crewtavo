@@ -454,6 +454,16 @@ describe("Team chat's quiet hours", () => {
     expect(sendPush).toHaveBeenCalledTimes(2);
   });
 
+  it("let through a reminder the person set for themselves", async () => {
+    // A reminder for 6:30 AM Saturday, before quiet hours end at 7.
+    const reminder = notice({ kind: "chat_reminder", title: "Reminder: a message in #general", body: "Gate code is 4411", link: "/chat/c1?message=m1", created_at: "2026-11-28T12:30:00Z" });
+    const w = chatWorld([reminder, chat("2026-11-28T12:30:00Z")], weeknights);
+    const sent = serve(w);
+    expect(await deliverNotifications(env)).toMatchObject({ claimed: 2, email: 1, sms: 1 });
+    expect(sent.emails()[0]!.subject).toBe("Reminder: a message in #general");
+    expect(sendPush).toHaveBeenCalledTimes(1);
+  });
+
   it("hold while notifications are paused, and in the person's own zone", async () => {
     const paused = chatWorld([chat("2026-11-27T21:00:00Z")], { ...weeknights, quiet_on: false, paused_until: "2026-11-27T22:00:00Z" });
     serve(paused);
