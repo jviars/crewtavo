@@ -9,7 +9,8 @@
 .close { display: grid; flex: none; place-items: center; width: 30px; height: 30px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--text-2); cursor: pointer; }
 .close:hover { background: var(--fill-2); color: var(--ink); }
 
-.body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Only the filter row on a phone moves sideways, never the rest. */
+.body { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .field { padding: 10px 16px 0; }
 .field :global(.search-field) { width: 100%; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--divider); }
@@ -74,7 +75,18 @@
   .headTitle { justify-content: center; font-size: var(--fs-15); }
   .close { display: none; }
   .field { padding: 10px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
-  .tools { gap: 8px; padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  /* One row of filters to swipe through, faded at an edge with more past it (SearchPanel's useScrollEdges). */
+  .tools {
+    gap: 8px; min-width: 0; padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); overflow-x: auto; flex-wrap: nowrap;
+    overscroll-behavior-x: contain; scroll-padding-inline: 16px; scrollbar-width: none;
+  }
+  .tools::-webkit-scrollbar { display: none; }
+  .tools[data-more="right"] { mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent); }
+  .tools[data-more="left"] { mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent); }
+  .tools[data-more="both"] {
+    mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+  }
   .chip { flex: none; height: 40px; padding: 0 14px; font-size: var(--fs-14); }
   .clear { flex: none; min-height: 40px; font-size: var(--fs-14); }
   .count { display: none; }
