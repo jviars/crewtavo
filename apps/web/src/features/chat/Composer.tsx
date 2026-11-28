@@ -1,6 +1,7 @@
 /**
- * Writing a message: text with @mentions picked from a list as you type, up to six photos (taken,
- * chosen, pasted or dropped on the box; shrunk before they upload), a job to link, and a reply. The
+ * Writing a message: text with @mentions picked from a list as you type, up to six photos and
+ * documents (PDF, Word, Excel, PowerPoint, text, CSV: taken, chosen, pasted or dropped on the box;
+ * photos shrunk before they upload), a job to link, and a reply. The
  * text can be formatted with Markdown (**bold**, _italics_, lists…; Ctrl+B and Ctrl+I mark a word).
  * Enter sends on a computer; on a phone the send button does. A half-written message waits for you
  * when you come back to the channel.
@@ -8,18 +9,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
+import { CHAT_DOCUMENT_ACCEPT, CHAT_MAX_FILES, chatDocumentType, chatFileKind } from "@crewtavo/core/chatContent";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
+import { Menu } from "@/components/ui/Menu";
 import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
-import { uploadFile } from "@/lib/files";
+import { storedType, uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { DOCUMENT_ICONS } from "./ChatFiles";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { EmojiPicker } from "./EmojiPicker";
 import { Avatar, roleColor } from "./ui";
 import s from "./chat.module.css";
+import f from "./chatFiles.module.css";
 import { t, T } from "@/lib/i18n";
 
 export interface MentionOption extends Mentionable {
@@ -33,9 +38,12 @@ export interface MentionOption extends Mentionable {
 interface Upload {
   id: string;
   name: string;
-  preview: string;
+  /** A photo's picture while it uploads; a document has its icon instead. */
+  preview: string | null;
   status: "uploading" | "done" | "error";
   path?: string;
+  type?: string;
+  size?: number;
 }
 
 interface Draft {
@@ -45,9 +53,11 @@ interface Draft {
 
 /** Drafts by channel, for as long as the tab is open. */
 const drafts = new Map<string, Draft>();
-const MAX_PHOTOS = 6;
+const MAX_FILES = CHAT_MAX_FILES;
 const coarse = () => window.matchMedia("(pointer: coarse)").matches;
 const isPhoto = (f: File) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name);
+/** A document a message can carry, by its name's ending (core chatFileKind, as the database allows). */
+const isDocument = (f: File) => !isPhoto(f) && chatFileKind({ name: f.name }) === "document";
 
 /** A pasted picture has no name of its own ("image.png"): call it what it is. */
 function pastedName(file: File, n: number): File {
@@ -86,6 +96,8 @@ export function Composer({
   const [dropping, setDropping] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const files = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const documents = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
   /** Where the caret goes once the text just set is in the box (Ctrl+B, Ctrl+I), before the next key lands. */
   const caret = useRef<[number, number] | null>(null);
@@ -133,24 +145,25 @@ export function Composer({
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string }>; job_id: string | null; reply_to: string | null }) =>
+    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string; type?: string; size?: number }>; job_id: string | null; reply_to: string | null }) =>
       api.post<{ message: ChatMessage }>(`/chat/channels/${channel.id}/messages`, payload),
     onSuccess: ({ message }) => addMessage(queryClient, session.company.id, message),
   });
 
   const ready = uploads.every((u) => u.status !== "uploading");
-  const photos = uploads.filter((u) => u.status === "done" && u.path);
-  const canSend = ready && !send.isPending && (text.trim().length > 0 || photos.length > 0 || Boolean(job));
+  const done = uploads.filter((u) => u.status === "done" && u.path);
+  const canSend = ready && !send.isPending && (text.trim().length > 0 || done.length > 0 || Boolean(job));
 
   const submit = () => {
     if (!canSend) return;
     const body = fromEditable(text.trim(), picked);
-    const payload = { body, attachments: photos.map((u) => ({ path: u.path!, name: u.name })), job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
+    const attachments = done.map((u) => ({ path: u.path!, name: u.name, ...(u.type ? { type: u.type } : {}), ...(u.size !== undefined ? { size: u.size } : {}) }));
+    const payload = { body, attachments, job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
     send.mutate(payload, {
       onSuccess: () => {
         setText("");
         setPicked([]);
-        uploads.forEach((u) => URL.revokeObjectURL(u.preview));
+        uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
         setUploads([]);
         setJob(null);
         onCancelReply();
@@ -253,18 +266,23 @@ export function Composer({
     el?.focus();
   };
 
-  const addPhotos = (list: FileList | File[] | null) => {
-    const all = [...(list ?? [])].filter(isPhoto);
-    const chosen = all.slice(0, MAX_PHOTOS - uploads.length);
-    if (files.current) files.current.value = "";
-    if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos.", { count: MAX_PHOTOS }));
-    // Photos turned away for space are told about once, together, with why and who can make room.
+  /** Photos and documents, from the pickers, a paste or a drop. Anything else is said no to, by name. */
+  const addFiles = (list: FileList | File[] | null) => {
+    const given = [...(list ?? [])];
+    const all = given.filter((file) => isPhoto(file) || isDocument(file));
+    const chosen = all.slice(0, Math.max(0, MAX_FILES - uploads.length));
+    for (const picker of [files, camera, documents]) if (picker.current) picker.current.value = "";
+    const other = given.find((file) => !all.includes(file));
+    if (other) toast.warning(t("{name} can't go in a message. Send photos, or PDF, Word, Excel, PowerPoint, text or CSV files.", { name: other.name }));
+    if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos and files.", { count: MAX_FILES }));
+    // Files turned away for space are told about once, together, with why and who can make room.
     const refused = new RefusedForSpace();
     const sent = chosen.map((file) => {
       const id = crypto.randomUUID();
-      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading" }]);
+      const photo = isPhoto(file);
+      setUploads((u) => [...u, { id, name: file.name, preview: photo ? URL.createObjectURL(file) : null, status: "uploading", size: photo ? undefined : file.size }]);
       return uploadFile(session.company.id, `chat/${channel.id}`, file).then(
-        (path) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done", path } : x))),
+        (path) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done", path, type: photo ? storedType(path, file) : file.type || undefined } : x))),
         (error: unknown) => {
           setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
           refused.add(error, file.name, file.size);
@@ -277,13 +295,16 @@ export function Composer({
   };
 
   // A screenshot or a copied photo pastes in as a photo. Copied text that brings a picture of itself
-  // along (Word, a spreadsheet) still pastes as text.
+  // along (Word, a spreadsheet) still pastes as text. A copied document (a PDF from the computer's
+  // files, which brings its name as text) pastes in as the document.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const data = e.clipboardData;
-    const pasted = [...data.items].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => Boolean(f && isPhoto(f)));
-    if (!pasted.length || data.getData("text/plain").trim()) return;
+    const pasted = [...data.items].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => Boolean(f));
+    const docs = pasted.filter(isDocument);
+    const pictures = data.getData("text/plain").trim() ? [] : pasted.filter(isPhoto);
+    if (!docs.length && !pictures.length) return;
     e.preventDefault();
-    addPhotos(pasted.map(pastedName));
+    addFiles([...pictures.map(pastedName), ...docs]);
   };
   const hasFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
   const onDragOver = (e: DragEvent) => {
@@ -296,7 +317,7 @@ export function Composer({
     if (!hasFiles(e)) return;
     e.preventDefault();
     setDropping(false);
-    addPhotos([...e.dataTransfer.files]);
+    addFiles([...e.dataTransfer.files]);
   };
 
   if (!channel.can_post) {
@@ -355,8 +376,8 @@ export function Composer({
         {(uploads.length > 0 || job) && (
           <div className={s.chips}>
             {uploads.map((u) => (
-              <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this photo") : u.name}>
-                <img src={u.preview} alt="" />
+              <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this file") : u.name}>
+                {u.preview ? <img src={u.preview} alt="" /> : <span className={f.chipIcon}><Icon name={DOCUMENT_ICONS[chatDocumentType({ name: u.name })]} size={18} /></span>}
                 <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.name}</span>
                 <button type="button" className="icon-btn" aria-label={t("Remove {tag}", { tag: u.name })} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={14} /></button>
               </span>
@@ -371,10 +392,22 @@ export function Composer({
           </div>
         )}
         <div className={s.composerRow}>
-          <button type="button" className={s.composerBtn} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
-            <Icon name="camera" size={17} />
-          </button>
-          <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
+          <Menu
+            label={t("Add photos or files")}
+            title={t("Add photos or files")}
+            align="start"
+            triggerClassName={s.composerBtn}
+            trigger={<Icon name="plus" size={17} />}
+            items={[
+              // On a computer the camera button would open the same file chooser as photos.
+              { label: t("Take a photo"), icon: "camera", onSelect: () => camera.current?.click(), hidden: !coarse(), disabled: uploads.length >= MAX_FILES },
+              { label: t("Choose photos"), icon: "image", onSelect: () => files.current?.click(), disabled: uploads.length >= MAX_FILES },
+              { label: t("Choose a file"), icon: "paperclip", description: t("PDF, Word, Excel, PowerPoint, text or CSV, up to 15 MB"), onSelect: () => documents.current?.click(), disabled: uploads.length >= MAX_FILES },
+            ]}
+          />
+          <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addFiles(e.target.files)} />
+          <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(e) => addFiles(e.target.files)} />
+          <input ref={documents} type="file" accept={CHAT_DOCUMENT_ACCEPT} multiple hidden onChange={(e) => addFiles(e.target.files)} />
           <textarea
             ref={input}
             className={s.composerInput}

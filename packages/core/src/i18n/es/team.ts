@@ -168,9 +168,7 @@ export default {
   "Mention": "Mencionar",
   "Replying to <b>{name}</b>": "Respondiendo a <b>{name}</b>",
   "Cancel reply": "Cancelar respuesta",
-  "Couldn't upload this photo": "No se pudo subir esta foto",
   "Pasted image": "Imagen pegada",
-  "A message takes up to {count} photos.": "Un mensaje lleva hasta {count} fotos.",
   "Job #{number}": "Trabajo #{number}",
   "Remove the job": "Quitar el trabajo",
   "Link a job": "Vincular un trabajo",
@@ -617,6 +615,15 @@ export default {
   "Travel and vehicles": "Viajes y vehículos",
   "Objects": "Objetos",
   "Symbols": "Símbolos",
+
+  // Team chat: documents in a message (features/chat/Composer.tsx, ChatFiles.tsx)
+  "Add photos or files": "Agregar fotos o archivos",
+  "Choose photos": "Elegir fotos",
+  "PDF, Word, Excel, PowerPoint, text or CSV, up to 15 MB": "PDF, Word, Excel, PowerPoint, texto o CSV, de hasta 15 MB",
+  "{name} can't go in a message. Send photos, or PDF, Word, Excel, PowerPoint, text or CSV files.": "{name} no se puede mandar en un mensaje. Manda fotos o archivos PDF, Word, Excel, PowerPoint, de texto o CSV.",
+  "A message takes up to {count} photos and files.": "Un mensaje lleva hasta {count} fotos y archivos.",
+  "Couldn't upload this file": "No se pudo subir este archivo",
+  "Open {name}": "Abrir {name}",
 
   // Guides: the list, a guide, its quiz and suggestions (features/kb)
   "{count} to look at": "{count} por revisar",

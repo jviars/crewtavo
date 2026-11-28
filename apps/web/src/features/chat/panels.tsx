@@ -8,11 +8,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useMemo, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { chatPlainText, type MessagePart } from "@crewtavo/core/chat";
-import { chatDocumentType, chatFileKind, markMatches, searchSnippet, type ChatDocumentType } from "@crewtavo/core/chatContent";
+import { chatDocumentType, chatFileKind, markMatches, searchSnippet } from "@crewtavo/core/chatContent";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { api } from "@/lib/api";
 import { t } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
+import { DOCUMENT_ICONS } from "./ChatFiles";
 import type { ChatMessage, ChatPerson, ChatState } from "./data";
 import { ChannelIcon, channelLabel, dayLabel, roleColor, timeLabel } from "./ui";
 import s from "./chat.module.css";
@@ -62,8 +63,6 @@ export function Marked({ text, query }: { text: string; query: string }) {
   if (!query.trim()) return <>{text}</>;
   return <>{markMatches(text, query).map((piece, i) => (piece.hit ? <mark key={i}>{piece.text}</mark> : <Fragment key={i}>{piece.text}</Fragment>))}</>;
 }
-
-const DOCUMENT_ICONS: Record<ChatDocumentType, IconName> = { pdf: "file", word: "fileText", sheet: "fileSpreadsheet", slides: "file", text: "fileText", csv: "fileSpreadsheet" };
 
 /** One message as a row of a list (search results, saved messages). */
 export function MessageRow({

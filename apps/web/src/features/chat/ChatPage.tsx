@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EVERYONE_TOKEN, roleToken, userToken } from "@crewtavo/core/chat";
+import { chatFileKind } from "@crewtavo/core/chatContent";
 import { hasRole, can, useSession } from "@/lib/session";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -307,7 +308,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
     return () => clearTimeout(timer);
   }, [flash, all]);
 
-  const photoPaths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.map((a) => a.path)))].sort(), [all]);
+  const photoPaths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.filter((a) => chatFileKind(a) === "photo").map((a) => a.path)))].sort(), [all]);
   const photos = useQuery({
     queryKey: ["chat-photos", company, photoPaths],
     enabled: photoPaths.length > 0,
@@ -492,7 +493,7 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
               <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
-              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? t("Photo") : t("Job")}</div>
+              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? (chatFileKind(m.attachments[0]!) === "photo" ? t("Photo") : m.attachments[0]!.name || t("File")) : t("Job")}</div>
             </button>
           ))}
         </div>

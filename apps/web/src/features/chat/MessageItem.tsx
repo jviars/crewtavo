@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { chatFileKind } from "@crewtavo/core/chatContent";
 import { orderReactions } from "@crewtavo/core/chatEmoji";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
@@ -20,6 +21,7 @@ import { copyText } from "@/lib/clipboard";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
+import { FileCard, FileCards } from "./ChatFiles";
 import { EmojiPicker } from "./EmojiPicker";
 import { ReactionPills, toggledReactions } from "./Reactions";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
@@ -171,6 +173,10 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   };
 
   const job = message.job_id ? ctx.jobs?.get(message.job_id) : undefined;
+  // Photos as pictures, voice notes, and every other file (a document) as a card.
+  const photos = message.attachments.filter((a) => chatFileKind(a) === "photo");
+  const voiceNotes = message.attachments.filter((a) => chatFileKind(a) === "audio");
+  const documents = message.attachments.filter((a) => !photos.includes(a) && !voiceNotes.includes(a));
   const nameColor = author ? roleColor(author.color) : undefined;
   // Yours, shown as on in the picker: picking one again takes it back.
   const myReactions = message.reactions.filter((g) => g.users.includes(ctx.me)).map((g) => g.kind);
@@ -240,9 +246,9 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )
         )}
 
-        {message.attachments.length > 0 && (
+        {photos.length > 0 && (
           <div className={s.photos}>
-            {message.attachments.map((a) =>
+            {photos.map((a) =>
               ctx.photos[a.path] ? (
                 <a key={a.path} className={s.photo} href={ctx.photos[a.path]} target="_blank" rel="noreferrer">
                   <img src={ctx.photos[a.path]} alt={a.name || t("Photo")} loading="lazy" />
@@ -253,6 +259,9 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             )}
           </div>
         )}
+        {/* Voice notes: VoiceNote (Field builder) */}
+        {voiceNotes.map((a) => <FileCard key={a.path} file={a} />)}
+        <FileCards files={documents} />
 
         {message.job_id && (
           job ? (
