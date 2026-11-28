@@ -47,6 +47,8 @@ export function notificationTopic(kind: string): NotificationTopic {
   // Snow tomorrow (Apps → Crewtavo - Snow) is schedule news: the crew may be going out.
   if (kind === "snow") return "schedule";
   if (kind === "schedule" || kind === "client" || kind === "equipment" || kind === "time" || kind === "chat" || kind === "hosting" || kind === "subs" || kind === "jobs") return kind;
+  // Team chat's reminders, and a scheduled message that couldn't be sent, come as Team chat does.
+  if (kind === "chat_reminder" || kind === "chat_scheduled") return "chat";
   // A new review, one of 1 or 2 stars (or changed down to that), and Google access starting or stopping.
   if (kind === "review" || kind === "review_low" || kind === "review_access") return "reviews";
   // An automatic post scheduled, and a post that didn't all go or Facebook & Instagram needing a sign-in.

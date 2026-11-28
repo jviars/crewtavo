@@ -23,6 +23,7 @@ import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup,
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import { VoiceNote } from "./VoiceNote";
 import { AddToJob } from "./AddToJob";
+import { useRemindMe } from "./Reminders";
 import s from "./chat.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
@@ -115,6 +116,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   const [editing, setEditing] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [toJob, setToJob] = useState(false);
+  const remind = useRemindMe(message);
   const mine = message.author_id === ctx.me;
   const mentioned = message.mention_all || message.mention_users.includes(ctx.me) || message.mention_roles.includes(ctx.myRoleKey);
   const company = session.company.id;
@@ -296,6 +298,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
       </div>
 
       {toJob && <AddToJob message={message} onClose={() => setToJob(false)} />}
+      {remind.dialog}
       {editing === null && (
         <div className={s.tools}>
           <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
@@ -314,6 +317,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
               { label: t("Edit"), icon: "edit", kbd: "E", onSelect: startEdit, hidden: !mine || !ctx.canPost },
               { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", kbd: "P", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
               { label: t("Copy text"), icon: "copy", kbd: "C", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
+              remind.entry,
               // The people who may change jobs (the API and the database decide again).
               { label: t("Add to a job"), icon: "job", kbd: "J", onSelect: () => setToJob(true), hidden: !hasRole(session, "admin", "office", "estimator") },
               { separator: true },

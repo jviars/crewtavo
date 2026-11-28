@@ -7,6 +7,12 @@
  *   POST /chat/messages/:id/to-job      a message onto a job: its words as a note, or a copy of its photos and files
  *   GET  /chat/statuses                 everyone's status now (theirs by hand, else their running clock's)
  *   PUT  /chat/status                   set my own status; DELETE clears it. Everyone connected hears of it.
+ *   GET  /chat/scheduled                my messages waiting to be sent later (?channel= for one conversation)
+ *   POST /chat/channels/:id/scheduled   schedule one; PATCH /chat/scheduled/:id changes its words or time;
+ *                                       DELETE takes it back; POST /chat/scheduled/:id/send sends it now.
+ *                                       The minute scheduler sends the rest (services/chatLater.ts).
+ *   GET  /chat/reminders                my reminders still to come, with their messages
+ *   PUT  /chat/messages/:id/reminder    remind me of a message at a time; DELETE /chat/reminders/:id takes it back
  */
 import { ADMINS, levelLabel, SALES, toEditable } from "@crewtavo/core";
 import { CUSTOM_STATUS, isAudio, STATUS_KINDS, STATUS_TEXT_MAX } from "@crewtavo/core/chatField";
@@ -17,13 +23,13 @@ import type { AppEnv } from "../env";
 import { checkOpenAiKey } from "../integrations/openai";
 import { loadSecret } from "../integrations/tokens";
 import { requireCompany, requireUser } from "../lib/auth";
-import { toCompany } from "../lib/chatHub";
+import { toCompany, toUser } from "../lib/chatHub";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reserveStorage, snapshotsFrom } from "../lib/storageLimits";
 import { adminClient } from "../lib/supabase";
 import { removeStored } from "../services/planFiles";
-import { voiceWordsOn } from "../services/chatVoice";
-import { loadPeople, messageById, requireOn, shapeMessages } from "./chat";
+import { afterMessage, voiceWordsOn } from "../services/chatVoice";
+import { attachment, chatDbError, loadPeople, MESSAGE_COLUMNS, messageBody, messageById, publish, requireOn, shapeMessages, type MessageRow } from "./chat";
 
 type Ctx = Context<AppEnv>;
 
@@ -213,5 +219,147 @@ chatField.delete("/chat/status", requireUser, requireCompany(), async (c) => {
   if (error) throw dbError(error);
   // What the clock says comes back, if it's running: read again by whoever's looking.
   toCompany(companyId, { type: "status", user_id: userId, status: null });
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Sending later
+// ---------------------------------------------------------------------------------------------
+
+const SCHEDULED_COLUMNS = "id, channel_id, body, attachments, job_id, reply_to, send_at, created_at";
+const sendAt = z.iso.datetime({ offset: true });
+
+/** Said when a time is gone by or more than a year away (chat_scheduled_guard). */
+const laterError = (error: { message: string; code?: string }) => (error.code === "22023" && /next year/.test(error.message) ? new HttpError(400, "Pick a time from now to a year ahead.") : chatDbError(error));
+
+chatField.get("/chat/scheduled", requireUser, requireCompany(), async (c) => {
+  const channel = c.req.query("channel");
+  const { db, companyId } = c.var;
+  await requireOn(c);
+  let q = db.from("chat_scheduled_messages").select(SCHEDULED_COLUMNS).eq("company_id", companyId).order("send_at").limit(200);
+  if (channel) q = q.eq("channel_id", uuid.parse(channel));
+  return c.json({ scheduled: must(await q) });
+});
+
+chatField.post("/chat/channels/:id/scheduled", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const body = await readJson(
+    c,
+    z.object({ body: messageBody.default(""), attachments: z.array(attachment).max(6).default([]), job_id: uuid.nullable().default(null), reply_to: uuid.nullable().default(null), send_at: sendAt }),
+  );
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const { data, error } = await db
+    .from("chat_scheduled_messages")
+    .insert({ company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to, send_at: body.send_at })
+    .select(SCHEDULED_COLUMNS)
+    .single();
+  if (error) throw laterError(error);
+  toUser(companyId, userId, { type: "scheduled", channel_id: id });
+  return c.json({ scheduled: data }, 201);
+});
+
+chatField.patch("/chat/scheduled/:id", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const body = await readJson(c, z.object({ body: messageBody.optional(), send_at: sendAt.optional() }));
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const patch = { ...(body.body !== undefined && { body: body.body }), ...(body.send_at && { send_at: body.send_at }) };
+  if (!Object.keys(patch).length) throw new HttpError(400, "Nothing to change.");
+  const { data, error } = await db.from("chat_scheduled_messages").update(patch).eq("id", id).select(SCHEDULED_COLUMNS).maybeSingle();
+  if (error) throw laterError(error);
+  if (!data) throw new HttpError(404, "That message was sent or taken back already.");
+  toUser(companyId, userId, { type: "scheduled", channel_id: data.channel_id });
+  return c.json({ scheduled: data });
+});
+
+chatField.delete("/chat/scheduled/:id", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const { data, error } = await db.from("chat_scheduled_messages").delete().eq("id", id).select("channel_id, attachments").maybeSingle();
+  if (error) throw dbError(error);
+  if (!data) throw new HttpError(404, "That message was sent or taken back already.");
+  await forgetFiles(c, data.attachments);
+  toUser(companyId, userId, { type: "scheduled", channel_id: data.channel_id });
+  return c.json({ ok: true });
+});
+
+/** A scheduled message's files, taken back with it: stored for it alone, they'd stay with nothing showing them. */
+async function forgetFiles(c: Ctx, attachments: unknown) {
+  const paths = (Array.isArray(attachments) ? (attachments as Array<{ path?: unknown }>) : []).map((a) => a.path).filter((p): p is string => typeof p === "string");
+  if (!paths.length) return;
+  const admin = adminClient(c.env);
+  const unused: string[] = [];
+  for (const path of paths) {
+    const [sent, waiting] = await Promise.all([
+      admin.from("chat_messages").select("id").eq("company_id", c.var.companyId).contains("attachments", [{ path }]).limit(1),
+      admin.from("chat_scheduled_messages").select("id").eq("company_id", c.var.companyId).contains("attachments", [{ path }]).limit(1),
+    ]);
+    if (!sent.error && !waiting.error && !sent.data?.length && !waiting.data?.length) unused.push(path);
+  }
+  if (unused.length) await removeStored(admin.storage.from("files"), unused);
+}
+
+/** Send now: as a message sent this moment, by its own id (sent twice, it's there once). */
+chatField.post("/chat/scheduled/:id/send", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const later = must(await db.from("chat_scheduled_messages").select(SCHEDULED_COLUMNS).eq("id", id).maybeSingle(), "That message was sent or taken back already.");
+  const { data, error } = await db
+    .from("chat_messages")
+    .insert({ id: later.id, company_id: companyId, channel_id: later.channel_id, author_id: userId, body: later.body, attachments: later.attachments as never, job_id: later.job_id, reply_to: later.reply_to })
+    .select(MESSAGE_COLUMNS)
+    .single();
+  if (error && error.code !== "23505") throw chatDbError(error);
+  const row = data ?? (await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", later.id).maybeSingle()).data;
+  await db.from("chat_scheduled_messages").delete().eq("id", id);
+  toUser(companyId, userId, { type: "scheduled", channel_id: later.channel_id });
+  if (!row) throw new HttpError(409, "That message can't be sent now.");
+  const [message] = await shapeMessages(db, companyId, [row as MessageRow]);
+  if (data) {
+    publish(c, message.channel_id, { type: "message", channel_id: message.channel_id, message });
+    afterMessage(c, message);
+  }
+  return c.json({ message });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Reminders
+// ---------------------------------------------------------------------------------------------
+
+chatField.get("/chat/reminders", requireUser, requireCompany(), async (c) => {
+  const { db, companyId } = c.var;
+  await requireOn(c);
+  const rows = must(await db.from("chat_reminders").select("id, message_id, channel_id, remind_at").eq("company_id", companyId).order("remind_at").limit(200));
+  const messages = rows.length ? (must(await db.from("chat_messages").select(MESSAGE_COLUMNS).in("id", rows.map((r) => r.message_id))) as MessageRow[]) : [];
+  const shaped = new Map((await shapeMessages(db, companyId, messages.filter((m) => !m.deleted_at))).map((m) => [m.id, m]));
+  return c.json({ reminders: rows.filter((r) => shaped.has(r.message_id)).map((r) => ({ ...r, message: shaped.get(r.message_id)! })) });
+});
+
+chatField.put("/chat/messages/:id/reminder", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const body = await readJson(c, z.object({ remind_at: sendAt }));
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const message = await messageById(db, id);
+  const { data, error } = await db
+    .from("chat_reminders")
+    .upsert({ company_id: companyId, channel_id: message.channel_id, message_id: id, user_id: userId, remind_at: body.remind_at }, { onConflict: "user_id,message_id" })
+    .select("id, message_id, channel_id, remind_at")
+    .single();
+  if (error) throw error.code === "22023" && /next year/.test(error.message) ? new HttpError(400, "Pick a time from now to a year ahead.") : chatDbError(error);
+  toUser(companyId, userId, { type: "reminders" });
+  return c.json({ reminder: data });
+});
+
+chatField.delete("/chat/reminders/:id", requireUser, requireCompany(), async (c) => {
+  const id = uuid.parse(c.req.param("id"));
+  const { db, companyId, userId } = c.var;
+  await requireOn(c);
+  const { error } = await db.from("chat_reminders").delete().eq("id", id);
+  if (error) throw dbError(error);
+  toUser(companyId, userId, { type: "reminders" });
   return c.json({ ok: true });
 });

@@ -78,6 +78,31 @@ export const NOTICES: readonly NoticeGroup[] = [
     bodies: [["Sent a photo", "Envió una foto"]],
     freeBody: true,
   },
+  // Team chat: a reminder someone set about a message (its body is the message's own words), and a
+  // message they scheduled that couldn't be sent, with why.
+  {
+    kind: "chat_reminder",
+    from: ["public.chat_send_due_reminders"],
+    titles: [
+      ["Reminder: your message in {where}", "Recordatorio: tu mensaje en {where}"],
+      ["Reminder: a message in {where}", "Recordatorio: un mensaje en {where}"],
+      ["Reminder: {name}'s message in {where}", "Recordatorio: el mensaje de {name} en {where}"],
+    ],
+    bodies: [
+      ["A photo or a file", "Una foto o un archivo"],
+      ["A linked job", "Un trabajo vinculado"],
+    ],
+    freeBody: true,
+  },
+  {
+    kind: "chat_scheduled",
+    from: ["public.chat_send_due"],
+    titles: [["Your scheduled message to {where} wasn't sent", "Tu mensaje programado para {where} no se envió"]],
+    bodies: [
+      ["You can't post in {where} any more.", "Ya no puedes publicar en {where}."],
+      ["It couldn't be sent: {reason}", "No se pudo enviar: {reason}"],
+    ],
+  },
 
   // A sub's job offers and pay
   {

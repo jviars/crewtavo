@@ -109,6 +109,31 @@
 .cardStatusLine svg { color: var(--text-3); }
 .cardStatusLine small { color: var(--text-3); font-size: var(--fs-12); }
 
+/* ---------- Sending later, and reminders ---------- */
+.laterBtn {
+  display: grid; flex: none; place-items: center; width: 24px; height: 32px; margin-bottom: 1px; margin-left: -2px; padding: 0; border: 0; border-radius: 8px;
+  background: none; color: var(--text-3); cursor: pointer;
+}
+.laterBtn:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.laterBtn:disabled { opacity: 0.4; cursor: default; }
+.scheduledBar {
+  display: flex; align-items: center; gap: 6px; width: fit-content; max-width: 100%; margin: 0 0 6px; padding: 4px 10px; border: 1px solid var(--divider); border-radius: var(--radius-pill);
+  background: var(--fill); color: var(--text-2); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer;
+}
+.scheduledBar:hover { background: var(--fill-2); color: var(--ink); }
+.laterList { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--divider); list-style: none; }
+.laterRow { display: grid; gap: 4px; padding: 10px 2px; border-bottom: 1px solid var(--row-divider); }
+.laterWhen { display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: var(--fs-12); font-weight: 600; }
+.laterText { overflow-wrap: anywhere; color: var(--ink); font-size: var(--fs-14); line-height: 1.4; white-space: pre-wrap; }
+.laterText strong { font-weight: 600; }
+.laterActions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.pickRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.remindersBtn { position: relative; }
+.reminderCount {
+  position: absolute; top: -3px; right: -5px; display: grid; place-items: center; min-width: 15px; height: 15px; padding: 0 3px; border-radius: var(--radius-pill);
+  background: var(--ink); color: var(--page); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Phones ---------- */
 @media (max-width: 900px) {
   .player { padding: 6px 12px 6px 6px; }
@@ -130,4 +155,8 @@
   .waitingCount { font-size: var(--fs-12); }
   .status { font-size: var(--fs-12); }
   .statusChoice { min-height: 48px; font-size: var(--fs-15); }
+  .scheduledBar { min-height: 36px; margin: 8px max(12px, env(safe-area-inset-left)) 0; padding: 6px 12px; font-size: var(--fs-13); }
+  .laterActions :global(.btn) { min-height: 40px; }
+  .laterText { font-size: var(--fs-15); }
+  .reminderCount { top: -2px; right: -2px; min-width: 18px; height: 18px; font-size: var(--fs-11); }
 }

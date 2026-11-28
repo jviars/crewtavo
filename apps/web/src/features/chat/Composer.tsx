@@ -17,6 +17,7 @@ import { toast } from "@/lib/toast";
 import { useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { JobPicker, type JobPick } from "./JobPicker";
 import { StatusChip, type ChatStatus } from "./Status";
+import { laterLabel, scheduledKey, ScheduledBar, SendLaterMenu, SendLaterSheet, useLongPress } from "./Schedule";
 import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, roleColor } from "./ui";
 import { usePhone, useVoiceRecorder } from "./voice";
@@ -169,18 +170,40 @@ export function Composer({
     const body = fromEditable(text.trim(), picked);
     const attachments: WaitingFile[] = photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }), ...(u.status === "waiting" && { body: u.body }) }));
     const payload = { body, attachments, job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
-    send.mutate(payload, {
-      onSuccess: () => {
-        setText("");
-        setPicked([]);
-        uploads.forEach((u) => URL.revokeObjectURL(u.preview));
-        setUploads([]);
-        setJob(null);
-        onCancelReply();
-        drafts.delete(channel.id);
-      },
-    });
+    send.mutate(payload, { onSuccess: cleared });
   };
+  /** Sent, waiting for signal, or scheduled: the box is empty again. */
+  const cleared = () => {
+    setText("");
+    setPicked([]);
+    uploads.forEach((u) => URL.revokeObjectURL(u.preview));
+    setUploads([]);
+    setJob(null);
+    onCancelReply();
+    drafts.delete(channel.id);
+  };
+
+  // Send later (Schedule.tsx): the chevron beside Send on a computer, a long press on Send on a phone.
+  const later = useMutation({
+    meta: { inline: true },
+    mutationFn: (at: Date) => {
+      if (uploads.some((u) => u.status === "waiting")) throw new Error(t("A photo hasn't gone up yet. Schedule the message once there's signal."));
+      return api.post(`/chat/channels/${channel.id}/scheduled`, {
+        body: fromEditable(text.trim(), picked),
+        attachments: photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }) })),
+        job_id: job?.id ?? null,
+        reply_to: replyTo?.id ?? null,
+        send_at: at.toISOString(),
+      });
+    },
+    onSuccess: (_r, at) => {
+      cleared();
+      toast.success(t("Scheduled for {when}", { when: laterLabel(at.toISOString(), session.company.timezone) }));
+      void queryClient.invalidateQueries({ queryKey: scheduledKey(session.company.id) });
+    },
+  });
+  const [laterSheet, setLaterSheet] = useState(false);
+  const press = useLongPress(() => canSend && setLaterSheet(true));
 
   /** Is the caret just after "@something"? Then offer people and roles that match it. */
   const lookForMention = (value: string, caret: number) => {
@@ -340,6 +363,7 @@ export function Composer({
   const placeholder = t("Message {channel}", { channel: channel.kind === "announcement" ? channel.name : `#${channel.name}` });
   return (
     <div className={s.foot}>
+      <ScheduledBar channelId={channel.id} options={options} />
       <div
         className={s.composer}
         data-dropping={dropping || undefined}
@@ -423,15 +447,27 @@ export function Composer({
           {phone && !text.trim() && !uploads.length && !job ? (
             <MicButton round onClick={() => void voice.start()} />
           ) : (
-          <button type="button" className={`btn btn-sm btn-primary ${s.sendBtn}`} aria-label={t("Send")} disabled={!canSend} onClick={submit}>
+          <>
+          <button
+            type="button"
+            className={`btn btn-sm btn-primary ${s.sendBtn}`}
+            aria-label={t("Send")}
+            aria-description={phone ? t("Hold to send later") : undefined}
+            disabled={!canSend}
+            {...(phone ? press.handlers : {})}
+            onClick={() => (press.consume() ? undefined : submit())}
+          >
             <span className={s.sendIcon} aria-hidden="true"><Icon name="arrowUp" size={19} /></span>
             <span className={s.sendText}>{t("Send")}</span>
           </button>
+          {!phone && <SendLaterMenu disabled={!canSend || later.isPending} onPick={(at) => later.mutate(at)} />}
+          </>
           )}
         </div>
         )}
       </div>
-      {(send.error || sendVoice.error) && <div className="field-error" style={{ margin: "6px 4px 0" }}>{((sendVoice.error ?? send.error) as Error).message}</div>}
+      {(send.error || sendVoice.error || later.error) && <div className="field-error" style={{ margin: "6px 4px 0" }}>{((later.error ?? sendVoice.error ?? send.error) as Error).message}</div>}
+      <SendLaterSheet open={laterSheet} onClose={() => setLaterSheet(false)} onPick={(at) => later.mutate(at)} />
       <JobPicker open={pickingJob} onClose={() => setPickingJob(false)} onPick={(j) => { setJob(j); setPickingJob(false); input.current?.focus(); }} />
     </div>
   );

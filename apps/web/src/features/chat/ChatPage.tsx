@@ -22,6 +22,7 @@ import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { useWaitingByChannel, WaitingCount, WaitingMessages } from "./Outbox";
 import { useStatuses } from "./Status";
+import { RemindersButton } from "./Reminders";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { t } from "@/lib/i18n";
@@ -188,6 +189,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
+        <RemindersButton channels={channels} className={s.settings} />
         {state?.me?.admin && (
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}

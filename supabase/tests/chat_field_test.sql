@@ -172,3 +172,135 @@ select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000
 select tcf.check((select count(*) from public.chat_statuses) = 0 and (select count(*) from public.chat_statuses(:'co')) = 0, 'another business sees no one''s status');
 select tcf.expect_error(format('insert into public.chat_statuses (company_id, user_id, kind) values (%L, %L, %L)', :'co', 'f1e1d000-0000-0000-0000-000000000009', 'busy'), 'or sets one there');
 commit;
+
+-- ===== Scheduled messages =======================================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Bring the plate compactor tomorrow', now() + interval '1 day') returning id as later_msg \gset
+-- Field crew can't ping @everyone in #general: scheduling it doesn't get them round that.
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000004', '@everyone the truck leaves at 6', now() + interval '1 second') returning id as nia_everyone \gset
+select tcf.check((select count(*) from public.chat_scheduled_messages) = 2, 'Nia schedules messages and sees her own');
+select tcf.expect_error(format('insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at) values (%L, %L, %L, %L, now() + interval %L)', :'co', :'ann', 'f1e1d000-0000-0000-0000-000000000004', 'News', '1 hour'),
+  'not where she can''t post');
+select tcf.expect_error(format('insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at) values (%L, %L, %L, %L, now() + interval %L)', :'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000003', 'As Lee', '1 hour'),
+  'not as someone else');
+select tcf.expect_error(format('insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at) values (%L, %L, %L, %L, now() - interval %L)', :'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004', 'Late', '1 hour'),
+  'and not for a time gone by');
+select tcf.expect_error(format('insert into public.chat_scheduled_messages (company_id, channel_id, author_id, attachments, send_at) values (%L, %L, %L, %L, now() + interval %L)', :'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000004',
+  jsonb_build_array(jsonb_build_object('path', :'co' || '/chat/' || :'general' || '/2b7e1516-28ae-4d2a-a6c1-0d0b1a2c3d4e.jpg')), '1 hour'), 'a file from another channel''s folder is refused');
+select tcf.expect_error('select * from public.chat_send_due()', 'and nobody signed in sends what''s due: only the server');
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000001", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_scheduled_messages) = 0, 'the owner doesn''t read Nia''s scheduled messages');
+update public.chat_scheduled_messages set body = 'Changed' where id = :'later_msg';
+delete from public.chat_scheduled_messages where id = :'later_msg';
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000001', '@everyone safety meeting at 7', now() + interval '1 second') returning id as owner_everyone \gset
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_scheduled_messages) = 0, 'nor does Lee');
+commit;
+select tcf.check((select body = 'Bring the plate compactor tomorrow' from public.chat_scheduled_messages where id = :'later_msg'), 'and neither can change or delete it');
+
+-- Sid schedules for #general, then field crew lose the right to post there before it goes. Ola
+-- schedules one and is then taken off the team.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000005', 'Can someone bring gloves', now() + interval '1 second') returning id as sid_later \gset
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000002", "role": "authenticated"}', true);
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at)
+values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000002', 'Payroll is Friday', now() + interval '1 second') returning id as ola_later \gset
+commit;
+
+select pg_sleep(1.2);
+-- What the guards do with a message from nobody signed in: they trust it, @everyone and all.
+begin;
+insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000004', '@everyone as the server') returning id as trusted \gset
+select tcf.check((select mention_all from public.chat_messages where id = :'trusted'), 'a message inserted with nobody signed in is trusted as the server''s: so a scheduled one mustn''t be sent that way');
+rollback;
+
+-- Two runs: Nia's and the owner's go first (the oldest), then field crew lose #general and Ola leaves.
+select count(*) as first_run from public.chat_send_due(2) \gset
+select tcf.check(:'first_run' = '2', 'the scheduler sends what''s due, oldest first');
+select tcf.check((select author_id = 'f1e1d000-0000-0000-0000-000000000004' and not mention_all from public.chat_messages where id = :'nia_everyone'),
+  'Nia''s scheduled @everyone goes as hers, its id kept, and doesn''t ping everyone');
+select tcf.check((select count(*) from public.notifications where link like '%' || :'nia_everyone') = 0, 'so nobody is told of it');
+select tcf.check((select mention_all from public.chat_messages where id = :'owner_everyone'), 'the owner''s scheduled @everyone does');
+select tcf.check((select count(*) from public.notifications where link like '%' || :'owner_everyone' and title = 'Owen Fern posted in #general') >= 4, 'and reaches the team');
+select tcf.check(coalesce(nullif(current_setting('request.jwt.claims', true), ''), 'none') = 'none' and (select auth.uid()) is null, 'the sign-in is put back after each');
+
+update public.chat_role_rules set can_post = false where channel_id = :'general' and role = 'field_crew';
+update public.memberships set active = false where company_id = :'co' and user_id = 'f1e1d000-0000-0000-0000-000000000002';
+create temp table tcf_run as select * from public.chat_send_due();
+select tcf.check((select count(*) from tcf_run) = 2 and (select count(*) from tcf_run where message_id is not null) = 0, 'a message from someone who can''t post there now, or who left, isn''t sent');
+select tcf.check((select count(*) from public.chat_messages where id in (:'sid_later', :'ola_later')) = 0, 'neither is in the channel');
+select tcf.check((select problem = 'You can''t post in #general any more.' from tcf_run where scheduled_id = :'sid_later'), 'and why is kept for Sid');
+select tcf.check((select count(*) from public.notifications where user_id = 'f1e1d000-0000-0000-0000-000000000005' and kind = 'chat_scheduled'
+  and title = 'Your scheduled message to #general wasn''t sent' and body = 'You can''t post in #general any more.') = 1, 'Sid hears why on the bell');
+select tcf.check((select count(*) from public.notifications where user_id = 'f1e1d000-0000-0000-0000-000000000002' and kind = 'chat_scheduled') = 0, 'Ola, off the team, isn''t told there');
+select tcf.check((select count(*) from public.chat_scheduled_messages where id in (:'sid_later', :'ola_later', :'nia_everyone', :'owner_everyone')) = 0, 'and nothing sent or dropped waits any more');
+select tcf.check((select count(*) from public.chat_send_due()) = 0, 'run again, nothing goes twice');
+update public.chat_role_rules set can_post = true where channel_id = :'general' and role = 'field_crew';
+update public.memberships set active = true where company_id = :'co' and user_id = 'f1e1d000-0000-0000-0000-000000000002';
+
+-- ===== Reminders ================================================================================
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'north_ch', 'f1e1d000-0000-0000-0000-000000000003', 'Order more sealer for Monday') returning id as lee_msg \gset
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000004", "role": "authenticated"}', true);
+insert into public.chat_reminders (message_id, user_id, remind_at) values (:'lee_msg', 'f1e1d000-0000-0000-0000-000000000004', now() + interval '1 second') returning id as nia_reminder \gset
+select tcf.check((select channel_id = :'north_ch' from public.chat_reminders where id = :'nia_reminder'), 'Nia sets a reminder on Lee''s message, in its channel');
+select tcf.expect_error(format('insert into public.chat_reminders (message_id, user_id, remind_at) values (%L, %L, now() + interval %L)', :'lee_msg', 'f1e1d000-0000-0000-0000-000000000003', '1 hour'), 'not one for Lee');
+select tcf.expect_error(format('insert into public.chat_reminders (message_id, user_id, remind_at) values (%L, %L, now() - interval %L)', :'later_msg', 'f1e1d000-0000-0000-0000-000000000004', '1 hour'), 'and only on a message that''s there, at a time to come');
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+select tcf.expect_error(format('insert into public.chat_reminders (message_id, user_id, remind_at) values (%L, %L, now() + interval %L)', :'lee_msg', 'f1e1d000-0000-0000-0000-000000000005', '1 hour'), 'Sid can''t be reminded of a message he can''t see');
+commit;
+
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000003", "role": "authenticated"}', true);
+select tcf.check((select count(*) from public.chat_reminders) = 0, 'Lee doesn''t read Nia''s reminders');
+delete from public.chat_reminders where id = :'nia_reminder';
+commit;
+select tcf.check((select count(*) from public.chat_reminders where id = :'nia_reminder') = 1, 'or delete them');
+
+-- Sid wants a reminder too, then field crew lose sight of #general before it's due.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "f1e1d000-0000-0000-0000-000000000005", "role": "authenticated"}', true);
+insert into public.chat_messages (company_id, channel_id, author_id, body) values (:'co', :'general', 'f1e1d000-0000-0000-0000-000000000005', 'Who has the van keys?') returning id as sid_msg \gset
+insert into public.chat_reminders (message_id, user_id, remind_at) values (:'sid_msg', 'f1e1d000-0000-0000-0000-000000000005', now() + interval '1 second');
+commit;
+select pg_sleep(1.2);
+update public.chat_role_rules set can_see = false, can_post = false where channel_id = :'general' and role = 'field_crew';
+create temp table tcf_reminded as select * from public.chat_send_due_reminders();
+update public.chat_role_rules set can_see = true, can_post = true where channel_id = :'general' and role = 'field_crew';
+select tcf.check((select told from tcf_reminded where user_id = 'f1e1d000-0000-0000-0000-000000000004'), 'Nia''s reminder is due and goes');
+select tcf.check((select count(*) from public.notifications where user_id = 'f1e1d000-0000-0000-0000-000000000004' and kind = 'chat_reminder'
+  and title = 'Reminder: Lee Lead''s message in #north-crew' and body = 'Order more sealer for Monday' and link = '/chat/' || :'north_ch' || '?message=' || :'lee_msg') = 1,
+  'on her bell: whose message, where, its words and the way to it');
+select tcf.check((select not told from tcf_reminded where user_id = 'f1e1d000-0000-0000-0000-000000000005'), 'Sid, who can''t see #general any more, isn''t told of it');
+select tcf.check((select count(*) from public.chat_reminders) = 0 and (select count(*) from public.chat_send_due_reminders()) = 0, 'and each is done once');
