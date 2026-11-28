@@ -277,29 +277,14 @@ chatField.delete("/chat/scheduled/:id", requireUser, requireCompany(), async (c)
   const id = uuid.parse(c.req.param("id"));
   const { db, companyId, userId } = c.var;
   await requireOn(c);
-  const { data, error } = await db.from("chat_scheduled_messages").delete().eq("id", id).select("channel_id, attachments").maybeSingle();
+  // Its files stay stored (nobody signed in deletes a stored file, and the server can't tell here
+  // whose upload one was), as a photo picked and then left out of a message does.
+  const { data, error } = await db.from("chat_scheduled_messages").delete().eq("id", id).select("channel_id").maybeSingle();
   if (error) throw dbError(error);
   if (!data) throw new HttpError(404, "That message was sent or taken back already.");
-  await forgetFiles(c, data.attachments);
   toUser(companyId, userId, { type: "scheduled", channel_id: data.channel_id });
   return c.json({ ok: true });
 });
-
-/** A scheduled message's files, taken back with it: stored for it alone, they'd stay with nothing showing them. */
-async function forgetFiles(c: Ctx, attachments: unknown) {
-  const paths = (Array.isArray(attachments) ? (attachments as Array<{ path?: unknown }>) : []).map((a) => a.path).filter((p): p is string => typeof p === "string");
-  if (!paths.length) return;
-  const admin = adminClient(c.env);
-  const unused: string[] = [];
-  for (const path of paths) {
-    const [sent, waiting] = await Promise.all([
-      admin.from("chat_messages").select("id").eq("company_id", c.var.companyId).contains("attachments", [{ path }]).limit(1),
-      admin.from("chat_scheduled_messages").select("id").eq("company_id", c.var.companyId).contains("attachments", [{ path }]).limit(1),
-    ]);
-    if (!sent.error && !waiting.error && !sent.data?.length && !waiting.data?.length) unused.push(path);
-  }
-  if (unused.length) await removeStored(admin.storage.from("files"), unused);
-}
 
 /** Send now: as a message sent this moment, by its own id (sent twice, it's there once). */
 chatField.post("/chat/scheduled/:id/send", requireUser, requireCompany(), async (c) => {

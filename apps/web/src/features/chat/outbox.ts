@@ -14,13 +14,14 @@
  * signs out (lib/offline.ts).
  */
 import { retryDelay, waitsForSignal } from "@crewtavo/core/chatField";
-import { onlineManager, type QueryClient } from "@tanstack/react-query";
+import { onlineManager } from "@tanstack/react-query";
 import { useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import { ApiError, errorMessage, isAuthError } from "@/lib/errors";
 import { storedExtension, uploadBody, uploadOnce } from "@/lib/files";
 import { t } from "@/lib/i18n";
-import { addMessage, type ChatAttachment, type ChatMessage } from "./data";
+// Types only: this loads with the app's sign-out (lib/offline.ts), before any chat screen.
+import type { ChatAttachment, ChatMessage } from "./data";
 
 /** A file on a waiting message: stored already, or its bytes kept here until it is. */
 export interface WaitingFile extends ChatAttachment {
@@ -168,13 +169,11 @@ export type NewMessage = Pick<WaitingMessage, "userId" | "companyId" | "channelI
  * Sends a message now, or keeps it to send once there's signal. The message sent, or null when it
  * waits. Throws what the server said when it refused the message (it isn't kept).
  */
-export async function sendChatMessage(queryClient: QueryClient, input: NewMessage): Promise<ChatMessage | null> {
+export async function sendChatMessage(input: NewMessage): Promise<ChatMessage | null> {
   const message: WaitingMessage = { ...input, id: input.id ?? crypto.randomUUID(), createdAt: Date.now(), attempts: 0, nextAt: 0, sending: false, kept: false };
   if (onlineManager.isOnline()) {
     try {
-      const sent = await deliver(message);
-      addMessage(queryClient, message.companyId, sent);
-      return sent;
+      return await deliver(message);
     } catch (error) {
       if (!noSignal(error)) throw error;
     }
@@ -190,7 +189,8 @@ export async function sendChatMessage(queryClient: QueryClient, input: NewMessag
 
 interface Sender {
   userId: string;
-  queryClient: QueryClient;
+  /** A waiting message that went: into the conversation's cache (data.ts addMessage). */
+  sent: (message: ChatMessage, companyId: string) => void;
 }
 let sender: Sender | null = null;
 let busy = false;
@@ -231,7 +231,7 @@ async function flush(now = false) {
       if (sent) {
         set(waiting.filter((m) => m.id !== next.id));
         await unkeep(next.id);
-        addMessage(to.queryClient, next.companyId, sent);
+        to.sent(sent, next.companyId);
         continue;
       }
       if (noSignal(failure)) {
@@ -277,8 +277,8 @@ export function deleteWaiting(id: string) {
  * Starts sending this person's waiting messages: those the phone kept from before, and those
  * kept from now on, on the triggers above. Returns how to stop (signed out, or chat turned off).
  */
-export function startChatOutbox(queryClient: QueryClient, userId: string): () => void {
-  const mine: Sender = { userId, queryClient };
+export function startChatOutbox(userId: string, sent: Sender["sent"]): () => void {
+  const mine: Sender = { userId, sent };
   sender = mine;
   void load(userId).then(() => flush(true));
   const stopOnline = onlineManager.subscribe((online) => void (online && flush(true)));

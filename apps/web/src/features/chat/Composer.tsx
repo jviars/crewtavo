@@ -14,7 +14,7 @@ import { api } from "@/lib/api";
 import { uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { JobPicker, type JobPick } from "./JobPicker";
 import { StatusChip, type ChatStatus } from "./Status";
 import { laterLabel, scheduledKey, ScheduledBar, SendLaterMenu, SendLaterSheet, useLongPress } from "./Schedule";
@@ -144,7 +144,8 @@ export function Composer({
   // Sent now, or kept on the phone until there's signal (outbox.ts); what the server refuses is said here.
   const send = useMutation({
     mutationFn: (payload: { body: string; attachments: WaitingFile[]; job_id: string | null; reply_to: string | null }) =>
-      sendChatMessage(queryClient, { ...payload, userId: session.userId, companyId: session.company.id, channelId: channel.id }),
+      sendChatMessage({ ...payload, userId: session.userId, companyId: session.company.id, channelId: channel.id }),
+    onSuccess: (message) => message && addMessage(queryClient, session.company.id, message),
   });
   // A voice note: recorded here (voice.ts), then sent on its own, stored in the channel's folder as it goes.
   const voice = useVoiceRecorder();
@@ -152,7 +153,8 @@ export function Composer({
   const sendVoice = useMutation({
     mutationFn: (note: VoicePreview) => {
       const path = `${session.company.id}/chat/${channel.id}/${crypto.randomUUID()}.${note.ext}`;
-      const file: WaitingFile = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, body: note.blob, ...(note.words && { words: note.words.slice(0, 5000) }) };
+      // The stored file's name, the same for everyone; a message shows it in their own words.
+      const file: WaitingFile = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, body: note.blob, ...(note.words && { words: note.words.slice(0, 5000) }) }; // i18n-ignore: stored
       return send.mutateAsync({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null });
     },
     onSuccess: () => {

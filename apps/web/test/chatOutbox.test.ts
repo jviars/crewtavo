@@ -4,7 +4,7 @@
  * closing the app; sent once when the signal comes back, however often they're tried; not kept when
  * the server refuses them; and gone when the person deletes them or signs out.
  */
-import { onlineManager, QueryClient } from "@tanstack/react-query";
+import { onlineManager } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeIndexedDb } from "./fakeIndexedDb";
 
@@ -62,13 +62,11 @@ async function openApp(signal: boolean) {
   onlineManager.setOnline(signal);
   open.errors = await import("../src/lib/errors");
   const outbox = await import("../src/features/chat/outbox");
-  const queryClient = new QueryClient();
   return {
-    queryClient,
     ...outbox,
-    start: (userId: string) => closeApp.push(outbox.startChatOutbox(queryClient, userId)),
+    start: (userId: string) => closeApp.push(outbox.startChatOutbox(userId, () => undefined)),
     send: (text: string, files: Array<{ path: string; body?: Blob }> = []) =>
-      outbox.sendChatMessage(queryClient, { userId: "u1", companyId: "c1", channelId: "ch1", body: text, attachments: files.map((f) => ({ ...f, name: "gate.jpg", type: "image/jpeg" })), job_id: null, reply_to: null }),
+      outbox.sendChatMessage({ userId: "u1", companyId: "c1", channelId: "ch1", body: text, attachments: files.map((f) => ({ ...f, name: "gate.jpg", type: "image/jpeg" })), job_id: null, reply_to: null }),
   };
 }
 async function settled() {

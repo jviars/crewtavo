@@ -68,7 +68,8 @@ export function useRemindMe(message: ChatMessage): { entry: MenuSub; dialog: Rea
         { label: t("Pick a time"), icon: "calendar" as const, onSelect: () => setPicking(true) },
       ],
     },
-    dialog: <PickTimeDialog open={picking} title={t("Remind me")} confirmLabel={t("Set the reminder")} busy={set.isPending} onClose={() => setPicking(false)} onPick={(at) => set.mutate(at)} />,
+    // Only while picking: every message on the page has this menu.
+    dialog: picking && <PickTimeDialog open title={t("Remind me")} confirmLabel={t("Set the reminder")} busy={set.isPending} onClose={() => setPicking(false)} onPick={(at) => set.mutate(at)} />,
   };
 }
 

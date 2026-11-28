@@ -345,7 +345,7 @@ export function useChatLive() {
   const refresh = session.refresh;
 
   // Messages kept on the phone for signal go out once there is (outbox.ts).
-  useEffect(() => (on ? startChatOutbox(queryClient, me) : undefined), [on, me, queryClient]);
+  useEffect(() => (on ? startChatOutbox(me, (message, companyId) => addMessage(queryClient, companyId, message)) : undefined), [on, me, queryClient]);
 
   useEffect(() => {
     if (!on) return;
