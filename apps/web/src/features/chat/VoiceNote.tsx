@@ -95,6 +95,8 @@ export function VoiceNote({ attachment, url }: { attachment: ChatAttachment; url
             fromPointer(e);
           }}
           onPointerMove={(e) => e.currentTarget.hasPointerCapture(e.pointerId) && fromPointer(e)}
+          // On a phone a tap on a message shows its tools: a tap on the bar is a place in the note instead.
+          onClick={(e) => e.stopPropagation()}
           onKeyDown={keys}
         >
           <span className={f.trackFill} style={{ width: `${done}%` }} />

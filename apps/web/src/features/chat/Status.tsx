@@ -15,7 +15,8 @@ import { Field, FormError } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Select } from "@/components/ui/Select";
 import { api } from "@/lib/api";
-import { t } from "@/lib/i18n";
+import { dateLocale } from "@/lib/format";
+import { browserOrSpanish, t } from "@/lib/i18n";
 import { useSession } from "@/lib/session";
 import { chatOn } from "./data";
 import { timeLabel } from "./ui";
@@ -179,5 +180,5 @@ function untilLabel(iso: string) {
   const d = new Date(iso);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
-  return sameDay ? timeLabel(iso) : `${d.toLocaleDateString(undefined, { weekday: "short" })} ${timeLabel(iso)}`;
+  return sameDay ? timeLabel(iso) : `${d.toLocaleDateString(browserOrSpanish() ?? dateLocale(), { weekday: "short" })} ${timeLabel(iso)}`;
 }

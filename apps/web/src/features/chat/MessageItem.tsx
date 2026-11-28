@@ -297,8 +297,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         )}
       </div>
 
-      {toJob && <AddToJob message={message} onClose={() => setToJob(false)} />}
-      {remind.dialog}
+      {/* Dialogs opened from the menu: a tap inside one isn't a tap on the message. */}
+      <div style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}>
+        {toJob && <AddToJob message={message} onClose={() => setToJob(false)} />}
+        {remind.dialog}
+      </div>
       {editing === null && (
         <div className={s.tools}>
           <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />

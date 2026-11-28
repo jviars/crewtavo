@@ -171,7 +171,9 @@ export type NewMessage = Pick<WaitingMessage, "userId" | "companyId" | "channelI
  */
 export async function sendChatMessage(input: NewMessage): Promise<ChatMessage | null> {
   const message: WaitingMessage = { ...input, id: input.id ?? crypto.randomUUID(), createdAt: Date.now(), attempts: 0, nextAt: 0, sending: false, kept: false };
-  if (onlineManager.isOnline()) {
+  // Behind messages of theirs already waiting in this conversation, so it keeps its place after them.
+  const behind = waiting.some((m) => m.userId === input.userId && m.channelId === input.channelId && !m.problem);
+  if (onlineManager.isOnline() && !behind) {
     try {
       return await deliver(message);
     } catch (error) {
@@ -183,7 +185,8 @@ export async function sendChatMessage(input: NewMessage): Promise<ChatMessage | 
   askToStay();
   message.kept = await keep(message);
   set([...waiting, message]);
-  plan();
+  if (behind && onlineManager.isOnline()) void flush(true);
+  else plan();
   return null;
 }
 
@@ -216,8 +219,11 @@ async function flush(now = false) {
     for (;;) {
       const to = sender;
       if (!to || !onlineManager.isOnline()) return;
-      const next = waiting.filter((m) => m.userId === to.userId && !m.problem).sort((a, b) => a.createdAt - b.createdAt)[0];
-      if (!next || (!now && next.nextAt > Date.now())) return;
+      const mine = waiting.filter((m) => m.userId === to.userId && !m.problem);
+      // On the timer, once any is due: then they go oldest first, so the conversation keeps its order.
+      if (!now && !mine.some((m) => m.nextAt <= Date.now())) return;
+      const next = [...mine].sort((a, b) => a.createdAt - b.createdAt)[0];
+      if (!next) return;
       change(next.id, { sending: true });
       let failure: unknown = null;
       let sent: ChatMessage | null = null;
@@ -236,8 +242,10 @@ async function flush(now = false) {
       }
       if (noSignal(failure)) {
         // Still no signal: it and the ones after it wait for the next try.
+        // The timer waits longer for all of them, not only this one.
         const attempts = next.attempts + 1;
-        change(next.id, { sending: false, attempts, nextAt: Date.now() + retryDelay(attempts, Math.random()) });
+        const until = Date.now() + retryDelay(attempts, Math.random());
+        set(waiting.map((m) => (m.id === next.id ? { ...m, sending: false, attempts, nextAt: until } : m.userId === to.userId && !m.problem ? { ...m, nextAt: Math.max(m.nextAt, until) } : m)));
         return;
       }
       // Refused (the person can't post there any more, a reply's message is gone): it waits for them to decide.

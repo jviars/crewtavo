@@ -178,3 +178,17 @@ describe("a Team chat message", () => {
     expect(kept()).toEqual([]);
   });
 });
+
+describe("messages waiting in a conversation", () => {
+  it("keep their order: one written once the signal is back goes after them, not before", async () => {
+    const app = await openApp(false);
+    app.start("u1");
+    await app.send("First");
+    await app.send("Second");
+    onlineManager.setOnline(true);
+    expect(await app.send("Third")).toBeNull();
+    await settled();
+    expect([...server.messages.values()].map((m) => m.body)).toEqual(["First", "Second", "Third"]);
+    expect(app.waitingNow()).toEqual([]);
+  });
+});
