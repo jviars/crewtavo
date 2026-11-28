@@ -132,8 +132,11 @@ function fakeDb(tables: Record<string, Row[]>) {
       }
       out = out.map((r) => {
         const copy = { ...r };
-        // settings->hub_tips and the like.
-        for (const part of cols.split(",").map((c) => c.trim()).filter((c) => c.includes("->"))) copy[part.split("->")[1]!] = r[part.split("->")[0]!]?.[part.split("->")[1]!];
+        // settings->hub_tips and the like, under another name too (tax_number:settings->tax_number).
+        for (const part of cols.split(",").map((c) => c.trim()).filter((c) => c.includes("->"))) {
+          const [column, key] = part.slice(part.indexOf(":") + 1).split("->") as [string, string];
+          copy[part.includes(":") ? part.split(":")[0]! : key] = r[column]?.[key];
+        }
         return copy;
       });
       if (order) {
@@ -1201,6 +1204,15 @@ describe("Hub Pay", () => {
 
     for (let i = 0; i < 11; i++) await app.request(`/api/hub/${t}/promo`, { method: "DELETE" }, from("203.0.113.9"));
     expect(db.rpcs.filter((r) => r.fn === "remove_promo_code")).toHaveLength(10);
+  });
+
+  // A VAT invoice has to show the business's number; Stripe's page is the one the client pays on.
+  it("puts the business's tax number on Stripe's invoice, beside the invoice's number", async () => {
+    Object.assign(db.tables.companies![0]!, { country: "GB", settings: { hub_tips: true, tax_number: "GB123456789" } });
+    await connect(stripeKey("sk_live_A", "acct_A"));
+    expect((await pay(await token(), 0)).status).toBe(200);
+    const sent = sentTo("POST", /^\/v1\/invoices$/).at(-1)!.body;
+    expect([0, 1, 2].map((i) => [sent.get(`custom_fields[${i}][name]`), sent.get(`custom_fields[${i}][value]`)])).toEqual([["Invoice", "#42"], ["VAT number", "GB123456789"], [null, null]]);
   });
 
   it("lists what was paid against the total, not a payment that was only a tip", async () => {

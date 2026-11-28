@@ -532,8 +532,6 @@ async function createStripeInvoice(
       currency: ctx.currency,
       auto_advance: false,
       pending_invoice_items_behavior: "exclude",
-      // A VAT or GST/HST number goes on the invoice Stripe shows the client, as on Crewtavo's own.
-      ...(ctx.taxNumber && { custom_fields: [{ name: taxNumberLabel(ctx.taxName), value: ctx.taxNumber }] }),
       // No coupon the business attached to the customer in Stripe: the items already have Crewtavo's
       // discounts, and Stripe taking another off would leave the invoice here partly paid.
       discounts: "",
@@ -545,7 +543,11 @@ async function createStripeInvoice(
             due_date: Math.max(invoice.due_on ? Math.floor(Date.parse(`${invoice.due_on}T23:00:00Z`) / 1000) : 0, Math.floor(Date.now() / 1000) + 3600),
           }),
       description: invoice.notes?.slice(0, 1500) || undefined,
-      custom_fields: [{ name: "Invoice", value: `#${invoice.number}` }],
+      custom_fields: [
+        { name: "Invoice", value: `#${invoice.number}` },
+        // A VAT or GST/HST number goes on the invoice Stripe shows the client, as on Crewtavo's own.
+        ...(ctx.taxNumber ? [{ name: taxNumberLabel(ctx.taxName), value: ctx.taxNumber }] : []),
+      ],
       metadata: {
         crewtavo_company_id: ctx.companyId, crewtavo_invoice_id: invoice.id, crewtavo_row: row.id, tip_cents: String(tipCents),
         ...(options.autopayCharge ? { crewtavo_autopay: options.autopayCharge } : {}),
