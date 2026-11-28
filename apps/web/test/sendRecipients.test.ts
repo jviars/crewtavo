@@ -75,11 +75,18 @@ describe("saying who got it", () => {
   });
 
   it("says nothing for a message from before this was kept, a note, or one that reached nobody", () => {
-    expect(messagePeople({ direction: "out", recipients: null })).toEqual({ to: null, toFull: null, missed: null });
+    expect(messagePeople({ direction: "out", recipients: null })).toEqual({ to: null, toFull: null, missed: null, why: null });
     expect(messagePeople({ direction: "internal", recipients: [{ to: "pat@example.com" }] }).to).toBeNull();
     // Not delivered shows for that one already.
-    expect(messagePeople({ direction: "out", recipients: [{ to: "pat@example.com", failed: true }] })).toEqual({ to: null, toFull: null, missed: null });
+    expect(messagePeople({ direction: "out", recipients: [{ to: "pat@example.com", failed: true }] })).toEqual({ to: null, toFull: null, missed: null, why: null });
     expect(messagePeople({ direction: "out", recipients: "pat@example.com" }).to).toBeNull();
+  });
+
+  it("says why a text didn't arrive when the text provider said, once for the same reason", () => {
+    const off = "Their phone is off or out of reach (Twilio error 30003).";
+    expect(messagePeople({ direction: "out", recipients: [{ to: "(540) 555-0163", name: "Pat Lee", failed: true, reason: off }] }).why).toBe(off);
+    const several = messagePeople({ direction: "out", recipients: [{ to: "(540) 555-0163", name: "Pat Lee" }, { to: "(540) 555-0333", name: "Mo", failed: true, reason: off }, { to: "(540) 555-0444", name: "Sam", failed: true, reason: off }, { to: "(540) 555-0555", name: "Al", failed: true, reason: 7 }] });
+    expect([several.missed, several.why]).toEqual(["(540) 555-0333, (540) 555-0444, (540) 555-0555", off]);
   });
 
   it("names the contact a text came from, and nobody for the client's own", () => {

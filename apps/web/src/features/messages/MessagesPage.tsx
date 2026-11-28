@@ -273,6 +273,7 @@ function Thread({ clientId, onBack }: { clientId: string; onBack: () => void }) 
                     {m.origin === "quo_import" && <span title={t("Brought in from Quo's history")}>· {t("From Quo")}</span>}
                     {m.status === "failed" && <span className="text-danger strong">· Not delivered</span>}
                     {sent.missed && <span className="text-danger">· Didn't reach {sent.missed}</span>}
+                    {sent.why && <span className="text-danger">· {sent.why}</span>}
                   </span>
                 )}
               </div>

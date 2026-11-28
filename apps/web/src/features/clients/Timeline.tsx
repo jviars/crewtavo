@@ -180,6 +180,7 @@ export function Timeline({ clientId, clientName }: { clientId: string; /** For a
                   {m.origin === "quo_import" && <span className={styles.origin} title={t("Brought in from Quo's history")}> · {t("From Quo")}</span>}
                   {m.status === "failed" && <span className={styles.failed}><StatusPill label="Failed" tone="danger" /></span>}
                   {people.missed && <span className={styles.missed}> · Didn't reach {people.missed}</span>}
+                  {people.why && <span className={styles.missed}> · {people.why}</span>}
                 </div>
                 {/* An email's subject on its own line under who it went to (Page-Client.dc.html). */}
                 {m.subject && <div className={styles.subjectLine}>{m.subject}</div>}

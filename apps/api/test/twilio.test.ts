@@ -10,7 +10,7 @@ import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 import { sendSms, smsReady } from "../src/lib/notify";
-import { checkTwilio, forgetTwilio, inboundAccounts, setSmsWebhook, TwilioProblem } from "../src/lib/twilio";
+import { checkTwilio, forgetTwilio, inboundAccounts, setSmsWebhook, TwilioProblem, twilioStatusUrl } from "../src/lib/twilio";
 import type { Db } from "../src/lib/supabase";
 import { twilioSignature } from "../src/routes/messages";
 
@@ -96,6 +96,14 @@ function fakeDb() {
     }
     if (q.table === "clients" && verb(q) === "select") return pick(state.clients);
     if (q.table === "messages" && verb(q) === "insert") state.messages.push(call(q, "insert")![1]);
+    if (q.table === "messages" && verb(q) !== "insert") {
+      // .contains("recipients", '[{"id": ...}]'): a row one of whose recipients has that id.
+      const has = call(q, "contains") ? (JSON.parse(call(q, "contains")![2]) as Array<{ id: string }>)[0]!.id : null;
+      const found = state.messages.filter(filters(q)).filter((m) => !has || (m.recipients ?? []).some((p: { id?: string }) => p.id === has));
+      if (verb(q) === "update") for (const row of found) Object.assign(row, call(q, "update")![1]);
+      else return { data: found };
+      return { data: null };
+    }
     if (q.table === "unknown_texts" && verb(q) === "insert") state.unknown.push(call(q, "insert")![1]);
     if (q.table === "unknown_texts" && verb(q) === "select") return { count: 0 };
     if (q.table === "companies") return { data: one ? { settings: {}, country: state.countries[String(call(q, "eq")?.[2])] ?? null } : [{ id: ALDER }, { id: BIRCH }] };
@@ -296,6 +304,24 @@ describe("sending a text", () => {
     ]);
   });
 
+  it("asks Twilio to report what became of a text kept on a timeline, where Twilio can reach this Crewtavo", async () => {
+    const { connect } = fakeDb();
+    await connect(ALDER, SID_A, "token-a-secret", "+15405550100");
+    const t = twilio();
+    vi.stubGlobal("fetch", t.fetcher);
+    const text = { to: "+15405550163", body: "Your quote is ready" };
+    await sendSms(env, { ...text, company: ALDER, kept: true });
+    await sendSms(withServer, { ...text, kept: true }, BIRCH);
+    // A sign-in code or a notice to the team has no message to mark, and Twilio can't reach a private address.
+    await sendSms(env, { ...text, company: ALDER });
+    await sendSms({ ...env, APP_URL: "http://localhost:8787" }, { ...text, company: ALDER, kept: true });
+    await sendSms({ ...env, APP_URL: "https://localhost:8787" }, { ...text, company: ALDER, kept: true });
+    await sendSms({ ...env, APP_URL: undefined }, { ...text, company: ALDER, kept: true });
+    expect(t.requests.map((r) => r.form.StatusCallback)).toEqual([`${HOOK}/status/${ALDER}`, `${HOOK}/status/${BIRCH}`, undefined, undefined, undefined, undefined]);
+    // In development, a stand-in for Twilio on this machine can.
+    expect(twilioStatusUrl({ APP_URL: "http://localhost:8102", LOOKALYKE_URL: "http://127.0.0.1:4102" }, ALDER)).toBe(`http://localhost:8102/api/webhooks/twilio/status/${ALDER}`);
+  });
+
   it("goes to a number typed without its country code with the company's country's, and to a US company's numbers as typed", async () => {
     const { state, connect } = fakeDb();
     state.countries[BIRCH] = "GB";
@@ -411,5 +437,139 @@ describe("a text that comes in", () => {
     expect(await inboundAccounts(env, db, { AccountSid: SID_A })).toEqual([]);
     expect(await inboundAccounts(env, db, { To: "+15405550100" })).toEqual([]);
     expect(await inboundAccounts(withServer, db, { AccountSid: SID_B, To: "+15405550100" })).toEqual([{ token: "server-token", companies: null }]);
+  });
+});
+
+describe("what Twilio reports about a text it took", () => {
+  const SENT = `${HOOK}/status/${ALDER}`;
+  const report = (status: string, extra: Record<string, string> = {}) => ({ AccountSid: SID_A, From: "+15405550100", To: "+15405550163", MessageSid: "SM1", SmsSid: "SM1", MessageStatus: status, SmsStatus: status, ...extra });
+  const post = async (params: Record<string, string>, token = "token-a-secret", url = SENT, on: Env = env) =>
+    app.request(url.replace("https://crew.example.com", ""), { method: "POST", headers: { "x-twilio-signature": await twilioSignature(token, url, params) }, body: new URLSearchParams(params) }, on);
+  const text = (more: Record<string, unknown> = {}) => ({ id: "m1", company_id: ALDER, client_id: "client-a", channel: "sms", direction: "out", status: "sent", external_id: "SM1", recipients: [{ to: "+15405550163", name: "Ana" }], ...more });
+  const setUp = async (...messages: Array<Record<string, unknown>>) => {
+    const made = fakeDb();
+    await made.connect(ALDER, SID_A, "token-a-secret", "+15405550100");
+    made.state.messages.push(...messages);
+    return made;
+  };
+  const now = (state: { messages: Array<Record<string, any>> }) => state.messages.map((m) => [m.status, m.recipients]);
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout"] }));
+  /** Until a report has looked for its message once and is waiting to look again. */
+  const looking = async () => {
+    while (!vi.getTimerCount()) await new Promise((resolve) => setImmediate(resolve));
+  };
+  afterEach(() => vi.useRealTimers());
+
+  it("marks a text that didn't arrive as failed, with why in words for the office", async () => {
+    const { state } = await setUp(text());
+    const res = await post(report("undelivered", { ErrorCode: "30003" }));
+    expect([res.status, await res.text()]).toEqual([200, ""]);
+    expect(now(state)).toEqual([["failed", [{ to: "+15405550163", name: "Ana", failed: true, reason: "Their phone is off or out of reach (Twilio error 30003)." }]]]);
+    // An unregistered US number is the one that fails every text after Twilio takes it.
+    state.messages[0] = text();
+    await post(report("failed", { ErrorCode: "30034" }));
+    expect(state.messages[0]!.recipients[0].reason).toBe("Your Twilio number isn't registered to text US numbers yet (A2P 10DLC). Finish the registration in Twilio (Twilio error 30034).");
+    state.messages[0] = text();
+    await post(report("failed", { ErrorCode: "39999" }));
+    expect(state.messages[0]!.recipients[0].reason).toBe("Twilio couldn't deliver it (Twilio error 39999).");
+    state.messages[0] = text({ recipients: null });
+    await post(report("failed"));
+    expect(now(state)).toEqual([["failed", null]]);
+  });
+
+  it("marks one that arrived as delivered, and leaves it alone while it's on its way", async () => {
+    const { state } = await setUp(text());
+    for (const status of ["queued", "sending", "sent"]) expect((await post(report(status))).status).toBe(200);
+    expect(state.messages[0]!.status).toBe("sent");
+    expect((await post(report("delivered"))).status).toBe(200);
+    expect(now(state)).toEqual([["delivered", [{ to: "+15405550163", name: "Ana" }]]]);
+  });
+
+  it("keeps the first word on how it ended, and a repeat changes nothing", async () => {
+    const { state, queries } = await setUp(text());
+    await post(report("delivered"));
+    await post(report("undelivered", { ErrorCode: "30003" }));
+    await post(report("delivered"));
+    expect(now(state)).toEqual([["delivered", [{ to: "+15405550163", name: "Ana" }]]]);
+    state.messages[0] = text();
+    await post(report("failed", { ErrorCode: "30005" }));
+    const failed = structuredClone(state.messages[0]);
+    const before = queries.length;
+    await post(report("delivered"));
+    await post(report("failed", { ErrorCode: "30003" }));
+    expect(state.messages[0]).toEqual(failed);
+    expect(queries.slice(before).filter((q) => q.table === "messages" && verb(q) === "update")).toEqual([]);
+  });
+
+  it("marks only the person whose text failed when it went to several", async () => {
+    const both = [{ to: "+15405550163", name: "Ana", id: "SM1" }, { to: "+15405550333", name: "Bo", id: "SM2" }];
+    const { state } = await setUp(text({ recipients: both }));
+    await post(report("delivered"));
+    await post(report("undelivered", { MessageSid: "SM2", ErrorCode: "30006" }));
+    const marked = [both[0], { ...both[1], failed: true, reason: "That number is a landline, or its carrier can't be reached (Twilio error 30006)." }];
+    expect(now(state)).toEqual([["delivered", marked]]);
+    // A failure stands, and its repeat with another reason changes nothing.
+    await post(report("delivered", { MessageSid: "SM2" }));
+    await post(report("failed", { MessageSid: "SM2", ErrorCode: "30003" }));
+    expect(now(state)).toEqual([["delivered", marked]]);
+    // Nobody got it: the whole text failed.
+    state.messages[0] = text({ recipients: both });
+    await post(report("failed", { ErrorCode: "30003" }));
+    expect(state.messages[0]!.status).toBe("sent");
+    await post(report("failed", { MessageSid: "SM2", ErrorCode: "30003" }));
+    expect(state.messages[0]!.status).toBe("failed");
+  });
+
+  it("waits a moment for a text whose message is still being saved", async () => {
+    const { state } = await setUp();
+    const answered = post(report("undelivered", { ErrorCode: "30003" }));
+    await looking();
+    state.messages.push(text());
+    await vi.advanceTimersByTimeAsync(3000);
+    expect((await answered).status).toBe(200);
+    expect(state.messages[0]!.status).toBe("failed");
+  });
+
+  it("answers 200 and changes nothing for a text it has no message for, or another company's", async () => {
+    const { state } = await setUp(text({ company_id: BIRCH }), text({ id: "m2", external_id: "SM7" }), text({ id: "m3", channel: "email" }));
+    const before = structuredClone(state.messages);
+    const answered = post(report("failed", { ErrorCode: "30003" }));
+    await looking();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect((await answered).status).toBe(200);
+    expect(state.messages).toEqual(before);
+  });
+
+  it("is refused unless that company's Twilio account signed the address it was given", async () => {
+    const { state, connect } = await setUp(text());
+    await connect(BIRCH, SID_B, "token-b-secret", "+15405550200");
+    const failed = report("failed", { ErrorCode: "30003" });
+    expect((await post(failed, "guess")).status).toBe(403);
+    expect((await post(failed, "token-b-secret")).status).toBe(403);
+    expect((await app.request(`/api/webhooks/twilio/status/${ALDER}`, { method: "POST", body: new URLSearchParams(failed) }, env)).status).toBe(403);
+    // Signed for the address of incoming texts, or for another company's, it isn't this one.
+    expect((await app.request(`/api/webhooks/twilio/status/${ALDER}`, { method: "POST", headers: { "x-twilio-signature": await twilioSignature("token-a-secret", `${HOOK}/status/${BIRCH}`, failed) }, body: new URLSearchParams(failed) }, env)).status).toBe(403);
+    expect((await app.request("/api/webhooks/twilio/status/nobody", { method: "POST", body: new URLSearchParams(failed) }, env)).status).toBe(404);
+    expect(state.messages[0]!.status).toBe("sent");
+  });
+
+  it("is taken for a company on the server's number, signed with the server's token", async () => {
+    const { state } = await setUp(text({ company_id: BIRCH }));
+    const res = await post(report("undelivered", { AccountSid: withServer.TWILIO_ACCOUNT_SID!, From: "+15405550000", ErrorCode: "30003" }), "server-token", `${HOOK}/status/${BIRCH}`, withServer);
+    expect(res.status).toBe(200);
+    expect(state.messages[0]!.status).toBe("failed");
+  });
+
+  it("is taken at the address for incoming texts too, where an owner may have pointed Twilio's reports", async () => {
+    const { state } = await setUp(text());
+    // On a report, From is the business's number and To the client's.
+    const res = await post(report("undelivered", { ErrorCode: "30003" }), "token-a-secret", HOOK);
+    expect(res.status).toBe(200);
+    expect(state.messages.map((m) => m.status)).toEqual(["failed"]);
+    expect((await post(report("sent"), "token-a-secret", HOOK)).status).toBe(200);
+    expect((await post(report("delivered"), "guess", HOOK)).status).toBe(403);
+    // Nothing is filed as a text from the client.
+    expect(state.messages).toHaveLength(1);
+    expect(state.unknown).toEqual([]);
   });
 });

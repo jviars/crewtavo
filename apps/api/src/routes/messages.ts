@@ -9,7 +9,7 @@
  */
 import { OFFICE, SALES } from "@crewtavo/core";
 import { asksToStopTexts, smsKeyword, STOP_HOWS } from "@crewtavo/core/marketing";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { addressHistory } from "../lib/address";
@@ -20,11 +20,12 @@ import { isEmail, renderEmail } from "../lib/email";
 import { appUrl, dbError, HttpError, must, param, readJson, uuid } from "../lib/http";
 import { sentToClient } from "../lib/links";
 import { sendEmail, sendSms } from "../lib/notify";
-import { inboundAccounts } from "../lib/twilio";
+import { companyTwilio, inboundAccounts, serverTwilio } from "../lib/twilio";
 import { adminClient } from "../lib/supabase";
 import { companyAddress } from "../services/automations";
 import { logoImage } from "../services/logo";
 import { receiveText } from "../services/inboundTexts";
+import { noteTwilioStatus } from "../services/twilioStatus";
 import { noteRefusedText, numberStopped, numberStoppedRefusal, phoneKey, setTexts, TextsRefusal, textsOffRefusal, textsOffTo } from "../services/textsOff";
 
 export const messages = new Hono<AppEnv>();
@@ -113,26 +114,45 @@ export async function twilioSignature(token: string, url: string, params: Record
 }
 
 /**
+ * Of `accounts`, the one whose Auth Token signed this request to `path`. Twilio signs the exact
+ * address it posts to: APP_URL, or one this instance had before a switch.
+ */
+async function signedBy<T extends { token: string }>(c: Context<AppEnv>, accounts: readonly T[], path: string, form: Record<string, string>): Promise<T | null> {
+  const signature = c.req.header("x-twilio-signature") ?? "";
+  const at = async (base: string) => {
+    for (const account of accounts) if (safeEqual(await twilioSignature(account.token, `${base}${path}`, form), signature)) return account;
+    return null;
+  };
+  let account = await at(appUrl(c));
+  for (const base of account ? [] : (await addressHistory(c.env)).origins) account ??= await at(base);
+  return account;
+}
+
+/** Twilio's report on a text it took, as its form says it (services/twilioStatus.ts). */
+const statusReport = (form: Record<string, string>) => ({ sid: form.MessageSid, status: form.MessageStatus, code: form.ErrorCode });
+
+/**
  * Incoming texts (set this URL as the Twilio number's messaging webhook). Twilio signs each request
  * with the Auth Token of the account the number is in, so whose text it is comes from which token
  * signed it: a company's own account (the one the request's AccountSid and To name, lib/twilio.ts
  * inboundAccounts), whose texts are that company's alone, or the server's, whose number every
  * company without its own shares. A request no known token signed is refused.
+ *
+ * Twilio's reports on texts the number sent come here too when its owner pointed them here in
+ * Twilio. They carry MessageStatus, and the business's number as From, not To.
  */
 messages.post("/webhooks/twilio", async (c) => {
   const form = Object.fromEntries((await c.req.formData()).entries()) as Record<string, string>;
   const admin = adminClient(c.env);
-  const accounts = await inboundAccounts(c.env, admin, form);
+  const report = Boolean(form.MessageStatus) && form.MessageStatus !== "received";
+  const accounts = await inboundAccounts(c.env, admin, report ? { AccountSid: form.AccountSid, To: form.From } : form);
   if (!accounts.length) throw new HttpError(501, "Texting isn't configured.");
-  // Twilio signs the exact address it posts to: APP_URL, or one this instance had before a switch.
-  const signature = c.req.header("x-twilio-signature") ?? "";
-  const signedBy = async (base: string) => {
-    for (const account of accounts) if (safeEqual(await twilioSignature(account.token, `${base}/api/webhooks/twilio`, form), signature)) return account;
-    return null;
-  };
-  let account = await signedBy(appUrl(c));
-  for (const base of account ? [] : (await addressHistory(c.env)).origins) account ??= await signedBy(base);
+  const account = await signedBy(c, accounts, "/api/webhooks/twilio", form);
   if (!account) throw new HttpError(403, "Bad signature.");
+  if (report) {
+    await noteTwilioStatus(admin, account.companies, statusReport(form));
+    return c.body(null, 200);
+  }
 
   const from = phoneKey(form.From);
   const body = (form.Body ?? "").slice(0, 10_000);
@@ -149,4 +169,19 @@ messages.post("/webhooks/twilio", async (c) => {
   const touched = await receiveText(admin, { from: form.From!, body, sid: form.MessageSid ?? null, keyword, phrase }, account.companies);
   for (const company of touched) kickAutomations(c, company);
   return c.text("<Response/>", 200, { "Content-Type": "text/xml" });
+});
+
+/**
+ * Twilio's report on a text Crewtavo sent for this company (the StatusCallback it was given with
+ * the text, lib/twilio.ts twilioStatusUrl): delivered, or not and why, marked on the message
+ * (services/twilioStatus.ts). Signed like an incoming text, by the company's own account or the
+ * server's. Twilio wants a 200 and reads nothing from it, so a text with no message gets one too.
+ */
+messages.post("/webhooks/twilio/status/:company", async (c) => {
+  const company = param(c, "company");
+  const form = Object.fromEntries((await c.req.formData()).entries()) as Record<string, string>;
+  const accounts = [await companyTwilio(c.env, company).catch(() => null), serverTwilio(c.env)].filter((account) => account !== null);
+  if (!(await signedBy(c, accounts, `/api/webhooks/twilio/status/${company}`, form))) throw new HttpError(403, "Bad signature.");
+  await noteTwilioStatus(adminClient(c.env), [company], statusReport(form));
+  return c.body(null, 200);
 });

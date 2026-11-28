@@ -137,12 +137,23 @@ export async function anyTwilio(env: Env): Promise<boolean | null> {
 
 const auth = (sid: string, token: string) => ({ Authorization: `Basic ${btoa(`${sid}:${token}`)}` });
 
+/**
+ * Where Twilio reports what became of a company's text once it has taken it (its StatusCallback,
+ * routes/messages.ts): delivered, or not and why. Null when Twilio couldn't reach it: it only
+ * calls a public https address (in development, a stand-in for Twilio on this machine calls any).
+ */
+export function twilioStatusUrl(env: Pick<Env, "APP_URL" | "LOOKALYKE_URL">, companyId: string): string | null {
+  const base = (env.APP_URL ?? "").replace(/\/$/, "");
+  const reachable = /^https:\/\//.test(base) && !/^https:\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(base);
+  return base && (reachable || env.LOOKALYKE_URL) ? `${base}/api/webhooks/twilio/status/${companyId}` : null;
+}
+
 /** One text through an account. Twilio's answer, or null when it couldn't be reached. */
-export function postMessage(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string }): Promise<Response | null> {
+export function postMessage(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string; statusCallback?: string | null }): Promise<Response | null> {
   return fetch(`${api(env)}/Accounts/${account.sid}/Messages.json`, {
     method: "POST",
     headers: { ...auth(account.sid, account.token), "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ To: message.to, From: account.from, Body: message.body }),
+    body: new URLSearchParams({ To: message.to, From: account.from, Body: message.body, ...(message.statusCallback ? { StatusCallback: message.statusCallback } : {}) }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   }).catch(() => null);
 }

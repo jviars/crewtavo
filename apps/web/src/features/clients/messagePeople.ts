@@ -9,6 +9,8 @@ interface Person {
   to: string;
   name?: string | null;
   failed?: boolean;
+  /** Why it didn't reach them, when the text provider said afterwards. */
+  reason?: unknown;
 }
 
 const people = (value: unknown): Person[] =>
@@ -24,6 +26,8 @@ export interface MessagePeople {
   toFull: string | null;
   /** "bo@example.com": who it didn't reach, when it reached someone else. */
   missed: string | null;
+  /** "Their phone is off or out of reach (Twilio error 30003).": why it didn't arrive, when the text provider said. */
+  why: string | null;
 }
 
 export function messagePeople(message: { direction: string; recipients?: unknown }): MessagePeople {
@@ -35,6 +39,7 @@ export function messagePeople(message: { direction: string; recipients?: unknown
     toFull: went.length ? went.map(full).join("\n") : null,
     // A send that reached nobody shows as not delivered already.
     missed: went.length && failed.length ? failed.map((p) => p.to).join(", ") : null,
+    why: [...new Set(failed.map((p) => p.reason).filter((reason): reason is string => typeof reason === "string" && reason.trim() !== ""))].join(" ") || null,
   };
 }
 
