@@ -233,6 +233,24 @@ commit;
 set role service_role;
 select tdm.check((select array_agg(u) from public.chat_audience(:'dm_ben') as u) = array['dc010000-0000-0000-0000-00000000000a']::uuid[], 'Bo gets no live updates from it');
 reset role;
+select tdm.check((select left_at is not null and left_company from public.chat_direct_members where channel_id = :'dm_ben' and user_id = 'dc010000-0000-0000-0000-000000000007'),
+  'leaving the company leaves his conversations');
+
+-- Back on the team later: none of it comes back.
+update public.memberships set active = true where company_id = :'co' and user_id = 'dc010000-0000-0000-0000-000000000007';
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-000000000007", "role": "authenticated"}', true);
+select tdm.check((select count(*) from public.chat_messages where channel_id = :'dm_ben') = 0 and not exists (select 1 from public.chat_overview(:'co') where id = :'dm_ben'),
+  'made active again, Bo doesn''t get the conversation back, or what was said while he was away');
+select tdm.check(public.chat_start_direct(:'co', array['dc010000-0000-0000-0000-00000000000a']::uuid[]) <> :'dm_ben', 'messaging Ruth again starts a new conversation');
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub": "dc010000-0000-0000-0000-00000000000a", "role": "authenticated"}', true);
+select tdm.check((select people = array['dc010000-0000-0000-0000-000000000007']::uuid[] and not can_post from public.chat_overview(:'co') where id = :'dm_ben'),
+  'Ruth''s old conversation is still named by Bo, and still takes no messages');
+commit;
 
 -- ===== Subs never see chat ===================================================================
 begin;

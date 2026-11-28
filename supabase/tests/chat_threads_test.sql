@@ -157,6 +157,11 @@ select tth.check((select unread from public.chat_threads(:'co') where root_id = 
 select tth.check((select count(*) from public.chat_thread_follows where root_id = :'root') = 1, 'she sees only her own following');
 commit;
 
+-- The server counts a thread's replies too (its live updates show "3 replies").
+set role service_role;
+select tth.check((select replies >= 4 from public.chat_thread_summaries(array[:'root']::uuid[])), 'the server counts a thread''s replies');
+reset role;
+
 -- ===== People who can't see the channel get nothing ==========================================
 begin;
 set local role authenticated;
