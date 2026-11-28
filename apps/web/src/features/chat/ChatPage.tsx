@@ -4,7 +4,7 @@
  * and a channel are separate screens. Live updates come from useChatLive (mounted by the app shell).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EVERYONE_TOKEN, roleToken, userToken } from "@crewtavo/core/chat";
 import { hasRole, can, useSession } from "@/lib/session";
@@ -46,6 +46,42 @@ function store(key: string, value: unknown) {
 
 const wide = () => window.matchMedia("(min-width: 901px)").matches;
 
+/**
+ * With the phone's keyboard up, the chat fits the part of the screen still showing, so the box you
+ * type in sits on the keyboard with the conversation above it. iOS doesn't shrink the page for the
+ * keyboard (nor do Android's browsers by default): it slides the page up under it, which left the
+ * chat sized for the whole screen with a blank band between the box and the keyboard, where the
+ * hidden tab bar had been. The size and place of what's showing come from visualViewport.
+ */
+function useKeyboardFit(ref: RefObject<HTMLElement>) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv || !window.matchMedia("(pointer: coarse)").matches) return;
+    const fit = () => {
+      const el = ref.current;
+      if (!el) return;
+      // Zoomed in with two fingers is a smaller view too, but not a keyboard.
+      const up = vv.scale < 1.05 && window.innerHeight - vv.height > 120;
+      if (up) {
+        el.dataset.keyboard = "";
+        el.style.setProperty("--keyboard-top", `${Math.round(vv.offsetTop)}px`);
+        el.style.setProperty("--keyboard-height", `${Math.round(vv.height)}px`);
+      } else if ("keyboard" in el.dataset) {
+        delete el.dataset.keyboard;
+        el.style.removeProperty("--keyboard-top");
+        el.style.removeProperty("--keyboard-height");
+      }
+    };
+    fit();
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+    return () => {
+      vv.removeEventListener("resize", fit);
+      vv.removeEventListener("scroll", fit);
+    };
+  }, [ref]);
+}
+
 export function ChatPage() {
   const session = useSession();
   const { channelId } = useParams();
@@ -55,6 +91,8 @@ export function ChatPage() {
   const state = useChatState();
   const [membersOpen, setMembersOpen] = useState(() => wide() && window.matchMedia("(min-width: 1181px)").matches && stored(MEMBERS_OPEN, true));
   const on = chatOn(session);
+  const layout = useRef<HTMLDivElement>(null);
+  useKeyboardFit(layout);
   const channels = state.data?.channels ?? [];
   const channel = channels.find((c) => c.id === channelId);
   useDocumentTitle(channel ? channelLabel(channel) : t("Team chat"));
@@ -81,7 +119,7 @@ export function ChatPage() {
   };
 
   return (
-    <div className={s.layout} data-view={channelId ? "channel" : "list"} data-members={(membersOpen && channel) || undefined}>
+    <div ref={layout} className={s.layout} data-view={channelId ? "channel" : "list"} data-members={(membersOpen && channel) || undefined}>
       <ChannelList state={state.data} current={channelId} />
       {channel ? (
         <Conversation key={channel.id} channel={channel} state={state.data!} around={around} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
@@ -434,7 +472,7 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
               <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
-              <span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? t("Photo") : t("Job")}</span>
+              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? t("Photo") : t("Job")}</div>
             </button>
           ))}
         </div>

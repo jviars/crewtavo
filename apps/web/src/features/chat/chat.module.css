@@ -104,13 +104,22 @@ button.convTopic:hover { color: var(--ink); }
 .name:hover { text-decoration: underline; text-underline-offset: 2px; }
 .role { color: var(--quiet); font-size: var(--fs-11); font-weight: 600; white-space: nowrap; }
 .time { display: inline-flex; align-items: center; gap: 3px; color: var(--quiet); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
-.body { margin: 1px 0 0; color: var(--ink); font-size: var(--fs-14); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.body { display: grid; gap: 4px; min-width: 0; margin: 1px 0 0; color: var(--ink); font-size: var(--fs-14); line-height: 1.45; overflow-wrap: anywhere; }
 .body a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
+/* Markdown in a message (MessageItem's MessageText): lines kept as typed, and nothing wider than the message. */
+.para, .heading { margin: 0; white-space: pre-wrap; }
+.heading { font-size: 1.07em; font-weight: 700; }
+.list { display: grid; gap: 1px; margin: 0; padding-left: 1.4em; white-space: pre-wrap; }
+.list li::marker { color: var(--text-3); }
+.quote { display: grid; gap: 4px; margin: 0; padding: 1px 0 1px 10px; border-left: 3px solid var(--border-strong); color: var(--text-2); }
+.code { padding: 1px 4px; border-radius: 4px; background: var(--fill-2); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; }
+.pre { margin: 0; padding: 8px 10px; border: 1px solid var(--divider); border-radius: 8px; background: var(--fill); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--fs-13); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .edited { margin-left: 4px; color: var(--quiet); font-size: var(--fs-11); }
 .mention { padding: 0 3px; border: 0; border-radius: 4px; background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); font: inherit; font-weight: 600; cursor: pointer; }
 .mention[data-role] { cursor: default; }
-.reply { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 0 2px; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
-.reply strong { color: var(--text-2); font-weight: 600; }
+.reply { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; margin: 0 0 2px; padding: 0; border: 0; background: none; color: var(--text-3); font: inherit; font-size: var(--fs-12); text-align: left; cursor: pointer; }
+.reply strong { flex: none; color: var(--text-2); font-weight: 600; white-space: nowrap; }
+.reply svg { flex: none; }
 .reply span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply:hover { color: var(--ink); }
 
@@ -166,6 +175,8 @@ a.jobCard:hover { border-color: var(--border-strong); background: var(--fill); c
 
 .composer { position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--page); transition: border-color var(--dur-fast); }
 .composer:focus-within { border-color: var(--border-strong); }
+/* Photos dragged over the box: it shows it will take them. */
+.composer[data-dropping] { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
 .composerRow { display: flex; align-items: flex-end; gap: 4px; padding: 6px; }
 .composerInput {
   flex: 1; min-width: 0; min-height: 34px; max-height: 200px; padding: 7px 6px; border: 0; outline: none; background: none; resize: none;
@@ -306,6 +317,8 @@ a.jobCard:hover { border-color: var(--border-strong); background: var(--fill); c
   .layout[data-view="channel"] { height: calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
   .layout[data-view="channel"] .side { display: none; }
   .layout[data-view="list"] .conversation { display: none; }
+  /* The keyboard is up (ChatPage's useKeyboardFit): just the part of the screen still showing, so the box sits on the keyboard. */
+  .layout[data-keyboard] { position: fixed; top: var(--keyboard-top, 0px); right: 0; left: 0; z-index: 25; height: var(--keyboard-height, 100dvh); }
   .off { padding: 32px 16px; }
 
   /* The channel list: a large title, then each channel as a row with what it's for and when it last spoke. */

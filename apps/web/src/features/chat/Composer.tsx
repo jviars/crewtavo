@@ -1,10 +1,12 @@
 /**
- * Writing a message: text with @mentions picked from a list as you type, up to six photos (taken or
- * chosen; shrunk before they upload), a job to link, and a reply. Enter sends on a computer; on a
- * phone the send button does. A half-written message waits for you when you come back to the channel.
+ * Writing a message: text with @mentions picked from a list as you type, up to six photos (taken,
+ * chosen, pasted or dropped on the box; shrunk before they upload), a job to link, and a reply. The
+ * text can be formatted with Markdown (**bold**, _italics_, lists…; Ctrl+B and Ctrl+I mark a word).
+ * Enter sends on a computer; on a phone the send button does. A half-written message waits for you
+ * when you come back to the channel.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
 import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
@@ -13,6 +15,7 @@ import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
 import { uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
+import { toast } from "@/lib/toast";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { Avatar, roleColor } from "./ui";
 import s from "./chat.module.css";
@@ -43,6 +46,14 @@ interface Draft {
 const drafts = new Map<string, Draft>();
 const MAX_PHOTOS = 6;
 const coarse = () => window.matchMedia("(pointer: coarse)").matches;
+const isPhoto = (f: File) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name);
+
+/** A pasted picture has no name of its own ("image.png"): call it what it is. */
+function pastedName(file: File, n: number): File {
+  if (file.name && !/^image\.\w+$/i.test(file.name)) return file;
+  const ext = file.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+  return new File([file], `${t("Pasted image")}${n ? ` ${n + 1}` : ""}.${ext}`, { type: file.type, lastModified: file.lastModified });
+}
 
 export function Composer({
   channel,
@@ -71,9 +82,17 @@ export function Composer({
   const [job, setJob] = useState<JobPick | null>(null);
   const [pickingJob, setPickingJob] = useState(false);
   const [suggest, setSuggest] = useState<{ query: string; start: number; index: number } | null>(null);
+  const [dropping, setDropping] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const files = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
+  /** Where the caret goes once the text just set is in the box (Ctrl+B, Ctrl+I), before the next key lands. */
+  const caret = useRef<[number, number] | null>(null);
+  useLayoutEffect(() => {
+    if (!caret.current || !input.current) return;
+    input.current.setSelectionRange(...caret.current);
+    caret.current = null;
+  }, [text]);
 
   // Another channel: keep this one's draft, bring back that one's.
   useEffect(() => {
@@ -194,6 +213,12 @@ export function Composer({
         return;
       }
     }
+    const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+    if (mod && (e.key === "b" || e.key === "i")) {
+      e.preventDefault();
+      wrap(e.key === "b" ? "**" : "_");
+      return;
+    }
     if (e.key === "Escape" && replyTo) {
       onCancelReply();
       return;
@@ -204,9 +229,24 @@ export function Composer({
     }
   };
 
-  const addPhotos = (list: FileList | null) => {
-    const chosen = [...(list ?? [])].filter((f) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name)).slice(0, MAX_PHOTOS - uploads.length);
+  /** Ctrl+B, Ctrl+I: the selected words between Markdown's marks, or the marks with the caret between them. */
+  const wrap = (mark: string) => {
+    const el = input.current;
+    if (!el) return;
+    const start = el.selectionStart ?? text.length;
+    const end = el.selectionEnd ?? start;
+    const words = text.slice(start, end);
+    const marked = words.startsWith(mark) && words.endsWith(mark) && words.length >= mark.length * 2;
+    const middle = marked ? words.slice(mark.length, words.length - mark.length) : `${mark}${words}${mark}`;
+    caret.current = words ? [start, start + middle.length] : [start + mark.length, start + mark.length];
+    setText(text.slice(0, start) + middle + text.slice(end));
+  };
+
+  const addPhotos = (list: FileList | File[] | null) => {
+    const all = [...(list ?? [])].filter(isPhoto);
+    const chosen = all.slice(0, MAX_PHOTOS - uploads.length);
     if (files.current) files.current.value = "";
+    if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos.", { count: MAX_PHOTOS }));
     // Photos turned away for space are told about once, together, with why and who can make room.
     const refused = new RefusedForSpace();
     const sent = chosen.map((file) => {
@@ -223,6 +263,29 @@ export function Composer({
     void Promise.all(sent).then(() => {
       if (refused.first) storageFull(refused.first, refused.title());
     });
+  };
+
+  // A screenshot or a copied photo pastes in as a photo. Copied text that brings a picture of itself
+  // along (Word, a spreadsheet) still pastes as text.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const data = e.clipboardData;
+    const pasted = [...data.items].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => Boolean(f && isPhoto(f)));
+    if (!pasted.length || data.getData("text/plain").trim()) return;
+    e.preventDefault();
+    addPhotos(pasted.map(pastedName));
+  };
+  const hasFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
+  const onDragOver = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setDropping(true);
+  };
+  const onDrop = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDropping(false);
+    addPhotos([...e.dataTransfer.files]);
   };
 
   if (!channel.can_post) {
@@ -243,7 +306,13 @@ export function Composer({
   const placeholder = t("Message {channel}", { channel: channel.kind === "announcement" ? channel.name : `#${channel.name}` });
   return (
     <div className={s.foot}>
-      <div className={s.composer}>
+      <div
+        className={s.composer}
+        data-dropping={dropping || undefined}
+        onDragOver={onDragOver}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+        onDrop={onDrop}
+      >
         <TypingLine channelId={channel.id} />
         {suggest && matches.length > 0 && (
           <div className={s.suggest} role="listbox" aria-label={t("People and roles to mention")}>
@@ -304,6 +373,7 @@ export function Composer({
             aria-label={placeholder}
             onChange={onChange}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             onClick={(e) => lookForMention(e.currentTarget.value, e.currentTarget.selectionStart ?? 0)}
             onBlur={() => setTimeout(() => setSuggest(null), 150)}
             maxLength={4000}

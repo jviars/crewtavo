@@ -1,12 +1,13 @@
 /**
- * One message: who sent it (in their role's color, the role in quiet words), the text with @mentions and links,
+ * One message: who sent it (in their role's color, the role in quiet words), the text with @mentions, links and
+ * its Markdown formatting (bold, italics, lists, quotes, code: core chatBlocks; nothing in it is read as HTML),
  * photos, a linked job, the message it replies to, and reactions. Hovering (or tapping, on a phone)
  * shows what you can do with it: react, reply, edit or delete your own, pin if you manage the channel.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CHAT_REACTIONS, fromEditable, messageParts, toEditable, type Mentionable } from "@crewtavo/core/chat";
+import { CHAT_REACTIONS, chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -41,37 +42,68 @@ export interface MessageContext {
   onJumpTo: (id: string) => void;
 }
 
-const URL_RE = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])/g;
+type TextContext = Pick<MessageContext, "personName" | "role" | "onPerson">;
 
-function Linkified({ text }: { text: string }) {
-  const pieces = text.split(URL_RE);
+function Inline({ nodes, ctx }: { nodes: ChatInline[]; ctx: TextContext }) {
   return (
     <>
-      {pieces.map((piece, i) =>
-        i % 2 === 1 ? (
-          <a key={i} href={piece} target="_blank" rel="noreferrer noopener">{piece}</a>
-        ) : (
-          <Fragment key={i}>{piece}</Fragment>
-        ),
-      )}
+      {nodes.map((n, i) => {
+        switch (n.kind) {
+          case "text":
+            return <Fragment key={i}>{n.text}</Fragment>;
+          case "everyone":
+            return <span key={i} className={s.mention} data-role="">{t("@everyone")}</span>;
+          case "role": {
+            const role = ctx.role(n.key);
+            return <span key={i} className={s.mention} data-role="" style={role ? badgeStyle(role.color) : undefined}>@{role?.label ?? t("role")}</span>;
+          }
+          case "user":
+            return <button key={i} type="button" className={s.mention} onClick={() => ctx.onPerson(n.id)}>@{ctx.personName(n.id)}</button>;
+          case "bold":
+            return <strong key={i}><Inline nodes={n.children} ctx={ctx} /></strong>;
+          case "italic":
+            return <em key={i}><Inline nodes={n.children} ctx={ctx} /></em>;
+          case "strike":
+            return <s key={i}><Inline nodes={n.children} ctx={ctx} /></s>;
+          case "code":
+            return <code key={i} className={s.code}>{n.text}</code>;
+          case "link":
+            return <a key={i} href={n.href} target="_blank" rel="noreferrer noopener"><Inline nodes={n.children} ctx={ctx} /></a>;
+        }
+      })}
     </>
   );
 }
 
-export function MessageText({ body, ctx }: { body: string; ctx: Pick<MessageContext, "personName" | "role" | "onPerson"> }) {
-  return (
-    <>
-      {messageParts(body).map((part, i) => {
-        if (part.kind === "text") return <Linkified key={i} text={part.text} />;
-        if (part.kind === "everyone") return <span key={i} className={s.mention} data-role="">{t("@everyone")}</span>;
-        if (part.kind === "role") {
-          const role = ctx.role(part.key);
-          return <span key={i} className={s.mention} data-role="" style={role ? badgeStyle(role.color) : undefined}>@{role?.label ?? t("role")}</span>;
-        }
-        return <button key={i} type="button" className={s.mention} onClick={() => ctx.onPerson(part.id)}>@{ctx.personName(part.id)}</button>;
-      })}
-    </>
-  );
+function Lines({ lines, ctx }: { lines: ChatInline[][]; ctx: TextContext }) {
+  return <>{lines.map((line, i) => <Fragment key={i}>{i > 0 && <br />}<Inline nodes={line} ctx={ctx} /></Fragment>)}</>;
+}
+
+function Block({ block, ctx, after }: { block: ChatBlock; ctx: TextContext; after?: ReactNode }) {
+  switch (block.kind) {
+    case "paragraph":
+      return <p className={s.para}><Lines lines={block.lines} ctx={ctx} />{after}</p>;
+    case "heading":
+      return <p className={s.heading}><Inline nodes={block.children} ctx={ctx} />{after}</p>;
+    case "quote":
+      return <blockquote className={s.quote}><Blocks blocks={block.blocks} ctx={ctx} after={after} /></blockquote>;
+    case "code":
+      return <><pre className={s.pre}><code>{block.text}</code></pre>{after}</>;
+    case "list": {
+      const items = block.items.map((item, i) => <li key={i}><Inline nodes={item} ctx={ctx} />{i === block.items.length - 1 && after}</li>);
+      return block.ordered ? <ol className={s.list} start={block.start === 1 ? undefined : block.start}>{items}</ol> : <ul className={s.list}>{items}</ul>;
+    }
+  }
+}
+
+function Blocks({ blocks, ctx, after }: { blocks: ChatBlock[]; ctx: TextContext; after?: ReactNode }) {
+  return <>{blocks.map((b, i) => <Block key={i} block={b} ctx={ctx} after={i === blocks.length - 1 ? after : undefined} />)}</>;
+}
+
+/** A message's text as it's shown. `after`: what follows its last words on their line ("(edited)"). */
+export function MessageText({ body, ctx, after }: { body: string; ctx: TextContext; after?: ReactNode }) {
+  const blocks = useMemo(() => chatBlocks(body), [body]);
+  return <Blocks blocks={blocks} ctx={ctx} after={after} />;
 }
 
 export function MessageItem({ message, head, flash, ctx }: { message: ChatMessage; head: boolean; flash?: boolean; ctx: MessageContext }) {
@@ -177,7 +209,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           <button type="button" className={s.reply} onClick={() => ctx.onJumpTo(message.reply!.id)}>
             <Icon name="reply" size={14} />
             <strong>{message.reply.author}</strong>
-            <span>{message.reply.deleted ? t("Deleted message") : toEditable(message.reply.body, nameFor) || t("Photo")}</span>
+            <span>{message.reply.deleted ? t("Deleted message") : chatPlainText(message.reply.body, nameFor) || t("Photo")}</span>
           </button>
         )}
         {head && (
@@ -205,10 +237,13 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           </div>
         ) : (
           message.body && (
-            <p className={s.body}>
-              <MessageText body={message.body} ctx={ctx} />
-              {message.edited_at && <span className={s.edited} title={t("Edited {when}", { when: new Date(message.edited_at).toLocaleString(browserOrSpanish()) })}>{t("(edited)")}</span>}
-            </p>
+            <div className={s.body}>
+              <MessageText
+                body={message.body}
+                ctx={ctx}
+                after={message.edited_at && <span className={s.edited} title={t("Edited {when}", { when: new Date(message.edited_at).toLocaleString(browserOrSpanish()) })}>{t("(edited)")}</span>}
+              />
+            </div>
           )
         )}
 

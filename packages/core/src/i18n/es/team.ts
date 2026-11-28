@@ -169,6 +169,8 @@ export default {
   "Replying to <b>{name}</b>": "Respondiendo a <b>{name}</b>",
   "Cancel reply": "Cancelar respuesta",
   "Couldn't upload this photo": "No se pudo subir esta foto",
+  "Pasted image": "Imagen pegada",
+  "A message takes up to {count} photos.": "Un mensaje lleva hasta {count} fotos.",
   "Job #{number}": "Trabajo #{number}",
   "Remove the job": "Quitar el trabajo",
   "Link a job": "Vincular un trabajo",
