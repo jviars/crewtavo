@@ -202,7 +202,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
       </div>
-      <ChatSearchField state={state} className={`${panels.sideSearch} hide-mobile`} />
+      <ChatSearchField state={state} id={SEARCH_FIELD_ID} className={`${panels.sideSearch} hide-mobile`} />
       <nav className={s.sideList} aria-label={t("Channels")}>
         {/* Your own places, above the channels. */}
         <Link to="/chat?view=saved" className={panels.sideEntry} aria-current={params.get("view") === "saved" ? "page" : undefined}>

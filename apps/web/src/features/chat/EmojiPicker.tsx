@@ -75,7 +75,7 @@ export function EmojiPicker({
       if ((e as Event & { newState: string }).newState !== "open") return;
       if (isPhone()) {
         el.dataset.sheet = "";
-        el.style.left = el.style.top = el.style.bottom = "";
+        el.style.left = el.style.top = el.style.bottom = el.style.maxHeight = "";
       } else delete el.dataset.sheet;
     };
     const onToggle = (e: Event) => {
@@ -85,11 +85,15 @@ export function EmojiPicker({
       const b = button.current!.getBoundingClientRect();
       const width = el.offsetWidth;
       const left = align === "end" ? Math.max(8, b.right - width) : Math.min(Math.max(8, b.left), window.innerWidth - width - 8);
+      // Its emoji draw once it's open, so it's placed by the height it will have (emoji.module.css), not the height it has yet.
+      const height = Math.min(440, window.innerHeight * 0.7);
       const below = window.innerHeight - b.bottom - 14;
-      const down = el.offsetHeight <= below || below >= b.top - 14;
+      const above = b.top - 14;
+      const down = height <= below || below >= above;
       el.style.left = `${left}px`;
       el.style.top = down ? `${b.bottom + 6}px` : "auto";
       el.style.bottom = down ? "auto" : `${window.innerHeight - b.top + 6}px`;
+      el.style.maxHeight = `${Math.max(200, Math.min(height, down ? below : above))}px`;
     };
     el.addEventListener("beforetoggle", beforeToggle);
     el.addEventListener("toggle", onToggle);

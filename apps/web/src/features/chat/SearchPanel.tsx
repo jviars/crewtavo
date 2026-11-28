@@ -86,7 +86,7 @@ function useSetSearch() {
 }
 
 /** The search field: at the top of the channel list on a computer, at the top of the search screen on a phone. */
-export function ChatSearchField({ state, className, autoFocus }: { state: ChatState | undefined; className?: string; autoFocus?: boolean }) {
+export function ChatSearchField({ state, className, autoFocus, id }: { state: ChatState | undefined; className?: string; autoFocus?: boolean; id?: string }) {
   const [params, setParams] = useSearchParams();
   const setSearch = useSetSearch();
   const open = params.get("view") === "search";
@@ -103,7 +103,7 @@ export function ChatSearchField({ state, className, autoFocus }: { state: ChatSt
       <label className="search-field">
         <Icon name="search" size={15} />
         <input
-          id={autoFocus ? undefined : SEARCH_FIELD_ID}
+          id={id}
           type="search"
           value={value}
           placeholder={label}
