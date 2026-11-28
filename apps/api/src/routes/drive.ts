@@ -30,7 +30,7 @@ import { ADMINS, OFFICE, SALES, type Permission, type Role, type Tables } from "
 import { extensionFor, fileTitle, GOOGLE_EXPORTS } from "@crewtavo/core/drive";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import type { AppEnv } from "../env";
+import { serviceUrl, type AppEnv, type Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { dbError, HttpError, must, param, readJson, requireEnv, uuid } from "../lib/http";
 import { reportError } from "../lib/monitoring";
@@ -62,7 +62,8 @@ drive.post("/drive/enabled", requireUser, requireCompany(ADMINS, "apps"), async 
 // Import from Google Drive
 // ---------------------------------------------------------------------------------------------
 
-const TOKEN_INFO = "https://oauth2.googleapis.com/tokeninfo";
+/** Google's check of a sign-in: its own address, or in development a stand-in's (env.ts serviceUrl), as its other sign-in addresses are. */
+const tokenInfo = (env: Pick<Env, "LOOKALYKE_URL">) => `${serviceUrl(env, "google", "https://oauth2.googleapis.com")}/tokeninfo`;
 const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
 const FOLDER = "application/vnd.google-apps.folder";
 const SHORTCUT = "application/vnd.google-apps.shortcut";
@@ -151,10 +152,10 @@ async function placeOf(c: Ctx, target: z.infer<typeof importBody>["target"]): Pr
  * The Google sign-in the web app sent must be for this deployment's own Google app: one made for
  * another app (a Google account's sign-in to something else) is refused, so it can't be used here.
  */
-async function checkGoogleSignIn(clientId: string, accessToken: string): Promise<void> {
+async function checkGoogleSignIn(env: Pick<Env, "LOOKALYKE_URL">, clientId: string, accessToken: string): Promise<void> {
   let info: { aud?: unknown; azp?: unknown } | null = null;
   try {
-    const response = await fetch(`${TOKEN_INFO}?${new URLSearchParams({ access_token: accessToken })}`, { signal: AbortSignal.timeout(15_000) });
+    const response = await fetch(`${tokenInfo(env)}?${new URLSearchParams({ access_token: accessToken })}`, { signal: AbortSignal.timeout(15_000) });
     if (response.status >= 500) throw new HttpError(503, "Google didn't answer. Try again in a minute.");
     if (response.ok) info = (await response.json()) as { aud?: unknown; azp?: unknown };
   } catch (error) {
@@ -366,7 +367,7 @@ drive.post("/drive/import", requireUser, requireCompany(DRIVE_ROLES), async (c) 
   if (body.files.length > MOST_FILES) throw new HttpError(400, `Choose up to ${MOST_FILES} files at a time.`);
   if (!body.accessToken) throw new HttpError(400, "Sign in to Google again, then choose the files.");
   const place = await placeOf(c, body.target);
-  await checkGoogleSignIn(clientId, body.accessToken);
+  await checkGoogleSignIn(c.env, clientId, body.accessToken);
 
   const files: PlanFileRow[] = [];
   // `full`: refused by a storage limit (the reason says which), so the screen can point to Settings → Storage.

@@ -223,6 +223,18 @@ describe("importing from Google Drive", () => {
     expect(db.uploads).toEqual([]);
   });
 
+  it("checks the sign-in with a stand-in for Google in development, as every other Google address does", async () => {
+    office();
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      return Response.json({ error: "invalid_token", error_description: "Invalid Value" }, { status: 400 });
+    });
+    const res = await post("/drive/import", { accessToken: TOKEN, files: [{ id: "pdf-1" }], target: { folder_id: FORMS } }, { ...env, LOOKALYKE_URL: "http://127.0.0.1:4100/" });
+    expect(res.status).toBe(400);
+    expect(asked).toEqual([`http://127.0.0.1:4100/google/tokeninfo?access_token=${TOKEN}`]);
+  });
+
   it("brings a file into a folder: stored by the server, recorded as the person, office only", async () => {
     const db = office();
     const requests = google({ "pdf-1": pdf("pdf-1", "Bid set rev 3.pdf") });
@@ -246,6 +258,8 @@ describe("importing from Google Drive", () => {
 
     // The sign-in was checked, then used only with Google Drive, and never in an address but the check's.
     expect(requests.map((r) => `${r.url.host}${r.url.pathname}`)).toEqual(["oauth2.googleapis.com/tokeninfo", "www.googleapis.com/drive/v3/files/pdf-1", "www.googleapis.com/drive/v3/files/pdf-1"]);
+    // The check's address is Google's own, exactly.
+    expect(requests[0]!.url.href).toBe(`https://oauth2.googleapis.com/tokeninfo?access_token=${TOKEN}`);
     expect(requests.slice(1).every((r) => r.authorization === `Bearer ${TOKEN}` && !r.url.search.includes(TOKEN))).toBe(true);
     expect(requests[2]!.url.searchParams.get("alt")).toBe("media");
     expect(requests[1]!.url.searchParams.get("supportsAllDrives")).toBe("true");
