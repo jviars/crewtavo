@@ -206,6 +206,8 @@ export function MeasurePage() {
   const [pitchFor, setPitchFor] = useState<string | null>(null);
   const [finding, setFinding] = useState<"cut" | "outline" | null>(null);
   const [roofOpen, setRoofOpen] = useState(false);
+  // With Roofing installed, the roof tools asked for on a drawing that would show a lawn's (roofOrLawn).
+  const [roofPicked, setRoofPicked] = useState(false);
   const [depth, setDepth] = useState("");
   // The Depth card stays open or shut as the person left it, whatever is typed in it.
   const [depthOpen, setDepthOpen] = useState(false);
@@ -391,12 +393,10 @@ export function MeasurePage() {
   const cubicYards = depthIn ? (summary.total_area_sqft * (depthIn / 12)) / 27 : 0;
   // The asphalt areas only (every area, on a drawing that marks none as an item): not the concrete, gravel or patches.
   const asphaltTons = depthIn ? (pavingQuantities(summary.sections).asphalt_sqyd * depthIn * 110) / 2000 : 0;
-  // With Roofing installed the roof tools show on every row; anyone else gets them once they set a pitch or an edge,
-  // or open Roof pitch and edges on a drawing that isn't a lawn (roofOrLawn, below).
+  // A roof for sure is one opened from Roofing, or with a pitch or a roof edge set. With Roofing installed the roof tools
+  // also show on a drawing nothing says is a lawn; anyone else gets them by opening Roof pitch and edges on one (roofOrLawn, below).
   const roofer = isRoofingCompany(company);
-  const roofSet = roofer || params.has("roofing") || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
-  // The roof, step by step (RoofSteps.tsx), with Roofing installed and for a roof opened from Roofing.
-  const roofSteps = roofer || params.has("roofing");
+  const roofSure = params.has("roofing") || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;
   const mapNames = useMemo(() => Object.fromEntries(shapes.map((s) => [s.id, labels[s.id]?.trim() || names[s.id]])), [shapes, labels, names]);
   const mapValues = useMemo(() => Object.fromEntries(summary.sections.map((s) => [s.feature_id, s.value])), [summary]);
   // Paving: the items panel shows with Paving installed, for a takeoff opened from Paving, or a drawing with items.
@@ -407,7 +407,9 @@ export function MeasurePage() {
   // opened with the drawing keeps what was saved.
   const lawnTrade = LAWN_TRADES.has(company.trade_preset ?? "");
   const lawnDrawing = Object.values(items).some((i) => lawnItem(i)) || summary.sections.some((s) => s.slope);
-  const { roofing, lawn } = roofOrLawn({ roof: roofSet, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });
+  const { roofing, lawn, offer: otherTools } = roofOrLawn({ roof: roofSure, roofingApp: roofer, roofPicked, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });
+  // The roof, step by step (RoofSteps.tsx), for a roof opened from Roofing and, with Roofing installed, any drawing that's a roof.
+  const roofSteps = params.has("roofing") || (roofer && roofing);
   const slopeKeys = useMemo(() => {
     const cuts = JSON.stringify(shapes.filter((s) => s.kind === "Cutout").map((s) => s.geometry));
     return Object.fromEntries(shapes.filter((s) => s.kind === "Area").map((s) => [s.id, JSON.stringify(s.geometry) + cuts]));
@@ -1738,6 +1740,14 @@ export function MeasurePage() {
               {phone && saveButton}
             </div>
             <FormError error={save.error} />
+            {otherTools && (
+              <div className="callout" role="note">
+                <Icon name={otherTools === "roof" ? "mower" : "roofing"} size={16} />
+                <span className="grow">{otherTools === "roof" ? "Lawn tools are showing. Measuring a roof instead?" : "Roof tools are showing. Measuring a lawn instead?"}</span>
+                {/* What was picked to draw next belongs to the tools being left. */}
+                <button type="button" className="link-btn" onClick={() => { pickEdge(null); setRoofPicked(otherTools === "roof"); }}>{otherTools === "roof" ? "Use roof tools" : "Use lawn tools"}</button>
+              </div>
+            )}
             {roofSteps ? (
               <RoofSteps
                 sections={roofSections.map((r) => ({ id: r.id, label: r.label, pitch: r.pitch ? pitchLabel(r.pitch) : "", squares: pitchError ? null : sectionSquares(r.sqft, r.pitch) }))}

@@ -202,19 +202,47 @@ describe("the Depth card", () => {
 });
 
 describe("roof tools and lawn tools", () => {
+  const plain = { roof: false, roofingApp: false, roofPicked: false, roofCardOpen: false, lawn: false };
+
   it("keeps a lawn's tools when Roof pitch and edges is only opened", () => {
     // A lawn care business looks into the roof card: its lawn items, Find, slope and Lawn card stay.
-    expect(roofOrLawn({ roof: false, roofCardOpen: true, lawn: true })).toEqual({ roofing: false, lawn: true });
-    expect(roofOrLawn({ roof: false, roofCardOpen: false, lawn: true })).toEqual({ roofing: false, lawn: true });
-    // Once a pitch or an edge is set it's a roof, as before; so is anything with Roofing installed.
-    expect(roofOrLawn({ roof: true, roofCardOpen: true, lawn: true })).toEqual({ roofing: true, lawn: false });
-    expect(roofOrLawn({ roof: true, roofCardOpen: false, lawn: true })).toEqual({ roofing: true, lawn: false });
+    expect(roofOrLawn({ ...plain, roofCardOpen: true, lawn: true })).toEqual({ roofing: false, lawn: true, offer: null });
+    expect(roofOrLawn({ ...plain, lawn: true })).toEqual({ roofing: false, lawn: true, offer: null });
+    // Once a pitch or an edge is set it's a roof, as before.
+    expect(roofOrLawn({ ...plain, roof: true, roofCardOpen: true, lawn: true })).toEqual({ roofing: true, lawn: false, offer: null });
+    expect(roofOrLawn({ ...plain, roof: true, lawn: true })).toEqual({ roofing: true, lawn: false, offer: null });
     // With no lawn in it, opening the card still brings out the roof tools.
-    expect(roofOrLawn({ roof: false, roofCardOpen: true, lawn: false })).toEqual({ roofing: true, lawn: false });
-    expect(roofOrLawn({ roof: false, roofCardOpen: false, lawn: false })).toEqual({ roofing: false, lawn: false });
+    expect(roofOrLawn({ ...plain, roofCardOpen: true })).toEqual({ roofing: true, lawn: false, offer: null });
+    expect(roofOrLawn(plain)).toEqual({ roofing: false, lawn: false, offer: null });
     const page = readFileSync(new URL("../src/features/measure/MeasurePage.tsx", import.meta.url), "utf8");
-    expect(page).toContain("const { roofing, lawn } = roofOrLawn({ roof: roofSet, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });");
     // The card itself opens and shuts by its own switch, a roof or not.
     expect(page).toContain("<details key=\"roof\" className=\"measure-extra\" open={roofing || roofOpen} onToggle={(e) => setRoofOpen(e.currentTarget.open)}>");
+  });
+
+  it("shows a roofing business with nothing lawn about it the roof tools on every drawing, as before", () => {
+    const roofer = { ...plain, roofingApp: true };
+    for (const roof of [false, true]) for (const roofCardOpen of [false, true]) expect(roofOrLawn({ ...roofer, roof, roofCardOpen })).toEqual({ roofing: true, lawn: false, offer: null });
+  });
+
+  it("offers lawn tools with Roofing installed when something says lawn, and a way to the roof tools", () => {
+    // A lawn care business that also does roofs, a drawing with lawn items or a slope, or Lawn turned on.
+    const both = { ...plain, roofingApp: true, lawn: true };
+    expect(roofOrLawn(both)).toEqual({ roofing: false, lawn: true, offer: "roof" });
+    expect(roofOrLawn({ ...both, roofCardOpen: true })).toEqual({ roofing: false, lawn: true, offer: "roof" });
+    // "Roof tools" pressed: the roof's tools, never both, with the way back while nothing makes it a roof for sure.
+    expect(roofOrLawn({ ...both, roofPicked: true })).toEqual({ roofing: true, lawn: false, offer: "lawn" });
+    // Opened from Roofing, or with a pitch or a roof edge set, it's a roof and nothing else is offered.
+    expect(roofOrLawn({ ...both, roof: true })).toEqual({ roofing: true, lawn: false, offer: null });
+    expect(roofOrLawn({ ...both, roof: true, roofPicked: true })).toEqual({ roofing: true, lawn: false, offer: null });
+    // The choice is only for a business with Roofing installed.
+    expect(roofOrLawn({ ...plain, lawn: true, roofPicked: true })).toEqual({ roofing: false, lawn: true, offer: null });
+  });
+
+  it("is asked by Measure with what makes a roof for sure kept apart from Roofing being installed", () => {
+    const page = readFileSync(new URL("../src/features/measure/MeasurePage.tsx", import.meta.url), "utf8");
+    expect(page).toContain("const roofSure = params.has(\"roofing\") || Boolean(pitch.trim()) || Object.values(pitches).some(Boolean) || Object.keys(edges).length > 0;");
+    expect(page).toContain("roofOrLawn({ roof: roofSure, roofingApp: roofer, roofPicked, roofCardOpen: roofOpen, lawn: lawnTrade || lawnDrawing || lawnOn });");
+    // The roof's steps replace the panel only on a roof: a lawn keeps its totals with Roofing installed.
+    expect(page).toContain("const roofSteps = params.has(\"roofing\") || (roofer && roofing);");
   });
 });
