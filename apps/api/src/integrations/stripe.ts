@@ -1312,22 +1312,46 @@ async function disputed(admin: Db, route: WebhookRoute, type: string, dispute: D
 // Deposits (payouts)
 // ---------------------------------------------------------------------------------------------
 
+/** A deposit Stripe hasn't settled yet: any other status is its outcome (one shown as paid can still turn failed). */
+const PAYOUT_ON_ITS_WAY = ["pending", "in_transit"];
+
 /** Record a deposit (and match it to payments once it's paid). True when it's new here. */
 async function savePayout(ctx: Ctx, payout: StripePayout): Promise<boolean> {
-  const { data: existing } = await ctx.admin.from("payouts").select("id, company_id, itemized_at").eq("processor_ref", payout.id).maybeSingle();
+  const saved = () => ctx.admin.from("payouts").select("id, company_id, itemized_at").eq("processor_ref", payout.id).maybeSingle();
+  let { data: existing } = await saved();
   if (existing && existing.company_id !== ctx.companyId) return false;
   const values = {
     company_id: ctx.companyId, processor: "stripe", processor_ref: payout.id, amount: payout.amount / 100, currency: payout.currency,
     // Stripe gives the arrival day as midnight UTC.
     status: payout.status, arrival_on: new Date(payout.arrival_date * 1000).toISOString().slice(0, 10), failure_message: payout.failure_message,
   };
-  const { data: row, error } = existing
-    ? await ctx.admin.from("payouts").update(values).eq("id", existing.id).select("id, itemized_at").single()
-    : await ctx.admin.from("payouts").insert(values).select("id, itemized_at").single();
-  fail(error);
+  let row: { id: string; itemized_at: string | null } | null = null;
+  let added = false;
+  if (!existing) {
+    const { data, error } = await ctx.admin.from("payouts").insert(values).select("id, itemized_at").single();
+    // Stripe sends payout.created and payout.paid together, and both can look before either saves:
+    // the other one's row is there now, and this one's reading of the deposit goes onto it.
+    if (error?.code === "23505") {
+      ({ data: existing } = await saved());
+      if (existing && existing.company_id !== ctx.companyId) return false;
+      if (!existing) fail(error);
+    } else {
+      fail(error);
+      row = data;
+      added = true;
+    }
+  }
+  if (!added && existing) {
+    // Each event reads the deposit as it is then, and two can be saved out of order: a reading from
+    // while it was on its way never replaces an outcome saved since.
+    const update = ctx.admin.from("payouts").update(values).eq("id", existing.id);
+    const { data, error } = await (PAYOUT_ON_ITS_WAY.includes(payout.status) ? update.in("status", PAYOUT_ON_ITS_WAY) : update).select("id, itemized_at").maybeSingle();
+    fail(error);
+    row = data;
+  }
   // Only automatic payouts can be broken down into the payments in them.
   if (row && payout.status === "paid" && payout.automatic && !row.itemized_at) await itemizePayout(ctx, row.id, payout.id);
-  return !existing;
+  return added;
 }
 
 /** Match a deposit's transactions to payments: each gets its fee and the deposit it arrived in. */

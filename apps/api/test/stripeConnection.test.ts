@@ -1339,6 +1339,75 @@ describe("money Stripe reports", () => {
     expect(db.tables.payments).toHaveLength(1);
   });
 
+  describe("a deposit's events arriving together", () => {
+    const deposit = (status: string) => ({ id: "po_1", amount: 17933, currency: "usd", arrival_date: 1_760_400_000, status, automatic: false, failure_message: null });
+
+    // payout.created and payout.paid can come in the same second: both look, find nothing, and save it.
+    it("saves it once, and neither event fails", async () => {
+      const key = stripeKey("sk_live_A", "acct_A");
+      await connect(key);
+      side(key).payouts.push(deposit("paid"));
+      // Neither save starts until both have looked.
+      const from = (db.db as any).from;
+      let looks = 0;
+      let looked = () => {};
+      const bothLooked = new Promise<void>((resolve) => (looked = resolve));
+      (db.db as any).from = (table: string) => {
+        const q = from(table);
+        if (table !== "payouts") return q;
+        const { insert, then } = q;
+        let saving = false;
+        q.insert = (row: unknown) => ((saving = true), insert(row));
+        q.then = (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+          if (saving) return bothLooked.then(() => then(resolve, reject));
+          if (++looks === 2) looked();
+          return then(resolve, reject);
+        };
+        return q;
+      };
+      await expect(Promise.all([event("payout.created", { id: "po_1" }), event("payout.paid", { id: "po_1" })])).resolves.toEqual([null, null]);
+      expect(db.tables.payouts).toEqual([expect.objectContaining({ company_id: CO, processor_ref: "po_1", status: "paid", amount: 179.33 })]);
+    });
+
+    // Each event reads the deposit as it is then. One read while it was on its way can be saved last.
+    it("keeps it paid when an earlier event's read of it is saved last", async () => {
+      const key = stripeKey("sk_live_A", "acct_A");
+      await connect(key);
+      const payout = deposit("in_transit");
+      side(key).payouts.push(payout);
+      let holding = false;
+      let release = () => {};
+      const held = new Promise<void>((resolve) => (release = resolve));
+      vi.stubGlobal("fetch", async (input: string | URL, init: RequestInit = {}) => {
+        const answer = await fakeServices(input, init);
+        if (!holding && new URL(String(input)).pathname === "/v1/payouts/po_1") {
+          holding = true;
+          await held;
+        }
+        return answer;
+      });
+      const created = event("payout.created", { id: "po_1" });
+      await vi.waitFor(() => expect(holding).toBe(true));
+      payout.status = "paid";
+      await event("payout.paid", { id: "po_1" });
+      release();
+      await created;
+      expect(db.tables.payouts).toEqual([expect.objectContaining({ processor_ref: "po_1", status: "paid" })]);
+    });
+
+    // Stripe can show a deposit as paid and then say the bank sent it back.
+    it("still marks a paid one failed", async () => {
+      const key = stripeKey("sk_live_A", "acct_A");
+      await connect(key);
+      const payout = deposit("paid");
+      side(key).payouts.push(payout);
+      await event("payout.paid", { id: "po_1" });
+      Object.assign(payout, { status: "failed", failure_message: "The bank account has been closed." });
+      await event("payout.failed", { id: "po_1" });
+      expect(db.tables.payouts).toEqual([expect.objectContaining({ status: "failed", failure_message: "The bank account has been closed." })]);
+    });
+  });
+
   it("takes what was owed from before back with the rest of its charge, and puts it in the charge's deposit", async () => {
     const key = stripeKey("sk_live_A", "acct_A");
     await connect(key);
