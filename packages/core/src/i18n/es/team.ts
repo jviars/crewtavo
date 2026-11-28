@@ -634,6 +634,17 @@ export default {
   "{amount} due": "{amount} por pagar",
   "Client Hub link": "Enlace del Portal del cliente",
 
+  // Team chat: saved for later (features/chat/SavedPanel.tsx, MessageItem.tsx)
+  "Save for later": "Guardar para después",
+  "messages::Saved": "Guardados",
+  "Saved for later": "Guardado para después",
+  "Remove from saved": "Quitar de guardados",
+  "Removed from saved": "Se quitó de guardados",
+  "Saved messages": "Mensajes guardados",
+  "Loading saved messages": "Cargando los mensajes guardados",
+  "Nothing saved yet": "Todavía no hay nada guardado",
+  "Save a message from its menu (···) to come back to it here: a gate code, an address, a change of plan.": "Guarda un mensaje desde su menú (···) para volver a él aquí: un código del portón, una dirección, un cambio de plan.",
+
   // Guides: the list, a guide, its quiz and suggestions (features/kb)
   "{count} to look at": "{count} por revisar",
   "Done with {name}'s suggestion": "Listo con la sugerencia de {name}",

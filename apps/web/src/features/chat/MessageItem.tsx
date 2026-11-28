@@ -8,7 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
-import { chatFileKind } from "@crewtavo/core/chatContent";
+import { chatFileKind, chatMessageLink } from "@crewtavo/core/chatContent";
 import { orderReactions } from "@crewtavo/core/chatEmoji";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
@@ -25,8 +25,10 @@ import { FileCard, FileCards } from "./ChatFiles";
 import { EmojiPicker } from "./EmojiPicker";
 import { LinkCards } from "./LinkCards";
 import { ReactionPills, toggledReactions } from "./Reactions";
+import { useSavedMessage } from "./SavedPanel";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import s from "./chat.module.css";
+import panels from "./panels.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
 export const REACTION_ICONS: Record<string, IconName> = { thumbs_up: "thumbsUp", on_it: "onIt", seen: "eye" };
@@ -121,6 +123,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   const mentioned = message.mention_all || message.mention_users.includes(ctx.me) || message.mention_roles.includes(ctx.myRoleKey);
   const company = session.company.id;
   const author = message.author;
+  const saved = useSavedMessage(message);
 
   const react = useMutation({
     meta: { inline: true },
@@ -204,6 +207,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         <span className={s.stamp} title={new Date(message.created_at).toLocaleString(browserOrSpanish())}>{shortTime(message.created_at)}</span>
       )}
 
+      {saved.saved && !head && <span className={panels.savedMark} title={t("Saved for later")}><Icon name="bookmark" size={12} filled label={t("Saved for later")} /></span>}
       <div className={s.msgMain}>
         {message.reply && (
           <button type="button" className={s.reply} onClick={() => ctx.onJumpTo(message.reply!.id)}>
@@ -222,6 +226,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             <span className={s.role}>{author ? author.role_label : t("App")}</span>
             <time className={s.time} dateTime={message.created_at} title={new Date(message.created_at).toLocaleString(browserOrSpanish())}>{timeLabel(message.created_at)}</time>
             {message.pinned_at && <span className={s.time} title={t("Pinned")}><Icon name="pushpin" size={11} />{t("Pinned")}</span>}
+            {saved.saved && <span className={s.time} title={t("Saved for later")}><Icon name="bookmark" size={11} filled />{t("Saved")}</span>}
           </div>
         )}
 
@@ -297,6 +302,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
               { label: t("Edit"), icon: "edit", kbd: "E", onSelect: startEdit, hidden: !mine || !ctx.canPost },
               { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", kbd: "P", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
               { label: t("Copy text"), icon: "copy", kbd: "C", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
+              { label: t("Copy link"), icon: "link", kbd: "L", onSelect: () => copyText(chatMessageLink(window.location.origin, message.channel_id, message.id), t("Link copied")) },
+              { label: saved.saved ? t("Remove from saved") : t("Save for later"), icon: "bookmark", kbd: "S", onSelect: saved.toggle },
               { separator: true },
               { label: t("Delete"), icon: "trash", danger: true, onSelect: askDelete, hidden: !(mine || ctx.canManage) },
             ]}

@@ -568,6 +568,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"chat_saved": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"created_at": string,"message_id": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"created_at"?: string,"message_id": string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"created_at"?: string,"message_id"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_saved_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_saved_company_id_message_id_fkey"
+      columns: ["company_id","message_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"chatgpt_plan_secrets": {
                   Row: {
                     "ciphertext": string,"company_id": string,"expires_at": string | null,"refresh_claimed_until": string | null,"updated_at": string,"user_id": string

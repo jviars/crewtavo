@@ -21,6 +21,7 @@ import { Composer, type MentionOption } from "./Composer";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
+import { SavedPanel, useSaved } from "./SavedPanel";
 import { ChatSearchField, SEARCH_FIELD_ID, SearchPanel } from "./SearchPanel";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
@@ -90,8 +91,8 @@ export function ChatPage() {
   const { channelId } = useParams();
   const [params] = useSearchParams();
   const around = params.get("message");
-  // A panel in the conversation's place (a screen of its own on a phone): Search.
-  const view = params.get("view") === "search" ? params.get("view") : null;
+  // A panel in the conversation's place (a screen of its own on a phone): Search, Saved.
+  const view = params.get("view") === "search" || params.get("view") === "saved" ? params.get("view") : null;
   const navigate = useNavigate();
   const state = useChatState();
   const [membersOpen, setMembersOpen] = useState(() => wide() && window.matchMedia("(min-width: 1181px)").matches && stored(MEMBERS_OPEN, true));
@@ -128,6 +129,8 @@ export function ChatPage() {
       <ChannelList state={state.data} current={channelId} />
       {view === "search" ? (
         <SearchPanel state={state.data} />
+      ) : view === "saved" ? (
+        <SavedPanel state={state.data} />
       ) : channel ? (
         <Conversation key={channel.id} channel={channel} state={state.data!} around={around} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
       ) : (
@@ -168,6 +171,8 @@ function ChatOff() {
 
 function ChannelList({ state, current }: { state: ChatState | undefined; current: string | undefined }) {
   const session = useSession();
+  const [params] = useSearchParams();
+  const saved = useSaved(Boolean(state?.enabled));
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
   const groups = useMemo(() => {
@@ -199,6 +204,12 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
       </div>
       <ChatSearchField state={state} className={`${panels.sideSearch} hide-mobile`} />
       <nav className={s.sideList} aria-label={t("Channels")}>
+        {/* Your own places, above the channels. */}
+        <Link to="/chat?view=saved" className={panels.sideEntry} aria-current={params.get("view") === "saved" ? "page" : undefined}>
+          <span aria-hidden="true"><Icon name="bookmark" size={14} /></span>
+          <span>{t("Saved", { context: "messages" })}</span>
+          {Boolean(saved.data?.ids.length) && <span className={panels.sideCount}>{saved.data!.ids.length}</span>}
+        </Link>
         {!state && (
           <Loading label={t("Loading channels")} className="stack-sm">
             {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={30} />)}

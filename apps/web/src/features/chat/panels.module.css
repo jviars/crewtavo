@@ -64,6 +64,9 @@
 .sideButton { display: grid; flex: none; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); cursor: pointer; }
 .sideButton:hover { background: var(--fill-3); }
 
+/* A saved message's bookmark (MessageItem), where a message without its own head has no room for words. */
+.savedMark { position: absolute; top: 5px; right: 10px; color: var(--quiet); pointer-events: none; }
+
 /* Choosing dates. */
 .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 

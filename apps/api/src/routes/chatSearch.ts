@@ -8,7 +8,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
-import { must, uuid } from "../lib/http";
+import { must, readQuery, uuid } from "../lib/http";
 import { chatDbError, loadPeople, MESSAGE_COLUMNS, requireOn, shapeMessages, type MessageRow } from "./chat";
 
 export const chatSearch = new Hono<AppEnv>();
@@ -17,8 +17,9 @@ const PAGE = 30;
 const HAS = ["photo", "file", "job", "link"] as const;
 
 chatSearch.get("/chat/search", requireUser, requireCompany(), async (c) => {
-  const query = z
-    .object({
+  const query = readQuery(
+    c,
+    z.object({
       q: z.string().max(200, "Search for fewer words.").default(""),
       channel: uuid.optional(),
       from: uuid.optional(),
@@ -32,8 +33,8 @@ chatSearch.get("/chat/search", requireUser, requireCompany(), async (c) => {
       before: z.iso.datetime({ offset: true }).optional(),
       order: z.enum(["newest", "best"]).default("newest"),
       offset: z.coerce.number().int().min(0).max(2_000).default(0),
-    })
-    .parse(c.req.query());
+    }),
+  );
   const { db, companyId } = c.var;
   await requireOn(c);
   const { data, error } = await db.rpc("chat_search", {

@@ -18,7 +18,9 @@ export type ChatEvent =
   | { type: "read"; channel_id: string }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
-  | { type: "chat"; enabled: boolean };
+  | { type: "chat"; enabled: boolean }
+  // Someone saved a message for later, or took it out: their own other tabs.
+  | { type: "saved"; message_id: string; saved: boolean };
 
 interface Listener {
   userId: string;

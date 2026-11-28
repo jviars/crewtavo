@@ -15,7 +15,7 @@ import { z } from "zod";
 import type { AppEnv } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { runInBackground } from "../lib/background";
-import { appUrl, dbError, HttpError, uuid } from "../lib/http";
+import { appUrl, dbError, HttpError, readQuery, uuid } from "../lib/http";
 import { allow } from "../lib/limit";
 import { fetchPreview, previewable, type LinkPreview } from "../lib/linkPreview";
 import { adminClient } from "../lib/supabase";
@@ -30,7 +30,7 @@ const ASKS = 30;
 const ASK_WINDOW_S = 5 * 60;
 
 chatLinks.get("/chat/preview", requireUser, requireCompany(), async (c) => {
-  const query = z.object({ url: z.string().min(1).max(2048), message: uuid }).parse(c.req.query());
+  const query = readQuery(c, z.object({ url: z.string().min(1).max(2048), message: uuid }));
   const { db, companyId, userId } = c.var;
   await requireOn(c);
   const message = await messageById(db, query.message);
