@@ -110,7 +110,7 @@ insert into public.invoice_line_items (company_id, invoice_id, name, quantity, u
 update public.invoices set status = 'sent' where id = :'oops';
 select tau.synced(:'oops');
 update public.invoices set status = 'void' where id = :'oops';
-select tau.check(tau.queued(:'oops', true) = 0, 'voiding isn''t sent');
+select tau.check(tau.queued(:'oops', true) = 0, 'voiding isn''t sent as a change (its void is queued on its own: books_void_test.sql)');
 
 -- ===== Moved to another client by a merge ======================================================
 -- The books keep it under its customer there (20261107000600_accounting_ignores_client_moves).

@@ -4,7 +4,8 @@ import type { Db } from "../lib/supabase";
  * Accounting sync: push clients, invoices and payments to QuickBooks Online or Zoho Books.
  * Called from the outbox task with the admin client; every query filters by company_id. An invoice
  * the books have already is sent again when it changes (a late fee, a minimum charge, an edit:
- * private.enqueue_accounting), through each one's update API, so the books keep up with it.
+ * private.enqueue_accounting), through each one's update API, so the books keep up with it, and
+ * voided there when it's voided here (private.enqueue_accounting_void).
  *
  * A link (sync_links) belongs to the books it was made in: the QuickBooks company or Zoho Books
  * organization connected then. Only links to the books connected now are used, and a change queued
@@ -193,19 +194,27 @@ async function pushClient(ctx: Ctx, clientId: string): Promise<string> {
   return contact.contact_id;
 }
 
-/** The books' copy of the invoice, sent now if it hasn't been; with `update`, one already sent is changed to match ours. */
-async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise<string> {
+/**
+ * The books' copy of the invoice, sent now if it hasn't been; with `update`, one already sent is
+ * changed to match ours. One voided here is voided there, and isn't sent if the books never got it
+ * (null then).
+ */
+async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise<string | null> {
   const existing = await linked(ctx, "invoice", invoiceId);
   if (existing && !update) return existing;
   const invoice = await one(
     ctx.admin
       .from("invoices")
-      .select("id, number, client_id, issued_on, due_on, subject, tax_rate, tax_amount, discount_amount, credit_amount, invoice_line_items(name, description, quantity, unit_price, taxable, service_id, sort)")
+      .select("id, number, status, client_id, issued_on, due_on, subject, tax_rate, tax_amount, discount_amount, credit_amount, invoice_line_items(name, description, quantity, unit_price, taxable, service_id, sort)")
       .eq("company_id", ctx.companyId)
       .eq("id", invoiceId)
       .maybeSingle(),
     "Invoice",
   );
+  if (invoice.status === "void") {
+    if (existing) await voidInBooks(ctx, existing);
+    return existing;
+  }
   const customerId = await pushClient(ctx, invoice.client_id);
   const lines = [...(invoice.invoice_line_items ?? [])].sort((a: any, b: any) => a.sort - b.sort);
   // Referral credits come off before tax with the discount, so the books see one discount for both.
@@ -311,6 +320,25 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
     throw new IntegrationError(`Zoho Books left the tax off invoice #${invoice.number}. Crewtavo sends it as an adjustment: turn on Adjustments in Zoho Books (Settings, Preferences, General), then press Try again.`);
   }
   return theirs.invoice_id;
+}
+
+/**
+ * Void the books' copy of an invoice voided here. An invoice with payments can't be voided here
+ * until they're refunded or removed, and neither of those is sent to the books, so the books may
+ * still have a payment on it: both take it off the invoice and keep it as the customer's unapplied
+ * credit, for the refund to be entered against by hand. Asked again, it's void already.
+ */
+async function voidInBooks(ctx: Ctx, externalId: string) {
+  const id = encodeURIComponent(externalId);
+  if (ctx.provider === "quickbooks") {
+    // QuickBooks wants the SyncToken the invoice has now. It keeps a voided invoice, at nothing and noted "Voided".
+    const current = (await qbo(ctx, "GET", `invoice/${id}`)).Invoice;
+    if (Number(current?.TotalAmt) === 0 && String(current?.PrivateNote ?? "").includes("Voided")) return;
+    await qbo(ctx, "POST", "invoice?operation=void", { Id: externalId, SyncToken: current?.SyncToken });
+    return;
+  }
+  const current = (await zoho(ctx, "GET", `invoices/${id}`)).invoice;
+  if (current?.status !== "void") await zoho(ctx, "POST", `invoices/${id}/status/void`);
 }
 
 /** The tax as the business's documents name it, with the invoice's rate: "VAT (20%)". */
@@ -427,8 +455,10 @@ export async function runAccountingJob(env: Env, admin: Db, row: { company_id: s
     provider: integration.provider as Accounting,
     integration: { external_account_id: integration.external_account_id, settings: (integration.settings ?? {}) as Record<string, unknown> },
   };
-  // Queued when it's sent, and again when it changes after: one the books have is updated.
-  if (row.topic === "accounting.invoice") await pushInvoice(ctx, row.payload.invoice_id, true);
+  // Queued when it's sent, and again when it changes after: one the books have is updated. Queued as
+  // accounting.void when it's voided (private.enqueue_accounting_void), so the version before this
+  // one, which would have updated it and called that done, leaves it for this one during an update.
+  if (row.topic === "accounting.invoice" || row.topic === "accounting.void") await pushInvoice(ctx, row.payload.invoice_id, true);
   else if (row.topic === "accounting.payment") await pushPayment(ctx, row.payload.payment_id);
   else throw new IntegrationError(`Unknown topic ${row.topic}`);
 

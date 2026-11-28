@@ -1040,6 +1040,79 @@ describe("accounting sync", () => {
       expect(calls[2]!.body).toMatchObject({ adjustment: 21.2, adjustment_description: "Tax (5.3%)" });
       expect(calls[4]!.body).toMatchObject({ amount: 421.2, invoices: [{ invoice_id: "zoho-inv-1", amount_applied: 421.2 }] });
     });
+
+    // Voided here (its payments, if it had any, refunded or removed first): the books' copy is voided
+    // too. Queued as accounting.void; a change queued before the void finds the invoice void as well.
+    describe("an invoice voided here", () => {
+      const voided = { ...invoice, status: "void" };
+      const voidJob = { company_id: COMPANY, topic: "accounting.void", payload: { invoice_id: "inv-1" } };
+      const asked = (calls: ReturnType<typeof books>) => calls.map((c) => [c.method, `${c.url.pathname.split("/v3/").at(-1)!.replace(/^company\/[^/]+\//, "")}${c.url.searchParams.has("operation") ? `?operation=${c.url.searchParams.get("operation")}` : ""}`]);
+
+      it("is voided in QuickBooks, with the SyncToken the invoice has there now", async () => {
+        const { db } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" }, [], voided);
+        const calls = books(() => ({ Invoice: { Id: "qbo-inv-1", SyncToken: "3", TotalAmt: 45, Balance: 45 } }));
+        await runAccountingJob(env, db, voidJob);
+        expect(asked(calls)).toEqual([["GET", "invoice/qbo-inv-1"], ["POST", "invoice?operation=void"]]);
+        expect(calls[1]!.body).toEqual({ Id: "qbo-inv-1", SyncToken: "3" });
+      });
+
+      it("is voided in Zoho Books", async () => {
+        const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], voided);
+        const calls = books((method) => (method === "GET" ? { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "sent" } } : { code: 0, message: "Invoice status has been changed to Void." }));
+        await runAccountingJob(env, db, voidJob);
+        expect(asked(calls)).toEqual([["GET", "invoices/zoho-inv-1"], ["POST", "invoices/zoho-inv-1/status/void"]]);
+        expect(calls[1]!.body).toBeNull();
+      });
+
+      // The void went through but its answer never came, and the outbox runs the job again.
+      it.each([
+        ["quickbooks", "qbo-inv-1", { Invoice: { Id: "qbo-inv-1", SyncToken: "4", TotalAmt: 0, Balance: 0, PrivateNote: "Voided" } }],
+        ["zoho_books", "zoho-inv-1", { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "void" } }],
+      ] as const)("isn't voided twice in %s", async (provider, id, theirs) => {
+        const { db } = await ours(provider, { client: "cust-1", invoice: id }, [], voided);
+        const calls = books(() => theirs);
+        await runAccountingJob(env, db, voidJob);
+        expect(calls.map((c) => c.method)).toEqual(["GET"]);
+      });
+
+      it.each([
+        ["quickbooks", "accounting.void"],
+        ["zoho_books", "accounting.void"],
+        // Sent and voided before the books got it: its first sending finds it void, and makes nothing there.
+        ["quickbooks", "accounting.invoice"],
+        ["zoho_books", "accounting.invoice"],
+      ] as const)("does nothing in %s when the books never got it (%s)", async (provider, topic) => {
+        const { db, links } = await ours(provider, { client: "cust-1" }, [], voided);
+        const fetch = vi.fn();
+        vi.stubGlobal("fetch", fetch);
+        await runAccountingJob(env, db, { ...voidJob, topic });
+        expect(fetch).not.toHaveBeenCalled();
+        expect(links.has("invoice")).toBe(false);
+      });
+
+      it("is voided, not updated, by a change queued before it was voided", async () => {
+        const { db } = await ours("quickbooks", { client: "cust-1", invoice: "qbo-inv-1" }, [], voided);
+        const calls = books(() => ({ Invoice: { Id: "qbo-inv-1", SyncToken: "3", TotalAmt: 45 } }));
+        await runAccountingJob(env, db, invoiceJob);
+        expect(asked(calls)).toEqual([["GET", "invoice/qbo-inv-1"], ["POST", "invoice?operation=void"]]);
+      });
+
+      it("fails when the books refuse, for the outbox to try again", async () => {
+        const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], voided);
+        vi.stubGlobal("fetch", async (_: string, init?: RequestInit) =>
+          init?.method === "POST" ? Response.json({ code: 1, message: "Payments are applied to this invoice." }, { status: 400 }) : Response.json({ code: 0, invoice: { status: "sent" } }));
+        await expect(runAccountingJob(env, db, voidJob)).rejects.toThrow("Payments are applied to this invoice.");
+      });
+
+      // A payment the task couldn't send until after the void: the books have no open invoice to put it on.
+      it("sends a payment of its own to the books unapplied, without making the invoice there", async () => {
+        const { db } = await ours("zoho_books", { client: "contact-1" }, [], voided);
+        const calls = books(() => ({ code: 0, customerpayments: [], payment: { payment_id: "zoho-pay-1" } }));
+        await runAccountingJob(env, db, paymentJob);
+        expect(asked(calls)).toEqual([["GET", "customerpayments"], ["POST", "customerpayments"]]);
+        expect(calls[1]!.body).toMatchObject({ amount: 45, invoices: [] });
+      });
+    });
   });
 
   // A business tried the sync against QuickBooks' sandbox company, then connected its real one. The
