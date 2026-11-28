@@ -25,7 +25,9 @@ export type ChatEvent =
   | { type: "status"; user_id: string; status: unknown }
   // My scheduled messages or reminders changed (sent, failed, edited elsewhere): read them again.
   | { type: "scheduled"; channel_id: string | null }
-  | { type: "reminders" };
+  | { type: "reminders" }
+  // Someone saved a message for later, or took it out: their own other tabs.
+  | { type: "saved"; message_id: string; saved: boolean };
 
 interface Listener {
   userId: string;

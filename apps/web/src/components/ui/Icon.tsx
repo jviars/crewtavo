@@ -260,6 +260,15 @@ const ICONS = {
   office: "building-office",
   busy: "minus-circle",
   alarm: "alarm",
+  /** A document by its kind (a file in team chat): PDF, Word, Excel, PowerPoint, CSV, text. */
+  filePdf: "file-pdf",
+  fileDoc: "file-doc",
+  fileXls: "file-xls",
+  filePpt: "file-ppt",
+  fileCsv: "file-csv",
+  fileTxt: "file-txt",
+  /** Saved for later (team chat). */
+  bookmark: "bookmark-simple",
 } satisfies Record<string, PhosphorName | Own>;
 
 export type IconName = keyof typeof ICONS;

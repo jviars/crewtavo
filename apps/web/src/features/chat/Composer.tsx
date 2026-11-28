@@ -1,6 +1,7 @@
 /**
- * Writing a message: text with @mentions picked from a list as you type, up to six photos (taken,
- * chosen, pasted or dropped on the box; shrunk before they upload), a job to link, and a reply. The
+ * Writing a message: text with @mentions picked from a list as you type, up to six photos and
+ * documents (PDF, Word, Excel, PowerPoint, text, CSV: taken, chosen, pasted or dropped on the box;
+ * photos shrunk before they upload), a job to link, and a reply. The
  * text can be formatted with Markdown (**bold**, _italics_, lists…; Ctrl+B and Ctrl+I mark a word).
  * Enter sends on a computer; on a phone the send button does. A half-written message waits for you
  * when you come back to the channel. In a thread (Threads.tsx) it replies there, and can also send
@@ -9,12 +10,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
+import { CHAT_DOCUMENT_ACCEPT, CHAT_MAX_FILES, chatDocumentType, chatFileKind } from "@crewtavo/core/chatContent";
 import { Icon } from "@/components/ui/Icon";
+import { Menu } from "@/components/ui/Menu";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api } from "@/lib/api";
 import { uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
+import { DOCUMENT_ICONS } from "./ChatFiles";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { JobPicker, type JobPick } from "./JobPicker";
 import { StatusChip, type ChatStatus } from "./Status";
@@ -25,6 +29,8 @@ import { usePhone, useVoiceRecorder } from "./voice";
 import { MicButton, VoiceRecorder, type VoicePreview } from "./VoiceRecorder";
 import s from "./chat.module.css";
 import th from "./threads.module.css";
+import { EmojiPicker } from "./EmojiPicker";
+import f from "./chatFiles.module.css";
 import { t, T } from "@/lib/i18n";
 
 export interface MentionOption extends Mentionable {
@@ -40,7 +46,8 @@ export interface MentionOption extends Mentionable {
 interface Upload {
   id: string;
   name: string;
-  preview: string;
+  /** A photo's picture while it uploads; a document has its icon instead. */
+  preview: string | null;
   /** waiting: no signal to store it; it goes with the message, which waits on the phone (outbox.ts). */
   status: "uploading" | "done" | "error" | "waiting";
   path?: string;
@@ -56,9 +63,11 @@ interface Draft {
 
 /** Drafts by channel, for as long as the tab is open. */
 const drafts = new Map<string, Draft>();
-const MAX_PHOTOS = 6;
+const MAX_FILES = CHAT_MAX_FILES;
 const coarse = () => window.matchMedia("(pointer: coarse)").matches;
 const isPhoto = (f: File) => f.type.startsWith("image/") || /\.(heic|heif)$/i.test(f.name);
+/** A document a message can carry, by its name's ending (core chatFileKind, as the database allows). */
+const isDocument = (f: File) => !isPhoto(f) && chatFileKind({ name: f.name }) === "document";
 
 /** A pasted picture has no name of its own ("image.png"): call it what it is. */
 function pastedName(file: File, n: number): File {
@@ -103,6 +112,8 @@ export function Composer({
   const [alsoSend, setAlsoSend] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const files = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const documents = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
   /** Where the caret goes once the text just set is in the box (Ctrl+B, Ctrl+I), before the next key lands. */
   const caret = useRef<[number, number] | null>(null);
@@ -187,7 +198,7 @@ export function Composer({
   const cleared = () => {
     setText("");
     setPicked([]);
-    uploads.forEach((u) => URL.revokeObjectURL(u.preview));
+    uploads.forEach((u) => u.preview && URL.revokeObjectURL(u.preview));
     setUploads([]);
     setJob(null);
     onCancelReply();
@@ -302,17 +313,32 @@ export function Composer({
     setText(text.slice(0, start) + middle + text.slice(end));
   };
 
-  const addPhotos = (list: FileList | File[] | null) => {
-    const all = [...(list ?? [])].filter(isPhoto);
-    const chosen = all.slice(0, MAX_PHOTOS - uploads.length);
-    if (files.current) files.current.value = "";
-    if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos.", { count: MAX_PHOTOS }));
-    // Photos turned away for space are told about once, together, with why and who can make room.
+  /** An emoji from the picker, where the cursor is (in place of what's selected). */
+  const insertEmoji = (emoji: string) => {
+    const el = input.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? start;
+    caret.current = [start + emoji.length, start + emoji.length];
+    setText(text.slice(0, start) + emoji + text.slice(end));
+    el?.focus();
+  };
+
+  /** Photos and documents, from the pickers, a paste or a drop. Anything else is said no to, by name. */
+  const addFiles = (list: FileList | File[] | null) => {
+    const given = [...(list ?? [])];
+    const all = given.filter((file) => isPhoto(file) || isDocument(file));
+    const chosen = all.slice(0, Math.max(0, MAX_FILES - uploads.length));
+    for (const picker of [files, camera, documents]) if (picker.current) picker.current.value = "";
+    const other = given.find((file) => !all.includes(file));
+    if (other) toast.warning(t("{name} can't go in a message. Send photos, or PDF, Word, Excel, PowerPoint, text or CSV files.", { name: other.name }));
+    if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos and files.", { count: MAX_FILES }));
+    // Files turned away for space are told about once, together, with why and who can make room.
     const refused = new RefusedForSpace();
     const sent = chosen.map(async (file) => {
       const id = crypto.randomUUID();
-      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading", size: file.size }]);
-      // To a path chosen first, so a photo with no signal now goes up once, with its message, later.
+      const photo = isPhoto(file);
+      setUploads((u) => [...u, { id, name: file.name, preview: photo ? URL.createObjectURL(file) : null, status: "uploading", size: file.size }]);
+      // To a path chosen first, so a file with no signal now goes up once, with its message, later.
       let ready: Awaited<ReturnType<typeof prepareChatFile>>;
       try {
         ready = await prepareChatFile(session.company.id, channel.id, file);
@@ -321,7 +347,7 @@ export function Composer({
         toast.error((error as Error).message);
         return;
       }
-      setUploads((u) => u.map((x) => (x.id === id ? { ...x, path: ready.path, type: ready.type } : x)));
+      setUploads((u) => u.map((x) => (x.id === id ? { ...x, path: ready.path, type: ready.type, size: ready.body.size } : x)));
       return uploadOnce(ready.path, ready.body).then(
         () => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done" } : x))),
         (error: unknown) => {
@@ -336,13 +362,16 @@ export function Composer({
   };
 
   // A screenshot or a copied photo pastes in as a photo. Copied text that brings a picture of itself
-  // along (Word, a spreadsheet) still pastes as text.
+  // along (Word, a spreadsheet) still pastes as text. A copied document (a PDF from the computer's
+  // files, which brings its name as text) pastes in as the document.
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const data = e.clipboardData;
-    const pasted = [...data.items].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => Boolean(f && isPhoto(f)));
-    if (!pasted.length || data.getData("text/plain").trim()) return;
+    const pasted = [...data.items].filter((i) => i.kind === "file").map((i) => i.getAsFile()).filter((f): f is File => Boolean(f));
+    const docs = pasted.filter(isDocument);
+    const pictures = data.getData("text/plain").trim() ? [] : pasted.filter(isPhoto);
+    if (!docs.length && !pictures.length) return;
     e.preventDefault();
-    addPhotos(pasted.map(pastedName));
+    addFiles([...pictures.map(pastedName), ...docs]);
   };
   const hasFiles = (e: DragEvent) => [...e.dataTransfer.types].includes("Files");
   const onDragOver = (e: DragEvent) => {
@@ -355,7 +384,7 @@ export function Composer({
     if (!hasFiles(e)) return;
     e.preventDefault();
     setDropping(false);
-    addPhotos([...e.dataTransfer.files]);
+    addFiles([...e.dataTransfer.files]);
   };
 
   if (!channel.can_post) {
@@ -418,8 +447,8 @@ export function Composer({
         {(uploads.length > 0 || job) && (
           <div className={s.chips}>
             {uploads.map((u) => (
-              <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this photo") : u.name}>
-                <img src={u.preview} alt="" />
+              <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this file") : u.name}>
+                {u.preview ? <img src={u.preview} alt="" /> : <span className={f.chipIcon}><Icon name={DOCUMENT_ICONS[chatDocumentType({ name: u.name })]} size={18} /></span>}
                 <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.status === "waiting" ? t("Goes when there's signal") : u.name}</span>
                 <button type="button" className="icon-btn" aria-label={t("Remove {tag}", { tag: u.name })} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={14} /></button>
               </span>
@@ -437,11 +466,23 @@ export function Composer({
           <VoiceRecorder recorder={voice} onSend={(note) => sendVoice.mutate(note)} sending={sendVoice.isPending} />
         ) : (
         <div className={s.composerRow}>
-          <button type="button" className={s.composerBtn} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
-            <Icon name="camera" size={17} />
-          </button>
+          <Menu
+            label={t("Add photos or files")}
+            title={t("Add photos or files")}
+            align="start"
+            triggerClassName={s.composerBtn}
+            trigger={<Icon name="plus" size={17} />}
+            items={[
+              // On a computer the camera button would open the same file chooser as photos.
+              { label: t("Take a photo"), icon: "camera", onSelect: () => camera.current?.click(), hidden: !coarse(), disabled: uploads.length >= MAX_FILES },
+              { label: t("Choose photos"), icon: "image", onSelect: () => files.current?.click(), disabled: uploads.length >= MAX_FILES },
+              { label: t("Choose a file"), icon: "paperclip", description: t("PDF, Word, Excel, PowerPoint, text or CSV, up to 15 MB"), onSelect: () => documents.current?.click(), disabled: uploads.length >= MAX_FILES },
+            ]}
+          />
           {!phone && <MicButton onClick={() => void voice.start()} />}
-          <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
+          <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addFiles(e.target.files)} />
+          <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={(e) => addFiles(e.target.files)} />
+          <input ref={documents} type="file" accept={CHAT_DOCUMENT_ACCEPT} multiple hidden onChange={(e) => addFiles(e.target.files)} />
           <textarea
             ref={input}
             className={s.composerInput}
@@ -456,6 +497,8 @@ export function Composer({
             onBlur={() => setTimeout(() => setSuggest(null), 150)}
             maxLength={4000}
           />
+          {/* On a phone, the keyboard has its own emoji. */}
+          <EmojiPicker label={t("Add an emoji")} triggerClassName={`${s.composerBtn} hide-mobile`} trigger={<Icon name="react" size={17} />} onPick={insertEmoji} />
           <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
             <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>

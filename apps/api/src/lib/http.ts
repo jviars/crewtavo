@@ -52,6 +52,13 @@ export async function readJson<S extends z.ZodType>(c: Context, schema: S): Prom
   return parsed.data;
 }
 
+/** A request's query string, checked like readJson's body: a 400 in words people understand when it isn't right. */
+export function readQuery<S extends z.ZodType>(c: Context, schema: S): z.infer<S> {
+  const parsed = schema.safeParse(c.req.query());
+  if (!parsed.success) throw new HttpError(400, friendlyIssue(parsed.error.issues[0]!));
+  return parsed.data;
+}
+
 const FIELD_NAMES: Record<string, string> = {
   client_id: "client", property_id: "property", job_id: "job", quote_id: "quote", request_id: "request", visit_id: "visit",
   to: "recipient", body: "message", due_on: "due date", starts_at: "start time", ends_at: "end time", scheduled_on: "date",

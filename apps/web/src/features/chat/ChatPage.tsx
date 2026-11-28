@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Link, NavLink, useMatch, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EVERYONE_TOKEN, roleToken, userToken } from "@crewtavo/core/chat";
+import { chatFileKind } from "@crewtavo/core/chatContent";
 import { hasRole, can, useSession } from "@/lib/session";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -32,8 +33,11 @@ import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { useWaitingByChannel, WaitingCount, WaitingMessages } from "./Outbox";
 import { useStatuses } from "./Status";
 import { RemindersButton } from "./Reminders";
+import { SavedPanel, useSaved } from "./SavedPanel";
+import { ChatSearchField, SEARCH_FIELD_ID, SearchPanel } from "./SearchPanel";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
+import panels from "./panels.module.css";
 import { t } from "@/lib/i18n";
 
 const LAST_CHANNEL = "crewtavo.chat.channel";
@@ -104,6 +108,8 @@ export function ChatPage() {
   // A thread's message is found in the thread; the channel stays where it was.
   const around = thread ? null : params.get("message");
   const threadsView = Boolean(useMatch("/chat/threads"));
+  // A panel in the conversation's place (a screen of its own on a phone): Search, Saved.
+  const view = params.get("view") === "search" || params.get("view") === "saved" ? params.get("view") : null;
   const navigate = useNavigate();
   const state = useChatState();
   const [membersOpen, setMembersOpen] = useState(() => wide() && window.matchMedia("(min-width: 1181px)").matches && stored(MEMBERS_OPEN, true));
@@ -116,11 +122,11 @@ export function ChatPage() {
 
   // On a computer, /chat opens the channel you had open last (or the first one).
   useEffect(() => {
-    if (channelId || threadsView || !channels.length || !wide()) return;
+    if (channelId || threadsView || view || !channels.length || !wide()) return;
     const last = stored<string | null>(LAST_CHANNEL, null);
     const target = channels.find((c) => c.id === last && !c.archived && !c.closed) ?? channels.find((c) => !c.archived && c.kind !== "direct") ?? channels[0];
     navigate(`/chat/${target.id}`, { replace: true });
-  }, [channelId, threadsView, channels, navigate]);
+  }, [channelId, threadsView, view, channels, navigate]);
   useEffect(() => {
     if (channel) store(LAST_CHANNEL, channel.id);
   }, [channel]);
@@ -136,9 +142,13 @@ export function ChatPage() {
   };
 
   return (
-    <div ref={layout} className={s.layout} data-view={channelId || threadsView ? "channel" : "list"} data-members={(membersOpen && channel && !thread) || undefined} data-thread={(channel && thread) || undefined}>
+    <div ref={layout} className={s.layout} data-view={channelId || threadsView || view ? "channel" : "list"} data-members={(membersOpen && channel && !thread && !view) || undefined} data-thread={(channel && thread && !view) || undefined}>
       <ChannelList state={state.data} current={channelId} threadsView={threadsView} />
-      {threadsView ? (
+      {view === "search" ? (
+        <SearchPanel state={state.data} />
+      ) : view === "saved" ? (
+        <SavedPanel state={state.data} />
+      ) : threadsView ? (
         <ThreadsView state={state.data} />
       ) : channel ? (
         <Conversation key={channel.id} channel={channel} state={state.data!} around={around} thread={thread} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
@@ -180,6 +190,8 @@ function ChatOff() {
 
 function ChannelList({ state, current, threadsView }: { state: ChatState | undefined; current: string | undefined; threadsView: boolean }) {
   const session = useSession();
+  const [params] = useSearchParams();
+  const saved = useSaved(Boolean(state?.enabled));
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
   const direct = useMemo(() => directList(channels, current), [channels, current]);
@@ -207,6 +219,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
         {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
+        <Link to="/chat?view=search" className={`${s.settings} mobile-only`} aria-label={t("Search chat")} title={t("Search chat")}><Icon name="search" size={16} /></Link>
         {state && <PauseMenu />}
         {state?.direct_messages && <NewMessageButton />}
         <RemindersButton channels={channels} className={s.settings} />
@@ -214,8 +227,15 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
       </div>
+      <ChatSearchField state={state} id={SEARCH_FIELD_ID} className={`${panels.sideSearch} hide-mobile`} />
       <nav className={s.sideList} aria-label={t("Channels")}>
         {state && <ThreadsLink state={state} active={threadsView} />}
+        {/* Your own places, above the channels. */}
+        <Link to="/chat?view=saved" className={panels.sideEntry} aria-current={params.get("view") === "saved" ? "page" : undefined}>
+          <span aria-hidden="true"><Icon name="bookmark" size={14} /></span>
+          <span>{t("Saved", { context: "messages" })}</span>
+          {Boolean(saved.data?.ids.length) && <span className={panels.sideCount}>{saved.data!.ids.length}</span>}
+        </Link>
         {!state && (
           <Loading label={t("Loading channels")} className="stack-sm">
             {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={30} />)}
@@ -333,7 +353,8 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
     return () => clearTimeout(timer);
   }, [flash, all]);
 
-  const photoPaths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.map((a) => a.path)))].sort(), [all]);
+  // Photos to show and voice notes to play (documents open in the file viewer, which signs its own).
+  const photoPaths = useMemo(() => [...new Set(all.flatMap((m) => m.attachments.filter((a) => chatFileKind(a) === "photo" || chatFileKind(a) === "audio").map((a) => a.path)))].sort(), [all]);
   const photos = useQuery({
     queryKey: ["chat-photos", company, photoPaths],
     enabled: photoPaths.length > 0,
@@ -436,6 +457,18 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost btn-icon"
+            aria-label={t("Search {channel}", { channel: channelLabel(channel) })}
+            title={t("Search this channel")}
+            onClick={() => {
+              navigate(`/chat/${channel.id}?view=search&in=${channel.id}`);
+              requestAnimationFrame(() => document.getElementById(SEARCH_FIELD_ID)?.focus());
+            }}
+          >
+            <Icon name="search" size={15} />
+          </button>
           {!isDirect && (
             <button type="button" className="btn btn-sm btn-ghost" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}>
               <Icon name="pushpin" size={15} /><span className={s.toolText}>{t("Pinned")}</span>
@@ -543,7 +576,7 @@ function PinsDialog({ open, channel, ctx, onClose }: { open: boolean; channel: C
           {pins.data?.map((m) => (
             <button key={m.id} type="button" className={s.pinItem} onClick={() => { ctx.onJumpTo(m.id); onClose(); }}>
               <span className={s.pinWho}><strong>{m.author?.name ?? "Crewtavo"}</strong> · {dayLabel(m.created_at)}, {timeLabel(m.created_at)}</span>
-              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? t("Photo") : t("Job")}</div>
+              <div className={s.body}>{m.body ? <MessageText body={m.body} ctx={ctx} /> : m.attachments.length ? (chatFileKind(m.attachments[0]!) === "photo" ? t("Photo") : m.attachments[0]!.name || t("File")) : t("Job")}</div>
             </button>
           ))}
         </div>

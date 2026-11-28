@@ -638,6 +638,8 @@ select t1070.check(array(
   'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_thread_counts(uuid)', 'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
   -- Everyone's Team chat status: for the team only (has_role leaves subs out), so none for a sub.
   'chat_statuses(uuid)',
+  -- Searching team chat: a sub has no chat (private.chat_rights), so finds nothing.
+  'chat_search(uuid, text, uuid, uuid, text[], timestamp with time zone, timestamp with time zone, text, integer, integer)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each

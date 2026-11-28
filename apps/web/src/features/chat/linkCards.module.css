@@ -1,0 +1,27 @@
+/* Under a message (LinkCards.tsx): a web page's card with a stripe down its side, and a record's card like a linked job's. */
+.cards { display: grid; gap: 6px; max-width: min(460px, 100%); margin-top: 6px; }
+.card { display: flex; align-items: flex-start; gap: 12px; min-width: 0; padding: 8px 12px; border-radius: 8px; color: var(--text-3); font-size: var(--fs-12); text-decoration: none; }
+a.card:hover { text-decoration: none; }
+.page { border: 1px solid var(--divider); border-left: 3px solid var(--border-strong); }
+a.page:hover { border-color: var(--border); border-left-color: var(--text-3); background: var(--fill); }
+.record { align-items: center; border: 1px solid var(--border); }
+a.record:hover { border-color: var(--border-strong); background: var(--fill); }
+.text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.site { overflow: hidden; color: var(--text-3); font-size: var(--fs-11); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.title { overflow: hidden; color: var(--ink); font-size: var(--fs-13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.page .title { color: var(--info); }
+.description { display: -webkit-box; overflow: hidden; color: var(--text-2); font-size: var(--fs-12); line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.meta { overflow: hidden; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.quiet { color: var(--text-3); font-size: var(--fs-13); }
+.image { flex: none; width: 64px; height: 64px; border-radius: 6px; background: var(--fill-2); object-fit: cover; }
+.recordIcon { display: grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--fill-2); color: var(--text-3); }
+.status { flex: none; }
+
+@media (max-width: 900px) {
+  .cards { max-width: 100%; }
+  .card { padding: 10px 12px; }
+  .title { font-size: var(--fs-15); }
+  .description, .meta { font-size: var(--fs-13); }
+  .image { width: 72px; height: 72px; }
+  .recordIcon { width: 40px; height: 40px; }
+}

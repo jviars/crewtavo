@@ -421,7 +421,8 @@ type LiveEvent =
   | { type: "chat"; enabled: boolean }
   | { type: "status"; user_id: string; status: { user_id: string } | null }
   | { type: "scheduled"; channel_id: string | null }
-  | { type: "reminders" };
+  | { type: "reminders" }
+  | { type: "saved"; message_id: string; saved: boolean };
 
 /**
  * One streaming connection per tab while chat is on (GET /api/chat/live). It reconnects by itself,
@@ -510,6 +511,10 @@ export function useChatLive() {
           return;
         case "reminders":
           queryClient.invalidateQueries({ queryKey: ["chat", company, "reminders"] });
+          return;
+        case "saved":
+          // Saved or taken out in another of your tabs (SavedPanel.tsx).
+          queryClient.invalidateQueries({ queryKey: [...chatKeys.all(company), "saved"] });
           return;
       }
     };

@@ -458,16 +458,36 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
-                },"chat_messages": {
+                },"chat_link_previews": {
                   Row: {
-                    "also_in_channel": boolean,"attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null,"thread_root": string | null
+                    "company_id": string,"description": string | null,"fetched_at": string,"final_url": string | null,"image": string | null,"ok": boolean,"site_name": string | null,"title": string | null,"url": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"thread_root"?: string | null
+                    "company_id": string,"description"?: string | null,"fetched_at"?: string,"final_url"?: string | null,"image"?: string | null,"ok": boolean,"site_name"?: string | null,"title"?: string | null,"url": string
                   }
                   Update: {
-                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"thread_root"?: string | null
+                    "company_id"?: string,"description"?: string | null,"fetched_at"?: string,"final_url"?: string | null,"image"?: string | null,"ok"?: boolean,"site_name"?: string | null,"title"?: string | null,"url"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_link_previews_company_id_fkey"
+      columns: ["company_id"]
+isOneToOne: false
+      referencedRelation: "companies"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"chat_messages": {
+                  Row: {
+                    "also_in_channel": boolean,"attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null,"search": unknown,"search_text": string | null,"thread_root": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"search"?: never,"search_text"?: never,"thread_root"?: string | null
+                  }
+                  Update: {
+                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"search"?: never,"search_text"?: never,"thread_root"?: string | null
                   }
                   Relationships: [
                     {
@@ -637,6 +657,32 @@ isOneToOne: false
       columns: ["company_id","role_id"]
 isOneToOne: false
       referencedRelation: "company_roles"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_saved": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"created_at": string,"message_id": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"created_at"?: string,"message_id": string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"created_at"?: string,"message_id"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_saved_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_saved_company_id_message_id_fkey"
+      columns: ["company_id","message_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -4688,6 +4734,11 @@ isOneToOne: false
 "chat_save_roles":
 { Args: { "p_company": string,"p_rules": Json,"p_settings": Json }; Returns: undefined
                            },
+"chat_search":
+{ Args: { "p_after"?: string,"p_author"?: string,"p_before"?: string,"p_channel"?: string,"p_company": string,"p_has"?: (string)[],"p_limit"?: number,"p_offset"?: number,"p_order"?: string,"p_query"?: string }; Returns: {
+              "channel_id": string,"id": string,"rank": number
+            }[]
+                           },
 "chat_seen_counts":
 { Args: { "p_channel": string,"p_messages": (string)[] }; Returns: {
               "message_id": string,"seen": number,"total": number
@@ -5191,7 +5242,7 @@ isOneToOne: false
                            },
 "global_search":
 { Args: { "p_company_id": string,"p_limit"?: number,"p_query": string }; Returns: {
-              "client_id": string,"id": string,"kind": string,"number": number,"status": string,"subtitle": string,"title": string
+              "client_id": string,"id": string,"kind": string,"number": number,"parent_id": string,"status": string,"subtitle": string,"title": string
             }[]
                            },
 "guide_feedback":

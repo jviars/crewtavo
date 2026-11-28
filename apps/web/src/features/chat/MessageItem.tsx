@@ -8,8 +8,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CHAT_REACTIONS, chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
-import { isAudio } from "@crewtavo/core/chatField";
+import { chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { chatFileKind, chatMessageLink } from "@crewtavo/core/chatContent";
+import { orderReactions } from "@crewtavo/core/chatEmoji";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -22,11 +23,17 @@ import { addressLine } from "@/lib/format";
 import { hasRole, useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
 import { ThreadSummary } from "./ThreadSummary";
+import { FileCards } from "./ChatFiles";
+import { EmojiPicker } from "./EmojiPicker";
+import { LinkCards } from "./LinkCards";
+import { ReactionPills, toggledReactions } from "./Reactions";
+import { useSavedMessage } from "./SavedPanel";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import { VoiceNote } from "./VoiceNote";
 import { AddToJob } from "./AddToJob";
 import { useRemindMe } from "./Reminders";
 import s from "./chat.module.css";
+import panels from "./panels.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
 export const REACTION_ICONS: Record<string, IconName> = { thumbs_up: "thumbsUp", on_it: "onIt", seen: "eye" };
@@ -127,18 +134,12 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   const mentioned = message.mention_all || message.mention_users.includes(ctx.me) || message.mention_roles.includes(ctx.myRoleKey);
   const company = session.company.id;
   const author = message.author;
+  const saved = useSavedMessage(message);
 
   const react = useMutation({
     meta: { inline: true },
     mutationFn: (v: { kind: string; on: boolean }) => api.post<{ reactions: ChatReactionGroup[] }>(`/chat/messages/${message.id}/reactions`, v),
-    onMutate: (v) => {
-      const next = CHAT_REACTIONS.map((r) => {
-        const users = message.reactions.find((g) => g.kind === r.key)?.users ?? [];
-        if (r.key !== v.kind) return { kind: r.key, users };
-        return { kind: r.key, users: v.on ? [...new Set([...users, ctx.me])] : users.filter((u) => u !== ctx.me) };
-      }).filter((g) => g.users.length);
-      setReactions(queryClient, company, message.channel_id, message.id, next);
-    },
+    onMutate: (v) => setReactions(queryClient, company, message.channel_id, message.id, orderReactions(toggledReactions(message.reactions, v.kind, ctx.me, v.on))),
     onSuccess: (res) => setReactions(queryClient, company, message.channel_id, message.id, res.reactions),
     onError: () => setReactions(queryClient, company, message.channel_id, message.id, message.reactions),
   });
@@ -187,12 +188,13 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   };
 
   const job = message.job_id ? ctx.jobs?.get(message.job_id) : undefined;
+  // Photos as pictures, voice notes, and every other file (a document) as a card.
+  const photos = message.attachments.filter((a) => chatFileKind(a) === "photo");
+  const voiceNotes = message.attachments.filter((a) => chatFileKind(a) === "audio");
+  const documents = message.attachments.filter((a) => !photos.includes(a) && !voiceNotes.includes(a));
   const nameColor = author ? roleColor(author.color) : undefined;
-  // Each reaction a check box: yours are ticked, and the menu stays open to pick another.
-  const reactionMenu = CHAT_REACTIONS.map((r) => {
-    const on = message.reactions.find((g) => g.kind === r.key)?.users.includes(ctx.me) ?? false;
-    return { label: t(r.label), icon: REACTION_ICONS[r.key], checkbox: true, checked: on, onSelect: () => react.mutate({ kind: r.key, on: !on }) };
-  });
+  // Yours, shown as on in the picker: picking one again takes it back.
+  const myReactions = message.reactions.filter((g) => g.users.includes(ctx.me)).map((g) => g.kind);
 
   return (
     <div
@@ -216,6 +218,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         <span className={s.stamp} title={new Date(message.created_at).toLocaleString(browserOrSpanish())}>{shortTime(message.created_at)}</span>
       )}
 
+      {saved.saved && !head && <span className={panels.savedMark} title={t("Saved for later")}><Icon name="bookmark" size={12} filled label={t("Saved for later")} /></span>}
       <div className={s.msgMain}>
         {message.thread_root && message.also_in_channel && ctx.onThread && (
           <button type="button" className={s.reply} onClick={() => ctx.onThread?.(message.thread_root!)}>
@@ -240,6 +243,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             <span className={s.role}>{author ? author.role_label : t("App")}</span>
             <time className={s.time} dateTime={message.created_at} title={new Date(message.created_at).toLocaleString(browserOrSpanish())}>{timeLabel(message.created_at)}</time>
             {message.pinned_at && <span className={s.time} title={t("Pinned")}><Icon name="pushpin" size={11} />{t("Pinned")}</span>}
+            {saved.saved && <span className={s.time} title={t("Saved for later")}><Icon name="bookmark" size={11} filled />{t("Saved")}</span>}
           </div>
         )}
 
@@ -265,11 +269,9 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )
         )}
 
-        {/* Voice notes: VoiceNote (Field builder) */}
-        {message.attachments.filter(isAudio).map((a) => <VoiceNote key={a.path} attachment={a} url={ctx.photos[a.path]} />)}
-        {message.attachments.some((a) => !isAudio(a)) && (
+        {photos.length > 0 && (
           <div className={s.photos}>
-            {message.attachments.filter((a) => !isAudio(a)).map((a) =>
+            {photos.map((a) =>
               ctx.photos[a.path] ? (
                 <a key={a.path} className={s.photo} href={ctx.photos[a.path]} target="_blank" rel="noreferrer">
                   <img src={ctx.photos[a.path]} alt={a.name || t("Photo")} loading="lazy" />
@@ -280,6 +282,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             )}
           </div>
         )}
+        {voiceNotes.map((a) => <VoiceNote key={a.path} attachment={a} url={ctx.photos[a.path]} />)}
+        <FileCards files={documents} />
 
         {message.job_id && (
           job ? (
@@ -291,22 +295,9 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             <span className={s.jobCard}>{t("A job you can't open")}</span>
           )
         )}
+        {editing === null && message.body && <LinkCards message={message} />}
 
-        {message.reactions.length > 0 && (
-          <div className={s.reactions}>
-            {message.reactions.map((g) => {
-              const info = CHAT_REACTIONS.find((r) => r.key === g.kind);
-              const on = g.users.includes(ctx.me);
-              const names = g.users.map((u) => (u === ctx.me ? t("You") : ctx.personName(u))).join(", ");
-              const label = info ? t(info.label) : g.kind;
-              return (
-                <button key={g.kind} type="button" className={s.reaction} aria-pressed={on} aria-label={`${label}, ${g.users.length}`} title={`${label}: ${names}`} onClick={() => react.mutate({ kind: g.kind, on: !on })}>
-                  {g.kind === "thumbs_up" || !info ? <><Icon name={REACTION_ICONS[g.kind] ?? "thumbsUp"} size={13} />{g.users.length}</> : `${label} · ${g.users.length}`}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        <ReactionPills reactions={message.reactions} me={ctx.me} personName={ctx.personName} onToggle={(kind, on) => react.mutate({ kind, on })} />
 
         {message.thread && ctx.onThread && <ThreadSummary thread={message.thread} onOpen={() => ctx.onThread?.(message.id)} />}
         {ctx.seen?.(message)}
@@ -319,7 +310,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
       </div>
       {editing === null && (
         <div className={s.tools}>
-          <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
+          <EmojiPicker label={t("React")} quick mine={myReactions} triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} onPick={(kind) => react.mutate({ kind, on: !myReactions.includes(kind) })} />
           {ctx.canPost && (
             <button type="button" className={`icon-btn ${s.icon}`} aria-label={t("Reply")} title={t("Reply")} onClick={() => ctx.onReply(message)}>
               <Icon name="reply" size={16} />
@@ -339,6 +330,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
               remind.entry,
               // The people who may change jobs (the API and the database decide again).
               { label: t("Add to a job"), icon: "job", kbd: "J", onSelect: () => setToJob(true), hidden: !hasRole(session, "admin", "office", "estimator") },
+              { label: t("Copy link"), icon: "link", kbd: "L", onSelect: () => copyText(chatMessageLink(window.location.origin, message.channel_id, message.id), t("Link copied")) },
+              { label: saved.saved ? t("Remove from saved") : t("Save for later"), icon: "bookmark", kbd: "S", onSelect: saved.toggle },
               { separator: true },
               { label: t("Delete"), icon: "trash", danger: true, onSelect: askDelete, hidden: !(mine || ctx.canManage) },
             ]}

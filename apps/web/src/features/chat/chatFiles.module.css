@@ -1,0 +1,25 @@
+/* A message's documents (ChatFiles.tsx): hairline cards with an icon in the kind's quiet color, the name and its kind and size. */
+.cards { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.card {
+  display: flex; align-items: center; gap: 10px; width: 280px; max-width: 100%; min-height: 52px; padding: 8px 12px 8px 8px; border: 1px solid var(--border); border-radius: 10px;
+  background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.card:hover { border-color: var(--border-strong); background: var(--fill); }
+.icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--fill-2); color: var(--text-2); }
+.icon[data-kind="pdf"] { background: var(--chat-ruby-tint); color: var(--chat-ruby); }
+.icon[data-kind="word"] { background: var(--chat-blue-tint); color: var(--chat-blue); }
+.icon[data-kind="sheet"], .icon[data-kind="csv"] { background: var(--chat-green-tint); color: var(--chat-green); }
+.icon[data-kind="slides"] { background: var(--chat-orange-tint); color: var(--chat-orange); }
+.text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.name { overflow: hidden; font-size: var(--fs-13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--text-3); font-size: var(--fs-12); }
+
+/* In the box, before sending: a document's chip shows its icon where a photo's shows the photo. */
+.chipIcon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: 6px; background: var(--page); color: var(--text-2); }
+
+@media (max-width: 900px) {
+  .card { width: 100%; min-height: 60px; padding: 10px 14px 10px 10px; border-radius: 12px; }
+  .icon { width: 40px; height: 40px; }
+  .name { font-size: var(--fs-15); }
+  .meta { font-size: var(--fs-13); }
+}

@@ -487,7 +487,7 @@ function SubMenu({ entry, index, onPick, onPush }: { entry: MenuSub; index: numb
 }
 
 /** Dragging the sheet's handle: it follows the finger down, and goes away if pulled far or flicked. */
-function drag(e: ReactPointerEvent<HTMLElement>, sheet: HTMLElement | null) {
+export function drag(e: ReactPointerEvent<HTMLElement>, sheet: HTMLElement | null) {
   if (!sheet?.hasAttribute("data-sheet") || e.button !== 0) return;
   const grab = e.currentTarget;
   const startY = e.clientY;

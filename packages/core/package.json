@@ -25,6 +25,8 @@
     "./roles": "./src/roles.ts",
     "./chat": "./src/chat.ts",
     "./chatField": "./src/chatField.ts",
+    "./chatContent": "./src/chatContent.ts",
+    "./chatEmoji": "./src/chatEmoji.ts",
     "./calls": "./src/calls.ts",
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",
