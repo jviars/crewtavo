@@ -185,12 +185,14 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
   const uninstall = useMutation({
     meta: { success: `${app.name} uninstalled`, inline: askPassword },
     mutationFn: async (options: { remove_reviews?: boolean; password?: string } = {}) => {
+      // What didn't happen at the other end, said once the uninstall is through (onSuccess).
+      let note: string | null = null;
       // Google's own calendars go with its sign-in; the ones added by address are removed here.
       if (hasAccount(app)) {
         const res = await api.post<{ revoked?: boolean }>(`/apps/${app.id}/disconnect`, options);
-        if (app.id === "meta" && res?.revoked === false) toast.info("Meta didn't confirm that it removed Crewtavo's access, so your app may still be listed on Facebook. To remove it there, open Settings & privacy, then Settings, then Business Integrations, pick the app and click Remove.");
+        if (app.id === "meta" && res?.revoked === false) note = ("Meta didn't confirm that it removed Crewtavo's access, so your app may still be listed on Facebook. To remove it there, open Settings & privacy, then Settings, then Business Integrations, pick the app and click Remove.");
         // The other Google app signs in the same way, and Google would sign it out too.
-        else if (res?.revoked === false) toast.info(`Your Google sign-in stays, since ${app.id === "google_business" ? "Google Calendar" : "Google Business Profile"} uses it too. Remove Crewtavo in your Google account's security settings to end both.`);
+        else if (res?.revoked === false) note = (`Your Google sign-in stays, since ${app.id === "google_business" ? "Google Calendar" : "Google Business Profile"} uses it too. Remove Crewtavo in your Google account's security settings to end both.`);
       }
       if (app.id === "chatgpt") {
         if (app.team_plans || plan.data?.team_plans) await api.put("/ai/team-plans", { on: false });
@@ -198,10 +200,13 @@ function AppListing({ app, all, ai }: { app: AppRow; all: AppRow[]; ai: AiState 
       }
       if (app.auth === "site") await api.delete(`/apps/${app.id}/site`);
       await Promise.all(sources.filter((s) => s.kind !== "google").map((s) => api.delete(`/calendars/${s.id}`)));
+      return note;
     },
-    onSuccess: () => {
+    onSuccess: (note) => {
       setPhase(null);
       setAskPassword(false);
+      // After "uninstalled" (the page's own success toast comes first), so it sits on top of it, and long enough to read and act on.
+      if (note) toast.warning(note, { duration: 20_000 });
     },
     onSettled: () => {
       refresh();
