@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
-import { sendSms, smsReady } from "../src/lib/notify";
+import { sendBusy, sendSms, smsReady } from "../src/lib/notify";
 import { checkTwilio, forgetTwilio, inboundAccounts, setSmsWebhook, TwilioProblem, twilioStatusUrl } from "../src/lib/twilio";
 import type { Db } from "../src/lib/supabase";
 import { twilioSignature } from "../src/routes/messages";
@@ -362,6 +362,27 @@ describe("sending a text", () => {
     vi.stubGlobal("fetch", twilio().fetcher);
     expect((await sendSms(env, { to: "+15405550163", body: "Hi", company: ALDER })).sent).toBe(true);
     expect(state.integrations[0]).toMatchObject({ status: "connected", last_error: null });
+  });
+
+  it("says whether a text Twilio turned away can be sent again without the client getting it twice", async () => {
+    const { connect } = fakeDb();
+    await connect(ALDER, SID_A, "token-a-secret", "+15405550100");
+    const answer = async (twilioSays: () => Response | Promise<never>) => {
+      vi.stubGlobal("fetch", (async (input: RequestInfo | URL) => (new URL(String(input)).host === "api.twilio.com" ? twilioSays() : Response.json([]))) as typeof fetch);
+      const result = await sendSms(env, { to: "+15405550163", body: "Hi", company: ALDER });
+      return [result.reason, sendBusy(result)];
+    };
+    // Twilio's own trouble, too many at once, and no connection at all: it didn't go.
+    expect(await answer(() => Response.json({ message: "Internal Server Error" }, { status: 500 }))).toEqual(["The text provider refused it (500: Internal Server Error).", true]);
+    expect(await answer(() => Response.json({ code: 20429, message: "Too Many Requests" }, { status: 429 }))).toEqual(["The text provider refused it (429: Too Many Requests).", true]);
+    const refusedConnection = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), { code: "ECONNREFUSED" }) });
+    expect(await answer(() => Promise.reject(refusedConnection))).toEqual(["Couldn't reach the text provider. Try again.", true]);
+    // Twilio took the request and didn't answer, or the line dropped: it may have sent it.
+    expect(await answer(() => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")))).toEqual(["Couldn't reach the text provider. Try again.", false]);
+    expect(await answer(() => Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) })))).toEqual(["Couldn't reach the text provider. Try again.", false]);
+    // A number that can't be texted and a refused token stay refused.
+    expect(await answer(() => Response.json({ code: 21211, message: "Invalid 'To' Phone Number" }, { status: 400 }))).toEqual(["The text provider refused it (400: Invalid 'To' Phone Number).", false]);
+    expect((await answer(refused))[1]).toBe(false);
   });
 
   it("isn't done through an account that was disconnected, or a key saved without an Account SID", async () => {

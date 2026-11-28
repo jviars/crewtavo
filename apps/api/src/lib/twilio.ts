@@ -148,14 +148,14 @@ export function twilioStatusUrl(env: Pick<Env, "APP_URL" | "LOOKALYKE_URL">, com
   return base && (reachable || env.LOOKALYKE_URL) ? `${base}/api/webhooks/twilio/status/${companyId}` : null;
 }
 
-/** One text through an account. Twilio's answer, or null when it couldn't be reached. */
-export function postMessage(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string; statusCallback?: string | null }): Promise<Response | null> {
+/** One text through an account: Twilio's answer. Throws, as fetch does, when Twilio couldn't be reached or didn't answer in time. */
+export function postMessage(env: Pick<Env, "LOOKALYKE_URL">, account: Pick<TwilioAccount, "sid" | "token" | "from">, message: { to: string; body: string; statusCallback?: string | null }): Promise<Response> {
   return fetch(`${api(env)}/Accounts/${account.sid}/Messages.json`, {
     method: "POST",
     headers: { ...auth(account.sid, account.token), "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ To: message.to, From: account.from, Body: message.body, ...(message.statusCallback ? { StatusCallback: message.statusCallback } : {}) }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
-  }).catch(() => null);
+  });
 }
 
 export interface TwilioCheck {

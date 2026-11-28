@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
-import { sendSms } from "../src/lib/notify";
+import { sendBusy, sendSms } from "../src/lib/notify";
 import { companyQuo, forgetQuo, quoRequest, verifyQuoWebhook, type QuoSettings } from "../src/lib/quo";
 import { callFromApi, handleQuoEvent } from "../src/services/quo";
 import { forgetTwilio } from "../src/lib/twilio";
@@ -205,6 +205,26 @@ describe("Texts through Quo", () => {
     vi.stubGlobal("fetch", fetcher);
     await sendSms(env, { to: ANA, body: "Reminder" }, CO);
     expect(seen[0]!.body.inboxStatus).toBeUndefined();
+  });
+
+  it("can be sent again by themselves after Quo's rate limit, which sent nothing, but not after its own failure or no answer, which may have", async () => {
+    await connectedDb();
+    const said = async (answer: () => { status?: number; body?: unknown } | never) => {
+      vi.stubGlobal("fetch", fakeQuo({ "POST /messages": answer }).fetcher);
+      vi.useFakeTimers({ toFake: ["setTimeout"] });
+      let result: Awaited<ReturnType<typeof sendSms>> | undefined;
+      void sendSms(env, { to: ANA, body: "Reminder" }, CO).then((r) => (result = r));
+      // Quo's rate limit is waited out a few times inside the one send first (lib/quo.ts quoRequest).
+      while (!result) {
+        await vi.advanceTimersByTimeAsync(5000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      vi.useRealTimers();
+      return [result.reason, sendBusy(result)];
+    };
+    expect(await said(() => ({ status: 429, body: { title: "Too Many Requests", message: "Slow down" } }))).toEqual(["Quo refused it (429: Slow down).", true]);
+    expect(await said(() => ({ status: 500, body: { title: "Unexpected Error", message: "boom" } }))).toEqual(["Quo refused it (500: boom).", false]);
+    expect(await said(() => { throw new TypeError("fetch failed"); })).toEqual(["Quo didn't answer, so this text may or may not have gone out. Check the conversation in Quo before sending it again.", false]);
   });
 
   it("say a number that opted out as Twilio's STOP code, so it's kept as stopped", async () => {

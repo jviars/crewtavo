@@ -29,7 +29,18 @@ export interface SendResult {
   status?: number;
   /** Twilio's error code when it refused a text: 21610 is a number that texted STOP. */
   code?: number;
+  /** The provider couldn't be connected to at all, so nothing left this server: the same send is safe to make again (sendBusy). */
+  unreached?: true;
 }
+
+/** How fetch says no connection was made: refused, no such host, no route there. */
+const NEVER_LEFT = ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH", "UND_ERR_CONNECT_TIMEOUT"];
+
+/**
+ * A request that failed before it reached the provider, so nothing was sent. A provider that took
+ * the request and didn't answer in time, or dropped the connection, isn't one: it may have sent it.
+ */
+export const neverLeft = (error: unknown): boolean => NEVER_LEFT.includes(String((error as { cause?: { code?: unknown } } | null)?.cause?.code ?? ""));
 
 export interface EmailMessage {
   to: string;
@@ -314,6 +325,15 @@ export function sendProblem(result: SendResult): "unset" | "recipient" | "sign_i
 }
 
 /**
+ * The provider turned an email or text away for now, and it didn't go: too many at once (429), its
+ * own trouble (5xx), or it couldn't be connected to. An automatic send waits and tries again
+ * (services/automations.ts). Not a daily or monthly limit, which a minute's wait won't lift, nor a
+ * provider that didn't answer, which may have sent it.
+ */
+export const sendBusy = (result: SendResult): boolean =>
+  !result.sent && (result.unreached === true || (result.status === 429 && !/sending limit/i.test(result.reason ?? "")) || (result.status ?? 0) >= 500);
+
+/**
  * Show a broken mailbox (changed password, revoked app password, a Resend key that's revoked or not
  * allowed to send) in Settings, and clear it once it works again.
  */
@@ -343,8 +363,8 @@ async function resendSend(env: Pick<Env, "LOOKALYKE_URL">, apiKey: string, from:
       headers: message.headers,
     }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
-  }).catch(() => null);
-  if (!response) return { sent: false, reason: "Couldn't reach Resend. Try again." };
+  }).catch((error: unknown) => (neverLeft(error) ? ("unreached" as const) : null));
+  if (!response || response === "unreached") return { sent: false, reason: "Couldn't reach Resend. Try again.", ...(response ? { unreached: true as const } : {}) };
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string };
     return { sent: false, status: response.status, reason: resendProblem(response.status, detail.message ?? "") };
@@ -516,7 +536,9 @@ async function quoTextOut(env: Env, account: QuoAccount, message: SmsMessage): P
   return {
     sent: false,
     // A key Quo turned down, or a number nobody may send from, is the company's to fix; Quo's other 403s (a daily cap) aren't.
-    ...(sent.status === 401 || sent.title === "Not Phone Number User" ? { status: sent.status } : {}),
+    // A 429 is said too: Quo didn't act on it, so an automatic text is tried again (sendBusy). Its 5xx
+    // isn't: Quo may have sent the text (lib/quo.ts quoRequest), so nothing sends it a second time.
+    ...(sent.status === 401 || sent.status === 429 || sent.title === "Not Phone Number User" ? { status: sent.status } : {}),
     reason: `Quo refused it (${sent.status}${words ? `: ${words}` : ""}).`,
     ...(code ? { code } : {}),
   };
@@ -595,8 +617,12 @@ async function textOut(env: Env, account: TwilioAccount | null, message: { to: s
     return mailpit(env, { to: `sms-${digits}@sms.local`, subject: `Text to ${message.to}`, text: message.body });
   }
   if (!account) return { sent: false, reason: "Texting isn't set up yet. An admin can connect Quo or Twilio in Apps." };
-  const response = await postMessage(env, account, message);
-  if (!response) return { sent: false, reason: "Couldn't reach the text provider. Try again." };
+  let response: Response;
+  try {
+    response = await postMessage(env, account, message);
+  } catch (error) {
+    return { sent: false, reason: "Couldn't reach the text provider. Try again.", ...(neverLeft(error) ? { unreached: true as const } : {}) };
+  }
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { message?: string; code?: number };
     return {

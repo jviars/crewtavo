@@ -55,7 +55,7 @@ import type { Env } from "../env";
 import { companyAddress, companyFooter, firstName, isEmail, renderEmail } from "../lib/email";
 import { clientLink, KEPT_LINK } from "../lib/links";
 import { peopleOnVisits } from "./visitPeople";
-import { sendEmail, sendSms } from "../lib/notify";
+import { sendBusy, sendEmail, sendProblem, sendSms } from "../lib/notify";
 import { adminClient, type Db } from "../lib/supabase";
 import { CAMPAIGN_LINK_DAYS, campaignRuleOf, letStretchGo, sendCampaignEmail } from "./automatedCampaigns";
 import { sendAutopayInvite } from "./autopay";
@@ -706,6 +706,18 @@ export function quietTexts(ctx: Pick<RunContext, "trigger" | "delayed" | "visit"
   throw new WaitUntil(morning, "Quiet hours: texts to clients wait until 8am");
 }
 
+/**
+ * Why an email or text that reached nobody didn't go. When that was only the provider's passing
+ * trouble (lib/notify.ts sendBusy), the run waits and tries the action again by itself (Busy), as an
+ * automated campaign's does. Not when one of them may have gone out unanswered (a provider that took
+ * it and didn't reply): another try could send it twice, so it fails for the office to look at.
+ */
+function sendFailure(delivery: Delivery): Error {
+  const busy = delivery.failed.find((person) => sendBusy(person.result));
+  const noneWent = delivery.failed.every((person) => sendBusy(person.result) || sendProblem(person.result) !== "provider");
+  return busy && noneWent ? new Busy(busy.reason) : new Error(delivery.failed[0]!.reason);
+}
+
 /** For an action's result when it reached some but not all: "; didn't reach bo@example.com (why)". */
 const missed = (delivery: Delivery) => (delivery.failed.length ? `; didn't reach ${addressList(delivery.failed)} (${delivery.failed[0]!.reason.replace(/\.$/, "")})` : "");
 
@@ -773,7 +785,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
         const email = renderEmail({ companyName: ctx.company.name, logo: baseUrl ? logoImage(baseUrl, ctx.company.id, ctx.company.settings) : null, text: render(action.body, from), footer: companyFooter(ctx.company) });
         return sendEmail(env, { to: person.to, subject: render(action.subject, from), text: email.text, html: email.html, replyTo: ctx.company.email ?? undefined, fromName: ctx.company.name }, ctx.company.id);
       }, "The email wasn't sent.");
-      if (!delivery.went.length) throw new Error(delivery.failed[0]!.reason);
+      if (!delivery.went.length) throw sendFailure(delivery);
       await admin.from("messages").insert({
         company_id: ctx.company.id, client_id: client.id, channel: "email", direction: "out", subject: render(action.subject, kept), body: render(action.body, kept),
         ...messageAbout(ctx, client.id), external_id: delivery.id, sent_by: null, recipients: recipientsColumn(delivery),
@@ -820,7 +832,7 @@ export async function performAction(env: Env, admin: Db, ctx: RunContext, action
         await noteRefusedText(admin, client, person.to, result, ctx.company.id);
         return result;
       }, "The text wasn't sent.");
-      if (!delivery.went.length) throw new Error(delivery.failed[0]!.reason);
+      if (!delivery.went.length) throw sendFailure(delivery);
       await admin.from("messages").insert({
         company_id: ctx.company.id, client_id: client.id, channel: "sms", direction: "out", body: render(action.body, kept),
         ...messageAbout(ctx, client.id), external_id: delivery.id, sent_by: null, recipients: recipientsColumn(delivery, true),
@@ -917,13 +929,13 @@ interface RunRow {
   result: unknown;
   /** The batch's claim (claim_automation_runs): this worker holds the run while it still matches. */
   claim_token: string | null;
-  /** Times it waited for a busy email service (Busy). */
+  /** Times it waited for a busy email or text service (Busy). */
   busy_tries?: number | null;
 }
 
-/** A run waits this many times for a busy email service, then fails. */
+/** A run waits this many times for a busy email or text service, then fails. */
 export const BUSY_TRIES = 4;
-/** How long a run waits for a busy email service after `tries` waits already: 1, 2, 4, then 8 minutes. */
+/** How long a run waits for a busy email or text service after `tries` waits already: 1, 2, 4, then 8 minutes. */
 export const busyWait = (tries: number) => 60_000 * 2 ** Math.max(0, Math.min(tries, BUSY_TRIES - 1));
 
 /** The claim couldn't be checked, so the run is left as it is; it's retried once the claim runs out. */
@@ -1042,13 +1054,14 @@ export async function executeRun(env: Env, admin: Db, run: RunRow, baseUrl: stri
         const done = await performAction(env, admin, { ...ctx, run: { ...ctx.run!, action: i } }, action, rule.name, baseUrl);
         results.push(done instanceof Skip ? { type: action.type, ok: true, skipped: true, detail: done.detail } : { type: action.type, ok: true, detail: done });
       } catch (error) {
-        // The email service is busy (Resend's 429 or 5xx): the run waits longer each time, and the
-        // batch stops so the rest don't pile in after it. After a few tries it fails, saying why.
+        // The email or text service is busy (a 429 or 5xx, or it can't be connected to): the run waits
+        // longer each time with the actions already done, which aren't done again, and the batch
+        // stops so the rest don't pile in after it. After a few tries it fails, saying why.
         if (error instanceof Busy && (run.busy_tries ?? 0) < BUSY_TRIES) {
           notes.busy = true;
           const wait = busyWait(run.busy_tries ?? 0);
           const minutes = Math.round(wait / 60_000);
-          const note = `${error.message.replace(/ Try again in [^.]*\.$/, "")} It's tried again by itself in ${minutes === 1 ? "a minute" : `${minutes} minutes`}.`;
+          const note = `${error.message.replace(/ Try again[^.]*\.$/, "")} It's tried again by itself in ${minutes === 1 ? "a minute" : `${minutes} minutes`}.`;
           return postpone(admin, run, new WaitUntil(new Date(Date.now() + wait), note), results, true);
         }
         // Not yet: the run waits with what's done so far, and this action and the ones after it go

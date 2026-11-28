@@ -65,8 +65,9 @@ export class WaitUntil extends Error {
 }
 
 /**
- * The email service was too busy to take an email (Resend's 429, or its 5xx): the automation run
- * waits and tries again, longer each time (services/automations.ts), and fails only after a few.
+ * The email or text service was too busy to take a message (a 429 or 5xx, or it couldn't be
+ * connected to): the automation run waits and tries again, longer each time (services/automations.ts),
+ * and fails only after a few.
  */
 export class Busy extends WaitUntil {
   override name = "Busy";

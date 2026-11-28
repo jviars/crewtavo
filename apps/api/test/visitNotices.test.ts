@@ -289,3 +289,109 @@ describe("the day-before reminder", () => {
     expect(emailed()[0]!.text).toContain("12 Oak St, Radford, VA on Thursday, October 29 at 9:00 AM.");
   });
 });
+
+describe("an automatic email or text the provider turns away for a moment", () => {
+  const email = { type: "send_email", subject: "Your visit on {{date}}", body: "{{address}} on {{date}}{{time}}." };
+  const text = { type: "send_sms", body: "See you {{date}}{{time}}." };
+  const both = (over: Record<string, Row[]> = {}) => world("visit.reminder", { automation_rules: [rule("visit.reminder", { actions: [email, text] })], ...over });
+  const postponed = (calls: Call[]) => calls.filter((c) => c.path === "rpc/postpone_automation_run").map((c) => c.body);
+  const trouble = { sent: false, status: 500, reason: "Resend is having trouble right now. Try again in a few minutes." };
+  const emailedOk = { type: "send_email", ok: true, detail: "Emailed ana@example.com" };
+  afterEach(() => {
+    sendEmail.mockImplementation(async () => ({ sent: true, id: "email-1" }));
+    sendSms.mockImplementation(async () => ({ sent: true, id: "sms-1" }));
+  });
+
+  it("waits and is tried again by itself, instead of failing on the first try", async () => {
+    sendEmail.mockImplementation(async () => trouble);
+    let calls = world("visit.rescheduled");
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("waiting");
+    expect(postponed(calls)).toEqual([{ p_id: 7, p_token: "claim-1", p_until: "2026-10-27T15:01:00.000Z", p_result: [], p_note: "Resend is having trouble right now. It's tried again by itself in a minute.", p_busy: true }]);
+    expect(finished(calls)).toEqual([]);
+    expect(calls.some((c) => c.method === "POST" && c.path === "messages")).toBe(false);
+    // Too many at once, and a provider that couldn't be connected to at all, are the same: nothing went.
+    for (const answer of [{ sent: false, status: 429, reason: "Resend got too many emails at once. Try again in a minute." }, { sent: false, unreached: true as const, reason: "Couldn't reach Resend. Try again." }]) {
+      sendEmail.mockImplementation(async () => answer);
+      calls = world("visit.rescheduled");
+      expect(await executeRun(env, adminClient(env), run(), env.APP_URL!), answer.reason).toBe("waiting");
+    }
+    expect(postponed(calls)[0]).toMatchObject({ p_note: "Couldn't reach Resend. It's tried again by itself in a minute." });
+  });
+
+  it("waits longer each time and fails after the last try, saying why", async () => {
+    sendEmail.mockImplementation(async () => trouble);
+    let calls = world("visit.rescheduled");
+    await executeRun(env, adminClient(env), run({ busy_tries: 3 }), env.APP_URL!);
+    expect(postponed(calls)[0]).toMatchObject({ p_until: "2026-10-27T15:08:00.000Z", p_busy: true });
+    calls = world("visit.rescheduled");
+    expect(await executeRun(env, adminClient(env), run({ busy_tries: 4 }), env.APP_URL!)).toBe("failed");
+    expect(finished(calls)[0]).toMatchObject({ p_status: "failed", p_error: trouble.reason });
+  });
+
+  it("doesn't send the email again when only the text after it was turned away", async () => {
+    sendSms.mockImplementation(async () => ({ sent: false, status: 500, reason: "The text provider refused it (500: Internal Server Error)." }));
+    let calls = both();
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("waiting");
+    expect(postponed(calls)[0]).toMatchObject({ p_result: [emailedOk], p_note: "The text provider refused it (500: Internal Server Error). It's tried again by itself in a minute.", p_busy: true });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    // The next try, with what the run kept: only the text goes.
+    sendSms.mockImplementation(async () => ({ sent: true, id: "sms-1" }));
+    calls = both();
+    expect(await executeRun(env, adminClient(env), run({ result: [emailedOk], busy_tries: 1 }), env.APP_URL!)).toBe("done");
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendSms).toHaveBeenCalledTimes(2);
+    expect(finished(calls)[0]).toMatchObject({ p_status: "done", p_result: [emailedOk, { type: "send_sms", ok: true, detail: "Texted +15405550100" }] });
+  });
+
+  it("still fails at once when the provider refuses it for good", async () => {
+    const refusals = [
+      { sent: false, status: 422, reason: "That email address isn't valid, so Resend didn't send it." },
+      { sent: false, status: 401, reason: "Resend didn't accept this API key." },
+      { sent: false, status: 429, reason: "This Resend account has reached its daily sending limit (100 emails on the free plan)." },
+      { sent: false, reason: "Email isn't set up yet. An owner can connect the company's email in Settings → Email." },
+    ];
+    for (const refusal of refusals) {
+      sendEmail.mockImplementation(async () => refusal);
+      const calls = world("visit.rescheduled");
+      expect(await executeRun(env, adminClient(env), run(), env.APP_URL!), refusal.reason).toBe("failed");
+      expect(postponed(calls)).toEqual([]);
+    }
+    sendSms.mockImplementation(async () => ({ sent: false, status: 400, code: 21211, reason: "The text provider refused it (400: Invalid 'To' Phone Number)." }));
+    const calls = world("visit.reminder", { automation_rules: [rule("visit.reminder", { actions: [text] })] });
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("failed");
+    expect(postponed(calls)).toEqual([]);
+  });
+
+  it("isn't sent again when the provider didn't answer and may have sent it", async () => {
+    sendEmail.mockImplementation(async () => ({ sent: false, reason: "Couldn't reach Resend. Try again." }));
+    let calls = world("visit.rescheduled");
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("failed");
+    expect(postponed(calls)).toEqual([]);
+    for (const reason of ["Quo didn't answer, so this text may or may not have gone out. Check the conversation in Quo before sending it again.", "Couldn't reach the text provider. Try again.", "Quo refused it (500: boom)."]) {
+      sendSms.mockImplementation(async () => ({ sent: false, reason }));
+      calls = world("visit.reminder", { automation_rules: [rule("visit.reminder", { actions: [text] })] });
+      expect(await executeRun(env, adminClient(env), run(), env.APP_URL!), reason).toBe("failed");
+      expect(postponed(calls)).toEqual([]);
+    }
+    expect(sendSms).toHaveBeenCalledTimes(3);
+  });
+
+  it("to several people is tried again only when none of them may have got it", async () => {
+    const contact = { id: "contact-1", company_id: CO, client_id: ANA_ID, name: "Bo Lee", email: "bo@example.com", phone: null, notify_email: true, notify_sms: false };
+    const answers = (bo: Row) => sendEmail.mockImplementation(async (_env, message) => ((message as { to: string }).to === "bo@example.com" ? bo : trouble) as never);
+    // One address is bad and the other met the provider's trouble: nothing went, so it's tried again.
+    answers({ sent: false, status: 422, reason: "That email address isn't valid, so Resend didn't send it." });
+    let calls = world("visit.rescheduled", { client_contacts: [contact] });
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("waiting");
+    expect(postponed(calls)[0]).toMatchObject({ p_note: "Resend is having trouble right now. It's tried again by itself in a minute." });
+    // One may have gone: trying again could send it twice.
+    answers({ sent: false, reason: "Couldn't reach Resend. Try again." });
+    calls = world("visit.rescheduled", { client_contacts: [contact] });
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("failed");
+    // One went: the action is done, saying who it didn't reach, as before.
+    answers({ sent: true, id: "email-2" });
+    calls = world("visit.rescheduled", { client_contacts: [contact] });
+    expect(await executeRun(env, adminClient(env), run(), env.APP_URL!)).toBe("done");
+    expect(finished(calls)[0].p_result[0].detail).toBe("Emailed bo@example.com; didn't reach ana@example.com (Resend is having trouble right now. Try again in a few minutes)");
+  });
+});

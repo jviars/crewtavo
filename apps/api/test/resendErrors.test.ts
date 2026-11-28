@@ -3,7 +3,7 @@
  * change in Resend, instead of Resend's own wording and a status code.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resendProblem, sendWithMailbox } from "../src/lib/notify";
+import { resendProblem, sendBusy, sendWithMailbox } from "../src/lib/notify";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -46,6 +46,26 @@ describe("Resend's refusals", () => {
   it("keep Resend's own words for anything else", () => {
     expect(resendProblem(422, "Invalid `scheduled_at` field.")).toBe("Resend refused it (422: Invalid `scheduled_at` field.).");
     expect(resendProblem(400, "")).toBe("Resend refused it (400).");
+  });
+
+  it("come back saying whether the email can be sent again without anyone getting it twice", async () => {
+    const settings = { preset: "resend", kind: "resend" as const, from_email: "office@acme.example" };
+    const answer = async (resendSays: () => Response | Promise<never>) => {
+      vi.stubGlobal("fetch", async () => resendSays());
+      const result = await sendWithMailbox({}, settings, { api_key: "re_company" }, { to: "ana@example.com", subject: "Hi", text: "Hello" });
+      return [result.reason, sendBusy(result)];
+    };
+    // Resend's own trouble, too many at once, and no connection at all: it didn't go.
+    expect(await answer(() => Response.json({ message: "Internal server error" }, { status: 500 }))).toEqual(["Resend is having trouble right now. Try again in a few minutes.", true]);
+    expect(await answer(() => Response.json({ message: "Too many requests" }, { status: 429 }))).toEqual(["Resend got too many emails at once. Try again in a minute.", true]);
+    const noSuchHost = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.resend.com"), { code: "ENOTFOUND" }) });
+    expect(await answer(() => Promise.reject(noSuchHost))).toEqual(["Couldn't reach Resend. Try again.", true]);
+    // Resend took the request and didn't answer: it may have sent it.
+    expect(await answer(() => Promise.reject(new DOMException("The operation was aborted due to timeout", "TimeoutError")))).toEqual(["Couldn't reach Resend. Try again.", false]);
+    // A limit a minute's wait won't lift, a bad address and a refused key stay refused.
+    expect((await answer(() => Response.json({ message: "You have exceeded your daily email sending quota." }, { status: 429 })))[1]).toBe(false);
+    expect((await answer(() => Response.json({ message: "Invalid `to` field." }, { status: 422 })))[1]).toBe(false);
+    expect((await answer(() => Response.json({ message: "API key is invalid" }, { status: 401 })))[1]).toBe(false);
   });
 
   it("come back from a send with the status, so callers can tell a bad key from a limit", async () => {
