@@ -499,8 +499,9 @@ export function Composer({
           />
           {/* On a phone, the keyboard has its own emoji. */}
           <EmojiPicker label={t("Add an emoji")} triggerClassName={`${s.composerBtn} hide-mobile`} trigger={<Icon name="react" size={17} />} onPick={insertEmoji} />
-          <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
-            <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
+          {/* In a thread's narrow panel, the icon alone, so the words have room. */}
+          <button type="button" className={`btn btn-sm ${thread ? "btn-icon" : ""} ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
+            <Icon name="job" size={15} />{!thread && <span className={s.jobText}>{t("Link a job")}</span>}
           </button>
           {phone && !text.trim() && !uploads.length && !job ? (
             <MicButton round onClick={() => void voice.start()} />

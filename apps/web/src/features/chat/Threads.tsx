@@ -9,7 +9,7 @@
  * connection (data.ts).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -30,7 +30,12 @@ import { t } from "@/lib/i18n";
 /** Where a thread opens: its channel, with the thread on the side. */
 export const threadPath = (channelId: string, rootId: string, message?: string) => `/chat/${channelId}?thread=${rootId}${message ? `&message=${message}` : ""}`;
 
-export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channel: ChatChannel; rootId: string; ctx: MessageContext; options: MentionOption[]; onClose: () => void }) {
+export function ThreadPanel({ channel, rootId, ctx, options, insert, onClose }: {
+  channel: ChatChannel; rootId: string; ctx: MessageContext; options: MentionOption[];
+  /** A mention to add to the reply (Mention, on a card opened from the thread). */
+  insert?: { option: MentionOption; nonce: number } | null;
+  onClose: () => void;
+}) {
   const session = useSession();
   const queryClient = useQueryClient();
   const company = session.company.id;
@@ -46,6 +51,36 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
   const following = pages[0]?.following ?? false;
   const replies = useMemo(() => [...pages].reverse().flatMap((p) => p.replies).filter((m) => !m.deleted_at), [pages]);
   const all = useMemo(() => (root ? [root, ...replies] : replies), [root, replies]);
+
+  // Mention on a card opened from here: into this box.
+  useEffect(() => {
+    if (insert) setFocusKey(`mention:${insert.nonce}`);
+  }, [insert]);
+
+  // Replying follows a thread, and so can a mention or a reply in a conversation: the server says
+  // which, so a new reply while not following asks again (and your own reply follows at once).
+  const lastReply = replies[replies.length - 1];
+  const seenReply = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!thread.data) return;
+    const last = lastReply?.id ?? null;
+    if (seenReply.current === undefined || seenReply.current === last) {
+      seenReply.current = last;
+      return;
+    }
+    seenReply.current = last;
+    if (!lastReply || following) return;
+    if (lastReply.author_id === ctx.me) setFollowing(queryClient, company, rootId, true);
+    else void queryClient.invalidateQueries({ queryKey: chatKeys.thread(company, rootId) });
+  }, [thread.data, lastReply, following, ctx.me, queryClient, company, rootId]);
+
+  // Closed: the focus goes back to the message's "replies", where the thread was opened, unless it went somewhere already.
+  useEffect(() => () => {
+    requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      document.querySelector<HTMLElement>(`#message-${rootId} [data-thread-open]`)?.focus({ preventScroll: true });
+    });
+  }, [rootId]);
 
   // Read while it's open, and again when you come back to the tab.
   useEffect(() => {
@@ -85,6 +120,8 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
     jobs: jobs.data ?? ctx.jobs,
     onThread: null,
     seen: null,
+    // The root shows in the channel too: its ids here are the thread's own.
+    idPrefix: "thread-message-",
     onReply: (m) => {
       setReplyTo(m);
       setFocusKey(`reply:${m.id}`);
@@ -122,7 +159,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
           )}
           {thread.error && <div style={{ padding: 16 }}><ErrorState compact error={thread.error} onRetry={() => thread.refetch()} /></div>}
           {root && (
-            <div id={`thread-message-${root.id}`} className={th.root}>
+            <div className={th.root}>
               {root.deleted_at ? <p className={th.gone}>{t("This message was deleted.")}</p> : <MessageItem message={root} head flash={flash === root.id} ctx={threadCtx} />}
             </div>
           )}
@@ -138,7 +175,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
             const prev = replies[i - 1];
             const day = isNewDay(prev, m);
             return (
-              <div key={m.id} id={`thread-message-${m.id}`}>
+              <div key={m.id}>
                 {day && i > 0 && <div className={s.day} role="separator">{dayLabel(m.created_at)}</div>}
                 <MessageItem message={m} head={day || startsGroup(prev, m) || Boolean(m.reply)} flash={flash === m.id} ctx={threadCtx} />
               </div>
@@ -147,7 +184,7 @@ export function ThreadPanel({ channel, rootId, ctx, options, onClose }: { channe
         </div>
       </div>
       {root && !root.deleted_at && (
-        <Composer channel={channel} options={options} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} focusKey={focusKey} thread={{ root: rootId }} />
+        <Composer channel={channel} options={options} replyTo={replyTo} onCancelReply={() => setReplyTo(null)} focusKey={focusKey} insert={insert} thread={{ root: rootId }} />
       )}
     </aside>
   );

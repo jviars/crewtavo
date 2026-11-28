@@ -57,6 +57,8 @@ export interface MessageContext {
   onThread?: ((rootId: string) => void) | null;
   /** What shows under a message about who has read it (Seen.tsx), if anything. */
   seen?: ((message: ChatMessage) => ReactNode) | null;
+  /** Its element's id before the message's: "message-" in a channel, another where the same message shows twice (a thread's panel). */
+  idPrefix?: string;
 }
 
 type TextContext = Pick<MessageContext, "personName" | "role" | "onPerson">;
@@ -198,7 +200,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
 
   return (
     <div
-      id={`message-${message.id}`}
+      id={`${ctx.idPrefix ?? "message-"}${message.id}`}
       className={s.msg}
       data-head={head || undefined}
       data-mentioned={mentioned || undefined}
