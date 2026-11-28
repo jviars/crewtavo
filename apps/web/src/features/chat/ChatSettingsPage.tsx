@@ -26,6 +26,7 @@ import { Avatar, badgeStyle, ChannelIcon, channelLabel, roleColor } from "./ui";
 import { DirectMessagesSwitch } from "./DirectSwitch";
 import s from "./chat.module.css";
 import { Select } from "@/components/ui/Select";
+import { VoiceWordsSetting } from "./VoiceWordsSetting";
 
 interface SettingsChannel {
   id: string;
@@ -117,6 +118,7 @@ export function ChatSettingsPage() {
         </Loading>
       )}
       {data.data && (tab === "roles" ? <RolesTab data={data.data} /> : <ChannelsTab data={data.data} adding={adding} onAdding={setAdding} />)}
+      {data.data && tab === "channels" && <VoiceWordsSetting />}
     </>
   );
 }

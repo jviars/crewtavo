@@ -29,6 +29,9 @@ import { ChannelNotifyMenu, PauseMenu } from "./Notify";
 import { useSeenLines } from "./Seen";
 import n from "./notify.module.css";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
+import { useWaitingByChannel, WaitingCount, WaitingMessages } from "./Outbox";
+import { useStatuses } from "./Status";
+import { RemindersButton } from "./Reminders";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { t } from "@/lib/i18n";
@@ -180,6 +183,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
   const direct = useMemo(() => directList(channels, current), [channels, current]);
+  const waiting = useWaitingByChannel(session.userId, session.company.id);
   const groups = useMemo(() => {
     const map = new Map<string, { name: string; order: number; channels: ChatChannel[] }>();
     for (const c of channels) {
@@ -205,6 +209,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
         {state && <PauseMenu />}
         {state?.direct_messages && <NewMessageButton />}
+        <RemindersButton channels={channels} className={s.settings} />
         {state?.me?.admin && (
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
@@ -234,7 +239,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
                     to={`/chat/${c.id}`}
                     className={muted ? `${s.channel} ${n.muted}` : s.channel}
                     data-unread={unread || undefined}
-                    aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}`}
+                    aria-label={`${channelLabel(c)}${c.mentions ? `, ${c.mentions} ${c.mentions === 1 ? "mention" : "mentions"}` : c.unread ? ", unread" : ""}${waiting.get(c.id) ? `, ${t.plural(waiting.get(c.id)!, { one: "{count} message waiting for signal", other: "{count} messages waiting for signal" })}` : ""}`}
                   >
                     <span className={s.hash} aria-hidden="true"><ChannelIcon channel={c} size={14} /></span>
                     <span className={s.channelText}>
@@ -244,6 +249,7 @@ function ChannelList({ state, current, threadsView }: { state: ChatState | undef
                     </span>
                     <span className={s.channelEnd}>
                       {c.last_message_at && <time className={s.channelTime} dateTime={c.last_message_at}>{listTime(c.last_message_at)}</time>}
+                      <WaitingCount count={waiting.get(c.id) ?? 0} />
                       {readOnly && <span className="hide-mobile"><Icon name="eye" size={13} label={t("Read only")} /></span>}
                       {muted && <span className={n.mutedIcon}><Icon name="bellOff" size={13} label={t("Notifications off")} /></span>}
                       {c.mentions > 0 && c.id !== current && <span className={s.mentions} aria-hidden="true">{c.mentions}</span>}
@@ -344,10 +350,11 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
   };
   const trusted = channel.can_manage || state.me?.admin || hasRole(session, "admin", "office");
   const isDirect = channel.kind === "direct";
+  const statuses = useStatuses();
   const options: MentionOption[] = useMemo(() => {
     const people = (members.data ?? [])
       .filter((m) => m.id !== me)
-      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label }));
+      .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label, status: statuses.get(m.id) }));
     // A direct conversation's mentions are of its people only.
     if (isDirect) return people;
     const roles = state.roles
@@ -355,7 +362,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
       .map((r) => ({ kind: "role" as const, label: r.label, token: roleToken(r.key), color: r.color, hint: t("Role") }));
     const everyone = channel.can_manage ? [{ kind: "everyone" as const, label: t("everyone"), token: EVERYONE_TOKEN, hint: t("Everyone in this channel") }] : [];
     return [...people, ...roles, ...everyone];
-  }, [members.data, state.roles, me, trusted, channel.can_manage, isDirect]);
+  }, [members.data, state.roles, me, trusted, channel.can_manage, isDirect, statuses]);
   const startDirect = useStartDirect();
   const message = state.direct_messages ? (p: ChatMember) => startDirect.mutate([p.id]) : null;
   // "Seen by" under announcements (for their authors and the channel's managers) and in direct conversations.
@@ -487,6 +494,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
               </div>
             );
           })}
+          {!around && <WaitingMessages me={me} companyId={company} channelId={channel.id} name={(p) => (p.kind === "user" ? ctx.personName(p.id) : p.kind === "role" ? ctx.role(p.key)?.label ?? "role" : "everyone")} />}
           {around && (
             <Button className={s.jumpLatest} size="sm" variant="dark" icon="arrowRight" onClick={() => navigate(`/chat/${channel.id}`, { replace: true })}>{t("Jump to the latest")}</Button>
           )}

@@ -20,6 +20,8 @@ import { IN_CHANNEL, threadSummaries } from "../lib/chatThreads";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reportError } from "../lib/monitoring";
 import { adminClient, type Db } from "../lib/supabase";
+import { loadTranscripts, withTranscripts } from "../lib/chatWords";
+import { afterMessage } from "../services/chatVoice";
 
 export const chat = new Hono<AppEnv>();
 
@@ -52,6 +54,11 @@ interface Attachment {
   size?: number;
   width?: number;
   height?: number;
+  /** A voice note's length, in seconds. */
+  duration?: number;
+  /** A voice note's words: the phone's, or the server's transcript (words_by "server"). */
+  words?: string;
+  words_by?: "server";
 }
 
 export interface MessageRow {
@@ -132,10 +139,11 @@ export async function loadPeople(db: Db, companyId: string, ids: Iterable<string
 export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
   if (!rows.length) return [];
   const replyIds = [...new Set(rows.map((r) => r.reply_to).filter((id): id is string => Boolean(id)))];
-  const [reactions, replies, threads] = await Promise.all([
+  const [reactions, replies, threads, words] = await Promise.all([
     db.from("chat_reactions").select("message_id, user_id, kind, created_at").in("message_id", rows.map((r) => r.id)).order("created_at"),
     replyIds.length ? db.from("chat_messages").select("id, author_id, body, deleted_at").in("id", replyIds) : Promise.resolve({ data: [], error: null }),
     threadSummaries(db, rows.filter((r) => !r.thread_root).map((r) => r.id)),
+    loadTranscripts(db, rows.filter((r) => Array.isArray(r.attachments) && r.attachments.length).map((r) => r.id)),
   ]);
   if (reactions.error) throw dbError(reactions.error);
   if (replies.error) throw dbError(replies.error);
@@ -145,7 +153,7 @@ export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[
     const reply = row.reply_to ? replyOf.get(row.reply_to) : null;
     return {
       ...row,
-      attachments: Array.isArray(row.attachments) ? (row.attachments as Attachment[]) : [],
+      attachments: withTranscripts(Array.isArray(row.attachments) ? (row.attachments as Attachment[]) : [], words.get(row.id)),
       author: row.author_id ? people.get(row.author_id) ?? null : null,
       reply: reply
         ? { id: reply.id, author: (reply.author_id && people.get(reply.author_id)?.name) || "Crewtavo", body: reply.deleted_at ? "" : reply.body.slice(0, 300), deleted: Boolean(reply.deleted_at) }
@@ -166,7 +174,7 @@ function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatRea
 }
 
 /** Whether the company has Team chat on: read with the server's key (the browser's role doesn't read the company's settings). */
-async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
+export async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
   return (await chatSwitches(env, companyId)).enabled;
 }
 
@@ -317,14 +325,16 @@ chat.get("/chat/channels/:id/members", requireUser, requireCompany(), async (c) 
   });
 });
 
-const messageBody = z.string().max(4000, "Messages can be up to 4,000 characters.");
-const attachment = z.object({
+export const messageBody = z.string().max(4000, "Messages can be up to 4,000 characters.");
+export const attachment = z.object({
   path: z.string().max(300),
   name: z.string().max(200).optional(),
   type: z.string().max(100).optional(),
   size: z.number().int().nonnegative().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  duration: z.number().nonnegative().max(3600).optional(),
+  words: z.string().max(5000).optional(),
 });
 
 chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c) => {
@@ -332,8 +342,14 @@ chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c
   const body = await readJson(
     c,
     z.object({
-      body: messageBody.default(""), attachments: z.array(attachment).max(6).default([]), job_id: uuid.nullable().default(null), reply_to: uuid.nullable().default(null),
-      thread_root: uuid.nullable().default(null), also_in_channel: z.boolean().default(false),
+      // Chosen by the browser, so a message sent again after an answer that never arrived is the same one (features/chat/outbox.ts).
+      id: uuid.optional(),
+      body: messageBody.default(""),
+      attachments: z.array(attachment).max(6).default([]),
+      job_id: uuid.nullable().default(null),
+      reply_to: uuid.nullable().default(null),
+      thread_root: uuid.nullable().default(null),
+      also_in_channel: z.boolean().default(false),
     }),
   );
   const { db, companyId, userId } = c.var;
@@ -341,15 +357,25 @@ chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c
   const { data, error } = await db
     .from("chat_messages")
     .insert({
+      ...(body.id && { id: body.id }),
       company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to,
       thread_root: body.thread_root, also_in_channel: body.thread_root ? body.also_in_channel : false,
     })
     .select(MESSAGE_COLUMNS)
     .single();
-  if (error) throw chatDbError(error);
+  if (error) {
+    // Sent before: the answer is that message, once, as long as it's theirs in this channel.
+    if (error.code === "23505" && body.id) {
+      const sent = (await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", body.id).maybeSingle()).data as MessageRow | null;
+      if (sent && sent.author_id === userId && sent.channel_id === id) return c.json({ message: (await shapeMessages(db, companyId, [sent]))[0] }, 200);
+      throw new HttpError(409, "That message can't be sent again. Write it again.");
+    }
+    throw chatDbError(error);
+  }
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, id, { type: "message", channel_id: id, message });
   if (message.thread_root) publishRoot(c, message.thread_root).catch((error) => reportError(error, { feature: "chat-live" }));
+  afterMessage(c, message);
   return c.json({ message }, 201);
 });
 

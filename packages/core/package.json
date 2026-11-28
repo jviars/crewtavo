@@ -24,6 +24,7 @@
     "./formulas": "./src/formulas.ts",
     "./roles": "./src/roles.ts",
     "./chat": "./src/chat.ts",
+    "./chatField": "./src/chatField.ts",
     "./calls": "./src/calls.ts",
     "./database": "./src/database.types.ts",
     "./time": "./src/time.ts",

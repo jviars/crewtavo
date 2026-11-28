@@ -254,6 +254,12 @@ const ICONS = {
   mailbox: "mailbox",
   handshake: "handshake",
   gavel: "gavel",
+  microphone: "microphone",
+  stop: "stop",
+  coffee: "coffee",
+  office: "building-office",
+  busy: "minus-circle",
+  alarm: "alarm",
 } satisfies Record<string, PhosphorName | Own>;
 
 export type IconName = keyof typeof ICONS;

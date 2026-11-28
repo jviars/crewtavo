@@ -267,6 +267,14 @@ insert into public.campaigns (company_id, name) values (:'co', 'Spring tune-up')
 insert into public.campaign_recipients (company_id, campaign_id, email) values (:'co', :'campaign', 'ann@client.test');
 insert into public.chat_reads (company_id, channel_id, user_id) values (:'co', :'general', 'd1070000-0000-0000-0000-000000000001');
 insert into public.chat_reactions (company_id, channel_id, message_id, user_id, kind) values (:'co', :'general', :'first_chat', 'd1070000-0000-0000-0000-000000000002', 'seen');
+-- Team chat in the field (20261129103100 to 20261129103500): a voice note's words, a status, a message
+-- to send later and a reminder.
+insert into public.chat_messages (company_id, channel_id, author_id, attachments) values (:'co', :'general', 'd1070000-0000-0000-0000-000000000003',
+  jsonb_build_array(jsonb_build_object('path', :'co' || '/chat/' || :'general' || '/d1070000-0000-0000-0000-0000000000e1.webm', 'type', 'audio/webm', 'words', 'Tarp is on the north side'))) returning id as voice_chat \gset
+insert into public.chat_transcripts (message_id, path, words) values (:'voice_chat', :'co' || '/chat/' || :'general' || '/d1070000-0000-0000-0000-0000000000e1.webm', 'The tarp is on the north side.');
+insert into public.chat_statuses (company_id, user_id, kind) values (:'co', 'd1070000-0000-0000-0000-000000000003', 'on_job');
+insert into public.chat_scheduled_messages (company_id, channel_id, author_id, body, send_at) values (:'co', :'general', 'd1070000-0000-0000-0000-000000000001', 'Payday is Friday', now() + interval '1 day');
+insert into public.chat_reminders (message_id, user_id, remind_at) values (:'first_chat', 'd1070000-0000-0000-0000-000000000002', now() + interval '1 day');
 insert into public.document_templates (company_id, name) values (:'co', 'Plain');
 insert into public.equipment_financials (company_id, equipment_id, purchase_price) values (:'co', :'e1', 4200);
 insert into public.intake_forms (company_id, slug, name) values (:'co', 'roof-quote', 'Roof quote');
@@ -628,6 +636,8 @@ select t1070.check(array(
   'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)', 'chat_read_marks(uuid)',
   'chat_save_roles(uuid, jsonb, jsonb)', 'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
   'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_thread_counts(uuid)', 'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
+  -- Everyone's Team chat status: for the team only (has_role leaves subs out), so none for a sub.
+  'chat_statuses(uuid)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each
@@ -805,8 +815,8 @@ select t1070.check((select row(name, timezone, currency, phone, logo)::text = ro
 select t1070.check(not exists (select 1 from public.company_basics(:'other')), 'and nothing about another company');
 select t1070.check(public.my_crew_ids(:'co') = '{}' and not exists (select 1 from public.material_choices(:'co')) and not exists (select 1 from public.job_material_costs(:'j1')) and not exists (select 1 from public.job_estimated_materials(:'j1'))
   and not exists (select 1 from public.time_entry_places(:'co', array[:'cy_entry']::uuid[])) and not exists (select 1 from public.chat_overview(:'co'))
-  and not exists (select 1 from public.chat_members(:'general')),
-  'no crews, price list, material costs, what a job''s materials are estimated as, clock places or chat');
+  and not exists (select 1 from public.chat_members(:'general')) and not exists (select 1 from public.chat_statuses(:'co')),
+  'no crews, price list, material costs, what a job''s materials are estimated as, clock places, chat or anyone''s status in it');
 select t1070.expect_error(format('select public.add_field_line(%L, %L, 1)', :'v1', :'shingles_service'), 'add_field_line refuses, even on their own visit');
 select t1070.expect_error(format('select public.chat_mark_read(%L)', :'general'), 'chat_mark_read refuses');
 select t1070.expect_error(format('select public.chat_set_enabled(%L, false)', :'co'), 'chat_set_enabled refuses');

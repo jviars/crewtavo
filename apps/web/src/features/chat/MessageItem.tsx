@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { CHAT_REACTIONS, chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { isAudio } from "@crewtavo/core/chatField";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -18,10 +19,13 @@ import { Menu } from "@/components/ui/Menu";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { addressLine } from "@/lib/format";
-import { useSession } from "@/lib/session";
+import { hasRole, useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
 import { ThreadSummary } from "./ThreadSummary";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
+import { VoiceNote } from "./VoiceNote";
+import { AddToJob } from "./AddToJob";
+import { useRemindMe } from "./Reminders";
 import s from "./chat.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
@@ -117,6 +121,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
+  const [toJob, setToJob] = useState(false);
+  const remind = useRemindMe(message);
   const mine = message.author_id === ctx.me;
   const mentioned = message.mention_all || message.mention_users.includes(ctx.me) || message.mention_roles.includes(ctx.myRoleKey);
   const company = session.company.id;
@@ -259,9 +265,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )
         )}
 
-        {message.attachments.length > 0 && (
+        {/* Voice notes: VoiceNote (Field builder) */}
+        {message.attachments.filter(isAudio).map((a) => <VoiceNote key={a.path} attachment={a} url={ctx.photos[a.path]} />)}
+        {message.attachments.some((a) => !isAudio(a)) && (
           <div className={s.photos}>
-            {message.attachments.map((a) =>
+            {message.attachments.filter((a) => !isAudio(a)).map((a) =>
               ctx.photos[a.path] ? (
                 <a key={a.path} className={s.photo} href={ctx.photos[a.path]} target="_blank" rel="noreferrer">
                   <img src={ctx.photos[a.path]} alt={a.name || t("Photo")} loading="lazy" />
@@ -304,6 +312,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
         {ctx.seen?.(message)}
       </div>
 
+      {/* Dialogs opened from the menu: a tap inside one isn't a tap on the message. */}
+      <div style={{ display: "contents" }} onClick={(e) => e.stopPropagation()}>
+        {toJob && <AddToJob message={message} onClose={() => setToJob(false)} />}
+        {remind.dialog}
+      </div>
       {editing === null && (
         <div className={s.tools}>
           <Menu label={t("React")} title={t("React")} align="end" triggerClassName={`icon-btn ${s.icon}`} trigger={<Icon name="react" size={16} />} items={reactionMenu} />
@@ -323,6 +336,9 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
               { label: t("Edit"), icon: "edit", kbd: "E", onSelect: startEdit, hidden: !mine || !ctx.canPost },
               { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", kbd: "P", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
               { label: t("Copy text"), icon: "copy", kbd: "C", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
+              remind.entry,
+              // The people who may change jobs (the API and the database decide again).
+              { label: t("Add to a job"), icon: "job", kbd: "J", onSelect: () => setToJob(true), hidden: !hasRole(session, "admin", "office", "estimator") },
               { separator: true },
               { label: t("Delete"), icon: "trash", danger: true, onSelect: askDelete, hidden: !(mine || ctx.canManage) },
             ]}

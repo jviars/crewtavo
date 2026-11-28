@@ -13,6 +13,7 @@ import { Fact, Facts } from "@/components/ui/Section";
 import { supabase } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useLive, type ChatMember } from "./data";
+import { StatusChip, StatusOnCard, useStatuses } from "./Status";
 import { Avatar, roleColor } from "./ui";
 import s from "./chat.module.css";
 import d from "./direct.module.css";
@@ -43,6 +44,7 @@ export function MembersPanel({ members, onPerson, onClose, onMessage }: {
 }) {
   const live = useLive();
   const { userId } = useSession();
+  const statuses = useStatuses();
   return (
     <aside className={s.members} aria-label={t("Members")}>
       <div className={s.membersHead}>
@@ -62,7 +64,10 @@ export function MembersPanel({ members, onPerson, onClose, onMessage }: {
                     <Face name={m.name} photo={m.avatar_url} />
                     {on && <span className={s.presence} />}
                   </span>
-                  <span className={s.memberName}>{m.name}</span>
+                  <span className={s.memberName}>
+                    {m.name}
+                    <StatusChip status={statuses.get(m.id)} />
+                  </span>
                   <span className={s.memberRole}>{m.role_label}</span>
                 </button>
               );
@@ -89,6 +94,7 @@ export function PersonDialog({ person, onClose, onMention, onMessage }: {
 }) {
   const { company, userId } = useSession();
   const live = useLive();
+  const statuses = useStatuses();
   const details = useQuery({
     queryKey: ["chat-person", company.id, person?.id],
     enabled: Boolean(person),
@@ -120,6 +126,7 @@ export function PersonDialog({ person, onClose, onMention, onMessage }: {
               <span className="muted small">{person.id === userId ? t("You") : on ? t("Online now") : t("Offline")}</span>
             </div>
           </div>
+          <StatusOnCard personId={person.id} status={statuses.get(person.id)} />
           {details.data && details.data.crews.length > 0 && (
             <Facts>
               <Fact label={t("Crews")}>{details.data.crews.join(", ")}</Fact>

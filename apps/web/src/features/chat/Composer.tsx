@@ -6,19 +6,23 @@
  * when you come back to the channel. In a thread (Threads.tsx) it replies there, and can also send
  * the reply to the channel.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { fromEditable, matchMentions, type Mentionable } from "@crewtavo/core/chat";
-import { Dialog } from "@/components/ui/Dialog";
 import { Icon } from "@/components/ui/Icon";
-import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
-import { api, supabase } from "@/lib/api";
-import { uploadFile } from "@/lib/files";
+import { api } from "@/lib/api";
+import { uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { JobPicker, type JobPick } from "./JobPicker";
+import { StatusChip, type ChatStatus } from "./Status";
+import { laterLabel, scheduledKey, ScheduledBar, SendLaterMenu, SendLaterSheet, useLongPress } from "./Schedule";
+import { noSignal, prepareChatFile, sendChatMessage, type WaitingFile } from "./outbox";
 import { Avatar, channelLabel, roleColor } from "./ui";
+import { usePhone, useVoiceRecorder } from "./voice";
+import { MicButton, VoiceRecorder, type VoicePreview } from "./VoiceRecorder";
 import s from "./chat.module.css";
 import th from "./threads.module.css";
 import { t, T } from "@/lib/i18n";
@@ -29,14 +33,20 @@ export interface MentionOption extends Mentionable {
   avatar?: string | null;
   photo?: string | null;
   hint?: string;
+  /** A person's status, beside their name (Status.tsx). */
+  status?: ChatStatus;
 }
 
 interface Upload {
   id: string;
   name: string;
   preview: string;
-  status: "uploading" | "done" | "error";
+  /** waiting: no signal to store it; it goes with the message, which waits on the phone (outbox.ts). */
+  status: "uploading" | "done" | "error" | "waiting";
   path?: string;
+  body?: Blob;
+  type?: string;
+  size?: number;
 }
 
 interface Draft {
@@ -140,36 +150,72 @@ export function Composer({
 
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
+  // Sent now, or kept on the phone until there's signal (outbox.ts); what the server refuses is said here.
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string }>; job_id: string | null; reply_to: string | null; thread_root: string | null; also_in_channel: boolean }) =>
-      api.post<{ message: ChatMessage }>(`/chat/channels/${channel.id}/messages`, payload),
-    onSuccess: ({ message }) => addMessage(queryClient, session.company.id, message),
+    mutationFn: (payload: { body: string; attachments: WaitingFile[]; job_id: string | null; reply_to: string | null; thread_root: string | null; also_in_channel: boolean }) =>
+      sendChatMessage({ ...payload, userId: session.userId, companyId: session.company.id, channelId: channel.id }),
+    onSuccess: (message) => message && addMessage(queryClient, session.company.id, message),
+  });
+  // A voice note: recorded here (voice.ts), then sent on its own, stored in the channel's folder as it goes.
+  const voice = useVoiceRecorder();
+  const phone = usePhone();
+  const sendVoice = useMutation({
+    mutationFn: (note: VoicePreview) => {
+      const path = `${session.company.id}/chat/${channel.id}/${crypto.randomUUID()}.${note.ext}`;
+      // The stored file's name, the same for everyone; a message shows it in their own words.
+      const file: WaitingFile = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, body: note.blob, ...(note.words && { words: note.words.slice(0, 5000) }) }; // i18n-ignore: stored
+      return send.mutateAsync({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null, thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend });
+    },
+    onSuccess: () => {
+      voice.done();
+      onCancelReply();
+    },
   });
 
   const ready = uploads.every((u) => u.status !== "uploading");
-  const photos = uploads.filter((u) => u.status === "done" && u.path);
+  const photos = uploads.filter((u) => (u.status === "done" || u.status === "waiting") && u.path);
   const canSend = ready && !send.isPending && (text.trim().length > 0 || photos.length > 0 || Boolean(job));
 
   const submit = () => {
     if (!canSend) return;
     const body = fromEditable(text.trim(), picked);
-    const payload = {
-      body, attachments: photos.map((u) => ({ path: u.path!, name: u.name })), job_id: job?.id ?? null, reply_to: replyTo?.id ?? null,
-      thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend,
-    };
-    send.mutate(payload, {
-      onSuccess: () => {
-        setText("");
-        setPicked([]);
-        uploads.forEach((u) => URL.revokeObjectURL(u.preview));
-        setUploads([]);
-        setJob(null);
-        onCancelReply();
-        setAlsoSend(false);
-        drafts.delete(draftKey);
-      },
-    });
+    const attachments: WaitingFile[] = photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }), ...(u.status === "waiting" && { body: u.body }) }));
+    const payload = { body, attachments, job_id: job?.id ?? null, reply_to: replyTo?.id ?? null, thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend };
+    send.mutate(payload, { onSuccess: cleared });
   };
+  /** Sent, waiting for signal, or scheduled: the box is empty again. */
+  const cleared = () => {
+    setText("");
+    setPicked([]);
+    uploads.forEach((u) => URL.revokeObjectURL(u.preview));
+    setUploads([]);
+    setJob(null);
+    onCancelReply();
+    setAlsoSend(false);
+    drafts.delete(draftKey);
+  };
+
+  // Send later (Schedule.tsx): the chevron beside Send on a computer, a long press on Send on a phone.
+  const later = useMutation({
+    meta: { inline: true },
+    mutationFn: (at: Date) => {
+      if (uploads.some((u) => u.status === "waiting")) throw new Error(t("A photo hasn't gone up yet. Schedule the message once there's signal."));
+      return api.post(`/chat/channels/${channel.id}/scheduled`, {
+        body: fromEditable(text.trim(), picked),
+        attachments: photos.map((u) => ({ path: u.path!, name: u.name, ...(u.type && { type: u.type }), ...(u.size && { size: u.size }) })),
+        job_id: job?.id ?? null,
+        reply_to: replyTo?.id ?? null,
+        send_at: at.toISOString(),
+      });
+    },
+    onSuccess: (_r, at) => {
+      cleared();
+      toast.success(t("Scheduled for {when}", { when: laterLabel(at.toISOString(), session.company.timezone) }));
+      void queryClient.invalidateQueries({ queryKey: scheduledKey(session.company.id) });
+    },
+  });
+  const [laterSheet, setLaterSheet] = useState(false);
+  const press = useLongPress(() => canSend && setLaterSheet(true));
 
   /** Is the caret just after "@something"? Then offer people and roles that match it. */
   const lookForMention = (value: string, caret: number) => {
@@ -263,13 +309,23 @@ export function Composer({
     if (all.length > chosen.length) toast.warning(t("A message takes up to {count} photos.", { count: MAX_PHOTOS }));
     // Photos turned away for space are told about once, together, with why and who can make room.
     const refused = new RefusedForSpace();
-    const sent = chosen.map((file) => {
+    const sent = chosen.map(async (file) => {
       const id = crypto.randomUUID();
-      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading" }]);
-      return uploadFile(session.company.id, `chat/${channel.id}`, file).then(
-        (path) => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done", path } : x))),
+      setUploads((u) => [...u, { id, name: file.name, preview: URL.createObjectURL(file), status: "uploading", size: file.size }]);
+      // To a path chosen first, so a photo with no signal now goes up once, with its message, later.
+      let ready: Awaited<ReturnType<typeof prepareChatFile>>;
+      try {
+        ready = await prepareChatFile(session.company.id, channel.id, file);
+      } catch (error) {
+        setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
+        toast.error((error as Error).message);
+        return;
+      }
+      setUploads((u) => u.map((x) => (x.id === id ? { ...x, path: ready.path, type: ready.type } : x)));
+      return uploadOnce(ready.path, ready.body).then(
+        () => setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "done" } : x))),
         (error: unknown) => {
-          setUploads((u) => u.map((x) => (x.id === id ? { ...x, status: "error" } : x)));
+          setUploads((u) => u.map((x) => (x.id === id ? (noSignal(error) ? { ...x, status: "waiting", body: ready.body } : { ...x, status: "error" }) : x)));
           refused.add(error, file.name, file.size);
         },
       );
@@ -322,6 +378,7 @@ export function Composer({
   const placeholder = thread ? t("Reply…") : t("Message {channel}", { channel: channelLabel(channel) });
   return (
     <div className={s.foot}>
+      {!thread && <ScheduledBar channelId={channel.id} options={options} />}
       <div
         className={s.composer}
         data-dropping={dropping || undefined}
@@ -345,6 +402,7 @@ export function Composer({
               >
                 {o.kind === "user" ? <Avatar name={o.label} color={o.avatar} photo={o.photo} size={22} /> : <Icon name={o.kind === "everyone" ? "users" : "mention"} size={16} />}
                 <span style={{ fontWeight: 600, color: o.kind === "role" ? roleColor(o.color) : undefined }}>{o.kind === "everyone" ? t("@everyone") : o.label}</span>
+                <StatusChip status={o.status} />
                 {o.hint && <small>{o.hint}</small>}
               </button>
             ))}
@@ -362,7 +420,7 @@ export function Composer({
             {uploads.map((u) => (
               <span key={u.id} className={s.chip} title={u.status === "error" ? t("Couldn't upload this photo") : u.name}>
                 <img src={u.preview} alt="" />
-                <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.name}</span>
+                <span>{u.status === "uploading" ? t("Uploading…") : u.status === "error" ? t("Didn't upload") : u.status === "waiting" ? t("Goes when there's signal") : u.name}</span>
                 <button type="button" className="icon-btn" aria-label={t("Remove {tag}", { tag: u.name })} onClick={() => setUploads((list) => list.filter((x) => x.id !== u.id))}><Icon name="x" size={14} /></button>
               </span>
             ))}
@@ -375,10 +433,14 @@ export function Composer({
             )}
           </div>
         )}
+        {voice.recording.phase !== "idle" ? (
+          <VoiceRecorder recorder={voice} onSend={(note) => sendVoice.mutate(note)} sending={sendVoice.isPending} />
+        ) : (
         <div className={s.composerRow}>
           <button type="button" className={s.composerBtn} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
             <Icon name="camera" size={17} />
           </button>
+          {!phone && <MicButton onClick={() => void voice.start()} />}
           <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
           <textarea
             ref={input}
@@ -397,11 +459,27 @@ export function Composer({
           <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
             <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>
-          <button type="button" className={`btn btn-sm btn-primary ${s.sendBtn}`} aria-label={t("Send")} disabled={!canSend} onClick={submit}>
+          {phone && !text.trim() && !uploads.length && !job ? (
+            <MicButton round onClick={() => void voice.start()} />
+          ) : (
+          <>
+          <button
+            type="button"
+            className={`btn btn-sm btn-primary ${s.sendBtn}`}
+            aria-label={t("Send")}
+            aria-description={phone ? t("Hold to send later") : undefined}
+            disabled={!canSend}
+            {...(phone && !thread ? press.handlers : {})}
+            onClick={() => (press.consume() ? undefined : submit())}
+          >
             <span className={s.sendIcon} aria-hidden="true"><Icon name="arrowUp" size={19} /></span>
             <span className={s.sendText}>{t("Send")}</span>
           </button>
+          {!phone && !thread && <SendLaterMenu disabled={!canSend || later.isPending} onPick={(at) => later.mutate(at)} />}
+          </>
+          )}
         </div>
+        )}
       </div>
       {thread && (
         <label className={th.alsoSend}>
@@ -409,7 +487,8 @@ export function Composer({
           <span>{channel.kind === "direct" ? t("Also send to the conversation") : t("Also send to {channel}", { channel: channelLabel(channel) })}</span>
         </label>
       )}
-      {send.error && <div className="field-error" style={{ margin: "6px 4px 0" }}>{(send.error as Error).message}</div>}
+      {(send.error || sendVoice.error || later.error) && <div className="field-error" style={{ margin: "6px 4px 0" }}>{((later.error ?? sendVoice.error ?? send.error) as Error).message}</div>}
+      <SendLaterSheet open={laterSheet} onClose={() => setLaterSheet(false)} onPick={(at) => later.mutate(at)} />
       <JobPicker open={pickingJob} onClose={() => setPickingJob(false)} onPick={(j) => { setJob(j); setPickingJob(false); input.current?.focus(); }} />
     </div>
   );
@@ -441,50 +520,4 @@ function useTypingNames(channelId: string, me: string) {
     return () => clearInterval(timer);
   }, [names.length]);
   return names;
-}
-
-interface JobPick {
-  id: string;
-  number: number | null;
-  title: string;
-}
-
-/** Pick a job to link: recent ones first, or search by title or number. */
-function JobPicker({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (job: JobPick) => void }) {
-  const { company } = useSession();
-  const [q, setQ] = useState("");
-  const jobs = useQuery({
-    queryKey: ["chat-job-search", company.id, q.trim()],
-    enabled: open,
-    queryFn: async () => {
-      let query = supabase().from("jobs").select("id, number, title, status, client:clients(display_name)").eq("company_id", company.id).neq("status", "archived").order("updated_at", { ascending: false }).limit(12);
-      const term = q.trim();
-      if (/^#?\d+$/.test(term)) query = query.eq("number", Number(term.replace("#", "")));
-      else if (term) query = query.ilike("title", `%${term.replace(/[%_]/g, "")}%`);
-      const { data, error } = await query;
-      if (error) throw new Error(error.message);
-      return data as unknown as Array<JobPick & { status: string; client: { display_name: string } | null }>;
-    },
-  });
-  return (
-    <Dialog open={open} onClose={onClose} title={t("Link a job")} size="sm">
-      <div className={`dialog-body stack-sm ${s.jobPicker}`}>
-        <SearchField value={q} onChange={setQ} placeholder={t("Search jobs by title or number")} label={t("Search jobs")} shortcut={false} autoFocus />
-        {jobs.isPending && <span className="muted small">{t("Loading jobs…")}</span>}
-        {jobs.data?.length === 0 && <span className="muted small">{t("No jobs match.")}</span>}
-        {Boolean(jobs.data?.length) && (
-          <ul className={s.jobList}>
-            {jobs.data?.map((j) => (
-              <li key={j.id}>
-                <button type="button" className={s.jobRow} onClick={() => onPick(j)}>
-                  <strong>{j.number ? `#${j.number} · ` : ""}{j.title}</strong>
-                  {j.client?.display_name && <span>{j.client.display_name}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </Dialog>
-  );
 }

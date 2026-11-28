@@ -260,6 +260,31 @@ export async function readStream(body: ReadableStream<Uint8Array>): Promise<stri
   }
 }
 
+/** OpenAI's models that write out speech, best fit first: the small GPT-4o one, else Whisper, which every key has had. */
+export const TRANSCRIBE_MODELS = ["gpt-4o-mini-transcribe", "whisper-1"] as const;
+
+/**
+ * A recording written out with a company's API key (POST /v1/audio/transcriptions): its words, or
+ * "" when there were none to hear. `language` (ISO 639-1, "en") helps when it's known. A model the
+ * key can't use is a problem of kind "model", so the caller can try the next.
+ */
+export async function transcribeWithKey(
+  env: Pick<Env, "LOOKALYKE_URL">,
+  apiKey: string,
+  audio: { body: Blob; fileName: string },
+  options: { model: string; language?: string | null; timeoutMs: number },
+): Promise<string> {
+  const form = new FormData();
+  form.append("file", audio.body, audio.fileName);
+  form.append("model", options.model);
+  form.append("response_format", "json");
+  if (options.language) form.append("language", options.language);
+  const response = await reach(`${keyApi(env)}/audio/transcriptions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form }, options.timeoutMs);
+  if (!response.ok) throw await httpProblem(response, "key");
+  const json = (await response.json().catch(() => null)) as { text?: unknown } | null;
+  return typeof json?.text === "string" ? json.text.trim() : "";
+}
+
 export interface OpenAiModel {
   slug: string;
   display_name: string;

@@ -10,6 +10,7 @@ import type { ChatColor } from "@crewtavo/core/chat";
 import { activeCompany, api, refreshSignIn, supabase } from "@/lib/api";
 import { useSession, type Session } from "@/lib/session";
 import { withDirectNames } from "./direct";
+import { startChatOutbox } from "./outbox";
 
 // ---------------------------------------------------------------------------------------------
 // Shapes
@@ -79,6 +80,11 @@ export interface ChatAttachment {
   size?: number;
   width?: number;
   height?: number;
+  /** A voice note's length, in seconds. */
+  duration?: number;
+  /** A voice note's words: what the phone heard as it was recorded, or the server's transcript (words_by "server"). */
+  words?: string;
+  words_by?: "server";
 }
 
 export interface ChatReactionGroup {
@@ -412,7 +418,10 @@ type LiveEvent =
   | { type: "seen"; channel_id: string; reads?: Array<{ user_id: string; at: string }> }
   | { type: "presence"; online: string[] }
   | { type: "channels" }
-  | { type: "chat"; enabled: boolean };
+  | { type: "chat"; enabled: boolean }
+  | { type: "status"; user_id: string; status: { user_id: string } | null }
+  | { type: "scheduled"; channel_id: string | null }
+  | { type: "reminders" };
 
 /**
  * One streaming connection per tab while chat is on (GET /api/chat/live). It reconnects by itself,
@@ -426,6 +435,9 @@ export function useChatLive() {
   const company = session.company.id;
   const me = session.userId;
   const refresh = session.refresh;
+
+  // Messages kept on the phone for signal go out once there is (outbox.ts).
+  useEffect(() => (on ? startChatOutbox(me, (message, companyId) => addMessage(queryClient, companyId, message)) : undefined), [on, me, queryClient]);
 
   useEffect(() => {
     if (!on) return;
@@ -485,6 +497,19 @@ export function useChatLive() {
         case "chat":
           void refresh();
           queryClient.invalidateQueries({ queryKey: chatKeys.all(company) });
+          return;
+        // Status, sending later and reminders (Status.tsx, Schedule.tsx, Reminders.tsx).
+        case "status":
+          if (event.status) {
+            const status = event.status;
+            queryClient.setQueryData<Array<{ user_id: string }>>(["chat", company, "statuses"], (list) => (list ? [...list.filter((x) => x.user_id !== event.user_id), status] : list));
+          } else queryClient.invalidateQueries({ queryKey: ["chat", company, "statuses"] });
+          return;
+        case "scheduled":
+          queryClient.invalidateQueries({ queryKey: ["chat", company, "scheduled"] });
+          return;
+        case "reminders":
+          queryClient.invalidateQueries({ queryKey: ["chat", company, "reminders"] });
           return;
       }
     };

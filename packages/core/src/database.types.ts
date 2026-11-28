@@ -562,6 +562,32 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"chat_reminders": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"created_at": string,"id": string,"message_id": string,"remind_at": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"created_at"?: string,"id"?: string,"message_id": string,"remind_at": string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"created_at"?: string,"id"?: string,"message_id"?: string,"remind_at"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_reminders_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_reminders_company_id_message_id_fkey"
+      columns: ["company_id","message_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
                 },"chat_role_rules": {
                   Row: {
                     "can_manage": boolean,"can_post": boolean,"can_see": boolean,"channel_id": string,"company_id": string,"id": string,"role": Database["public"]['Enums']["member_role"] | null,"role_id": string | null
@@ -614,6 +640,58 @@ isOneToOne: false
       referencedColumns: ["company_id","id"]
     }
                   ]
+                },"chat_scheduled_messages": {
+                  Row: {
+                    "attachments": NonNullable<Json>,"author_id": string,"body": string,"channel_id": string,"company_id": string,"created_at": string,"id": string,"job_id": string | null,"reply_to": string | null,"send_at": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attachments"?: NonNullable<Json>,"author_id": string,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"send_at": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "attachments"?: NonNullable<Json>,"author_id"?: string,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"id"?: string,"job_id"?: string | null,"reply_to"?: string | null,"send_at"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_scheduled_messages_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_scheduled_messages_company_id_job_id_fkey"
+      columns: ["company_id","job_id"]
+isOneToOne: false
+      referencedRelation: "jobs"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_scheduled_messages_company_id_reply_to_fkey"
+      columns: ["company_id","reply_to"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_statuses": {
+                  Row: {
+                    "company_id": string,"kind": string,"until": string | null,"updated_at": string,"user_id": string,"words": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "company_id": string,"kind": string,"until"?: string | null,"updated_at"?: string,"user_id": string,"words"?: string | null
+                  }
+                  Update: {
+                    "company_id"?: string,"kind"?: string,"until"?: string | null,"updated_at"?: string,"user_id"?: string,"words"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_statuses_company_id_user_id_fkey"
+      columns: ["company_id","user_id"]
+isOneToOne: true
+      referencedRelation: "memberships"
+      referencedColumns: ["company_id","user_id"]
+    }
+                  ]
                 },"chat_thread_follows": {
                   Row: {
                     "channel_id": string,"company_id": string,"following": boolean,"last_read_at": string | null,"root_id": string,"user_id": string
@@ -635,6 +713,32 @@ isOneToOne: false
     },{
       foreignKeyName: "chat_thread_follows_company_id_root_id_fkey"
       columns: ["company_id","root_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_transcripts": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"created_at": string,"message_id": string,"path": string,"words": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"created_at"?: string,"message_id": string,"path": string,"words": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"created_at"?: string,"message_id"?: string,"path"?: string,"words"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_transcripts_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_transcripts_company_id_message_id_fkey"
+      columns: ["company_id","message_id"]
 isOneToOne: false
       referencedRelation: "chat_messages"
       referencedColumns: ["company_id","id"]
@@ -4594,6 +4698,16 @@ isOneToOne: false
               "seen_at": string,"user_id": string
             }[]
                            },
+"chat_send_due":
+{ Args: { "p_limit"?: number }; Returns: {
+              "author_id": string,"channel_id": string,"company_id": string,"message_id": string,"problem": string,"scheduled_id": string
+            }[]
+                           },
+"chat_send_due_reminders":
+{ Args: { "p_limit"?: number }; Returns: {
+              "company_id": string,"reminder_id": string,"told": boolean,"user_id": string
+            }[]
+                           },
 "chat_set_direct_messages":
 { Args: { "p_company": string,"p_on": boolean }; Returns: boolean
                            },
@@ -4605,6 +4719,11 @@ isOneToOne: false
                            },
 "chat_start_direct":
 { Args: { "p_company": string,"p_people": (string)[] }; Returns: string
+                           },
+"chat_statuses":
+{ Args: { "p_company": string }; Returns: {
+              "by_clock": boolean,"kind": string,"until": string,"user_id": string,"words": string
+            }[]
                            },
 "chat_thread_counts":
 { Args: { "p_company": string }; Returns: Record<string, unknown>
