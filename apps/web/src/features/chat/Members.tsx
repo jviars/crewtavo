@@ -64,11 +64,9 @@ export function MembersPanel({ members, onPerson, onClose, onMessage }: {
                     <Face name={m.name} photo={m.avatar_url} />
                     {on && <span className={s.presence} />}
                   </span>
-                  <span className={s.memberName}>
-                    {m.name}
-                    <StatusChip status={statuses.get(m.id)} />
-                  </span>
-                  <span className={s.memberRole}>{m.role_label}</span>
+                  <span className={s.memberName}>{m.name}</span>
+                  {/* A status takes the role's place: the row has room for one, and the group and the card say the role. */}
+                  {statuses.get(m.id) ? <StatusChip status={statuses.get(m.id)} className={s.memberRole} /> : <span className={s.memberRole}>{m.role_label}</span>}
                 </button>
               );
               if (!onMessage || m.id === userId) return row;
