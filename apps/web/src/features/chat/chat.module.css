@@ -328,7 +328,10 @@ a.jobCard:hover { border-color: var(--border-strong); background: var(--fill); c
 
   /* The channel list: a large title, then each channel as a row with what it's for and when it last spoke. */
   .side { border-right: 0; }
-  .sideHead { min-height: 0; padding: 12px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); }
+  /* The buttons on a row of their own above the large title (as a phone's own lists have them), so the title fits however many there are. */
+  .sideHead { flex-wrap: wrap; row-gap: 4px; min-height: 0; padding: 8px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left)); }
+  .sideHead::before { content: ""; flex: 1 1 0; }
+  .sideHead > h1.sideTitle { order: 1; flex: 1 0 100%; }
   .sideTitle { font-size: var(--fs-30); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
   .settings { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
   .settings:hover { background: var(--fill-3); }

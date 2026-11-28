@@ -21,6 +21,9 @@
 .row:hover .close, .close:focus-visible { opacity: 1; }
 .row:hover :global(a) > span:last-child { visibility: hidden; }
 .close:hover { background: var(--fill-3); color: var(--ink); }
+/* A touch screen has no hover to show it, so it would be tapped unseen beside the row's time: there
+   a conversation is closed from its own menu (DirectMenu) instead. */
+@media (hover: none) { .close { display: none; } }
 .empty { margin: 2px 8px 6px; color: var(--quiet); font-size: var(--fs-12); }
 
 /* New message: who it's to, as chips, then the people to pick from. */
