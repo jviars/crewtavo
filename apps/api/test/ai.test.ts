@@ -101,6 +101,31 @@ describe("an answer from Claude", () => {
   });
 });
 
+describe("a model the Claude key can't use", () => {
+  const noSuchModel = (model: string) => ({ status: 404, body: { type: "error", error: { type: "not_found_error", message: `model: ${model}` } } });
+  const read = (e: Env) => readDocument(e, { asker: { companyId: CO, userId: PAT }, system: "Copy what is printed.", prompt: "Fill in the form.", file: { data: "AAAA", mediaType: "image/jpeg" }, schema: { type: "object" } });
+
+  it("is named when someone asks, as it is when receipt reading is turned on, instead of a problem to try again", async () => {
+    serve({ claude: noSuchModel("claude-opus-5-5") });
+    const said = [502, "The Claude key can't use claude-opus-5-5. Check the key's workspace in the Claude Console."];
+    expect(await refused()).toEqual(said);
+    expect(await refused(() => read(env))).toEqual(said);
+    serve({ claude: { status: 403, body: { type: "error", error: { type: "permission_error", message: "no" } } } });
+    expect(await refused()).toEqual(said);
+  });
+
+  it("points at AI_MODEL when the server sets the model", async () => {
+    const bogus = { ...env, AI_MODEL: "claude-bogus-9-9" } as Env;
+    serve({ claude: noSuchModel("claude-bogus-9-9") });
+    const said = "The Claude key can't use claude-bogus-9-9. Check the key's workspace in the Claude Console, or the model this server is set to (AI_MODEL).";
+    expect(await refused(() => ask(bogus))).toEqual([502, said]);
+    expect(await refused(() => read(bogus))).toEqual([502, said]);
+    // The switch for reading receipts says the same.
+    await keys({ claude: "sk-ant-company" });
+    expect(await checkCompanyAi(bogus, adminClient(env), CO)).toBe(said);
+  });
+});
+
 describe("which service answers", () => {
   it("is the server's Claude key for a company with no key of its own, as before", async () => {
     const asked = serve({ claude: claudeSays("OK") });

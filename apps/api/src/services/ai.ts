@@ -138,6 +138,10 @@ export const aiModel = (env: Env) => env.AI_MODEL || "claude-opus-5-5";
 
 const claudeApi = (env: Env) => serviceUrl(env, "anthropic", "https://api.anthropic.com");
 
+/** Anthropic has no such model for the key (404), or won't let the key use it (403): said when a key is checked and when someone asks. */
+const cantUseModel = (env: Env) => `The Claude key can't use ${aiModel(env)}. Check the key's workspace in the Claude Console${env.AI_MODEL ? ", or the model this server is set to (AI_MODEL)" : ""}.`;
+const noSuchModel = (error: unknown) => error instanceof Anthropic.PermissionDeniedError || error instanceof Anthropic.NotFoundError;
+
 /**
  * Whether a Claude key works, asked of Anthropic before a feature that spends it is turned on: null
  * when it does, else what to fix. Reading the model's details costs nothing.
@@ -149,7 +153,7 @@ export async function checkAnthropicKey(env: Env, apiKey: string): Promise<strin
     return null;
   } catch (error) {
     if (error instanceof Anthropic.AuthenticationError) return "Anthropic turned the Claude key down. Check that it was copied correctly on the Apps page, or make a new one in the Claude Console.";
-    if (error instanceof Anthropic.PermissionDeniedError || error instanceof Anthropic.NotFoundError) return `The Claude key can't use ${aiModel(env)}. Check the key's workspace in the Claude Console.`;
+    if (noSuchModel(error)) return cantUseModel(env);
     if (error instanceof Anthropic.RateLimitError) return "Anthropic is busy right now. Try again in a minute.";
     return "Crewtavo couldn't reach Anthropic to check the Claude key. Try again in a minute.";
   }
@@ -255,6 +259,7 @@ async function readWithClaude(env: Env, apiKey: string, ask: Ask): Promise<strin
     if (error instanceof HttpError) throw error;
     if (error instanceof Anthropic.APIConnectionTimeoutError) throw new HttpError(504, "Reading it took too long.");
     if (error instanceof Anthropic.AuthenticationError) throw new HttpError(502, "The Claude key on the Apps page didn't work. Check that it was copied correctly.");
+    if (noSuchModel(error)) throw new HttpError(502, cantUseModel(env));
     if (error instanceof Anthropic.RateLimitError) throw new HttpError(429, BUSY);
     if (error instanceof Anthropic.APIError) throw new HttpError(502, HAD_A_PROBLEM);
     throw error;
@@ -266,7 +271,7 @@ async function completeWithClaude(env: Env, apiKey: string, ask: Ask): Promise<s
 
   try {
     const response = await client.beta.messages.create({
-      model: env.AI_MODEL || "claude-opus-5-5",
+      model: aiModel(env),
       max_tokens: ask.maxTokens,
       system: ask.system,
       messages: [{ role: "user", content: ask.prompt }],
@@ -292,6 +297,7 @@ async function completeWithClaude(env: Env, apiKey: string, ask: Ask): Promise<s
   } catch (error) {
     if (error instanceof HttpError) throw error;
     if (error instanceof Anthropic.AuthenticationError) throw new HttpError(502, "The Claude key on the Apps page didn't work. Check that it was copied correctly.");
+    if (noSuchModel(error)) throw new HttpError(502, cantUseModel(env));
     if (error instanceof Anthropic.RateLimitError) throw new HttpError(429, BUSY);
     if (error instanceof Anthropic.APIError) throw new HttpError(502, HAD_A_PROBLEM);
     throw error;
