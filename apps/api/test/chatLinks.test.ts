@@ -8,7 +8,7 @@ import { PNG } from "pngjs";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app";
 import type { Env } from "../src/env";
-import { fetchPreview, PREVIEW_LIMITS, previewable, readHead } from "../src/lib/linkPreview";
+import { fetchPreview, jpegSize, MAX_PICTURE_SIDE, PARSE_CHARS, PREVIEW_LIMITS, previewable, previewPicture, readHead } from "../src/lib/linkPreview";
 
 // Link previews in team chat (lib/linkPreview.ts, routes/chatLinks.ts): public pages only, on their
 // usual ports, every redirect checked, five seconds and 512 KB of HTML at most, and the picture
@@ -291,6 +291,42 @@ describe("reading a preview", () => {
     const started = Date.now();
     expect(await fetchPreview("http://news.example.com/slow", { ...PREVIEW_LIMITS, timeoutMs: 300 })).toBeNull();
     expect(Date.now() - started).toBeLessThan(1_200);
+  });
+
+  it("reads any page's head in time in step with its size, however it's written", () => {
+    const page = new URL("https://news.example.com/");
+    const half = 512 * 1024;
+    for (const [what, hostile] of [
+      ["meta after meta, never closed", "<meta ".repeat(half / 6)],
+      ["a title never closed", `<title>${"<meta ".repeat(half / 6)}`],
+      ["a value never closed", `<head><meta content="${"a ".repeat(half / 2)}`],
+      ["attribute after attribute", `<meta ${"a=a ".repeat(half / 4)}>`],
+      ["quotes in quotes", `<meta content='${'x="'.repeat(half / 3)}>`],
+      ["nothing but <", "<".repeat(half)],
+      ["a comment never closed", `<!--${"<meta a=b>".repeat(half / 10)}`],
+      ["many small tags", '<meta name="a" content="b">'.repeat(half / 27)],
+    ] as const) {
+      const started = performance.now();
+      readHead(hostile, page);
+      expect(performance.now() - started, what).toBeLessThan(150);
+    }
+    // Only the start of a page is looked at.
+    expect(readHead(`<head>${" ".repeat(PARSE_CHARS)}<title>Too far in</title></head>`, page).title).toBeNull();
+  });
+
+  it("doesn't decode a picture its own header says is huge", async () => {
+    // The header's width and height patched in: the rest isn't looked at.
+    const wide = png(40, 20);
+    wide.writeUInt32BE(MAX_PICTURE_SIDE + 1, 16);
+    expect(await previewPicture(wide)).toBeNull();
+    const tall = jpeg(40, 20);
+    const sof = tall.indexOf(Buffer.from([0xff, 0xc0]));
+    tall.writeUInt16BE(MAX_PICTURE_SIDE + 1, sof + 5);
+    expect(jpegSize(tall)).toEqual([40, MAX_PICTURE_SIDE + 1]);
+    expect(await previewPicture(tall)).toBeNull();
+    expect(jpegSize(jpeg(800, 400))).toEqual([800, 400]);
+    expect(jpegSize(Buffer.from([0xff, 0xd8, 0xff]))).toBeNull();
+    expect(await previewPicture(png(600, 315))).toMatch(/^data:image\/jpeg;base64,/);
   });
 
   it("reads a page's own tags, Twitter's, or its title", () => {
