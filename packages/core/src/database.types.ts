@@ -394,14 +394,14 @@ isOneToOne: false
                   ]
                 },"chat_channels": {
                   Row: {
-                    "archived_at": string | null,"category": string,"company_id": string,"created_at": string,"created_by": string | null,"crew_id": string | null,"id": string,"kind": string,"name": string,"position": number,"topic": string | null,"updated_at": string
+                    "archived_at": string | null,"category": string,"company_id": string,"created_at": string,"created_by": string | null,"crew_id": string | null,"direct_key": string | null,"id": string,"kind": string,"name": string,"position": number,"topic": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "archived_at"?: string | null,"category"?: string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"id"?: string,"kind"?: string,"name": string,"position"?: number,"topic"?: string | null,"updated_at"?: string
+                    "archived_at"?: string | null,"category"?: string,"company_id": string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"direct_key"?: string | null,"id"?: string,"kind"?: string,"name": string,"position"?: number,"topic"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "archived_at"?: string | null,"category"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"id"?: string,"kind"?: string,"name"?: string,"position"?: number,"topic"?: string | null,"updated_at"?: string
+                    "archived_at"?: string | null,"category"?: string,"company_id"?: string,"created_at"?: string,"created_by"?: string | null,"crew_id"?: string | null,"direct_key"?: string | null,"id"?: string,"kind"?: string,"name"?: string,"position"?: number,"topic"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -416,6 +416,26 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "companies"
       referencedColumns: ["id"]
+    }
+                  ]
+                },"chat_direct_members": {
+                  Row: {
+                    "channel_id": string,"closed_at": string | null,"company_id": string,"joined_at": string,"left_at": string | null,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"closed_at"?: string | null,"company_id": string,"joined_at"?: string,"left_at"?: string | null,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"closed_at"?: string | null,"company_id"?: string,"joined_at"?: string,"left_at"?: string | null,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_direct_members_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
     }
                   ]
                 },"chat_messages": {
@@ -4454,8 +4474,19 @@ isOneToOne: false
 "chat_audience":
 { Args: { "p_channel": string }; Returns: string[]
                            },
+"chat_close_direct":
+{ Args: { "p_channel": string }; Returns: undefined
+                           },
 "chat_create_channel":
 { Args: { "p_category"?: string,"p_company": string,"p_crew"?: string,"p_name": string,"p_preset": string,"p_topic"?: string }; Returns: string
+                           },
+"chat_direct_people":
+{ Args: { "p_company": string }; Returns: {
+              "avatar_color": string,"avatar_url": string,"color": string,"full_name": string,"role_key": string,"role_name": string,"user_id": string
+            }[]
+                           },
+"chat_leave_direct":
+{ Args: { "p_channel": string }; Returns: undefined
                            },
 "chat_mark_read":
 { Args: { "p_channel": string }; Returns: undefined
@@ -4467,14 +4498,20 @@ isOneToOne: false
                            },
 "chat_overview":
 { Args: { "p_company": string }; Returns: {
-              "archived": boolean,"can_manage": boolean,"can_post": boolean,"category": string,"crew_id": string,"id": string,"kind": string,"last_message_at": string,"mentions": number,"name": string,"position": number,"topic": string,"unread": number
+              "archived": boolean,"can_manage": boolean,"can_post": boolean,"category": string,"closed": boolean,"created_at": string,"crew_id": string,"id": string,"kind": string,"last_message_at": string,"mentions": number,"name": string,"people": (string)[],"position": number,"topic": string,"unread": number
             }[]
                            },
 "chat_save_roles":
 { Args: { "p_company": string,"p_rules": Json,"p_settings": Json }; Returns: undefined
                            },
+"chat_set_direct_messages":
+{ Args: { "p_company": string,"p_on": boolean }; Returns: boolean
+                           },
 "chat_set_enabled":
 { Args: { "p_company": string,"p_enabled": boolean }; Returns: boolean
+                           },
+"chat_start_direct":
+{ Args: { "p_company": string,"p_people": (string)[] }; Returns: string
                            },
 "chatgpt_host_id":
 { Args: Record<PropertyKey, never>; Returns: string

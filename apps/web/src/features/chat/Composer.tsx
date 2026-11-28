@@ -17,7 +17,7 @@ import { uploadFile } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
-import { Avatar, roleColor } from "./ui";
+import { Avatar, channelLabel, roleColor } from "./ui";
 import s from "./chat.module.css";
 import { t, T } from "@/lib/i18n";
 
@@ -297,13 +297,15 @@ export function Composer({
             ? t("This channel is archived. You can read it, but nobody can post in it.")
             : channel.kind === "announcement"
               ? t("Owners, admins and the office post here. You can read and react.")
-              : t("Your role can read this channel but not post in it.")}
+              : channel.kind === "direct"
+                ? t("Nobody else in this conversation is on the team any more, so it can't take new messages.")
+                : t("Your role can read this channel but not post in it.")}
         </div>
       </div>
     );
   }
 
-  const placeholder = t("Message {channel}", { channel: channel.kind === "announcement" ? channel.name : `#${channel.name}` });
+  const placeholder = t("Message {channel}", { channel: channelLabel(channel) });
   return (
     <div className={s.foot}>
       <div

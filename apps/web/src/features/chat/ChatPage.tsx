@@ -1,7 +1,8 @@
 /**
  * Team chat (/chat and /chat/:channelId). Channels on the left, grouped by category, with what's
- * new in each; the open channel in the middle; who's in it on the right. On a phone the channel list
- * and a channel are separate screens. Live updates come from useChatLive (mounted by the app shell).
+ * new in each, then direct messages (DirectMessages.tsx); the open channel in the middle; who's in
+ * it on the right. On a phone the channel list and a channel are separate screens. Live updates come
+ * from useChatLive (mounted by the app shell).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -17,6 +18,9 @@ import { EmptyState, ErrorState } from "@/components/ui/States";
 import { api } from "@/lib/api";
 import { signedUrls } from "@/lib/files";
 import { Composer, type MentionOption } from "./Composer";
+import { DirectFaces, DirectMenu, DirectSection, NewMessageButton, useStartDirect } from "./DirectMessages";
+import { directList, directPeople } from "./direct";
+import d from "./direct.module.css";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
@@ -27,6 +31,8 @@ import { t } from "@/lib/i18n";
 const LAST_CHANNEL = "crewtavo.chat.channel";
 const MEMBERS_OPEN = "crewtavo.chat.members";
 const COLLAPSED = "crewtavo.chat.collapsed";
+/** The Direct messages section's key among the folded ones (not a category anyone can name). */
+const DIRECT = "\u0000direct";
 
 function stored<T>(key: string, fallback: T): T {
   try {
@@ -101,7 +107,7 @@ export function ChatPage() {
   useEffect(() => {
     if (channelId || !channels.length || !wide()) return;
     const last = stored<string | null>(LAST_CHANNEL, null);
-    const target = channels.find((c) => c.id === last && !c.archived) ?? channels.find((c) => !c.archived) ?? channels[0];
+    const target = channels.find((c) => c.id === last && !c.archived && !c.closed) ?? channels.find((c) => !c.archived && c.kind !== "direct") ?? channels[0];
     navigate(`/chat/${target.id}`, { replace: true });
   }, [channelId, channels, navigate]);
   useEffect(() => {
@@ -163,9 +169,11 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
   const session = useSession();
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
+  const direct = useMemo(() => directList(channels, current), [channels, current]);
   const groups = useMemo(() => {
     const map = new Map<string, { name: string; order: number; channels: ChatChannel[] }>();
     for (const c of channels) {
+      if (c.kind === "direct") continue;
       const name = c.archived ? t("Archived") : c.category;
       const g = map.get(name) ?? { name, order: c.archived ? Number.MAX_SAFE_INTEGER : c.position, channels: [] };
       g.order = Math.min(g.order, c.archived ? Number.MAX_SAFE_INTEGER : c.position);
@@ -185,6 +193,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         {/* On a phone the top bar already names the business: the list has the screen's large title. */}
         <span className={`${s.sideTitle} hide-mobile`}>{session.company.name}</span>
         <h1 className={`${s.sideTitle} mobile-only`}>{t("Team chat")}</h1>
+        {state?.direct_messages && <NewMessageButton />}
         {state?.me?.admin && (
           <Link to="/chat/settings" className={s.settings} aria-label={t("Chat settings")} title={t("Chat settings")}><Icon name="settings" size={16} /></Link>
         )}
@@ -232,6 +241,9 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
             </div>
           );
         })}
+        {state && (state.direct_messages || direct.length > 0) && (
+          <DirectSection channels={direct} state={state} current={current} open={!collapsed.includes(DIRECT)} onToggle={() => toggle(DIRECT)} />
+        )}
         {state && !state.me?.admin && <p className={s.sideNote}>{t("You see the channels your role allows. Ask an owner or admin if one is missing.")}</p>}
       </nav>
     </aside>
@@ -315,16 +327,21 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
     return r ? { label: r.label, color: r.color } : null;
   };
   const trusted = channel.can_manage || state.me?.admin || hasRole(session, "admin", "office");
+  const isDirect = channel.kind === "direct";
   const options: MentionOption[] = useMemo(() => {
     const people = (members.data ?? [])
       .filter((m) => m.id !== me)
       .map((m) => ({ kind: "user" as const, label: m.name, token: userToken(m.id), avatar: m.avatar_color, photo: m.avatar_url, hint: m.role_label }));
+    // A direct conversation's mentions are of its people only.
+    if (isDirect) return people;
     const roles = state.roles
       .filter((r) => r.key !== "owner" && (r.mentionable || trusted))
       .map((r) => ({ kind: "role" as const, label: r.label, token: roleToken(r.key), color: r.color, hint: t("Role") }));
     const everyone = channel.can_manage ? [{ kind: "everyone" as const, label: t("everyone"), token: EVERYONE_TOKEN, hint: t("Everyone in this channel") }] : [];
     return [...people, ...roles, ...everyone];
-  }, [members.data, state.roles, me, trusted, channel.can_manage]);
+  }, [members.data, state.roles, me, trusted, channel.can_manage, isDirect]);
+  const startDirect = useStartDirect();
+  const message = state.direct_messages ? (p: ChatMember) => startDirect.mutate([p.id]) : null;
 
   const ctx: MessageContext = {
     me,
@@ -376,7 +393,12 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
       <header className={s.convHead}>
         <Link to="/chat" className={s.back} aria-label={t("All channels")}><Icon name="chevronLeft" size={20} /></Link>
         <div className={s.convTitle}>
-          <h1><span className={s.convHash} aria-hidden="true"><ChannelIcon channel={channel} size={15} /></span><span>{channel.name}</span></h1>
+          <h1>
+            {isDirect
+              ? <span className={d.headFaces} aria-hidden="true"><DirectFaces people={directPeople(channel, state.people)} size={20} /></span>
+              : <span className={s.convHash} aria-hidden="true"><ChannelIcon channel={channel} size={15} /></span>}
+            <span>{channel.name}</span>
+          </h1>
           {membersCount !== undefined && (
             <span className={s.convSub}>{[t.plural(membersCount, { one: "{count} member", other: "{count} members" }), online ? t.plural(online, { one: "{count} online", other: "{count} online" }) : null].filter(Boolean).join(" · ")}</span>
           )}
@@ -387,12 +409,15 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           channel.topic && <p className={s.convTopic}>{channel.topic}</p>
         )}
         <div className={s.convTools}>
-          <button type="button" className="btn btn-sm btn-ghost" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}>
-            <Icon name="pushpin" size={15} /><span className={s.toolText}>{t("Pinned")}</span>
-          </button>
+          {!isDirect && (
+            <button type="button" className="btn btn-sm btn-ghost" aria-label={t("Pinned messages")} title={t("Pinned messages")} onClick={() => setPinsOpen(true)}>
+              <Icon name="pushpin" size={15} /><span className={s.toolText}>{t("Pinned")}</span>
+            </button>
+          )}
           <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={membersOpen ? t("Hide the member list") : membersCount ? t("Members ({count})", { count: membersCount }) : t("Members")} aria-pressed={membersOpen} title={t("Members")} onClick={onToggleMembers}>
             <Icon name="users" size={15} />
           </button>
+          {isDirect && <DirectMenu channel={channel} />}
         </div>
       </header>
 
@@ -416,8 +441,17 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
           {atStart && !around && (
             <div className={s.welcome}>
               <span className={s.welcomeIcon}><ChannelIcon channel={channel} size={20} /></span>
-              <h2>{t("Welcome to {channel}", { channel: channelLabel(channel) })}</h2>
-              <p>{t("This is the start of {channel}.", { channel: channelLabel(channel) })}{channel.topic ? ` ${channel.topic}` : ""}</p>
+              {isDirect ? (
+                <>
+                  <h2>{channel.name}</h2>
+                  <p>{t("This is the start of your conversation with {names}. Only the people in it can read it.", { names: channel.name })}</p>
+                </>
+              ) : (
+                <>
+                  <h2>{t("Welcome to {channel}", { channel: channelLabel(channel) })}</h2>
+                  <p>{t("This is the start of {channel}.", { channel: channelLabel(channel) })}{channel.topic ? ` ${channel.topic}` : ""}</p>
+                </>
+              )}
             </div>
           )}
           {all.map((m, i) => {
@@ -451,12 +485,13 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
         person={person}
         onClose={() => setPersonId(null)}
         onMention={channel.can_post ? (p) => { setMentionInsert({ option: { kind: "user", label: p.name, token: userToken(p.id), avatar: p.avatar_color, photo: p.avatar_url }, nonce: Date.now() }); setFocusKey(`mention:${Date.now()}`); } : null}
+        onMessage={message}
       />
       <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
       <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
     </section>
     {membersOpen && <div className={s.membersBackdrop} onClick={onToggleMembers} aria-hidden="true" />}
-    {membersOpen && <MembersPanel members={members.data} onPerson={setPersonId} onClose={onToggleMembers} />}
+    {membersOpen && <MembersPanel members={members.data} onPerson={setPersonId} onClose={onToggleMembers} onMessage={message} />}
     </>
   );
 }

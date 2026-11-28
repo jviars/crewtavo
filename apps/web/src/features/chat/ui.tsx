@@ -27,13 +27,13 @@ export function Avatar({ name, color, photo, size = 40, className }: { name: str
   );
 }
 
-/** The channel's icon: # for a text channel, a megaphone for announcements. */
+/** The channel's icon: # for a text channel, a megaphone for announcements, a person for a direct conversation. */
 export function ChannelIcon({ channel, size = 20 }: { channel: Pick<ChatChannel, "kind">; size?: number }) {
-  return <Icon name={channel.kind === "announcement" ? "megaphone" : "hash"} size={size} />;
+  return <Icon name={channel.kind === "announcement" ? "megaphone" : channel.kind === "direct" ? "user" : "hash"} size={size} />;
 }
 
-/** "#north-crew" or "Announcements". */
-export const channelLabel = (channel: Pick<ChatChannel, "kind" | "name">) => (channel.kind === "announcement" ? channel.name : `#${channel.name}`);
+/** "#north-crew", "Announcements", or a direct conversation's people ("Marcus, Tyler and Sam"). */
+export const channelLabel = (channel: Pick<ChatChannel, "kind" | "name">) => (channel.kind === "text" ? `#${channel.name}` : channel.name);
 
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 

@@ -1,0 +1,68 @@
+/*
+ * Direct messages (DirectMessages.tsx): faces in the channel list and a conversation's head, the people
+ * picker, and the Message button in the member list. The rest is chat.module.css's.
+ */
+
+/* One face, or two overlapping for a group. */
+.face { display: grid; flex: none; place-items: center; overflow: hidden; border-radius: 50%; background: var(--avatar); color: #fff; font-weight: 700; }
+.face > :global(img) { border-radius: 50%; }
+.faces { position: relative; display: inline-grid; flex: none; place-items: center; border-radius: 50%; color: var(--text-3); }
+.back { position: absolute; top: 0; left: 0; }
+.front { position: absolute; right: 0; bottom: 0; box-shadow: 0 0 0 2px var(--page); }
+
+/* In the channel list: the conversation's row, with Close on hover. */
+.sectionHead { display: flex; align-items: center; }
+.row { position: relative; }
+.row .lead { background: none; }
+.close {
+  position: absolute; top: 50%; right: 6px; width: 20px; height: 20px; border-radius: 5px; color: var(--text-3);
+  opacity: 0; transform: translateY(-50%); transition: opacity var(--dur-fast);
+}
+.row:hover .close, .close:focus-visible { opacity: 1; }
+.row:hover :global(a) > span:last-child { visibility: hidden; }
+.close:hover { background: var(--fill-3); color: var(--ink); }
+.empty { margin: 2px 8px 6px; color: var(--quiet); font-size: var(--fs-12); }
+
+/* New message: who it's to, as chips, then the people to pick from. */
+.picker { min-height: 0; }
+.to {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 42px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--page);
+}
+.to:focus-within { border-color: var(--border-strong); }
+.toLabel { color: var(--quiet); font-size: var(--fs-13); }
+.chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 2px 0 4px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); font-size: var(--fs-13); }
+.chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip :global(.icon-btn) { width: 22px; height: 22px; border-radius: 50%; }
+.toInput { flex: 1; min-width: 120px; height: 28px; padding: 0 4px; border: 0; outline: none; background: none; color: var(--ink); font: inherit; font-size: var(--fs-14); }
+.toInput::placeholder { color: var(--quiet); }
+.people { display: grid; max-height: min(50vh, 360px); margin: 0; padding: 0; overflow-y: auto; list-style: none; border-top: 1px solid var(--divider); }
+.person { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 6px 4px; border: 0; border-bottom: 1px solid var(--row-divider); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.person:hover, .person:focus-visible { background: var(--fill); }
+.personName { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-14); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.personRole { flex: none; max-width: 40%; overflow: hidden; color: var(--quiet); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+
+/* The member list's Message button, beside each person. */
+.memberRow { position: relative; display: flex; align-items: center; }
+.memberRow > button:first-child { flex: 1; min-width: 0; }
+.memberMessage { flex: none; width: 26px; height: 26px; margin-left: 2px; border-radius: 6px; color: var(--text-3); opacity: 0; transition: opacity var(--dur-fast); }
+.memberRow:hover .memberMessage, .memberMessage:focus-visible { opacity: 1; }
+.memberMessage:hover { background: var(--fill-2); color: var(--ink); }
+@media (hover: none) { .memberMessage { opacity: 1; } }
+
+/* A conversation's head: its people's faces where a channel has its #. */
+.headFaces { display: inline-flex; flex: none; margin-right: 4px; }
+
+@media (max-width: 900px) {
+  .row .lead { background: none; }
+  .close { display: none; }
+  .row:hover :global(a) > span:last-child { visibility: visible; }
+  .empty { margin: 4px max(16px, env(safe-area-inset-left)) 8px; font-size: var(--fs-14); }
+  .toInput { font-size: var(--fs-16); }
+  .chip { height: 32px; font-size: var(--fs-14); }
+  .chip :global(.icon-btn) { width: 28px; height: 28px; }
+  .person { min-height: 56px; }
+  .personName { font-size: var(--fs-15); }
+  .personRole { font-size: var(--fs-13); }
+  .memberMessage { width: 40px; height: 40px; border-radius: var(--radius-pill); }
+}

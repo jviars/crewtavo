@@ -23,6 +23,7 @@ import { api } from "@/lib/api";
 import { hasRole, useSession } from "@/lib/session";
 import { chatKeys, chatOn } from "./data";
 import { Avatar, badgeStyle, ChannelIcon, channelLabel, roleColor } from "./ui";
+import { DirectMessagesSwitch } from "./DirectSwitch";
 import s from "./chat.module.css";
 import { Select } from "@/components/ui/Select";
 
@@ -384,6 +385,9 @@ function ChannelsTab({ data, adding, onAdding: setAdding }: { data: SettingsData
   return (
     <div className="stack">
       <p className={s.channelsNote}>Who can see each channel is on the Roles tab.</p>
+      <Section title="Direct messages">
+        <DirectMessagesSwitch />
+      </Section>
       {categories.map((cat) => {
         const list = active.filter((c) => c.category === cat).sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
         return (

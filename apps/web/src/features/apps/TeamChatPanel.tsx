@@ -9,6 +9,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Section } from "@/components/ui/Section";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { DirectMessagesSwitch } from "../chat/DirectSwitch";
 import { kit } from "./PanelKit";
 
 export function useTeamChatSwitch() {
@@ -45,6 +46,7 @@ export function TeamChatPanel() {
         Everyone on your team has <strong>Team chat</strong> in the menu. Crewtavo started you with <strong>Announcements</strong>, <strong>#general</strong>, a channel for each
         crew and one for the office. Set up channels and who sees each one in Chat settings: field crew start with only their own crew's.
       </p>
+      <DirectMessagesSwitch />
     </Section>
   );
 }

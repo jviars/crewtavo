@@ -183,6 +183,9 @@ const ICONS = {
   hash: "hash",
   megaphone: "megaphone",
   reply: "arrow-bend-up-left",
+  /** Team chat: a new direct message, and a channel whose notifications are off. */
+  compose: "note-pencil",
+  bellOff: "bell-slash",
   react: "smiley",
   mention: "at",
   onIt: "check-circle",

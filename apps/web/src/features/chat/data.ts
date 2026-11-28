@@ -9,6 +9,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { ChatColor } from "@crewtavo/core/chat";
 import { activeCompany, api, refreshSignIn, supabase } from "@/lib/api";
 import { useSession, type Session } from "@/lib/session";
+import { withDirectNames } from "./direct";
 
 // ---------------------------------------------------------------------------------------------
 // Shapes
@@ -16,7 +17,8 @@ import { useSession, type Session } from "@/lib/session";
 
 export interface ChatChannel {
   id: string;
-  kind: "text" | "announcement";
+  /** direct: a conversation between people (DirectMessages.tsx), named by them (direct.ts). */
+  kind: "text" | "announcement" | "direct";
   name: string;
   category: string;
   topic: string | null;
@@ -28,6 +30,11 @@ export interface ChatChannel {
   unread: number;
   mentions: number;
   last_message_at: string | null;
+  created_at?: string;
+  /** A direct conversation's other people (ids in state.people); null for a channel. */
+  people?: string[] | null;
+  /** A direct conversation closed until a new message comes. */
+  closed?: boolean;
 }
 
 export interface ChatRole {
@@ -41,9 +48,13 @@ export interface ChatRole {
 
 export interface ChatState {
   enabled: boolean;
+  /** Direct messages on for the business (Chat settings; on unless an owner or admin turned them off). */
+  direct_messages: boolean;
   me: { user_id: string; role_key: string; admin: boolean } | null;
   channels: ChatChannel[];
   roles: ChatRole[];
+  /** Everyone in my direct conversations, by id. */
+  people: Record<string, ChatPerson>;
 }
 
 export interface ChatPerson {
@@ -126,6 +137,7 @@ export function useChatState() {
   return useQuery({
     queryKey: chatKeys.state(session.company.id),
     queryFn: () => api.get<ChatState>("/chat/state"),
+    select: withDirectNames,
     enabled: on,
     // The live connection keeps this current; this is the fallback when it can't connect.
     refetchInterval: 60_000,

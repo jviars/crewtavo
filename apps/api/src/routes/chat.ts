@@ -52,7 +52,7 @@ interface Attachment {
   height?: number;
 }
 
-interface MessageRow {
+export interface MessageRow {
   id: string;
   channel_id: string;
   author_id: string | null;
@@ -82,12 +82,12 @@ export interface ChatMessageOut extends Omit<MessageRow, "attachments"> {
   reactions: ChatReactionOut[];
 }
 
-const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
+export const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
 
 const roleLabel = (key: string, custom: Map<string, string>) => (isRole(key) ? ROLE_LABELS[key] : custom.get(key) ?? "Team");
 
 /** People by id, as chat shows them: name, and their role's label and color. */
-async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Promise<Map<string, ChatPerson>> {
+export async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Promise<Map<string, ChatPerson>> {
   const wanted = [...new Set([...ids].filter(Boolean))];
   const out = new Map<string, ChatPerson>();
   if (!wanted.length) return out;
@@ -122,7 +122,7 @@ async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Pro
 }
 
 /** Messages with their authors, the message each replies to, and their reactions. */
-async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
+export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
   if (!rows.length) return [];
   const replyIds = [...new Set(rows.map((r) => r.reply_to).filter((id): id is string => Boolean(id)))];
   const [reactions, replies] = await Promise.all([
@@ -153,27 +153,32 @@ function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatRea
 
 /** Whether the company has Team chat on: read with the server's key (the browser's role doesn't read the company's settings). */
 async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
-  const { data, error } = await adminClient(env).from("companies").select("settings").eq("id", companyId).maybeSingle();
-  if (error) throw dbError(error);
-  const settings = (data?.settings ?? {}) as { team_chat?: { enabled?: boolean } };
-  return settings.team_chat?.enabled === true;
+  return (await chatSwitches(env, companyId)).enabled;
 }
 
-async function requireOn(c: Context<AppEnv>) {
+/** Team chat's switches: chat itself, and direct messages (on unless an owner or admin turned them off). */
+export async function chatSwitches(env: Env, companyId: string): Promise<{ enabled: boolean; direct: boolean }> {
+  const { data, error } = await adminClient(env).from("companies").select("settings").eq("id", companyId).maybeSingle();
+  if (error) throw dbError(error);
+  const settings = (data?.settings ?? {}) as { team_chat?: { enabled?: boolean; direct_messages?: boolean } };
+  return { enabled: settings.team_chat?.enabled === true, direct: settings.team_chat?.direct_messages !== false };
+}
+
+export async function requireOn(c: Context<AppEnv>) {
   if (!(await chatEnabled(c.env, c.var.companyId))) throw new HttpError(409, OFF);
 }
 
-async function messageById(db: Db, id: string): Promise<MessageRow> {
+export async function messageById(db: Db, id: string): Promise<MessageRow> {
   return must(await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", id).maybeSingle(), "That message isn't here anymore.") as MessageRow;
 }
 
 /** Tell the channel, without holding up the answer to the person who made the change. */
-function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent, options: { except?: string } = {}) {
+export function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent, options: { except?: string } = {}) {
   toChannel(adminClient(c.env), c.var.companyId, channelId, event, options).catch((error) => reportError(error, { feature: "chat-live" }));
 }
 
 /** Database refusals in words people understand. */
-function chatDbError(error: { message: string; code?: string }): HttpError {
+export function chatDbError(error: { message: string; code?: string }): HttpError {
   if (error.code === "42501" && /row-level security/i.test(error.message)) return new HttpError(403, "You can't post in this channel.");
   if (error.code === "42501" || error.code === "23514" || error.code === "22023") return new HttpError(error.code === "42501" ? 403 : 400, error.message);
   return dbError(error);
@@ -186,7 +191,8 @@ function chatDbError(error: { message: string; code?: string }): HttpError {
 /** Chat for this person: on or off, their channels with what's new, and the roles to @mention. */
 chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
   const { db, companyId, userId, role } = c.var;
-  if (!(await chatEnabled(c.env, companyId))) return c.json({ enabled: false, channels: [], roles: [], me: null });
+  const switches = await chatSwitches(c.env, companyId);
+  if (!switches.enabled) return c.json({ enabled: false, direct_messages: false, channels: [], roles: [], me: null, people: {} });
   const [overview, me, roles, settings] = await Promise.all([
     db.rpc("chat_overview", { p_company: companyId }),
     db.from("memberships").select("role, role_id").eq("company_id", companyId).eq("user_id", userId).maybeSingle(),
@@ -206,11 +212,15 @@ chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
     mentionable: setting?.mentionable ?? true,
     show_separately: setting?.show_separately ?? true,
   }));
+  // The people in each direct conversation, to show their names and faces.
+  const people = await loadPeople(db, companyId, (overview.data ?? []).flatMap((ch) => ch.people ?? []));
   return c.json({
     enabled: true,
+    direct_messages: switches.direct,
     me: { user_id: userId, role_key: chatRoleKey(me.data?.role ?? role, me.data?.role_id ?? null), admin: ADMINS.includes(role) },
     channels: overview.data ?? [],
     roles: roleList,
+    people: Object.fromEntries(people),
   });
 });
 
@@ -466,7 +476,8 @@ chat.get("/chat/settings", requireUser, requireCompany(ADMINS), async (c) => {
   const { db, companyId } = c.var;
   await requireOn(c);
   const [channels, rules, settings, roles, members, crews] = await Promise.all([
-    db.from("chat_channels").select("id, kind, name, category, topic, crew_id, position, archived_at").eq("company_id", companyId).order("position").order("name"),
+    // Direct conversations are their people's, not the business's to set up.
+    db.from("chat_channels").select("id, kind, name, category, topic, crew_id, position, archived_at").eq("company_id", companyId).neq("kind", "direct").order("position").order("name"),
     db.from("chat_role_rules").select("channel_id, role, role_id, can_see, can_post, can_manage").eq("company_id", companyId),
     db.from("chat_role_settings").select("role, role_id, color, show_separately, mentionable, own_crew_only").eq("company_id", companyId),
     db.from("company_roles").select("id, name, description, base_role").eq("company_id", companyId).order("name"),
@@ -554,7 +565,7 @@ chat.patch("/chat/settings/channels/:id", requireUser, requireCompany(ADMINS), a
   );
   const { db, companyId } = c.var;
   await requireOn(c);
-  const current = must(await db.from("chat_channels").select("kind").eq("id", id).eq("company_id", companyId).maybeSingle(), "That channel isn't here anymore.");
+  const current = must(await db.from("chat_channels").select("kind").eq("id", id).eq("company_id", companyId).neq("kind", "direct").maybeSingle(), "That channel isn't here anymore.");
   const patch: TablesUpdate<"chat_channels"> = {};
   if (body.name !== undefined) patch.name = current.kind === "announcement" ? body.name : channelSlug(body.name);
   if (body.category !== undefined) patch.category = body.category;
