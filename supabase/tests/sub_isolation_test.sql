@@ -628,18 +628,17 @@ select t1070.check(array(
   -- Tagging many clients at once: runs as the caller, and no rule lets a sub change a client.
   'change_client_tags(uuid[], text, text)',
   'change_sub_offer(uuid, jsonb, timestamp with time zone)', 'chargeable_invoices(uuid, uuid)',
-  -- Team chat's direct messages, threads, notification choices and "seen by" (20261129101000 to 101300): a
-  -- sub has no rights in any channel (private.chat_rights) and can't be in a conversation, so each
-  -- refuses them or answers nothing; the direct-messages switch is for owners and admins.
-  'chat_close_direct(uuid)',
-  'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_direct_people(uuid)', 'chat_follow(uuid, boolean)', 'chat_leave_direct(uuid)',
-  'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)', 'chat_read_marks(uuid)',
-  'chat_save_roles(uuid, jsonb, jsonb)', 'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
-  'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_thread_counts(uuid)', 'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
-  -- Everyone's Team chat status: for the team only (has_role leaves subs out), so none for a sub.
-  'chat_statuses(uuid)',
-  -- Searching team chat: a sub has no chat (private.chat_rights), so finds nothing.
+  -- Team chat (20261019001600, and 20261129101000 to 104000): a sub has no rights in any channel
+  -- (private.chat_rights) and can't be in a direct conversation, so each refuses them or answers nothing:
+  -- channels and direct messages, threads, notification choices, "seen by", search and statuses (for the
+  -- team only: has_role leaves subs out). The switches are for owners and admins.
+  'chat_close_direct(uuid)', 'chat_create_channel(uuid, text, text, text, text, uuid)', 'chat_direct_people(uuid)',
+  'chat_follow(uuid, boolean)', 'chat_leave_direct(uuid)', 'chat_mark_read(uuid)', 'chat_members(uuid)', 'chat_overview(uuid)',
+  'chat_read_marks(uuid)', 'chat_save_roles(uuid, jsonb, jsonb)',
   'chat_search(uuid, text, uuid, uuid, text[], timestamp with time zone, timestamp with time zone, text, integer, integer)',
+  'chat_seen_counts(uuid, uuid[])', 'chat_seen_list(uuid)', 'chat_set_direct_messages(uuid, boolean)', 'chat_set_enabled(uuid, boolean)',
+  'chat_set_notify(uuid, text)', 'chat_start_direct(uuid, uuid[])', 'chat_statuses(uuid)', 'chat_thread_counts(uuid)',
+  'chat_thread_read(uuid)', 'chat_thread_summaries(uuid[])', 'chat_threads(uuid)',
   -- Finding and merging duplicate clients: the owner and the office with invoices only, never a sub.
   'client_duplicates(uuid, integer)', 'client_merge_preview(uuid, uuid, uuid)',
   -- Money added up for Home, Invoices and Deposits (collected_by_day, invoice_summary, stripe_fees): each

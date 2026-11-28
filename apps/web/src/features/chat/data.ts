@@ -127,6 +127,8 @@ export interface ChatMember extends ChatPerson {
 interface MessagePage {
   messages: ChatMessage[];
   has_more: boolean;
+  /** Asked for the messages around a reply that's only in its thread: that thread, to open instead. */
+  thread_root?: string;
 }
 
 /** Is team chat on for this business (Apps → Team chat)? It's the team's: a sub never has it. */

@@ -303,6 +303,11 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
   const company = session.company.id;
   const me = state.me?.user_id ?? session.userId;
   const messages = useMessages(channel.id, around);
+  // A link to a reply that's only in its thread opens that thread at the reply.
+  const threadOfAround = messages.data?.pages[0]?.thread_root;
+  useEffect(() => {
+    if (around && threadOfAround) navigate(`/chat/${channel.id}?thread=${threadOfAround}&message=${around}`, { replace: true });
+  }, [around, threadOfAround, channel.id, navigate]);
   const members = useMembers(channel.id);
   const live = useLive();
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);

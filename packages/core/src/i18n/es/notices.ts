@@ -69,7 +69,7 @@ export const NOTICES: readonly NoticeGroup[] = [
   // Team chat. The body is the message itself, in its writer's words: never translated.
   {
     kind: "chat",
-    from: ["private.chat_notify_mentions"],
+    from: ["private.chat_notify_mentions", "private.chat_files_line"],
     titles: [
       // A direct message, to one person or a group.
       ["{name} messaged you and 1 other", "{name} les escribió a ti y a 1 persona más"],
@@ -80,7 +80,11 @@ export const NOTICES: readonly NoticeGroup[] = [
       ["{name} replied in a thread in {where}", "{name} respondió en un hilo de {where}"],
       ["{name} posted in {where}", "{name} publicó en {where}"],
     ],
-    bodies: [["Sent a photo", "Envió una foto"]],
+    bodies: [
+      ["Sent a photo", "Envió una foto"],
+      ["Sent a voice note", "Envió una nota de voz"],
+      ["Sent a file", "Envió un archivo"],
+    ],
     freeBody: true,
   },
   // Team chat: a reminder someone set about a message (its body is the message's own words), and a

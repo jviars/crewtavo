@@ -53,7 +53,7 @@ vi.mock("../src/lib/supabase", async (original) => {
     from: (table: string) => chain(table, []),
     rpc: async (name: string, args: Record<string, unknown>) => {
       db.rpcs.push({ name, args });
-      return { data: name === "chat_search" ? db.hits : name === "chat_audience" ? [ME] : true, error: null };
+      return { data: name === "chat_search" ? db.hits : name === "chat_audience" ? [ME] : name === "chat_thread_summaries" ? [] : true, error: null };
     },
     auth: { getClaims: async () => ({ data: { claims: { sub: ME } }, error: null }) },
   };

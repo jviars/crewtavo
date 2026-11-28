@@ -275,6 +275,9 @@ chat.get("/chat/channels/:id/messages", requireUser, requireCompany(), async (c)
   if (query.around) {
     const target = await messageById(db, query.around);
     if (target.channel_id !== id) throw new HttpError(404, "That message isn't in this channel.");
+    // A reply that's only in its thread: the page opens the thread there instead (a search result,
+    // a saved message, a reminder or a copied link can point at one).
+    if (target.thread_root && !target.also_in_channel) return c.json({ messages: [], has_more: false, thread_root: target.thread_root });
     const half = Math.floor(query.limit / 2);
     const [older, newer] = await Promise.all([
       db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).or(IN_CHANNEL).lte("created_at", target.created_at).order("created_at", { ascending: false }).limit(half + 1),
