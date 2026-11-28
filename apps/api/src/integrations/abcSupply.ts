@@ -475,14 +475,14 @@ export class AbcClient {
     return (await res.json().catch(() => ({}))) as T;
   }
 
-  /** The ship-to accounts this app prices for, with their branches. Retired ones (no branches) are left out, as ABC asks. */
+  /** The ship-to accounts this app prices for, with their branches. Retired ones (no branches) are left out, as ABC asks, and so are branches ABC lists as inactive. */
   async accounts(): Promise<AbcAccount[]> {
     const body = await this.call<{ shipTos?: Array<{ number?: string; name?: string; status?: string; address?: { city?: string; state?: string }; billTo?: { number?: string } | null; branches?: Array<{ number?: string; name?: string; homeBranch?: boolean; status?: string }> }> }>(
       "/api/account/v1/search/accounts",
       { body: { filters: [{ key: "accountType", condition: "equals", values: ["Ship-To"] }], pagination: { itemsPerPage: 100, pageNumber: 1 } } },
     );
     return (body.shipTos ?? []).flatMap((s): AbcAccount[] => {
-      const branches = (s.branches ?? []).flatMap((b): AbcBranch[] => (text(b.number) ? [{ number: b.number!.trim(), name: text(b.name) ?? `Branch ${b.number}`, home: b.homeBranch === true }] : []));
+      const branches = (s.branches ?? []).flatMap((b): AbcBranch[] => (text(b.number) && text(b.status)?.toLowerCase() !== "inactive" ? [{ number: b.number!.trim(), name: text(b.name) ?? `Branch ${b.number}`, home: b.homeBranch === true }] : []));
       if (!text(s.number) || !branches.length || (s.status && s.status.toLowerCase() === "inactive")) return [];
       return [{ number: s.number!.trim(), name: text(s.name) ?? `Account ${s.number}`, city: text(s.address?.city), state: text(s.address?.state), bill_to: text(s.billTo?.number), branches }];
     });

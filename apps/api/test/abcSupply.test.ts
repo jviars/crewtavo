@@ -186,6 +186,20 @@ describe("ABC Supply", () => {
     expect(sent("/search/accounts")[0].filters).toEqual([{ key: "accountType", condition: "equals", values: ["Ship-To"] }]);
   });
 
+  it("doesn't offer a branch ABC lists as inactive, or an account left with none", async () => {
+    const branch = (number: string, status?: string) => ({ number, name: `ABC Supply - ${number}`, homeBranch: number === "18", ...(status ? { status } : {}) });
+    abc.mockImplementation(async () =>
+      Response.json({
+        shipTos: [
+          { name: "EASY ROOFING", number: "1163698", status: "active", branches: [branch("18", "active"), branch("21", "Inactive"), branch("33")] },
+          { name: "CLOSED BRANCH ONLY", number: "777", status: "active", branches: [branch("21", "inactive")] },
+        ],
+      }),
+    );
+    const accounts = await new AbcClient({}, "sandbox", "token-1", abc as never).accounts();
+    expect(accounts.map((a) => [a.number, a.branches.map((b) => b.number)])).toEqual([["1163698", ["18", "33"]]]);
+  });
+
   it("searches the branch's catalog, and tries the longest word when the whole phrase finds nothing", async () => {
     abc.mockImplementation(async (_url, init) => {
       const value = JSON.parse(String(init?.body)).filters[0].values[0];
