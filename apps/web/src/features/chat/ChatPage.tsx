@@ -312,10 +312,13 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
   const live = useLive();
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [focusKey, setFocusKey] = useState("");
-  const [personId, setPersonId] = useState<string | null>(null);
+  // Whose card is open, and from where: Mention goes into that place's box.
+  const [personAt, setPersonAt] = useState<{ id: string; from: "channel" | "thread" } | null>(null);
+  const personId = personAt?.id ?? null;
+  const openPerson = (from: "channel" | "thread") => (id: string) => setPersonAt({ id, from });
   const [pinsOpen, setPinsOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
-  const [mentionInsert, setMentionInsert] = useState<{ option: MentionOption; nonce: number } | null>(null);
+  const [mentionInsert, setMentionInsert] = useState<{ option: MentionOption; nonce: number; into: "channel" | "thread" } | null>(null);
   // Where "New" goes: as many of the latest messages as were unread when the channel opened.
   const [unreadAtOpen] = useState(channel.unread);
   const top = useRef<HTMLDivElement>(null);
@@ -408,7 +411,7 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
       setReplyTo(m);
       setFocusKey(`reply:${m.id}`);
     },
-    onPerson: setPersonId,
+    onPerson: openPerson("channel"),
     onJumpTo: (id) => {
       if (all.some((m) => m.id === id)) {
         setFlash(id);
@@ -545,27 +548,32 @@ function Conversation({ channel, state, around, thread, membersOpen, onToggleMem
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
         focusKey={focusKey}
-        insert={mentionInsert}
+        insert={mentionInsert?.into === "channel" ? mentionInsert : null}
       />
-
-      <PersonDialog
-        person={person}
-        onClose={() => setPersonId(null)}
-        onMention={channel.can_post ? (p) => { setMentionInsert({ option: { kind: "user", label: p.name, token: userToken(p.id), avatar: p.avatar_color, photo: p.avatar_url }, nonce: Date.now() }); setFocusKey(`mention:${Date.now()}`); } : null}
-        onMessage={message}
-      />
-      <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
-      {seen.dialog}
-      <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
     </section>
     {thread ? (
-      <ThreadPanel key={thread} channel={channel} rootId={thread} ctx={ctx} options={options} onClose={() => navigate(`/chat/${channel.id}`)} />
+      <ThreadPanel key={thread} channel={channel} rootId={thread} ctx={{ ...ctx, onPerson: openPerson("thread") }} options={options}
+        insert={mentionInsert?.into === "thread" ? mentionInsert : null} onClose={() => navigate(`/chat/${channel.id}`)} />
     ) : (
       <>
         {membersOpen && <div className={s.membersBackdrop} onClick={onToggleMembers} aria-hidden="true" />}
-        {membersOpen && <MembersPanel members={members.data} onPerson={setPersonId} onClose={onToggleMembers} onMessage={message} />}
+        {membersOpen && <MembersPanel members={members.data} onPerson={openPerson("channel")} onClose={onToggleMembers} onMessage={message} />}
       </>
     )}
+    {/* Outside the conversation's section, which a phone hides while a thread is open: a dialog in it wouldn't show, yet would block the page. */}
+    <PersonDialog
+      person={person}
+      onClose={() => setPersonAt(null)}
+      onMention={channel.can_post ? (p) => {
+        const into = personAt?.from ?? "channel";
+        setMentionInsert({ option: { kind: "user", label: p.name, token: userToken(p.id), avatar: p.avatar_color, photo: p.avatar_url }, nonce: Date.now(), into });
+        if (into === "channel") setFocusKey(`mention:${Date.now()}`);
+      } : null}
+      onMessage={message}
+    />
+    <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
+    {seen.dialog}
+    <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
     </>
   );
 }
