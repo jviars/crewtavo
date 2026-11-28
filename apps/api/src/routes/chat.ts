@@ -15,6 +15,7 @@ import { z } from "zod";
 import type { AppEnv, Env } from "../env";
 import { requireCompany, requireUser } from "../lib/auth";
 import { forgetAudiences, onlineUsers, subscribe, toChannel, toCompany, toUser, type ChatEvent } from "../lib/chatHub";
+import { IN_CHANNEL, threadSummaries } from "../lib/chatThreads";
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reportError } from "../lib/monitoring";
 import { adminClient, type Db } from "../lib/supabase";
@@ -60,6 +61,9 @@ export interface MessageRow {
   attachments: unknown;
   job_id: string | null;
   reply_to: string | null;
+  /** A thread reply's root (routes/chatThreads.ts), and whether it was also sent to the channel. */
+  thread_root: string | null;
+  also_in_channel: boolean;
   mention_users: string[];
   mention_roles: string[];
   mention_all: boolean;
@@ -80,9 +84,11 @@ export interface ChatMessageOut extends Omit<MessageRow, "attachments"> {
   author: ChatPerson | null;
   reply: { id: string; author: string; body: string; deleted: boolean } | null;
   reactions: ChatReactionOut[];
+  /** A message with replies in a thread: how many, the last one's time, and who replied. */
+  thread: { replies: number; last_reply_at: string; people: ChatPerson[] } | null;
 }
 
-export const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
+export const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, thread_root, also_in_channel, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
 
 const roleLabel = (key: string, custom: Map<string, string>) => (isRole(key) ? ROLE_LABELS[key] : custom.get(key) ?? "Team");
 
@@ -125,13 +131,14 @@ export async function loadPeople(db: Db, companyId: string, ids: Iterable<string
 export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
   if (!rows.length) return [];
   const replyIds = [...new Set(rows.map((r) => r.reply_to).filter((id): id is string => Boolean(id)))];
-  const [reactions, replies] = await Promise.all([
+  const [reactions, replies, threads] = await Promise.all([
     db.from("chat_reactions").select("message_id, user_id, kind, created_at").in("message_id", rows.map((r) => r.id)).order("created_at"),
     replyIds.length ? db.from("chat_messages").select("id, author_id, body, deleted_at").in("id", replyIds) : Promise.resolve({ data: [], error: null }),
+    threadSummaries(db, rows.filter((r) => !r.thread_root).map((r) => r.id)),
   ]);
   if (reactions.error) throw dbError(reactions.error);
   if (replies.error) throw dbError(replies.error);
-  const people = await loadPeople(db, companyId, [...rows.map((r) => r.author_id ?? ""), ...(replies.data ?? []).map((r) => r.author_id ?? "")]);
+  const people = await loadPeople(db, companyId, [...rows.map((r) => r.author_id ?? ""), ...(replies.data ?? []).map((r) => r.author_id ?? ""), ...[...threads.values()].flatMap((t) => t.people)]);
   const replyOf = new Map((replies.data ?? []).map((r) => [r.id, r]));
   return rows.map((row) => {
     const reply = row.reply_to ? replyOf.get(row.reply_to) : null;
@@ -143,8 +150,14 @@ export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[
         ? { id: reply.id, author: (reply.author_id && people.get(reply.author_id)?.name) || "Crewtavo", body: reply.deleted_at ? "" : reply.body.slice(0, 300), deleted: Boolean(reply.deleted_at) }
         : null,
       reactions: groupReactions((reactions.data ?? []).filter((r) => r.message_id === row.id)),
+      thread: threadOut(threads.get(row.id), people),
     };
   });
+}
+
+function threadOut(summary: { replies: number; last_reply_at: string; people: string[] } | undefined, people: Map<string, ChatPerson>) {
+  if (!summary) return null;
+  return { replies: summary.replies, last_reply_at: summary.last_reply_at, people: summary.people.flatMap((id) => people.get(id) ?? []) };
 }
 
 function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatReactionOut[] {
@@ -177,6 +190,14 @@ export function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent,
   toChannel(adminClient(c.env), c.var.companyId, channelId, event, options).catch((error) => reportError(error, { feature: "chat-live" }));
 }
 
+/** A thread's root with its new count of replies, to everyone looking at its channel. */
+async function publishRoot(c: Context<AppEnv>, rootId: string) {
+  const { data, error } = await c.var.db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", rootId).maybeSingle();
+  if (error || !data) return;
+  const [root] = await shapeMessages(c.var.db, c.var.companyId, [data as MessageRow]);
+  publish(c, root.channel_id, { type: "message_updated", channel_id: root.channel_id, message: root });
+}
+
 /** Database refusals in words people understand. */
 export function chatDbError(error: { message: string; code?: string }): HttpError {
   if (error.code === "42501" && /row-level security/i.test(error.message)) return new HttpError(403, "You can't post in this channel.");
@@ -192,14 +213,17 @@ export function chatDbError(error: { message: string; code?: string }): HttpErro
 chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
   const { db, companyId, userId, role } = c.var;
   const switches = await chatSwitches(c.env, companyId);
-  if (!switches.enabled) return c.json({ enabled: false, direct_messages: false, channels: [], roles: [], me: null, people: {} });
-  const [overview, me, roles, settings] = await Promise.all([
+  if (!switches.enabled) return c.json({ enabled: false, direct_messages: false, channels: [], roles: [], me: null, people: {}, threads: { unread: 0, mentions: 0 } });
+  const [overview, me, roles, settings, threads] = await Promise.all([
     db.rpc("chat_overview", { p_company: companyId }),
     db.from("memberships").select("role, role_id").eq("company_id", companyId).eq("user_id", userId).maybeSingle(),
     db.from("company_roles").select("id, name, base_role").eq("company_id", companyId).order("name"),
     db.from("chat_role_settings").select("role, role_id, color, mentionable, show_separately").eq("company_id", companyId),
+    // The threads I follow: how many have new replies, and the mentions in them (routes/chatThreads.ts).
+    db.rpc("chat_thread_counts", { p_company: companyId }),
   ]);
-  for (const r of [overview, me, roles, settings]) if (r.error) throw dbError(r.error);
+  for (const r of [overview, me, roles, settings, threads]) if (r.error) throw dbError(r.error);
+  const threadCounts = (Array.isArray(threads.data) ? threads.data[0] : threads.data) as { unread: number; mentions: number } | undefined;
   const rows = settings.data ?? [];
   const settingFor = (level: Role | null, roleId: string | null) =>
     (roleId && rows.find((s) => s.role_id === roleId)) || rows.find((s) => s.role === level) || null;
@@ -221,6 +245,7 @@ chat.get("/chat/state", requireUser, requireCompany(), async (c) => {
     channels: overview.data ?? [],
     roles: roleList,
     people: Object.fromEntries(people),
+    threads: { unread: threadCounts?.unread ?? 0, mentions: threadCounts?.mentions ?? 0 },
   });
 });
 
@@ -239,14 +264,15 @@ chat.get("/chat/channels/:id/messages", requireUser, requireCompany(), async (c)
     if (target.channel_id !== id) throw new HttpError(404, "That message isn't in this channel.");
     const half = Math.floor(query.limit / 2);
     const [older, newer] = await Promise.all([
-      db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).lte("created_at", target.created_at).order("created_at", { ascending: false }).limit(half + 1),
-      db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).gt("created_at", target.created_at).order("created_at").limit(half),
+      db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).or(IN_CHANNEL).lte("created_at", target.created_at).order("created_at", { ascending: false }).limit(half + 1),
+      db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).or(IN_CHANNEL).gt("created_at", target.created_at).order("created_at").limit(half),
     ]);
     const before = must(older) as MessageRow[];
     hasMore = before.length > half;
     rows = [...before.slice(0, half).reverse(), ...(must(newer) as MessageRow[])];
   } else {
-    let q = db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).order("created_at", { ascending: false }).limit(query.limit + 1);
+    // Thread replies stay in their thread, unless they were also sent to the channel.
+    let q = db.from("chat_messages").select(MESSAGE_COLUMNS).eq("channel_id", id).or(IN_CHANNEL).order("created_at", { ascending: false }).limit(query.limit + 1);
     if (query.before) q = q.lt("created_at", query.before);
     const page = must(await q) as MessageRow[];
     hasMore = page.length > query.limit;
@@ -304,18 +330,25 @@ chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c
   const id = uuid.parse(c.req.param("id"));
   const body = await readJson(
     c,
-    z.object({ body: messageBody.default(""), attachments: z.array(attachment).max(6).default([]), job_id: uuid.nullable().default(null), reply_to: uuid.nullable().default(null) }),
+    z.object({
+      body: messageBody.default(""), attachments: z.array(attachment).max(6).default([]), job_id: uuid.nullable().default(null), reply_to: uuid.nullable().default(null),
+      thread_root: uuid.nullable().default(null), also_in_channel: z.boolean().default(false),
+    }),
   );
   const { db, companyId, userId } = c.var;
   await requireOn(c);
   const { data, error } = await db
     .from("chat_messages")
-    .insert({ company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to })
+    .insert({
+      company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to,
+      thread_root: body.thread_root, also_in_channel: body.thread_root ? body.also_in_channel : false,
+    })
     .select(MESSAGE_COLUMNS)
     .single();
   if (error) throw chatDbError(error);
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, id, { type: "message", channel_id: id, message });
+  if (message.thread_root) await publishRoot(c, message.thread_root);
   return c.json({ message }, 201);
 });
 
@@ -343,6 +376,7 @@ chat.delete("/chat/messages/:id", requireUser, requireCompany(), async (c) => {
   if (!data) throw new HttpError(403, "You can only delete your own messages.");
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, message.channel_id, { type: "message_updated", channel_id: message.channel_id, message });
+  if (message.thread_root) await publishRoot(c, message.thread_root);
   return c.json({ message });
 });
 

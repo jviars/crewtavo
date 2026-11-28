@@ -440,14 +440,14 @@ isOneToOne: false
                   ]
                 },"chat_messages": {
                   Row: {
-                    "attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null
+                    "also_in_channel": boolean,"attachments": NonNullable<Json>,"author_id": string | null,"body": string,"channel_id": string,"company_id": string,"created_at": string,"deleted_at": string | null,"edited_at": string | null,"id": string,"job_id": string | null,"mention_all": boolean,"mention_roles": (string)[],"mention_users": (string)[],"pinned_at": string | null,"pinned_by": string | null,"reply_to": string | null,"thread_root": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id": string,"company_id": string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"thread_root"?: string | null
                   }
                   Update: {
-                    "attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null
+                    "also_in_channel"?: boolean,"attachments"?: NonNullable<Json>,"author_id"?: string | null,"body"?: string,"channel_id"?: string,"company_id"?: string,"created_at"?: string,"deleted_at"?: string | null,"edited_at"?: string | null,"id"?: string,"job_id"?: string | null,"mention_all"?: boolean,"mention_roles"?: (string)[],"mention_users"?: (string)[],"pinned_at"?: string | null,"pinned_by"?: string | null,"reply_to"?: string | null,"thread_root"?: string | null
                   }
                   Relationships: [
                     {
@@ -465,6 +465,12 @@ isOneToOne: false
     },{
       foreignKeyName: "chat_messages_company_id_reply_to_fkey"
       columns: ["company_id","reply_to"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_messages_thread_fkey"
+      columns: ["company_id","thread_root"]
 isOneToOne: false
       referencedRelation: "chat_messages"
       referencedColumns: ["company_id","id"]
@@ -565,6 +571,32 @@ isOneToOne: false
       columns: ["company_id","role_id"]
 isOneToOne: false
       referencedRelation: "company_roles"
+      referencedColumns: ["company_id","id"]
+    }
+                  ]
+                },"chat_thread_follows": {
+                  Row: {
+                    "channel_id": string,"company_id": string,"following": boolean,"last_read_at": string | null,"root_id": string,"user_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "channel_id": string,"company_id": string,"following"?: boolean,"last_read_at"?: string | null,"root_id": string,"user_id": string
+                  }
+                  Update: {
+                    "channel_id"?: string,"company_id"?: string,"following"?: boolean,"last_read_at"?: string | null,"root_id"?: string,"user_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "chat_thread_follows_company_id_channel_id_fkey"
+      columns: ["company_id","channel_id"]
+isOneToOne: false
+      referencedRelation: "chat_channels"
+      referencedColumns: ["company_id","id"]
+    },{
+      foreignKeyName: "chat_thread_follows_company_id_root_id_fkey"
+      columns: ["company_id","root_id"]
+isOneToOne: false
+      referencedRelation: "chat_messages"
       referencedColumns: ["company_id","id"]
     }
                   ]
@@ -4485,6 +4517,9 @@ isOneToOne: false
               "avatar_color": string,"avatar_url": string,"color": string,"full_name": string,"role_key": string,"role_name": string,"user_id": string
             }[]
                            },
+"chat_follow":
+{ Args: { "p_following": boolean,"p_root": string }; Returns: boolean
+                           },
 "chat_leave_direct":
 { Args: { "p_channel": string }; Returns: undefined
                            },
@@ -4512,6 +4547,22 @@ isOneToOne: false
                            },
 "chat_start_direct":
 { Args: { "p_company": string,"p_people": (string)[] }; Returns: string
+                           },
+"chat_thread_counts":
+{ Args: { "p_company": string }; Returns: Record<string, unknown>
+                           },
+"chat_thread_read":
+{ Args: { "p_root": string }; Returns: undefined
+                           },
+"chat_thread_summaries":
+{ Args: { "p_roots": (string)[] }; Returns: {
+              "last_reply_at": string,"people": (string)[],"replies": number,"root_id": string
+            }[]
+                           },
+"chat_threads":
+{ Args: { "p_company": string }; Returns: {
+              "channel_id": string,"last_reply_at": string,"mentions": number,"replies": number,"root_id": string,"unread": number
+            }[]
                            },
 "chatgpt_host_id":
 { Args: Record<PropertyKey, never>; Returns: string

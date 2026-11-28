@@ -77,6 +77,7 @@ export const NOTICES: readonly NoticeGroup[] = [
       ["{name} messaged you", "{name} te escribió"],
       ["{name} replied to you in {where}", "{name} te respondió en {where}"],
       ["{name} mentioned you in {where}", "{name} te mencionó en {where}"],
+      ["{name} replied in a thread in {where}", "{name} respondió en un hilo de {where}"],
       ["{name} posted in {where}", "{name} publicó en {where}"],
     ],
     bodies: [["Sent a photo", "Envió una foto"]],

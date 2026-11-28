@@ -55,6 +55,8 @@ export interface ChatState {
   roles: ChatRole[];
   /** Everyone in my direct conversations, by id. */
   people: Record<string, ChatPerson>;
+  /** The threads I follow: how many have new replies, and the mentions in them. */
+  threads?: { unread: number; mentions: number };
 }
 
 export interface ChatPerson {
@@ -101,6 +103,11 @@ export interface ChatMessage {
   author: ChatPerson | null;
   reply: { id: string; author: string; body: string; deleted: boolean } | null;
   reactions: ChatReactionGroup[];
+  /** A thread reply's root (Threads.tsx), and whether it was also sent to the channel's main list. */
+  thread_root?: string | null;
+  also_in_channel?: boolean;
+  /** A message with replies in a thread: how many, the last one's time, and who replied. */
+  thread?: { replies: number; last_reply_at: string; people: ChatPerson[] } | null;
 }
 
 export interface ChatMember extends ChatPerson {
@@ -128,6 +135,8 @@ export const chatKeys = {
   messages: (company: string, channel: string) => ["chat", company, "messages", channel] as const,
   members: (company: string, channel: string) => ["chat", company, "members", channel] as const,
   pins: (company: string, channel: string) => ["chat", company, "pins", channel] as const,
+  thread: (company: string, root: string) => ["chat", company, "thread", root] as const,
+  threads: (company: string) => ["chat", company, "threads"] as const,
   settings: (company: string) => ["chat", company, "settings"] as const,
 };
 
@@ -149,7 +158,8 @@ export function useChatState() {
 export function useChatBadge(): { mentions: number; unread: boolean } {
   const state = useChatState();
   const channels = state.data?.channels ?? [];
-  return { mentions: channels.reduce((n, c) => n + c.mentions, 0), unread: channels.some((c) => c.unread > 0) };
+  const threads = state.data?.threads ?? { unread: 0, mentions: 0 };
+  return { mentions: channels.reduce((n, c) => n + c.mentions, 0) + threads.mentions, unread: channels.some((c) => c.unread > 0) || threads.unread > 0 };
 }
 
 /** A channel's messages, newest page first; older pages load as people scroll up. */
@@ -228,8 +238,12 @@ function updatePages(queryClient: QueryClient, company: string, channel: string,
   queryClient.setQueriesData<Pages>({ queryKey: chatKeys.messages(company, channel) }, (data) => (data ? change(data) : data));
 }
 
-/** A new message: onto the newest page, once (the sender's own answer and the live event both bring it). */
+/** A new message: onto the newest page, once (the sender's own answer and the live event both bring it). A thread reply goes to its thread, and to the channel only when it was also sent there. */
 export function addMessage(queryClient: QueryClient, company: string, message: ChatMessage) {
+  if (message.thread_root) {
+    addReply(queryClient, company, message);
+    if (!message.also_in_channel) return;
+  }
   updatePages(queryClient, company, message.channel_id, (data) => {
     if (data.pages.some((p) => p.messages.some((m) => m.id === message.id))) return replaceIn(data, message);
     const [first, ...rest] = data.pages;
@@ -245,6 +259,7 @@ function replaceIn(data: Pages, message: ChatMessage): Pages {
 
 export function replaceMessage(queryClient: QueryClient, company: string, message: ChatMessage) {
   updatePages(queryClient, company, message.channel_id, (data) => replaceIn(data, message));
+  updateThreads(queryClient, company, (m) => (m.id === message.id ? message : m));
   queryClient.invalidateQueries({ queryKey: chatKeys.pins(company, message.channel_id) });
 }
 
@@ -253,6 +268,61 @@ export function setReactions(queryClient: QueryClient, company: string, channel:
     ...data,
     pages: data.pages.map((p) => ({ ...p, messages: p.messages.map((m) => (m.id === messageId ? { ...m, reactions } : m)) })),
   }));
+  updateThreads(queryClient, company, (m) => (m.id === messageId ? { ...m, reactions } : m));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Threads (Threads.tsx): a message's replies, newest page first like a channel's
+// ---------------------------------------------------------------------------------------------
+
+export interface ThreadPage {
+  root: ChatMessage;
+  replies: ChatMessage[];
+  has_more: boolean;
+  following: boolean;
+}
+type ThreadPages = InfiniteData<ThreadPage, string>;
+
+export function useThread(root: string | null) {
+  const { company } = useSession();
+  return useInfiniteQuery({
+    queryKey: chatKeys.thread(company.id, root ?? "none"),
+    enabled: Boolean(root),
+    initialPageParam: "",
+    queryFn: ({ pageParam }) => api.get<ThreadPage>(`/chat/messages/${root}/thread${pageParam ? `?before=${encodeURIComponent(pageParam)}` : ""}`),
+    getNextPageParam: (last) => (last.has_more && last.replies.length ? last.replies[0].created_at : undefined),
+    staleTime: 30_000,
+  });
+}
+
+/** Each open thread's root and replies, changed by `change`. */
+function updateThreads(queryClient: QueryClient, company: string, change: (m: ChatMessage) => ChatMessage) {
+  queryClient.setQueriesData<ThreadPages>({ queryKey: ["chat", company, "thread"] }, (data) =>
+    data ? { ...data, pages: data.pages.map((p) => ({ ...p, root: change(p.root), replies: p.replies.map(change) })) } : data,
+  );
+}
+
+function addReply(queryClient: QueryClient, company: string, message: ChatMessage) {
+  queryClient.setQueryData<ThreadPages>(chatKeys.thread(company, message.thread_root!), (data) => {
+    if (!data) return data;
+    if (data.pages.some((p) => p.replies.some((m) => m.id === message.id))) {
+      return { ...data, pages: data.pages.map((p) => ({ ...p, replies: p.replies.map((m) => (m.id === message.id ? message : m)) })) };
+    }
+    const [first, ...rest] = data.pages;
+    return { ...data, pages: [{ ...first, replies: [...first.replies, message] }, ...rest] };
+  });
+}
+
+export function setFollowing(queryClient: QueryClient, company: string, root: string, following: boolean) {
+  queryClient.setQueryData<ThreadPages>(chatKeys.thread(company, root), (data) => (data ? { ...data, pages: data.pages.map((p) => ({ ...p, following })) } : data));
+}
+
+/** Read the thread up to now: here at once, then on the server. */
+export async function markThreadRead(queryClient: QueryClient, company: string, root: string) {
+  await api.post(`/chat/messages/${root}/thread/read`).catch(() => undefined);
+  queryClient.invalidateQueries({ queryKey: chatKeys.state(company) });
+  queryClient.invalidateQueries({ queryKey: chatKeys.threads(company) });
+  queryClient.invalidateQueries({ queryKey: ["notifications"] });
 }
 
 /** Read up to now: clear the channel's counts here at once, and tell the server. */
@@ -275,9 +345,11 @@ interface LiveStore {
   typing: Map<string, Map<string, { name: string; until: number }>>;
   /** Which channel this tab has open, so its new messages count as read. */
   viewing: string | null;
+  /** Which thread this tab has open, likewise. */
+  viewingThread: string | null;
 }
 
-let live: LiveStore = { connected: false, online: new Set(), typing: new Map(), viewing: null };
+let live: LiveStore = { connected: false, online: new Set(), typing: new Map(), viewing: null, viewingThread: null };
 const subscribers = new Set<() => void>();
 const emit = () => subscribers.forEach((fn) => fn());
 const setLive = (patch: Partial<LiveStore>) => {
@@ -292,6 +364,9 @@ const subscribe = (fn: () => void) => {
 export const useLive = () => useSyncExternalStore(subscribe, () => live);
 export const setViewing = (channel: string | null) => {
   if (live.viewing !== channel) setLive({ viewing: channel });
+};
+export const setViewingThread = (root: string | null) => {
+  if (live.viewingThread !== root) setLive({ viewingThread: root });
 };
 
 export function useTyping(channel: string | undefined, me: string | undefined): string[] {
@@ -368,7 +443,18 @@ export function useChatLive() {
         case "message": {
           addMessage(queryClient, company, event.message);
           if (event.message.author_id) stopTyping(event.channel_id, event.message.author_id);
-          if (live.viewing === event.channel_id && document.visibilityState === "visible") void markRead(queryClient, company, event.channel_id);
+          const root = event.message.thread_root;
+          const visible = document.visibilityState === "visible";
+          if (root) {
+            // A thread reply: read if its thread is open here, and the Threads view's counts change.
+            if (live.viewingThread === root && visible) void markThreadRead(queryClient, company, root);
+            else if (event.message.author_id !== me) {
+              refreshState();
+              queryClient.invalidateQueries({ queryKey: chatKeys.threads(company) });
+            }
+            if (!event.message.also_in_channel) return;
+          }
+          if (live.viewing === event.channel_id && visible) void markRead(queryClient, company, event.channel_id);
           else if (event.message.author_id !== me) refreshState();
           return;
         }

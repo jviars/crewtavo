@@ -1,12 +1,13 @@
 /**
  * Team chat (/chat and /chat/:channelId). Channels on the left, grouped by category, with what's
  * new in each, then direct messages (DirectMessages.tsx); the open channel in the middle; who's in
- * it on the right. On a phone the channel list and a channel are separate screens. Live updates come
- * from useChatLive (mounted by the app shell).
+ * it on the right, or an open thread (?thread=, Threads.tsx). /chat/threads lists the threads you
+ * follow. On a phone the channel list and a channel are separate screens. Live updates come from
+ * useChatLive (mounted by the app shell).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Link, NavLink, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, useMatch, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { EVERYONE_TOKEN, roleToken, userToken } from "@crewtavo/core/chat";
 import { hasRole, can, useSession } from "@/lib/session";
 import { Button } from "@/components/ui/Button";
@@ -23,6 +24,7 @@ import { directList, directPeople } from "./direct";
 import d from "./direct.module.css";
 import { chatKeys, chatOn, markRead, setViewing, useChatState, useJobCards, useLive, useMembers, useMessages, usePins, type ChatChannel, type ChatMember, type ChatMessage, type ChatState } from "./data";
 import { MembersPanel, PersonDialog } from "./Members";
+import { ThreadPanel, threadPath, ThreadsLink, ThreadsView } from "./Threads";
 import { MessageItem, MessageText, type MessageContext } from "./MessageItem";
 import { ChannelIcon, channelLabel, dayLabel, isNewDay, listTime, startsGroup, timeLabel } from "./ui";
 import s from "./chat.module.css";
@@ -92,7 +94,10 @@ export function ChatPage() {
   const session = useSession();
   const { channelId } = useParams();
   const [params] = useSearchParams();
-  const around = params.get("message");
+  const thread = params.get("thread");
+  // A thread's message is found in the thread; the channel stays where it was.
+  const around = thread ? null : params.get("message");
+  const threadsView = Boolean(useMatch("/chat/threads"));
   const navigate = useNavigate();
   const state = useChatState();
   const [membersOpen, setMembersOpen] = useState(() => wide() && window.matchMedia("(min-width: 1181px)").matches && stored(MEMBERS_OPEN, true));
@@ -105,11 +110,11 @@ export function ChatPage() {
 
   // On a computer, /chat opens the channel you had open last (or the first one).
   useEffect(() => {
-    if (channelId || !channels.length || !wide()) return;
+    if (channelId || threadsView || !channels.length || !wide()) return;
     const last = stored<string | null>(LAST_CHANNEL, null);
     const target = channels.find((c) => c.id === last && !c.archived && !c.closed) ?? channels.find((c) => !c.archived && c.kind !== "direct") ?? channels[0];
     navigate(`/chat/${target.id}`, { replace: true });
-  }, [channelId, channels, navigate]);
+  }, [channelId, threadsView, channels, navigate]);
   useEffect(() => {
     if (channel) store(LAST_CHANNEL, channel.id);
   }, [channel]);
@@ -125,10 +130,12 @@ export function ChatPage() {
   };
 
   return (
-    <div ref={layout} className={s.layout} data-view={channelId ? "channel" : "list"} data-members={(membersOpen && channel) || undefined}>
-      <ChannelList state={state.data} current={channelId} />
-      {channel ? (
-        <Conversation key={channel.id} channel={channel} state={state.data!} around={around} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
+    <div ref={layout} className={s.layout} data-view={channelId || threadsView ? "channel" : "list"} data-members={(membersOpen && channel && !thread) || undefined} data-thread={(channel && thread) || undefined}>
+      <ChannelList state={state.data} current={channelId} threadsView={threadsView} />
+      {threadsView ? (
+        <ThreadsView state={state.data} />
+      ) : channel ? (
+        <Conversation key={channel.id} channel={channel} state={state.data!} around={around} thread={thread} membersOpen={membersOpen} onToggleMembers={toggleMembers} />
       ) : (
         <section className={s.conversation} aria-label={t("Channel")}>
           {state.isPending ? (
@@ -165,7 +172,7 @@ function ChatOff() {
 // Channel list
 // ---------------------------------------------------------------------------------------------
 
-function ChannelList({ state, current }: { state: ChatState | undefined; current: string | undefined }) {
+function ChannelList({ state, current, threadsView }: { state: ChatState | undefined; current: string | undefined; threadsView: boolean }) {
   const session = useSession();
   const [collapsed, setCollapsed] = useState<string[]>(() => stored(COLLAPSED, []));
   const channels = state?.channels ?? [];
@@ -199,6 +206,7 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
         )}
       </div>
       <nav className={s.sideList} aria-label={t("Channels")}>
+        {state && <ThreadsLink state={state} active={threadsView} />}
         {!state && (
           <Loading label={t("Loading channels")} className="stack-sm">
             {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} height={30} />)}
@@ -254,7 +262,9 @@ function ChannelList({ state, current }: { state: ChatState | undefined; current
 // A conversation
 // ---------------------------------------------------------------------------------------------
 
-function Conversation({ channel, state, around, membersOpen, onToggleMembers }: { channel: ChatChannel; state: ChatState; around: string | null; membersOpen: boolean; onToggleMembers: () => void }) {
+function Conversation({ channel, state, around, thread, membersOpen, onToggleMembers }: {
+  channel: ChatChannel; state: ChatState; around: string | null; thread: string | null; membersOpen: boolean; onToggleMembers: () => void;
+}) {
   const session = useSession();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -364,6 +374,7 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
         document.getElementById(`message-${id}`)?.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       } else navigate(`/chat/${channel.id}?message=${id}`);
     },
+    onThread: (rootId) => navigate(threadPath(channel.id, rootId)),
   };
 
   const person: ChatMember | null = personId
@@ -490,8 +501,14 @@ function Conversation({ channel, state, around, membersOpen, onToggleMembers }: 
       <PinsDialog open={pinsOpen} channel={channel} ctx={ctx} onClose={() => setPinsOpen(false)} />
       <TopicDialog open={topicOpen} channel={channel} onClose={() => setTopicOpen(false)} />
     </section>
-    {membersOpen && <div className={s.membersBackdrop} onClick={onToggleMembers} aria-hidden="true" />}
-    {membersOpen && <MembersPanel members={members.data} onPerson={setPersonId} onClose={onToggleMembers} onMessage={message} />}
+    {thread ? (
+      <ThreadPanel key={thread} channel={channel} rootId={thread} ctx={ctx} options={options} onClose={() => navigate(`/chat/${channel.id}`)} />
+    ) : (
+      <>
+        {membersOpen && <div className={s.membersBackdrop} onClick={onToggleMembers} aria-hidden="true" />}
+        {membersOpen && <MembersPanel members={members.data} onPerson={setPersonId} onClose={onToggleMembers} onMessage={message} />}
+      </>
+    )}
     </>
   );
 }

@@ -6,6 +6,8 @@
 
 .layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: calc(100dvh - var(--page-top)); background: var(--page); overflow: hidden; }
 .layout[data-members] { grid-template-columns: 220px minmax(0, 1fr) 200px; }
+/* A thread open (Threads.tsx): its panel takes the member list's place, a little wider. */
+.layout[data-thread] { grid-template-columns: 220px minmax(0, 1fr) minmax(320px, 380px); }
 /* Chat is off, or couldn't load: said in the middle of the screen. */
 .off { padding: 40px 24px; }
 
@@ -306,13 +308,16 @@ a.jobCard:hover { border-color: var(--border-strong); background: var(--fill); c
 @media (max-width: 1180px) {
   .layout { position: relative; }
   .layout[data-members] { grid-template-columns: 220px minmax(0, 1fr); }
+  .layout[data-thread] { grid-template-columns: 220px minmax(0, 1fr) 320px; }
   .layout[data-members] .members { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; width: 260px; border-left: 1px solid var(--menu-border); background: var(--menu); box-shadow: var(--menu-shadow); }
   .membersClose { display: inline-grid; }
 }
 
 /* ---------- Phones: the list and a conversation are separate screens (Mobile-Team.dc.html) ---------- */
 @media (max-width: 900px) {
-  .layout, .layout[data-members] { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - var(--page-top) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
+  .layout, .layout[data-members], .layout[data-thread] { grid-template-columns: minmax(0, 1fr); height: calc(100dvh - var(--page-top) - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
+  /* A thread is a screen of its own, over its conversation. */
+  .layout[data-thread] .conversation { display: none; }
   /* An open conversation has no top bar over it (base.css), so it takes that height too. */
   .layout[data-view="channel"] { height: calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom)); }
   .layout[data-view="channel"] .side { display: none; }

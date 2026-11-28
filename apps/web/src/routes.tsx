@@ -123,6 +123,7 @@ export const routes: RouteObject[] = [
           { path: "messages", ...page(screens.messages, "MessagesPage") },
           { path: "chat", ...page(screens.chat, "ChatPage") },
           { path: "chat/settings", ...page(screens.chatSettings, "ChatSettingsPage") },
+          { path: "chat/threads", ...page(screens.chat, "ChatPage") },
           { path: "chat/:channelId", ...page(screens.chat, "ChatPage") },
           { path: "website", ...page(screens.website, "WebsitePage") },
           { path: "timesheets", ...page(screens.timesheets, "TimesheetsPage") },

@@ -3,7 +3,8 @@
  * chosen, pasted or dropped on the box; shrunk before they upload), a job to link, and a reply. The
  * text can be formatted with Markdown (**bold**, _italics_, lists…; Ctrl+B and Ctrl+I mark a word).
  * Enter sends on a computer; on a phone the send button does. A half-written message waits for you
- * when you come back to the channel.
+ * when you come back to the channel. In a thread (Threads.tsx) it replies there, and can also send
+ * the reply to the channel.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
@@ -19,6 +20,7 @@ import { toast } from "@/lib/toast";
 import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
 import { Avatar, channelLabel, roleColor } from "./ui";
 import s from "./chat.module.css";
+import th from "./threads.module.css";
 import { t, T } from "@/lib/i18n";
 
 export interface MentionOption extends Mentionable {
@@ -62,6 +64,7 @@ export function Composer({
   onCancelReply,
   focusKey,
   insert,
+  thread,
 }: {
   channel: ChatChannel;
   options: MentionOption[];
@@ -71,11 +74,15 @@ export function Composer({
   focusKey: string;
   /** A mention to add at the end of what's typed (Mention, from someone's profile). */
   insert?: { option: MentionOption; nonce: number } | null;
+  /** Replying in this message's thread, rather than to the channel. */
+  thread?: { root: string } | null;
 }) {
   const session = useSession();
   const queryClient = useQueryClient();
   const storageFull = useStorageFull();
-  const saved = drafts.get(channel.id);
+  // A thread's half-written reply is kept apart from the channel's.
+  const draftKey = thread ? `thread:${thread.root}` : channel.id;
+  const saved = drafts.get(draftKey);
   const [text, setText] = useState(saved?.text ?? "");
   const [picked, setPicked] = useState<MentionOption[]>(saved?.picked ?? []);
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -83,6 +90,7 @@ export function Composer({
   const [pickingJob, setPickingJob] = useState(false);
   const [suggest, setSuggest] = useState<{ query: string; start: number; index: number } | null>(null);
   const [dropping, setDropping] = useState(false);
+  const [alsoSend, setAlsoSend] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const files = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
@@ -96,17 +104,18 @@ export function Composer({
 
   // Another channel: keep this one's draft, bring back that one's.
   useEffect(() => {
-    const draft = drafts.get(channel.id);
+    const draft = drafts.get(draftKey);
     setText(draft?.text ?? "");
     setPicked(draft?.picked ?? []);
     setUploads([]);
     setJob(null);
     setSuggest(null);
-  }, [channel.id]);
+    setAlsoSend(false);
+  }, [draftKey]);
   useEffect(() => {
-    if (text || picked.length) drafts.set(channel.id, { text, picked });
-    else drafts.delete(channel.id);
-  }, [channel.id, text, picked]);
+    if (text || picked.length) drafts.set(draftKey, { text, picked });
+    else drafts.delete(draftKey);
+  }, [draftKey, text, picked]);
   useEffect(() => {
     if (focusKey && input.current) {
       input.current.focus();
@@ -132,7 +141,7 @@ export function Composer({
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string }>; job_id: string | null; reply_to: string | null }) =>
+    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string }>; job_id: string | null; reply_to: string | null; thread_root: string | null; also_in_channel: boolean }) =>
       api.post<{ message: ChatMessage }>(`/chat/channels/${channel.id}/messages`, payload),
     onSuccess: ({ message }) => addMessage(queryClient, session.company.id, message),
   });
@@ -144,7 +153,10 @@ export function Composer({
   const submit = () => {
     if (!canSend) return;
     const body = fromEditable(text.trim(), picked);
-    const payload = { body, attachments: photos.map((u) => ({ path: u.path!, name: u.name })), job_id: job?.id ?? null, reply_to: replyTo?.id ?? null };
+    const payload = {
+      body, attachments: photos.map((u) => ({ path: u.path!, name: u.name })), job_id: job?.id ?? null, reply_to: replyTo?.id ?? null,
+      thread_root: thread?.root ?? null, also_in_channel: Boolean(thread) && alsoSend,
+    };
     send.mutate(payload, {
       onSuccess: () => {
         setText("");
@@ -153,7 +165,8 @@ export function Composer({
         setUploads([]);
         setJob(null);
         onCancelReply();
-        drafts.delete(channel.id);
+        setAlsoSend(false);
+        drafts.delete(draftKey);
       },
     });
   };
@@ -188,7 +201,8 @@ export function Composer({
     lookForMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
     send.reset();
     const now = Date.now();
-    if (e.target.value.trim() && now - lastTyping.current > 3_000) {
+    // Typing in a thread isn't shown in the channel.
+    if (!thread && e.target.value.trim() && now - lastTyping.current > 3_000) {
       lastTyping.current = now;
       api.post(`/chat/channels/${channel.id}/typing`).catch(() => undefined);
     }
@@ -305,7 +319,7 @@ export function Composer({
     );
   }
 
-  const placeholder = t("Message {channel}", { channel: channelLabel(channel) });
+  const placeholder = thread ? t("Reply…") : t("Message {channel}", { channel: channelLabel(channel) });
   return (
     <div className={s.foot}>
       <div
@@ -315,7 +329,7 @@ export function Composer({
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
         onDrop={onDrop}
       >
-        <TypingLine channelId={channel.id} />
+        {!thread && <TypingLine channelId={channel.id} />}
         {suggest && matches.length > 0 && (
           <div className={s.suggest} role="listbox" aria-label={t("People and roles to mention")}>
             <div className={s.suggestHead}>{t("Mention")}</div>
@@ -389,6 +403,12 @@ export function Composer({
           </button>
         </div>
       </div>
+      {thread && (
+        <label className={th.alsoSend}>
+          <input type="checkbox" checked={alsoSend} onChange={(e) => setAlsoSend(e.target.checked)} />
+          <span>{channel.kind === "direct" ? t("Also send to the conversation") : t("Also send to {channel}", { channel: channelLabel(channel) })}</span>
+        </label>
+      )}
       {send.error && <div className="field-error" style={{ margin: "6px 4px 0" }}>{(send.error as Error).message}</div>}
       <JobPicker open={pickingJob} onClose={() => setPickingJob(false)} onPick={(j) => { setJob(j); setPickingJob(false); input.current?.focus(); }} />
     </div>

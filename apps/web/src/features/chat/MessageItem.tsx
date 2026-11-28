@@ -2,7 +2,8 @@
  * One message: who sent it (in their role's color, the role in quiet words), the text with @mentions, links and
  * its Markdown formatting (bold, italics, lists, quotes, code: core chatBlocks; nothing in it is read as HTML),
  * photos, a linked job, the message it replies to, and reactions. Hovering (or tapping, on a phone)
- * shows what you can do with it: react, reply, edit or delete your own, pin if you manage the channel.
+ * shows what you can do with it: react, reply, reply in a thread, edit or delete your own, pin if you
+ * manage the channel. A message with a thread says how many replies it has (ThreadSummary.tsx).
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
@@ -19,6 +20,7 @@ import { copyText } from "@/lib/clipboard";
 import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
+import { ThreadSummary } from "./ThreadSummary";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
 import s from "./chat.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
@@ -40,6 +42,8 @@ export interface MessageContext {
   onReply: (message: ChatMessage) => void;
   onPerson: (id: string) => void;
   onJumpTo: (id: string) => void;
+  /** Open a message's thread (Threads.tsx); not given inside a thread, where threads don't nest. */
+  onThread?: ((rootId: string) => void) | null;
 }
 
 type TextContext = Pick<MessageContext, "personName" | "role" | "onPerson">;
@@ -205,6 +209,12 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
       )}
 
       <div className={s.msgMain}>
+        {message.thread_root && message.also_in_channel && ctx.onThread && (
+          <button type="button" className={s.reply} onClick={() => ctx.onThread?.(message.thread_root!)}>
+            <Icon name="messages" size={14} />
+            <span>{t("Replied in a thread")}</span>
+          </button>
+        )}
         {message.reply && (
           <button type="button" className={s.reply} onClick={() => ctx.onJumpTo(message.reply!.id)}>
             <Icon name="reply" size={14} />
@@ -287,6 +297,8 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             })}
           </div>
         )}
+
+        {message.thread && ctx.onThread && <ThreadSummary thread={message.thread} onOpen={() => ctx.onThread?.(message.id)} />}
       </div>
 
       {editing === null && (
@@ -304,6 +316,7 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
             triggerClassName={`icon-btn ${s.icon}`}
             trigger={<Icon name="more" size={16} />}
             items={[
+              { label: t("Reply in thread"), icon: "messages", kbd: "T", onSelect: () => ctx.onThread?.(message.id), hidden: !ctx.onThread || Boolean(message.thread_root) },
               { label: t("Edit"), icon: "edit", kbd: "E", onSelect: startEdit, hidden: !mine || !ctx.canPost },
               { label: message.pinned_at ? t("Unpin") : t("Pin to the channel"), icon: message.pinned_at ? "unpin" : "pushpin", kbd: "P", onSelect: () => pin.mutate(), hidden: !ctx.canManage },
               { label: t("Copy text"), icon: "copy", kbd: "C", onSelect: () => copyText(toEditable(message.body, nameFor), "Copied"), hidden: !message.body },
