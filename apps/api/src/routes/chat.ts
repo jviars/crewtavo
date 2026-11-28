@@ -18,6 +18,8 @@ import { forgetAudiences, onlineUsers, subscribe, toChannel, toCompany, toUser, 
 import { dbError, HttpError, must, readJson, uuid } from "../lib/http";
 import { reportError } from "../lib/monitoring";
 import { adminClient, type Db } from "../lib/supabase";
+import { loadTranscripts, withTranscripts } from "../lib/chatWords";
+import { afterMessage } from "../services/chatVoice";
 
 export const chat = new Hono<AppEnv>();
 
@@ -50,9 +52,14 @@ interface Attachment {
   size?: number;
   width?: number;
   height?: number;
+  /** A voice note's length, in seconds. */
+  duration?: number;
+  /** A voice note's words: the phone's, or the server's transcript (words_by "server"). */
+  words?: string;
+  words_by?: "server";
 }
 
-interface MessageRow {
+export interface MessageRow {
   id: string;
   channel_id: string;
   author_id: string | null;
@@ -82,12 +89,12 @@ export interface ChatMessageOut extends Omit<MessageRow, "attachments"> {
   reactions: ChatReactionOut[];
 }
 
-const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
+export const MESSAGE_COLUMNS = "id, channel_id, author_id, body, attachments, job_id, reply_to, mention_users, mention_roles, mention_all, pinned_at, pinned_by, edited_at, deleted_at, created_at";
 
 const roleLabel = (key: string, custom: Map<string, string>) => (isRole(key) ? ROLE_LABELS[key] : custom.get(key) ?? "Team");
 
 /** People by id, as chat shows them: name, and their role's label and color. */
-async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Promise<Map<string, ChatPerson>> {
+export async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Promise<Map<string, ChatPerson>> {
   const wanted = [...new Set([...ids].filter(Boolean))];
   const out = new Map<string, ChatPerson>();
   if (!wanted.length) return out;
@@ -122,12 +129,13 @@ async function loadPeople(db: Db, companyId: string, ids: Iterable<string>): Pro
 }
 
 /** Messages with their authors, the message each replies to, and their reactions. */
-async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
+export async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Promise<ChatMessageOut[]> {
   if (!rows.length) return [];
   const replyIds = [...new Set(rows.map((r) => r.reply_to).filter((id): id is string => Boolean(id)))];
-  const [reactions, replies] = await Promise.all([
+  const [reactions, replies, words] = await Promise.all([
     db.from("chat_reactions").select("message_id, user_id, kind, created_at").in("message_id", rows.map((r) => r.id)).order("created_at"),
     replyIds.length ? db.from("chat_messages").select("id, author_id, body, deleted_at").in("id", replyIds) : Promise.resolve({ data: [], error: null }),
+    loadTranscripts(db, rows.filter((r) => Array.isArray(r.attachments) && r.attachments.length).map((r) => r.id)),
   ]);
   if (reactions.error) throw dbError(reactions.error);
   if (replies.error) throw dbError(replies.error);
@@ -137,7 +145,7 @@ async function shapeMessages(db: Db, companyId: string, rows: MessageRow[]): Pro
     const reply = row.reply_to ? replyOf.get(row.reply_to) : null;
     return {
       ...row,
-      attachments: Array.isArray(row.attachments) ? (row.attachments as Attachment[]) : [],
+      attachments: withTranscripts(Array.isArray(row.attachments) ? (row.attachments as Attachment[]) : [], words.get(row.id)),
       author: row.author_id ? people.get(row.author_id) ?? null : null,
       reply: reply
         ? { id: reply.id, author: (reply.author_id && people.get(reply.author_id)?.name) || "Crewtavo", body: reply.deleted_at ? "" : reply.body.slice(0, 300), deleted: Boolean(reply.deleted_at) }
@@ -152,28 +160,28 @@ function groupReactions(rows: Array<{ user_id: string; kind: string }>): ChatRea
 }
 
 /** Whether the company has Team chat on: read with the server's key (the browser's role doesn't read the company's settings). */
-async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
+export async function chatEnabled(env: Env, companyId: string): Promise<boolean> {
   const { data, error } = await adminClient(env).from("companies").select("settings").eq("id", companyId).maybeSingle();
   if (error) throw dbError(error);
   const settings = (data?.settings ?? {}) as { team_chat?: { enabled?: boolean } };
   return settings.team_chat?.enabled === true;
 }
 
-async function requireOn(c: Context<AppEnv>) {
+export async function requireOn(c: Context<AppEnv>) {
   if (!(await chatEnabled(c.env, c.var.companyId))) throw new HttpError(409, OFF);
 }
 
-async function messageById(db: Db, id: string): Promise<MessageRow> {
+export async function messageById(db: Db, id: string): Promise<MessageRow> {
   return must(await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", id).maybeSingle(), "That message isn't here anymore.") as MessageRow;
 }
 
 /** Tell the channel, without holding up the answer to the person who made the change. */
-function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent, options: { except?: string } = {}) {
+export function publish(c: Context<AppEnv>, channelId: string, event: ChatEvent, options: { except?: string } = {}) {
   toChannel(adminClient(c.env), c.var.companyId, channelId, event, options).catch((error) => reportError(error, { feature: "chat-live" }));
 }
 
 /** Database refusals in words people understand. */
-function chatDbError(error: { message: string; code?: string }): HttpError {
+export function chatDbError(error: { message: string; code?: string }): HttpError {
   if (error.code === "42501" && /row-level security/i.test(error.message)) return new HttpError(403, "You can't post in this channel.");
   if (error.code === "42501" || error.code === "23514" || error.code === "22023") return new HttpError(error.code === "42501" ? 403 : 400, error.message);
   return dbError(error);
@@ -280,32 +288,50 @@ chat.get("/chat/channels/:id/members", requireUser, requireCompany(), async (c) 
   });
 });
 
-const messageBody = z.string().max(4000, "Messages can be up to 4,000 characters.");
-const attachment = z.object({
+export const messageBody = z.string().max(4000, "Messages can be up to 4,000 characters.");
+export const attachment = z.object({
   path: z.string().max(300),
   name: z.string().max(200).optional(),
   type: z.string().max(100).optional(),
   size: z.number().int().nonnegative().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  duration: z.number().nonnegative().max(3600).optional(),
+  words: z.string().max(5000).optional(),
 });
 
 chat.post("/chat/channels/:id/messages", requireUser, requireCompany(), async (c) => {
   const id = uuid.parse(c.req.param("id"));
   const body = await readJson(
     c,
-    z.object({ body: messageBody.default(""), attachments: z.array(attachment).max(6).default([]), job_id: uuid.nullable().default(null), reply_to: uuid.nullable().default(null) }),
+    z.object({
+      // Chosen by the browser, so a message sent again after an answer that never arrived is the same one (features/chat/outbox.ts).
+      id: uuid.optional(),
+      body: messageBody.default(""),
+      attachments: z.array(attachment).max(6).default([]),
+      job_id: uuid.nullable().default(null),
+      reply_to: uuid.nullable().default(null),
+    }),
   );
   const { db, companyId, userId } = c.var;
   await requireOn(c);
   const { data, error } = await db
     .from("chat_messages")
-    .insert({ company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to })
+    .insert({ ...(body.id && { id: body.id }), company_id: companyId, channel_id: id, author_id: userId, body: body.body, attachments: body.attachments as never, job_id: body.job_id, reply_to: body.reply_to })
     .select(MESSAGE_COLUMNS)
     .single();
-  if (error) throw chatDbError(error);
+  if (error) {
+    // Sent before: the answer is that message, once, as long as it's theirs in this channel.
+    if (error.code === "23505" && body.id) {
+      const sent = (await db.from("chat_messages").select(MESSAGE_COLUMNS).eq("id", body.id).maybeSingle()).data as MessageRow | null;
+      if (sent && sent.author_id === userId && sent.channel_id === id) return c.json({ message: (await shapeMessages(db, companyId, [sent]))[0] }, 200);
+      throw new HttpError(409, "That message can't be sent again. Write it again.");
+    }
+    throw chatDbError(error);
+  }
   const [message] = await shapeMessages(db, companyId, [data as MessageRow]);
   publish(c, id, { type: "message", channel_id: id, message });
+  afterMessage(c, message);
   return c.json({ message }, 201);
 });
 

@@ -64,6 +64,11 @@ export interface ChatAttachment {
   size?: number;
   width?: number;
   height?: number;
+  /** A voice note's length, in seconds. */
+  duration?: number;
+  /** A voice note's words: what the phone heard as it was recorded, or the server's transcript (words_by "server"). */
+  words?: string;
+  words_by?: "server";
 }
 
 export interface ChatReactionGroup {

@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useMemo, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { CHAT_REACTIONS, chatBlocks, chatPlainText, fromEditable, toEditable, type ChatBlock, type ChatInline, type Mentionable } from "@crewtavo/core/chat";
+import { isAudio } from "@crewtavo/core/chatField";
 import { BrandMark } from "@/components/shell/BrandMark";
 import { Face } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
@@ -20,6 +21,7 @@ import { addressLine } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import { replaceMessage, setReactions, type ChatMessage, type ChatReactionGroup, type JobCard } from "./data";
 import { badgeStyle, roleColor, shortTime, timeLabel } from "./ui";
+import { VoiceNote } from "./VoiceNote";
 import s from "./chat.module.css";
 import { browserOrSpanish, t } from "@/lib/i18n";
 
@@ -247,9 +249,11 @@ export function MessageItem({ message, head, flash, ctx }: { message: ChatMessag
           )
         )}
 
-        {message.attachments.length > 0 && (
+        {/* Voice notes: VoiceNote (Field builder) */}
+        {message.attachments.filter(isAudio).map((a) => <VoiceNote key={a.path} attachment={a} url={ctx.photos[a.path]} />)}
+        {message.attachments.some((a) => !isAudio(a)) && (
           <div className={s.photos}>
-            {message.attachments.map((a) =>
+            {message.attachments.filter((a) => !isAudio(a)).map((a) =>
               ctx.photos[a.path] ? (
                 <a key={a.path} className={s.photo} href={ctx.photos[a.path]} target="_blank" rel="noreferrer">
                   <img src={ctx.photos[a.path]} alt={a.name || t("Photo")} loading="lazy" />

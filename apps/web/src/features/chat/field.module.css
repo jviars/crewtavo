@@ -1,0 +1,76 @@
+/*
+ * Team chat for the field (voice notes, messages waiting for signal, status, sending later and
+ * reminders), on chat.module.css's tokens: the page's ground, hairlines, Phosphor icons. Every
+ * control is at least 40px on a phone (its rules are in the max-width: 900px block at the end).
+ */
+
+/* ---------- Voice notes in a message ---------- */
+.voiceNote { display: grid; gap: 4px; max-width: min(360px, 100%); margin-top: 6px; }
+.player { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px 6px 6px; border: 1px solid var(--divider); border-radius: var(--radius-pill); background: var(--fill); }
+.playBtn {
+  display: grid; flex: none; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%;
+  background: var(--green-solid); color: #fff; cursor: pointer;
+}
+.playBtn:disabled { opacity: 0.45; cursor: default; }
+.track { position: relative; flex: 1; min-width: 48px; height: 24px; cursor: pointer; touch-action: none; }
+.track::before { content: ""; position: absolute; top: 50%; right: 0; left: 0; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--fill-3); }
+.trackFill { position: absolute; top: 50%; left: 0; height: 4px; margin-top: -2px; border-radius: 2px; background: var(--green); }
+.trackKnob { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--page); }
+.track:focus-visible { box-shadow: var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.voiceTime { flex: none; min-width: 34px; color: var(--text-3); font-size: var(--fs-12); font-variant-numeric: tabular-nums; text-align: right; }
+.speedBtn {
+  flex: none; min-width: 34px; height: 24px; padding: 0 6px; border: 1px solid var(--divider); border-radius: var(--radius-pill);
+  background: none; color: var(--text-2); font: inherit; font-size: var(--fs-11); font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.speedBtn:hover { background: var(--fill-2); color: var(--ink); }
+.voiceWords { padding: 0 6px; }
+.voiceWords p {
+  display: -webkit-box; margin: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-13); line-height: 1.4;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere;
+}
+.voiceWords p[data-open] { display: block; -webkit-line-clamp: unset; line-clamp: unset; }
+.showAll { padding: 0; border: 0; background: none; color: var(--info); font: inherit; font-size: var(--fs-12); font-weight: 600; cursor: pointer; }
+
+/* ---------- Recording one, in the composer ---------- */
+.micBtn { display: grid; flex: none; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--text-3); cursor: pointer; }
+.micBtn:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
+.micRound { display: grid; flex: none; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--green-solid); color: #fff; cursor: pointer; }
+.micBtn:disabled, .micRound:disabled { opacity: 0.4; cursor: default; }
+.recorder { display: flex; align-items: center; gap: 8px; min-height: 46px; padding: 6px; }
+.recorderBtn { display: grid; flex: none; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--text-3); cursor: pointer; }
+.recorderBtn:hover { background: var(--fill-2); color: var(--ink); }
+.recorderNote { flex: 1; min-width: 0; color: var(--ink); font-size: var(--fs-13); }
+.recorder > svg { flex: none; color: var(--danger); }
+.recDot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--danger-solid); animation: recPulse 1.2s ease-in-out infinite; }
+@keyframes recPulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .recDot { animation: none; } }
+.recTime { display: inline-flex; flex: none; align-items: baseline; gap: 6px; color: var(--ink); font-size: var(--fs-14); font-weight: 600; font-variant-numeric: tabular-nums; }
+.recTime small { color: var(--danger); font-size: var(--fs-12); font-weight: 500; }
+.level { display: inline-flex; flex: 1; align-items: center; gap: 3px; min-width: 0; height: 20px; }
+.level i { width: 4px; height: 6px; border-radius: 2px; background: var(--fill-3); transition: height var(--dur-fast), background var(--dur-fast); }
+.level i:nth-child(2) { height: 9px; }
+.level i:nth-child(3) { height: 12px; }
+.level i:nth-child(4) { height: 15px; }
+.level i:nth-child(5) { height: 18px; }
+.level i[data-on] { background: var(--green); }
+.stopBtn, .voiceSend { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 32px; margin-left: auto; padding: 0 12px; border-radius: var(--radius-pill); }
+.stopBtn { border: 1px solid var(--border); background: var(--page); color: var(--ink); font: inherit; font-size: var(--fs-13); font-weight: 600; cursor: pointer; }
+.stopBtn:hover:not(:disabled) { background: var(--fill-2); }
+.stopBtn svg { color: var(--danger-solid); }
+.recorder .track { cursor: default; }
+
+/* ---------- Phones ---------- */
+@media (max-width: 900px) {
+  .player { padding: 6px 12px 6px 6px; }
+  .playBtn { width: 40px; height: 40px; }
+  .speedBtn { min-width: 44px; height: 32px; font-size: var(--fs-12); }
+  .voiceTime { font-size: var(--fs-13); }
+  .voiceWords p { font-size: var(--fs-14); }
+  .showAll { min-height: 32px; font-size: var(--fs-13); }
+  .recorder { gap: 8px; min-height: 56px; padding: 8px max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); }
+  .recorderBtn { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .micBtn { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--fill-2); color: var(--ink); }
+  .stopBtn, .voiceSend { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .voiceSend { background: var(--green-solid); color: #fff; border: 0; }
+  .stopText { display: none; }
+}

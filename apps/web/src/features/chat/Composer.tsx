@@ -13,11 +13,13 @@ import { Icon } from "@/components/ui/Icon";
 import { SearchField } from "@/components/ui/Toolbar";
 import { RefusedForSpace, useStorageFull } from "@/features/settings/storage";
 import { api, supabase } from "@/lib/api";
-import { uploadFile } from "@/lib/files";
+import { uploadFile, uploadOnce } from "@/lib/files";
 import { useSession } from "@/lib/session";
 import { toast } from "@/lib/toast";
-import { addMessage, useTyping, type ChatChannel, type ChatMessage } from "./data";
+import { addMessage, useTyping, type ChatAttachment, type ChatChannel, type ChatMessage } from "./data";
 import { Avatar, roleColor } from "./ui";
+import { usePhone, useVoiceRecorder } from "./voice";
+import { MicButton, VoiceRecorder, type VoicePreview } from "./VoiceRecorder";
 import s from "./chat.module.css";
 import { t, T } from "@/lib/i18n";
 
@@ -132,9 +134,24 @@ export function Composer({
   const matches = useMemo(() => (suggest ? matchMentions(options, suggest.query) : []), [options, suggest]);
 
   const send = useMutation({
-    mutationFn: (payload: { body: string; attachments: Array<{ path: string; name: string }>; job_id: string | null; reply_to: string | null }) =>
+    mutationFn: (payload: { body: string; attachments: ChatAttachment[]; job_id: string | null; reply_to: string | null }) =>
       api.post<{ message: ChatMessage }>(`/chat/channels/${channel.id}/messages`, payload),
     onSuccess: ({ message }) => addMessage(queryClient, session.company.id, message),
+  });
+  // A voice note: recorded here (voice.ts), stored in the channel's folder, then sent on its own.
+  const voice = useVoiceRecorder();
+  const phone = usePhone();
+  const sendVoice = useMutation({
+    mutationFn: async (note: VoicePreview) => {
+      const path = `${session.company.id}/chat/${channel.id}/${crypto.randomUUID()}.${note.ext}`;
+      await uploadOnce(path, note.blob);
+      const file: ChatAttachment = { path, name: "Voice note", type: note.type, size: note.blob.size, duration: note.seconds, ...(note.words && { words: note.words.slice(0, 5000) }) };
+      return send.mutateAsync({ body: "", attachments: [file], job_id: null, reply_to: replyTo?.id ?? null });
+    },
+    onSuccess: () => {
+      voice.done();
+      onCancelReply();
+    },
   });
 
   const ready = uploads.every((u) => u.status !== "uploading");
@@ -359,10 +376,14 @@ export function Composer({
             )}
           </div>
         )}
+        {voice.recording.phase !== "idle" ? (
+          <VoiceRecorder recorder={voice} onSend={(note) => sendVoice.mutate(note)} sending={sendVoice.isPending} />
+        ) : (
         <div className={s.composerRow}>
           <button type="button" className={s.composerBtn} aria-label={t("Add photos")} title={t("Add photos")} disabled={uploads.length >= MAX_PHOTOS} onClick={() => files.current?.click()}>
             <Icon name="camera" size={17} />
           </button>
+          {!phone && <MicButton onClick={() => void voice.start()} />}
           <input ref={files} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => addPhotos(e.target.files)} />
           <textarea
             ref={input}
@@ -381,13 +402,18 @@ export function Composer({
           <button type="button" className={`btn btn-sm ${s.jobBtn}`} aria-label={t("Link a job")} title={t("Link a job")} onClick={() => setPickingJob(true)}>
             <Icon name="job" size={15} /><span className={s.jobText}>{t("Link a job")}</span>
           </button>
+          {phone && !text.trim() && !uploads.length && !job ? (
+            <MicButton round onClick={() => void voice.start()} />
+          ) : (
           <button type="button" className={`btn btn-sm btn-primary ${s.sendBtn}`} aria-label={t("Send")} disabled={!canSend} onClick={submit}>
             <span className={s.sendIcon} aria-hidden="true"><Icon name="arrowUp" size={19} /></span>
             <span className={s.sendText}>{t("Send")}</span>
           </button>
+          )}
         </div>
+        )}
       </div>
-      {send.error && <div className="field-error" style={{ margin: "6px 4px 0" }}>{(send.error as Error).message}</div>}
+      {(send.error || sendVoice.error) && <div className="field-error" style={{ margin: "6px 4px 0" }}>{((sendVoice.error ?? send.error) as Error).message}</div>}
       <JobPicker open={pickingJob} onClose={() => setPickingJob(false)} onPick={(j) => { setJob(j); setPickingJob(false); input.current?.focus(); }} />
     </div>
   );
