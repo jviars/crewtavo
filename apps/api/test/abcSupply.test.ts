@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env";
-import { AbcClient, abcSays, brandOf, requestToken, uomOf } from "../src/integrations/abcSupply";
+import { AbcClient, AbcProblem, abcSays, brandOf, requestToken, uomOf } from "../src/integrations/abcSupply";
 import { decryptJson, encryptJson } from "../src/lib/crypto";
 
 // Stand-ins for the signed-in person's Supabase client and the service-role client: tables of rows
@@ -272,6 +272,49 @@ describe("ABC Supply", () => {
     await new AbcClient({}, "sandbox", "token-1", abc as never, renew).accounts();
     expect(renew).toHaveBeenCalledOnce();
     expect((abc.mock.calls[1]![1]!.headers as Record<string, string>).Authorization).toBe("Bearer token-2");
+  });
+
+  it("says the account can't be used when a new token still gets a 401, instead of asking to sign in again", async () => {
+    // ABC answers 401 for an account the app's user can't use too (Price Items: the ship-to; frequent items: the bill-to).
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const refusal = (message: string) => Response.json({ code: "UNAUTHORIZED", message }, { status: 401 });
+    abc.mockImplementation(async (url) => refusal(String(url).includes("/pricing/") ? "The user does not have access to the provided ship-to number." : "Account 7654321-001 is not a Bill-To account this user can read."));
+    const renew = vi.fn(async () => "token-2");
+    const client = new AbcClient({}, "sandbox", "token-1", abc as never, renew);
+    const usual = await client.usual("7654321-001", "18").catch((e: unknown) => e as AbcProblem);
+    expect(usual).toBeInstanceOf(AbcProblem);
+    expect((usual as AbcProblem).status).toBe(403);
+    expect((usual as AbcProblem).message).toBe(
+      "ABC Supply says this app can't read the bill-to account that's picked (ABC's words: Account 7654321-001 is not a Bill-To account this user can read). Pick another account under Apps → ABC Supply.",
+    );
+    // One new token for the frequent and the recent items between them, and each asked once more with it.
+    expect(renew).toHaveBeenCalledOnce();
+    expect(abc.mock.calls.map(([, init]) => (init!.headers as Record<string, string>).Authorization).sort()).toEqual(["Bearer token-1", "Bearer token-1", "Bearer token-2", "Bearer token-2"]);
+
+    // Prices next, with the token that's already new: no third try and no other token.
+    abc.mockClear();
+    const priced = await client.prices("999", "18", [{ id: "a", item_number: "02GASTZ3WW", quantity: 1, uom: "BD" }]).catch((e: unknown) => e as AbcProblem);
+    expect((priced as AbcProblem).message).toBe(
+      "ABC Supply says this app can't get prices for the ship-to account that's picked (ABC's words: The user does not have access to the provided ship-to number). Pick another account under Apps → ABC Supply.",
+    );
+    expect(renew).toHaveBeenCalledOnce();
+    expect(abc).toHaveBeenCalledOnce();
+  });
+
+  it("tells the office which account to change when ABC won't let the app use it", async () => {
+    await roofer();
+    state.tables.integrations![0]!.settings = { ...(state.tables.integrations![0]!.settings as Row), bill_to: "7654321-001" };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    abc.mockImplementation(async (url) =>
+      String(url).includes("/oauth2/") ? Response.json({ access_token: "token-9", expires_in: 1800 }) : Response.json({ code: "UNAUTHORIZED", message: "Unauthorized" }, { status: 401 }),
+    );
+    const usual = await send("/materials/usual");
+    expect(await usual.json()).toMatchObject({ items: [], note: "ABC Supply didn't share what you usually buy. ABC Supply says this app can't read the bill-to account that's picked. Pick another account under Apps → ABC Supply." });
+    // The saved token had run out, so one was fetched to begin with; the 401s fetched one more between them.
+    expect(abc.mock.calls.filter(([u]) => String(u).includes("/oauth2/"))).toHaveLength(2);
+    const prices = await send("/materials/prices", { lines: [{ item_number: "02GASTZ3WW", uom: "BD" }] });
+    expect(prices.status).toBe(403);
+    expect(((await prices.json()) as { error: string }).error).toMatch(/can't get prices for the ship-to account that's picked.*Pick another account under Apps → ABC Supply\./);
   });
 
   it("connects with pasted keys, starting at the first account's home branch", async () => {

@@ -200,6 +200,18 @@ function apiProblem(status: number, body: string): AbcProblem {
   return new AbcProblem("ABC Supply isn't answering right now. Try again in a minute.", 502);
 }
 
+/**
+ * A 401 that a new token didn't cure isn't about signing in. ABC answers 401 as well when the app's
+ * user can't use the account asked about: Price Items for the ship-to ("The user does not have
+ * access to the provided ship-to number"), frequent and recent items for the bill-to. Picking the
+ * account again under Apps → ABC Supply also reads its bill-to afresh.
+ */
+function accountProblem(path: string, body: string): AbcProblem {
+  const said = abcSays(body)?.replace(/\.$/, "");
+  const what = path.startsWith("/api/pricing/") ? "get prices for the ship-to account" : /\/(frequents|recents)\b/.test(path) ? "read the bill-to account" : "use the account";
+  return new AbcProblem(`ABC Supply says this app can't ${what} that's picked${said && !/^unauthori[sz]ed$/i.test(said) ? ` (ABC's words: ${said})` : ""}. Pick another account under Apps → ABC Supply.`, 403);
+}
+
 const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 
 const SAYING = /message$|^(detail|title|description|reason|error|error_description)$/i;
@@ -396,8 +408,9 @@ export function firstAnswer<T>(ask: () => Promise<T>, after: number): Promise<T>
 }
 
 /**
- * ABC's API for one app's token. A 401 means the token ran out: get another and call again.
- * `lane` (the company) keeps its calls under ABC's limit (pace).
+ * ABC's API for one app's token. A 401 can mean the token ran out: one new token is fetched, however
+ * many calls the old one failed, and each is asked once more. A 401 with the new token means the
+ * account can't be used (accountProblem). `lane` (the company) keeps its calls under ABC's limit (pace).
  */
 export class AbcClient {
   constructor(
@@ -409,13 +422,25 @@ export class AbcClient {
     private readonly lane?: string,
   ) {}
 
+  private renewal: Promise<string> | null = null;
+
+  /** After a 401 to a call sent with `sent`: the new token, fetched once. False when `sent` already was the new one, so asking again can't help. */
+  private async renewed(sent: string): Promise<boolean> {
+    if (!this.renew) return false;
+    const first = !this.renewal;
+    this.renewal ??= this.renew();
+    this.token = await this.renewal;
+    return first || this.token !== sent;
+  }
+
   private async call<T>(path: string, init: { method?: string; body?: unknown; wait?: number } = {}, retried = false): Promise<T> {
     if (this.lane) await pace(this.lane);
     const started = Date.now();
     let timedOut = false;
+    const token = this.token;
     const res = await this.fetcher(`${apiOf(this.env, this.environment)}${path}`, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
-      headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json", ...(init.body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json", ...(init.body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: init.wait ? AbortSignal.timeout(init.wait) : providerTimeout(),
     }).catch((error: unknown) => {
@@ -426,15 +451,13 @@ export class AbcClient {
     });
     if (!res) throw new AbcProblem(timedOut ? NOT_ANSWERED : NOT_REACHED, 502);
     if (Date.now() - started > SLOW_MS) console.warn(`ABC Supply took ${Math.round((Date.now() - started) / 1000)} s to answer ${path} (${res.status})`);
-    if (res.status === 401 && this.renew && !retried) {
-      this.token = await this.renew();
-      return this.call(path, init, true);
-    }
+    if (res.status === 401 && !retried && (await this.renewed(token))) return this.call(path, init, true);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       // For the server's logs: what was asked and ABC's whole answer, since the person only sees the gist.
       console.warn(`ABC Supply answered ${res.status} to ${path}: ${body.slice(0, 1000) || "(nothing)"}${init.body === undefined ? "" : ` (sent ${JSON.stringify(init.body).slice(0, 1000)})`}`);
-      throw apiProblem(res.status, body);
+      // Still 401 with a token ABC has just given: it's the account, not the sign-in.
+      throw res.status === 401 && this.renewal ? accountProblem(path, body) : apiProblem(res.status, body);
     }
     return (await res.json().catch(() => ({}))) as T;
   }
@@ -576,15 +599,13 @@ export class AbcClient {
   /** ABC's picture of an item (its docs say a PNG up to 250 px; production sends larger JPEGs), or null when it has none. */
   async image(assetId: string, retried = false): Promise<{ body: ArrayBuffer; type: string } | null> {
     if (this.lane) await pace(this.lane);
+    const token = this.token;
     const res = await this.fetcher(`${apiOf(this.env, this.environment)}/api/product/v1/items/${encodeURIComponent(assetId)}/images`, {
-      headers: { Authorization: `Bearer ${this.token}`, Accept: "image/png, image/*" },
+      headers: { Authorization: `Bearer ${token}`, Accept: "image/png, image/*" },
       signal: providerTimeout(),
     }).catch(() => null);
     if (!res) throw new AbcProblem(NOT_REACHED, 502);
-    if (res.status === 401 && this.renew && !retried) {
-      this.token = await this.renew();
-      return this.image(assetId, true);
-    }
+    if (res.status === 401 && !retried && (await this.renewed(token))) return this.image(assetId, true);
     if (res.status === 404 || res.status === 400) return null;
     if (!res.ok) throw apiProblem(res.status, await res.text().catch(() => ""));
     const type = res.headers.get("Content-Type") ?? "image/png";
