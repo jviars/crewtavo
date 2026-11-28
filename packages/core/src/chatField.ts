@@ -60,7 +60,7 @@ export function recordedFile(made: string | undefined, asked: RecordingType): { 
  * yet goes by its type.
  */
 export const isAudio = (file: { type?: string | null; path?: string | null }) =>
-  file.path ? /\.(webm|weba|m4a|aac|mp3|mpga|ogg|oga|opus|wav)$/i.test(file.path) : Boolean(file.type?.startsWith("audio/"));
+  file.path ? /\.(webm|weba|m4a|mp4|aac|mp3|mpga|ogg|oga|opus|wav)$/i.test(file.path) : Boolean(file.type?.startsWith("audio/"));
 
 /** "0:42", "4:05". */
 export function clockText(seconds: number): string {

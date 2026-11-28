@@ -308,7 +308,6 @@ chatField.delete("/chat/scheduled/:id", requireUser, requireCompany(), async (c)
   return c.json({ ok: true });
 });
 
-/** Send now: as a message sent this moment, by its own id (sent twice, it's there once). */
 /**
  * Send now: the database takes the scheduled message as it sends it (public.chat_send_scheduled_now),
  * so the minute's run can't send it too. Published here only when this call sent it.
