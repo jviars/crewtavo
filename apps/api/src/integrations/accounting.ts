@@ -1,4 +1,4 @@
-import { lineTotal, toCents } from "@crewtavo/core";
+import { lineTotal, taxLineLabel, taxName, toCents } from "@crewtavo/core";
 import type { Db } from "../lib/supabase";
 /**
  * Accounting sync: push clients, invoices and payments to QuickBooks Online or Zoho Books.
@@ -264,6 +264,12 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
   }
 
   const reference = String(invoice.number);
+  // Zoho Books takes tax only as one of the taxes set up in its organization, by that tax's id, and
+  // works the amount out itself; there's nowhere to send ours. So it goes as the invoice's
+  // adjustment, which Zoho adds after everything else and shows under the name sent with it
+  // ("Tax (5.3%)"): the invoice comes to our total there, and a payment in full fits. Zoho's own
+  // tax reports don't count it.
+  const tax = Number(invoice.tax_amount ?? 0);
   const body = {
     customer_id: customerId,
     reference_number: reference,
@@ -275,21 +281,43 @@ async function pushInvoice(ctx: Ctx, invoiceId: string, update = false): Promise
       rate: Number(line.unit_price),
       quantity: Number(line.quantity),
     })),
-    // On an update, a discount gone to nothing is sent too, or Zoho keeps the one it had.
+    // On an update, a discount or tax gone to nothing is sent too, or Zoho keeps the one it had.
     ...(discount > 0 || existing ? { discount, discount_type: "entity_level", is_discount_before_tax: true } : {}),
+    ...(tax > 0 || existing ? { adjustment: tax, adjustment_description: await taxLabel(ctx, invoice.tax_rate) } : {}),
   };
+  // The lines sent (without Zoho's line ids) replace the ones it has. Sent again, it's the same change.
+  const change = async (id: string) => (await zoho(ctx, "PUT", `invoices/${encodeURIComponent(id)}`, body)).invoice;
+  // What it comes to there before the tax: the lines less the discount and credits.
+  const beforeTax = charged - toCents(discount);
+  let theirs: { invoice_id: string; status?: string; total?: number | string };
   if (existing) {
-    // The lines sent (without Zoho's line ids) replace the ones it has. Sent again, it's the same change.
-    await zoho(ctx, "PUT", `invoices/${encodeURIComponent(existing)}`, body);
-    return existing;
+    theirs = { ...(await change(existing)), invoice_id: existing };
+  } else {
+    // Sent already: Zoho has an invoice for this customer with our number as its reference, dated as
+    // ours and coming to what we send. Or to that without the tax, as one sent before the tax went
+    // with it did.
+    const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
+      .find((i: any) => i.reference_number === reference && i.customer_id === customerId && i.date === invoice.issued_on && [beforeTax, beforeTax + toCents(tax)].includes(toCents(i.total)));
+    theirs = sent ?? (await zoho(ctx, "POST", "invoices", body)).invoice;
+    await remember(ctx, "invoice", invoiceId, theirs.invoice_id);
+    if (sent && toCents(sent.total) !== beforeTax + toCents(tax)) theirs = { ...(await change(theirs.invoice_id)), invoice_id: theirs.invoice_id };
   }
-  // Sent already: Zoho has an invoice for this customer with our number as its reference, dated as
-  // ours and coming to what we send (no tax goes to Zoho, so the lines less the discount and credits).
-  const sent = ((await zoho(ctx, "GET", `invoices?reference_number=${encodeURIComponent(reference)}&customer_id=${encodeURIComponent(customerId)}`)).invoices ?? [])
-    .find((i: any) => i.reference_number === reference && i.customer_id === customerId && i.date === invoice.issued_on && toCents(i.total) === charged - toCents(discount));
-  const created = sent ?? (await zoho(ctx, "POST", "invoices", body)).invoice;
-  await remember(ctx, "invoice", invoiceId, created.invoice_id);
-  return created.invoice_id;
+  // Zoho makes an invoice as a draft, which isn't owed in its books and takes no payment. Ours is
+  // sent already, so Zoho's is marked sent (that emails nobody). Asked again, it's sent already.
+  if (theirs.status === "draft") await zoho(ctx, "POST", `invoices/${encodeURIComponent(theirs.invoice_id)}/status/sent`);
+  // An organization can have adjustments turned off, and Zoho then leaves ours out: the invoice is
+  // there without its tax, and a payment in full won't fit. Said, with where to turn them on.
+  if (tax > 0 && theirs.total !== undefined && toCents(theirs.total) === beforeTax) {
+    throw new IntegrationError(`Zoho Books left the tax off invoice #${invoice.number}. Crewtavo sends it as an adjustment: turn on Adjustments in Zoho Books (Settings, Preferences, General), then press Try again.`);
+  }
+  return theirs.invoice_id;
+}
+
+/** The tax as the business's documents name it, with the invoice's rate: "VAT (20%)". */
+async function taxLabel(ctx: Ctx, rate: number | string | null): Promise<string> {
+  const { data: company, error } = await ctx.admin.from("companies").select("country, tax_name:settings->tax_name").eq("id", ctx.companyId).maybeSingle();
+  if (error) throw new IntegrationError(error.message);
+  return taxLineLabel(taxName(company, company?.country), rate);
 }
 
 async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> {
@@ -334,6 +362,12 @@ async function pushPayment(ctx: Ctx, paymentId: string): Promise<string | null> 
   // Sent already: Zoho has a payment with our id as its reference.
   const sent = ((await zoho(ctx, "GET", `customerpayments?reference_number=${encodeURIComponent(paymentId)}`)).customerpayments ?? [])
     .find((p: any) => p.reference_number === paymentId);
+  if (!sent && invoiceExternal && payment.invoice_id) {
+    // Zoho refuses a payment for more than its invoice has left, and one against a draft. Invoices
+    // sent before their tax went with them are both, so one like that is brought up to date first.
+    const theirs = (await zoho(ctx, "GET", `invoices/${encodeURIComponent(invoiceExternal)}`)).invoice;
+    if (theirs && (theirs.status === "draft" || toCents(theirs.balance ?? 0) < toCents(payment.amount))) await pushInvoice(ctx, payment.invoice_id, true);
+  }
   const created = sent ?? (await zoho(ctx, "POST", "customerpayments", {
     customer_id: customerId,
     payment_mode: payment.method === "ach" ? "Bank Transfer" : payment.method === "card" ? "Credit Card" : payment.method,

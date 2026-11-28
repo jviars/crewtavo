@@ -691,14 +691,21 @@ describe("accounting sync", () => {
      * Our side: the client (and maybe the invoice) sent before, and the links saved since. `others`
      * are other records' links, which the provider's id finds.
      */
-    async function ours(provider: "quickbooks" | "zoho_books", linked: Record<string, string>, others: Array<{ entity: string; local_id: string; external_id: string }> = [], sent: Record<string, unknown> = invoice) {
+    async function ours(
+      provider: "quickbooks" | "zoho_books",
+      linked: Record<string, string>,
+      others: Array<{ entity: string; local_id: string; external_id: string }> = [],
+      sent: Record<string, unknown> = invoice,
+      more: { paid?: Record<string, unknown>; company?: Record<string, unknown> } = {},
+    ) {
       const ciphertext = await encryptJson(env, { access_token: "token", expires_at: Date.now() + 3_600_000 });
       const links = new Map(Object.entries(linked));
       const { db } = fakeDb((q) => {
         if (q.table === "integrations") return verb(q) === "select" ? { data: { provider, external_account_id: "books-1", settings: {} } } : {};
         if (q.table === "integration_secrets") return { data: { ciphertext } };
+        if (q.table === "companies") return { data: more.company ?? null };
         if (q.table === "invoices") return { data: sent };
-        if (q.table === "payments") return { data: payment };
+        if (q.table === "payments") return { data: more.paid ?? payment };
         if (q.table === "sync_links") {
           if (verb(q) === "upsert") links.set(call(q, "upsert")![1].entity, call(q, "upsert")![1].external_id);
           const match = call(q, "match")?.[1];
@@ -774,8 +781,8 @@ describe("accounting sync", () => {
         find: (url, made) => {
           const kind = url.pathname.split("/").at(-1);
           const hits = made.filter((r) => r.kind === kind && r.reference_number === url.searchParams.get("reference_number"));
-          // Zoho works out an invoice's total; nothing of ours sends it tax.
-          const total = (r: Record<string, any>) => r.total ?? r.line_items.reduce((sum: number, l: any) => sum + l.rate * l.quantity, 0) - (r.discount ?? 0);
+          // Zoho works out an invoice's total: its lines less the discount, plus the adjustment our tax goes in.
+          const total = (r: Record<string, any>) => r.total ?? r.line_items.reduce((sum: number, l: any) => sum + l.rate * l.quantity, 0) - (r.discount ?? 0) + (r.adjustment ?? 0);
           return kind === "invoices"
             ? { code: 0, invoices: hits.filter((r) => r.customer_id === url.searchParams.get("customer_id")).map((r) => ({ ...r, invoice_id: r.id, total: total(r) })) }
             : { code: 0, customerpayments: hits.map((r) => ({ ...r, payment_id: r.id })) };
@@ -940,7 +947,7 @@ describe("accounting sync", () => {
       const calls = books(() => ({ code: 0, invoice: { invoice_id: "zoho-inv-1" } }));
       await runAccountingJob(env, db, invoiceJob);
       expect(calls.map((c) => [c.method, c.url.pathname.split("/").slice(-2).join("/")])).toEqual([["PUT", "invoices/zoho-inv-1"]]);
-      expect(calls[0]!.body).toMatchObject({ customer_id: "contact-1", reference_number: "1042", discount: 0, line_items: [{ name: "Mowing", rate: 45 }, { name: "Late fee", rate: 25 }] });
+      expect(calls[0]!.body).toMatchObject({ customer_id: "contact-1", reference_number: "1042", discount: 0, adjustment: 0, line_items: [{ name: "Mowing", rate: 45 }, { name: "Late fee", rate: 25 }] });
       expect(links.get("invoice")).toBe("zoho-inv-1");
     });
 
@@ -952,9 +959,86 @@ describe("accounting sync", () => {
 
     it("leaves the invoice as it is when a payment needs it", async () => {
       const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], changed);
-      const calls = books(() => ({ code: 0, customerpayments: [], payment: { payment_id: "zoho-pay-1" } }));
+      const calls = books(() => ({ code: 0, customerpayments: [], invoice: { invoice_id: "zoho-inv-1", status: "sent", total: 70, balance: 70 }, payment: { payment_id: "zoho-pay-1" } }));
       await runAccountingJob(env, db, paymentJob);
-      expect(calls.map((c) => [c.method, c.url.pathname.split("/").at(-1)])).toEqual([["GET", "customerpayments"], ["POST", "customerpayments"]]);
+      expect(calls.map((c) => [c.method, c.url.pathname.split("/").at(-1)])).toEqual([["GET", "customerpayments"], ["GET", "zoho-inv-1"], ["POST", "customerpayments"]]);
+    });
+
+    // Zoho Books takes tax only as one of the taxes set up in its organization, and has no place for
+    // an amount of ours. So the tax goes as the invoice's adjustment, under the tax's name, and Zoho's
+    // total is ours: $400.00 of sealcoat and $21.20 of tax.
+    const taxed = { ...invoice, tax_rate: 0.053, tax_amount: 21.2, invoice_line_items: [{ ...invoice.invoice_line_items[0]!, name: "Sealcoat", quantity: 2, unit_price: 200, taxable: true }] };
+    const asked = (calls: ReturnType<typeof books>) => calls.map((c) => [c.method, c.url.pathname.replace("/books/v3/", "")]);
+
+    it("sends Zoho Books an invoice's tax as its adjustment, and marks the invoice sent without Zoho emailing it", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1" }, [], taxed);
+      const calls = books((method, url) => {
+        if (method === "GET") return { code: 0, invoices: [] };
+        return url.pathname.endsWith("/invoices") ? { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "draft", total: 421.2 } } : { code: 0 };
+      });
+      await runAccountingJob(env, db, invoiceJob);
+      expect(asked(calls)).toEqual([["GET", "invoices"], ["POST", "invoices"], ["POST", "invoices/zoho-inv-1/status/sent"]]);
+      expect(calls[1]!.body).toMatchObject({ adjustment: 21.2, adjustment_description: "Tax (5.3%)", line_items: [{ name: "Sealcoat", rate: 200, quantity: 2 }] });
+      expect(calls[1]!.body.line_items[0]).not.toHaveProperty("tax_id");
+      expect(calls[1]!.url.searchParams.has("send")).toBe(false);
+      expect(links.get("invoice")).toBe("zoho-inv-1");
+    });
+
+    // Adjustments are a setting of the Zoho Books organization (Settings, Preferences, General).
+    it("says where to turn adjustments on when Zoho Books leaves the tax out", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1" }, [], taxed);
+      const calls = books((method, url) => {
+        if (method === "GET") return { code: 0, invoices: [] };
+        return url.pathname.endsWith("/invoices") ? { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "draft", total: 400 } } : { code: 0 };
+      });
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow(
+        "Zoho Books left the tax off invoice #1042. Crewtavo sends it as an adjustment: turn on Adjustments in Zoho Books (Settings, Preferences, General), then press Try again.",
+      );
+      // It's there and linked, so Try again updates that one.
+      expect(asked(calls)).toEqual([["GET", "invoices"], ["POST", "invoices"], ["POST", "invoices/zoho-inv-1/status/sent"]]);
+      expect(links.get("invoice")).toBe("zoho-inv-1");
+    });
+
+    it("names the adjustment as the business names its tax", async () => {
+      const { db } = await ours("zoho_books", { client: "contact-1" }, [], { ...taxed, tax_rate: 0.2, tax_amount: 80 }, { company: { country: "GB", tax_name: null } });
+      const calls = books((method) => (method === "GET" ? { code: 0, invoices: [] } : { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "sent" } }));
+      await runAccountingJob(env, db, invoiceJob);
+      expect(calls[1]!.body).toMatchObject({ adjustment: 80, adjustment_description: "VAT (20%)" });
+    });
+
+    it("finds the taxed invoice it sent Zoho Books by its total with the tax", async () => {
+      const { db, links } = await ours("zoho_books", { client: "contact-1" }, [], taxed);
+      const zohoBooks = zoho();
+      await expect(runAccountingJob(env, db, invoiceJob)).rejects.toThrow("timeout");
+      await runAccountingJob(env, db, invoiceJob);
+      expect(zohoBooks.posts).toHaveLength(1);
+      expect(links.get("invoice")).toBe("made-1");
+    });
+
+    it("marks an invoice Zoho Books still has as a draft sent when it changes", async () => {
+      const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], changed);
+      const calls = books((method) => (method === "PUT" ? { code: 0, invoice: { invoice_id: "zoho-inv-1", status: "draft" } } : { code: 0 }));
+      await runAccountingJob(env, db, invoiceJob);
+      expect(asked(calls)).toEqual([["PUT", "invoices/zoho-inv-1"], ["POST", "invoices/zoho-inv-1/status/sent"]]);
+    });
+
+    // Invoices sent before the tax went with them are in Zoho Books for less than they're owed, as
+    // drafts. A payment in full was refused: "The amount applied to invoice ... is more than its balance due."
+    it("brings a Zoho Books invoice that's short of the payment up to date first, so the payment fits", async () => {
+      const { db } = await ours("zoho_books", { client: "contact-1", invoice: "zoho-inv-1" }, [], taxed, { paid: { ...payment, amount: 421.2 } });
+      const theirs = { invoice_id: "zoho-inv-1", status: "draft", total: 400, balance: 400 };
+      const calls = books((method, url) => {
+        if (url.pathname.endsWith("/customerpayments")) return method === "GET" ? { code: 0, customerpayments: [] } : { code: 0, payment: { payment_id: "zoho-pay-1" } };
+        if (method === "PUT") Object.assign(theirs, { total: 421.2, balance: 421.2 });
+        if (url.pathname.endsWith("/status/sent")) theirs.status = "sent";
+        return { code: 0, invoice: { ...theirs } };
+      });
+      await runAccountingJob(env, db, paymentJob);
+      expect(asked(calls)).toEqual([
+        ["GET", "customerpayments"], ["GET", "invoices/zoho-inv-1"], ["PUT", "invoices/zoho-inv-1"], ["POST", "invoices/zoho-inv-1/status/sent"], ["POST", "customerpayments"],
+      ]);
+      expect(calls[2]!.body).toMatchObject({ adjustment: 21.2, adjustment_description: "Tax (5.3%)" });
+      expect(calls[4]!.body).toMatchObject({ amount: 421.2, invoices: [{ invoice_id: "zoho-inv-1", amount_applied: 421.2 }] });
     });
   });
 

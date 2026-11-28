@@ -763,7 +763,7 @@ export const APP_INFO: Record<string, AppInfo> = {
     about:
       "When Zoho Books is your book of record, Crewtavo sends clients, invoices and payments there as they happen, in whichever Zoho data center your account lives.",
     highlights: [
-      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines and discounts, and keep up when they change." },
+      { icon: "invoice", title: "Invoices", text: "Sent invoices arrive with their lines and discounts, and their tax as an adjustment, and keep up when they change." },
       { icon: "dollar", title: "Payments", text: "Each payment is recorded against the right invoice." },
       { icon: "users", title: "Contacts", text: "Clients are added as customers." },
     ],
